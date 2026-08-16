@@ -4,15 +4,12 @@
 // nextTurn queues drained at save points.
 //
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { CompactionSettings } from "../compaction/index.ts";
 import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
-import {
-	buildBuiltinHooks,
-	composeHooks,
-	type HookLayer,
-} from "../hooks/builtin/builtin-hooks.ts";
-import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import { buildBuiltinHooks } from "../hooks/builtin/builtin-hooks.ts";
+import { HookBus } from "../hooks/native/hook-bus.ts";
+import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 import {
 	type ClaudeCodeHookLayer,
 	claudeToolMatcherName,
@@ -73,6 +70,13 @@ import {
 	loadSessionMessages,
 } from "./harness/session-lifecycle.ts";
 import {
+	stableSerialize,
+	digest,
+	trajectoryEventPayload,
+	EPHEMERAL_AGENT_EVENTS,
+	isDurableAgentEvent,
+} from "./harness/utilities.ts";
+import {
 	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
@@ -108,58 +112,6 @@ export type {
 	HarnessQueues,
 } from "./harness/contracts.ts";
 export { HarnessBusyError } from "./harness/phase.ts";
-
-function stableSerialize(value: unknown): string {
-	if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
-	if (value && typeof value === "object") {
-		return `{${Object.entries(value as Record<string, unknown>)
-			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`)
-			.join(",")}}`;
-	}
-	return JSON.stringify(value) ?? "null";
-}
-
-function digest(value: unknown): string {
-	return createHash("sha256").update(stableSerialize(value)).digest("hex");
-}
-
-function trajectoryEventPayload(event: AgentEvent): Record<string, unknown> {
-	const payload = structuredClone(event as unknown as Record<string, unknown>);
-	for (const field of ["delta", "content", "message", "messages", "result"]) {
-		const value = payload[field];
-		if (value !== undefined) {
-			payload[`${field}Digest`] = digest(value);
-			payload[`${field}Size`] =
-				typeof value === "string" ? value.length : JSON.stringify(value).length;
-			payload[field] = undefined;
-		}
-	}
-	if (event.type === "subagent_event") {
-		payload.eventType = event.event.type;
-		payload.event = undefined;
-	}
-	return payload;
-}
-
-// Streaming events are presentation updates, not durable state transitions.
-// Persisting each token/partial tool result makes the append-only projection grow
-// quadratically (snapshot cloning) and, more importantly, fsyncs on the UI thread.
-// Boundary events retain everything needed for replay, diagnostics, and evals.
-const EPHEMERAL_AGENT_EVENTS = new Set<AgentEvent["type"]>([
-	"text_delta",
-	"thinking_delta",
-	"tool_call_delta",
-	"tool_execution_update",
-	"message_update",
-	"context_update",
-	"phase",
-]);
-
-function isDurableAgentEvent(event: AgentEvent): boolean {
-	return !EPHEMERAL_AGENT_EVENTS.has(event.type);
-}
-
 export type { AgentRuntimeState, HarnessPhase } from "./run-kernel.ts";
 export type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 
@@ -218,8 +170,10 @@ export class AgentHarness {
 	private _runResolve?: () => void;
 	private _subscribers: Set<EventHandler> = new Set();
 	private _extensionRunner?: ExtensionRunner;
-	/** Typed extension event bus for structured lifecycle events */
-	private _extensionBus: ExtensionEventBus | undefined;
+	/** Central hook bus — single source of truth for all hook handlers */
+	private _hookBus: HookBus = new HookBus();
+	/** Typed extension event bus — wired from _hookBus via fromHookBus */
+	private _extensionBus: ExtensionEventBus = ExtensionEventBus.fromHookBus(this._hookBus);
 	private _beforeAgentStart?: (
 		promptText: string,
 	) =>
@@ -524,7 +478,11 @@ export class AgentHarness {
 
 	/** Set or replace the typed extension event bus. */
 	setExtensionBus(bus: ExtensionEventBus | undefined): void {
-		this._extensionBus = bus;
+		// Dispose any previously wired extension bus (auto-wired from HookBus).
+		if (this._extensionBus && !this._extensionBus.getRegisteredEvents().length) {
+			void this._extensionBus.dispose();
+		}
+		this._extensionBus = bus ?? ExtensionEventBus.fromHookBus(this._hookBus);
 	}
 
 	setExtensionRunner(runner: ExtensionRunner | undefined): void {
@@ -1009,38 +967,47 @@ export class AgentHarness {
 			? runner.getTools().map(tool => this.wrapExtensionTool(tool))
 			: [];
 		const tools = [...(config.tools ?? []), ...extensionTools];
-		const extensionHooks = runner?.getHooks();
 
+		// Rebuild HookBus layers each turn (extensions may add/remove tools/hooks).
+		// Using a fresh bus avoids stale registrations between turns.
+		const hookBus = new HookBus();
+
+		// Layer 1: builtin hooks (highest priority)
 		const builtinHooks = buildBuiltinHooks({
 			config,
 			contextWindowTokens: () => config.contextWindowTokens,
 			toolDefs: () => tools as unknown as Record<string, unknown>[],
 			loopDetector: this.loopDetector,
 			eventBus: {
-				// Builtin interventions must use the same subscriber path as loop-runner
-				// events or the application/TUI never sees them. Mirror them to legacy
-				// extension listeners as a secondary projection.
-				emit: (event: { type: string;[key: string]: unknown }) => {
+				emit: (event: { type: string; [key: string]: unknown }) => {
 					this.emitToSubscribers(event as AgentEvent);
 					void this._extensionBus?.emitLegacy(event);
 				},
 			},
 		});
+		hookBus.register(builtinHooks, { source: "builtin", priority: 100 });
 
-		const layers: HookLayer[] = [
-			{ source: "builtin", hooks: builtinHooks },
-			{ source: "extensions", hooks: extensionHooks },
-			{
-				source: "claude-code-compat",
-				hooks: (pluginHookLayer ?? this.createClaudeCodeHookLayer()).hooks,
-			},
-			{ source: "user", hooks: config.hooks },
-		];
+		// Layer 2: extension runner hooks
+		const extensionHooks = runner?.getHooks();
+		if (extensionHooks) {
+			hookBus.register(extensionHooks, { source: "extensions", priority: 50 });
+		}
+
+		// Layer 3: claude-code compatibility hook layer
+		const claudeHooks = (pluginHookLayer ?? this.createClaudeCodeHookLayer()).hooks;
+		if (claudeHooks) {
+			hookBus.register(claudeHooks, { source: "claude-code-compat", priority: 40 });
+		}
+
+		// Layer 4: user hooks (lowest priority)
+		if (config.hooks) {
+			hookBus.register(config.hooks, { source: "user", priority: 0 });
+		}
 
 		return {
 			...config,
 			tools,
-			hooks: composeHooks(layers, undefined, config.onHookEvent),
+			hooks: hookBus.toHooks(),
 		};
 	}
 

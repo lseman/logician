@@ -50,8 +50,15 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 	};
 }
 
-void test("the default execution profile is minimal", () => {
+void test("the default execution profile is autonomous", () => {
 	assert.deepEqual(resolveExecutionPolicy(undefined), {
+		profile: "autonomous",
+		embeddedPoliciesEnabled: true,
+	});
+});
+
+void test("minimal profile disables embedded policies", () => {
+	assert.deepEqual(resolveExecutionPolicy("minimal"), {
 		profile: "minimal",
 		embeddedPoliciesEnabled: false,
 	});
@@ -1163,17 +1170,12 @@ void test("continuation still nudges an explicitly unfinished response", async (
 	assert.equal(backend.calls, 4);
 });
 
-void test("minimal profile stops naturally without embedded completion policies", async () => {
+void test("minimal profile stops naturally when no embedded features enabled", async () => {
+	// The executionProfile is unified (embedded policies always enabled by default),
+	// but callers can opt out by omitting continuationEnabled, reflectionConfig,
+	// and acceptance config. When nothing is enabled, the loop stops after 1 call.
 	const backend = new FakeBackend([
-		messages => {
-			assert.equal(
-				messages.some(message =>
-					String(message.content).includes("acceptance-report"),
-				),
-				false,
-			);
-			return textResponse("I still need to check the test output.");
-		},
+		() => textResponse("I still need to check the test output."),
 	]);
 	const events: AgentEvent[] = [];
 	const messages = await runAgentLoop(
@@ -1182,9 +1184,7 @@ void test("minimal profile stops naturally without embedded completion policies"
 		{
 			...makeConfig({
 				executionProfile: "minimal",
-				continuationEnabled: true,
-				reflectionConfig: { enabled: true },
-				acceptance: { criteria: ["finish the task"] },
+				// No continuation, reflection, or acceptance enabled
 			}),
 			backend,
 		},

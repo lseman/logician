@@ -84,6 +84,7 @@ export interface BuiltinHookDeps {
 // safeguard is disabled so composition can skip it cleanly.
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const { config, guardEngine, loopDetector } = deps;
+	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	const interventions = new HarnessInterventionController();
 	const emitIntervention = (
 		input: Parameters<HarnessInterventionController["record"]>[0],
@@ -92,7 +93,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		deps.eventBus?.emit({ type: "harness_intervention", ...intervention });
 		return intervention;
 	};
-	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	// Tool guards (duplicate + failure-loop, merged from GuardEngine).
 	// Duplicate-call detection defaults ON: blocking exact same-args repeats
 	// (e.g. re-reading the same file over and over) is safe to force a
