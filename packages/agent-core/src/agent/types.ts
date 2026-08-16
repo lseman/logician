@@ -30,12 +30,6 @@ export type {
 	QueueMode,
 	ThinkingLevel,
 	WebSearchConfig,
-	Result,
-	FileErrorCode,
-	ExecutionErrorCode,
-	CompactionErrorCode,
-	BranchSummaryErrorCode,
-	SessionErrorCode,
 	AgentErrorOptions,
 } from "./types/types-config.ts";
 export {
@@ -45,18 +39,8 @@ export {
 	INFERENCE_MODE_ORDER,
 	INFERENCE_MODES,
 	isValidInferenceMode,
-	ok,
-	err,
-	getOrThrow,
-	getOrUndefined,
-	toError,
 	AgentError,
 	AgentErrorType,
-	FileError,
-	ExecutionError,
-	CompactionError,
-	BranchSummaryError,
-	SessionError,
 	wrapError,
 } from "./types/types-config.ts";
 // ── Message, Tool, Event, Hook ────────────────────────────────────────────
