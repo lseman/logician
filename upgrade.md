@@ -105,18 +105,18 @@ packages/
 
 ## 3. Phase-by-Phase Plan
 
-### Phase 0: Foundation (Low Risk)
+### Phase 0: Foundation (Low Risk) — **Partially superseded, see audit below**
 
 **Goal**: Clean up what's already marked for deletion in consolidation.md.
 
 | Step | Action | Files | Effort |
 |------|--------|-------|--------|
-| 0.1 | Delete `tasks/todo-state.ts` | tasks/todo-state.ts (~60 lines) | 15 min |
-| 0.2 | Delete `tasks/task-status-state.ts` | tasks/task-status-state.ts (~30 lines) | 15 min |
-| 0.3 | Delete `tasks/run-task-state.ts` | tasks/run-task-state.ts (~30 lines) | 15 min |
-| 0.4 | Delete `tasks/adaptive-mode.ts` | tasks/adaptive-mode.ts (~100 lines) | 15 min |
-| 0.5 | Flatten `tasks/completion-gate.ts` into `tasks/outcome-resolution.ts` | tasks/completion-gate.ts → outcome-resolution.ts | 30 min |
-| 0.6 | Update all imports | agent-loop-runner.ts, harness.ts, tests | 30 min |
+| ~~0.1~~ | ~~Delete `tasks/todo-state.ts`~~ — **retained, public API** | tasks/todo-state.ts | — |
+| ~~0.2~~ | ~~Delete `tasks/task-status-state.ts`~~ — **retained, public API** | tasks/task-status-state.ts | — |
+| ~~0.3~~ | ~~Delete `tasks/run-task-state.ts`~~ — **retained, async-context isolation for concurrent loops** | tasks/run-task-state.ts | — |
+| ~~0.4~~ | ~~Delete `tasks/adaptive-mode.ts`~~ — **retained, live sampling-mode selector for `inferenceMode: "auto"`** | tasks/adaptive-mode.ts | — |
+| 0.5 | Flatten `tasks/completion-gate.ts` into `tasks/outcome-resolution.ts` | tasks/completion-gate.ts → outcome-resolution.ts | **Done** (2026-08-16, as part of Phase 2 exit-path work) |
+| 0.6 | Update all imports | agent-loop-runner.ts, harness.ts, tests | **Done** |
 
 **Test gate**: `bun run test` passes. No behavior changes.
 
@@ -193,6 +193,13 @@ packages/
 - TUI cycle/persist tests pass
 - Bridge setInferenceMode / setThinkingLevel tests pass
 
+**2026-08-16 progress**: Started 3.1 by grepping every `AgentConfig` field for real (non-declaration) readers across the whole monorepo, the same audit method used for Phase 0/5. Found 16 fully dead fields and removed them end-to-end (config type → coding-agent config parsing/bridge plumbing → TUI settings UI → tests):
+- 15 fields with **zero** readers anywhere outside their own type declaration: `progressSignalEnabled`, `progressSignalMinScore`, `progressSignalMinLowScoreTurns`, `goalDecompositionEnabled`, `goalDecomposerMaxSubgoals`, `recoveryMemoryMaxEntries`, `hypothesisTrackingEnabled`, `hypothesisTrackerMaxHypotheses`, `guardFusionEnabled`, `guardFusionWeights`, `guardGraduatedIntervention`, `thinkingLoopMinThinkingLength`, `thinkingLoopThinkingOnlyThreshold`, `thinkingLoopEscalationRatio`, `thinkingLoopMetaReasoningThreshold` — these were config knobs for guard modules (`goal-decomposer.ts`, `hypothesis-tracker.ts`, `progress-signal.ts`, `thinking-loop-detector.ts`) already deleted in an earlier phase; the config fields just never got cleaned up alongside the modules.
+- 1 field (`thinkingLoopDetectionEnabled`) had live plumbing all the way through config parsing → bridge → a TUI settings toggle ("Thinking-loop guard: Detect reasoning loops without action"), but no consumer in agent-core actually read it — the toggle was a silent no-op. Removed with explicit user sign-off rather than left as a fake feature.
+- `recoveryMemoryEnabled` (sibling of the deleted `recoveryMemoryMaxEntries`) was kept — it genuinely gates real logic in `builtin-hooks.ts` (`recoveryMemoryOn`) even though the standalone `recovery-memory.ts` module is gone; the concept was reimplemented inline.
+- Verified via full `bun run test`: agent-core 422/422, coding-agent 253/253, tui 257/258 (1 known pre-existing failure), agent-capabilities 29/31 (2 known pre-existing failures) — no new failures.
+- Remaining Phase 3 work (3.1 continued, 3.2–3.5) not started: `AgentConfig` still has ~90 fields; `inferenceMode` dual-tracking (core config vs `thinkingLevel`) untouched; TUI `inference-settings.ts` not yet reconciled with `agent-settings.ts`'s shape.
+
 ---
 
 ### Phase 4: Kernel Simplification (Medium Risk)
@@ -221,19 +228,19 @@ packages/
 
 ---
 
-### Phase 5: Guard System Cleanup (Low Risk)
+### Phase 5: Guard System Cleanup (Low Risk) — **SUPERSEDED, see audit below**
 
 **Goal**: Remove overengineered guards, keep essential ones.
 
 | Step | Action | Files | Effort |
 |------|--------|-------|--------|
-| 5.1 | Delete `guards/output-guard.ts` — replace with simple context-full check in loop | guards/output-guard.ts | 30 min |
-| 5.2 | Delete `guards/guard-engine.ts` — merge loop detection into main loop or remove | guards/guard-engine.ts | 30 min |
+| ~~5.1~~ | ~~Delete `guards/output-guard.ts`~~ — **retained, see audit** | guards/output-guard.ts | — |
+| ~~5.2~~ | ~~Delete `guards/guard-engine.ts`~~ — **retained, see audit** | guards/guard-engine.ts | — |
 | 5.3 | Keep `guards/loop-detector.ts` behind feature flag only | guards/loop-detector.ts | 30 min |
 | 5.4 | Keep `guards/guard-callbacks.ts` — pi-style callbacks are clean | (keep) | — |
 | 5.5 | Keep `guards/response-patterns.ts` — useful for non-committal detection | (keep) | — |
 
-**Expected reduction**: ~750 lines deleted.
+**Expected reduction**: ~~~750 lines deleted~~ 0 — deletion targets are load-bearing (see 2026-08-16 audit below).
 
 **Test gate**:
 - `guards-simplified.test.ts` passes
@@ -293,26 +300,28 @@ These are NOT part of Pi but are valuable for Logician. Keep them, but make them
 
 ## 5. What to Delete
 
-| Module | Lines | Reason |
-|--------|-------|--------|
-| `tasks/todo-state.ts` | ~60 | Not core loop contract |
-| `tasks/task-status-state.ts` | ~30 | Merge into outcome-resolution |
-| `tasks/run-task-state.ts` | ~30 | Merge into outcome-resolution |
-| `tasks/adaptive-mode.ts` | ~100 | Simplify objective extraction |
-| `guards/output-guard.ts` | ~465 | Replace with simple check |
-| `guards/guard-engine.ts` | ~286 | Merge into main loop |
-| `tasks/completion-gate.ts` | ~35 | Flatten into outcome-resolution |
-| `harness/phase.ts` | ~35 | Simplify phase hierarchy |
-| `harness/contracts.ts` | ~35 | Merge into harness.ts |
-| `loop/provider-request.ts` | ~336 | Already deleted (Phase 1) |
-| `configuration/inference-modes.ts` | ~254 | Already deleted (Phase 3) |
-| `agent/runtime-state.ts` | ~140 | Already deleted (Phase 5) |
-| `agent/tasks/task-state-controller.ts` | ~371 | Already deleted |
-| `agent/guards/goal-decomposer.ts` | — | Already deleted |
-| `agent/guards/hypothesis-tracker.ts` | — | Already deleted |
-| `agent/guards/progress-signal.ts` | — | Already deleted |
-| `agent/guards/recovery-memory.ts` | — | Already deleted |
-| `agent/guards/thinking-loop-detector.ts` | — | Already deleted |
+**2026-08-16 audit**: Grepped every module below for real (non-test) importers across `packages/` and `apps/` before touching anything. Result: every module upgrade.md proposed deleting for "not core loop contract" / "simplify" reasons is still actively imported — several are re-exported as public API from `agent-core/index.ts` and consumed by `coding-agent` and `agent-capabilities`, not just internal to agent-loop-runner.ts. **None of these are safe to delete as originally scoped.** The table below is corrected to reflect actual usage; treat "Reason" as historical intent, not current fact.
+
+| Module | Lines | Original reason | Audit result |
+|--------|-------|--------|--------|
+| `tasks/todo-state.ts` | ~60 | Not core loop contract | **Keep** — public API (`agent-core/index.ts` exports `getTasks`/`onTodosChanged`/`Task`), consumed by `coding-agent/agent-bridge.ts` and `agent-capabilities/tasks/todo.ts` |
+| `tasks/task-status-state.ts` | ~30 | Merge into outcome-resolution | **Keep** — public API (`agent-core/index.ts` exports `TaskStatusRecord` + helpers), consumed by `agent-capabilities/tasks/task-status.ts` and `exit-path.ts` |
+| `tasks/run-task-state.ts` | ~30 | Merge into outcome-resolution | **Keep** — AsyncLocalStorage isolation so concurrent parent/child loops don't share todo/task_status state; used by agent-loop-runner.ts |
+| `tasks/adaptive-mode.ts` | ~100 | Simplify objective extraction | **Keep** — live sampling-mode selector for `inferenceMode: "auto"`, has dedicated test coverage in agent-loop-runner.test.ts |
+| `guards/output-guard.ts` | ~465 | Replace with simple check | **Keep** — wired as an optional loop-level guard (config.outputGuard) in agent-loop-runner.ts |
+| `guards/guard-engine.ts` | ~286 | Merge into main loop | **Keep** — builtin-hooks.ts explicitly documents it as "the canonical source" for tool guard rails (duplicate + failure-loop detection) |
+| `tasks/completion-gate.ts` | ~35 | Flatten into outcome-resolution | **Done** — flattened into outcome-resolution.ts as part of the 2026-08-16 exit-path work |
+| `harness/phase.ts` | ~35 | Simplify phase hierarchy | Still imported by harness.ts — **not yet audited for content**, do a proper read before deciding |
+| `harness/contracts.ts` | ~35 | Merge into harness.ts | Still imported by harness.ts — **not yet audited for content**, do a proper read before deciding |
+| `loop/provider-request.ts` | ~336 | Already deleted (Phase 1) | Confirmed gone |
+| `configuration/inference-modes.ts` | ~254 | Already deleted (Phase 3) | Confirmed gone |
+| `agent/runtime-state.ts` | ~140 | Already deleted (Phase 5) | Confirmed gone |
+| `agent/tasks/task-state-controller.ts` | ~371 | Already deleted | Confirmed gone |
+| `agent/guards/goal-decomposer.ts` | — | Already deleted | Confirmed gone |
+| `agent/guards/hypothesis-tracker.ts` | — | Already deleted | Confirmed gone |
+| `agent/guards/progress-signal.ts` | — | Already deleted | Confirmed gone |
+| `agent/guards/recovery-memory.ts` | — | Already deleted | Confirmed gone |
+| `agent/guards/thinking-loop-detector.ts` | — | Already deleted | Confirmed gone |
 
 ---
 
