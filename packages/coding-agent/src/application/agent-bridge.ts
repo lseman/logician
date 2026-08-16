@@ -34,7 +34,7 @@ import {
 	loadExtensions,
 } from "@logician/agent-core/extensions/index.ts";
 import { PermissionManager, type PermissionMode, type PermissionRules } from "@logician/agent-core/tools/shared/permissions.ts";
-import type { AskUserContext } from "@logician/agent-core/agent/types/types-tools.ts";
+import type { AskUserContext } from "@logician/agent-core/agent/types/types-messages.ts";
 import {
 	configurePluginRuntimeEnv,
 	type PluginCommandResult,

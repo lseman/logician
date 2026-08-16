@@ -1,11 +1,8 @@
 // ── Core types (barrel) ──────────────────────────────────────────────────
-// Sub-modules:
-//   types-messages.ts  : Message, MessageRole, AgentMessage, StopReason
-//   types-events.ts    : AgentEvent, AgentEventBody, EventHandler
-//   types-hooks.ts     : All hook context/result types, AgentHooks
-//   types-tools.ts     : Tool, ToolCall, ToolResult, ToolContext
-//   types-config.ts    : AgentConfig, WebSearchConfig, QueueMode, ThinkingLevel
-//   types-errors.ts    : AgentErrorType, AgentError, wrapError
+// Re-exports from consolidated sub-modules:
+//   types-config.ts  : Config, Error, Truncation types
+//   types-messages.ts: Message, Tool, Event, Hook types
+//   types-truncation.ts: Truncation defaults (kept separate — used by non-type code)
 
 export type {
 	AgentStopPolicy,
@@ -20,6 +17,7 @@ export type {
 	HarnessIntervention,
 	HarnessInterventionKind,
 } from "./intervention-controller.ts";
+// ── Config, Error, Truncation ─────────────────────────────────────────────
 export type {
 	AcceptanceCriterion,
 	AcceptanceReview,
@@ -32,6 +30,13 @@ export type {
 	QueueMode,
 	ThinkingLevel,
 	WebSearchConfig,
+	Result,
+	FileErrorCode,
+	ExecutionErrorCode,
+	CompactionErrorCode,
+	BranchSummaryErrorCode,
+	SessionErrorCode,
+	AgentErrorOptions,
 } from "./types/types-config.ts";
 export {
 	cycleInferenceMode,
@@ -40,37 +45,27 @@ export {
 	INFERENCE_MODE_ORDER,
 	INFERENCE_MODES,
 	isValidInferenceMode,
-} from "./types/types-config.ts";
-export {
-	AgentError,
-	type AgentErrorOptions,
-	AgentErrorType,
-	BranchSummaryError,
-	type BranchSummaryErrorCode,
-	CompactionError,
-	type CompactionErrorCode,
-	ExecutionError,
-	type ExecutionErrorCode,
+	ok,
 	err,
-	FileError,
-	type FileErrorCode,
 	getOrThrow,
 	getOrUndefined,
-	ok,
-	type Result,
-	SessionError,
-	type SessionErrorCode,
 	toError,
+	AgentError,
+	AgentErrorType,
+	FileError,
+	ExecutionError,
+	CompactionError,
+	BranchSummaryError,
+	SessionError,
 	wrapError,
-} from "./types/types-errors.ts";
+} from "./types/types-config.ts";
+// ── Message, Tool, Event, Hook ────────────────────────────────────────────
 export type {
 	AgentEvent,
 	AgentEventBody,
 	AgentEventEnvelope,
 	EventHandler,
 	AgentEventSink,
-} from "./types/types-events.ts";
-export type {
 	AfterProviderResponseContext,
 	AfterToolCallContext,
 	AfterToolCallResult,
@@ -89,13 +84,9 @@ export type {
 	GetSteeringMessagesContext,
 	PrepareNextTurnContext,
 	PrepareNextTurnResult,
-	PreToolUseContext,
-	PreToolUseResult,
 	ShouldStopAfterTurnContext,
 	TransformContext,
 	TransformContextResult,
-} from "./types/types-hooks.ts";
-export type {
 	AgentMessage,
 	BashExecutionMessage,
 	BranchSummaryMessage,
@@ -108,15 +99,13 @@ export type {
 	Message,
 	MessageRole,
 	StopReason,
-} from "./types/types-messages.ts";
-export type {
 	AskUserContext,
 	Tool,
 	ToolCall,
 	ToolContext,
 	ToolExecutionMode,
 	ToolResult,
-} from "./types/types-tools.ts";
+} from "./types/types-messages.ts";
 export type { TruncationConfig } from "./types/types-truncation.ts";
 export {
 	DEFAULT_TRUNCATION,
