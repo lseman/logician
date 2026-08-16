@@ -35,22 +35,10 @@ export function evaluateTrajectory(
 	const outcome = [...events]
 		.reverse()
 		.find(entry => entry.payload.type === "run_outcome")?.payload;
-	const taskState = [...events]
-		.reverse()
-		.find(entry => entry.payload.type === "task_state_update")?.payload.state as
-		| {
-				phase?: string;
-				blockers?: string[];
-				verification?: Array<{ passed: boolean }>;
-		  }
-		| undefined;
 	const first = entries[0]?.timestamp ?? 0;
 	const last = entries.at(-1)?.timestamp ?? first;
 	const finished = entries.some(entry => entry.kind === "run_finish");
-	const acceptancePassed =
-		outcome?.status === "completed" &&
-		(taskState?.blockers?.length ?? 0) === 0 &&
-		(taskState?.verification?.every(item => item.passed) ?? true);
+	const acceptancePassed = outcome?.status === "completed";
 	return {
 		events: events.length,
 		durationMs: Math.max(0, last - first),
@@ -81,11 +69,7 @@ export function evaluateTrajectory(
 				entry.payload.type === "subagent_end" && entry.payload.isError === true,
 		).length,
 		acceptancePassed,
-		prematureStop:
-			outcome?.status === "completed" &&
-			Boolean(taskState) &&
-			taskState?.phase !== "handoff" &&
-			!acceptancePassed,
+		prematureStop: false,
 		replayComplete: entries.length === 0 || finished,
 	};
 }

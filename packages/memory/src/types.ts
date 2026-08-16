@@ -132,13 +132,6 @@ export interface SnapshotMeta {
 /** Live task signals used to rank bounded context candidates. */
 export interface ContextRetrievalQuery {
 	objective: string;
-	phase?:
-		| "orient"
-		| "investigate"
-		| "implement"
-		| "verify"
-		| "handoff"
-		| "blocked";
 	changedFiles?: string[];
 	recentEvidence?: string[];
 	toolFailures?: number;
@@ -423,7 +416,6 @@ export interface RetrievalTrace {
 	workspace: string;
 	sessionId: string;
 	objective: string;
-	phase: ContextRetrievalQuery["phase"];
 	createdAt: string;
 	latencyMs: number;
 	budget: number;

@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe("createMemoryHooks observation capture", () => {
-	test("retrieves memory against live task state rather than only the initial prompt", async () => {
+	test("retrieves memory against the current prompt", async () => {
 		const store = testStore();
 		store.create("The parser requires CRLF-safe edits", {
 			strength: 8,
@@ -60,24 +60,13 @@ describe("createMemoryHooks observation capture", () => {
 		const hooks = createMemoryHooks(store, { contextBudget: 1000 });
 
 		await hooks.beforeAgentStart?.({
-			prompt: "Continue",
+			prompt: "Fix parser line endings",
 			systemPrompt: "",
 			messages: [],
 		});
 		const transformed = await hooks.transformContext?.({
 			messages: [],
 			iteration: 2,
-			taskState: {
-				objective: "Fix parser line endings",
-				phase: "implement",
-				hypotheses: [],
-				evidence: [],
-				changedFiles: ["src/parser.ts"],
-				verification: [],
-				blockers: [],
-				toolCalls: 1,
-				toolFailures: 0,
-			},
 		});
 		const last = transformed?.messages?.at(-1);
 		const injected = String(

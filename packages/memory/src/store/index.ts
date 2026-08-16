@@ -710,7 +710,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	  workspace TEXT NOT NULL,
 	  session_id TEXT NOT NULL,
 	  objective TEXT NOT NULL,
-	  phase TEXT NOT NULL,
 	  created_at TEXT NOT NULL,
 	  latency_ms REAL NOT NULL,
 	  budget INTEGER NOT NULL,
@@ -964,6 +963,45 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					normalizeStoredScope.run(normalized, scope.workspace);
 				}
 			}
+		}
+	} catch {}
+
+	// Remove deprecated phase column from retrieval_traces (SQLite needs
+	// the rename-table workaround because ALTER TABLE DROP COLUMN is not
+	// supported until 3.35.0).
+	try {
+		const rtCols = db
+			.prepare("PRAGMA table_info(retrieval_traces)")
+			.all() as Array<{ name: string }>;
+		if (rtCols.find(c => c.name === "phase")) {
+			db.exec("DROP TABLE IF EXISTS retrieval_traces_v2");
+			db.exec(`
+				CREATE TABLE retrieval_traces_v2 (
+					id TEXT PRIMARY KEY,
+					workspace TEXT NOT NULL,
+					session_id TEXT NOT NULL,
+					objective TEXT NOT NULL,
+					created_at TEXT NOT NULL,
+					latency_ms REAL NOT NULL,
+					budget INTEGER NOT NULL,
+					tokens INTEGER NOT NULL,
+					abstained INTEGER NOT NULL,
+					reason TEXT,
+					candidate_counts TEXT NOT NULL,
+					selected TEXT NOT NULL
+				)
+			`);
+			db.exec(
+				"INSERT INTO retrieval_traces_v2 SELECT id, workspace, session_id, objective, created_at, latency_ms, budget, tokens, abstained, reason, candidate_counts, selected FROM retrieval_traces",
+			);
+			db.exec("DROP TABLE retrieval_traces");
+			db.exec("ALTER TABLE retrieval_traces_v2 RENAME TO retrieval_traces");
+			db.exec(
+				"CREATE INDEX IF NOT EXISTS idx_retrieval_traces_workspace ON retrieval_traces(workspace, created_at DESC)",
+			);
+			// Clear all traces — their phase-weighted scores are no longer valid.
+			db.exec("DELETE FROM retrieval_traces");
+			db.exec("DELETE FROM memory_outcome_receipts");
 		}
 	} catch {}
 
@@ -2823,7 +2861,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const retrievalStarted = performance.now();
 		const retrieval = typeof query === "string" ? { objective: query } : query;
 		const objective = retrieval.objective?.trim() || "";
-		const phase = retrieval.phase || "orient";
 		const changedFiles = retrieval.changedFiles || [];
 		const queryText = [
 			objective,
@@ -2881,18 +2918,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				Math.max(0, nowMs - Date.parse(timestamp || "")) / 86_400_000;
 			return Number.isFinite(ageDays) ? 1 / (1 + ageDays / 14) : 0;
 		};
-		const phaseScore = (type: string): number => {
-			if (phase === "investigate" && /error|file_read|search|fact/.test(type))
-				return 1;
-			if (
-				phase === "implement" &&
-				/file_write|file_edit|decision|pattern/.test(type)
-			)
-				return 1;
-			if (phase === "verify" && /command_run|error|test/.test(type)) return 1;
-			if (phase === "blocked" && /error|decision/.test(type)) return 1;
-			return 0;
-		};
+
 		// Retention-scored working tier as a small ranking nudge — hot/warm
 		// memories (recently relevant, reinforced by access) rank slightly
 		// above cold ones, and archived (never-accessed) memories are gently
@@ -3075,7 +3101,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			const score =
 				relevance * 18 +
 				files * 10 +
-				phaseScore(obs.type) * 3 +
 				(obs.importance / 10) * 4 +
 				recencyScore(obs.timestamp) * 2 +
 				(isEpisode ? 5 : 0) +
@@ -3156,7 +3181,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				score:
 					relevance * 20 +
 					files * 12 +
-					phaseScore(mem.type) * 3 +
 					(mem.strength / 10) * 6 +
 					recencyScore(mem.updatedAt) +
 					tierScore(mem.id) +
@@ -3235,7 +3259,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			workspace: currentWorkspace,
 			sessionId,
 			objective: sanitizeString(objective).slice(0, 1000),
-			phase,
 			createdAt: now(),
 			latencyMs: Number((performance.now() - retrievalStarted).toFixed(3)),
 			budget,
@@ -3255,15 +3278,14 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		};
 		db.prepare(
 			`INSERT INTO retrieval_traces
-		  (id, workspace, session_id, objective, phase, created_at, latency_ms,
+		  (id, workspace, session_id, objective, created_at, latency_ms,
 		   budget, tokens, abstained, reason, candidate_counts, selected)
-		  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		).run(
 			trace.id,
 			trace.workspace,
 			trace.sessionId,
 			trace.objective,
-			trace.phase || "orient",
 			trace.createdAt,
 			trace.latencyMs,
 			trace.budget,
@@ -3290,7 +3312,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				? "truth-aware claims and semantic memory"
 				: "semantic memory";
 		const retrievalNote = objective
-			? `_Task-aware retrieval: ${phase}; ${retrievalMode} compact index; ${blocks.length} items; ~${tokenCount}/${budget} tokens._`
+			? `_Task-aware retrieval: ${retrievalMode} compact index; ${blocks.length} items; ~${tokenCount}/${budget} tokens._`
 			: `_Semantic memory compact index: ${blocks.length} items; ~${tokenCount}/${budget} tokens._`;
 		const expansionNote =
 			"Each bracketed value is a stable ID. These entries are summaries, not complete records. Call `memory_get` once with the relevant IDs when full rationale, evidence, or details are needed.";
@@ -3355,7 +3377,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			workspace: row.workspace,
 			sessionId: row.session_id,
 			objective: row.objective,
-			phase: row.phase,
 			createdAt: row.created_at,
 			latencyMs: row.latency_ms,
 			budget: row.budget,

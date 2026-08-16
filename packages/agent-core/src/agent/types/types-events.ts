@@ -2,10 +2,6 @@
 
 import type { InferenceMode } from "../configuration/inference-modes.ts";
 import type { HarnessIntervention } from "../intervention-controller.ts";
-import type {
-	ExplicitTaskState,
-	TaskPhase,
-} from "../tasks/task-state-controller.ts";
 import type { Message, MessageRole, StopReason } from "./types-messages.ts";
 
 /**
@@ -35,13 +31,11 @@ export type AgentEventBody =
 			nextTurn: readonly string[];
 	  }
 	| { type: "turn_start"; turnId: string }
-	| { type: "task_state_update"; state: ExplicitTaskState }
 	| {
 			type: "inference_mode_selected";
 			configuredMode: "auto";
 			effectiveMode: Exclude<InferenceMode, "auto">;
 			reason: string;
-			phase: TaskPhase;
 	  }
 	| {
 			type: "turn_end";
@@ -277,7 +271,7 @@ export type AgentEventBody =
 			type: "agent_retry_start";
 			attempt: number;
 			maxRetries: number;
-			delayMs: number;
+			delayMs?: number;
 			error: string;
 			reason?: "compaction" | "error" | "overflow" | "rate_limit";
 	  }

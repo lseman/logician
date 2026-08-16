@@ -801,7 +801,6 @@ export class AgentHarness {
 						// Use GuardEngine's internal OutputGuard.
 						outputGuard: this.guardCallbacks.outputGuard,
 						extensionBus: this._extensionBus,
-						initialTaskState: this.runKernel.snapshot().state.taskState,
 						refreshNextTurnConfig: () =>
 							this.withExtensionRuntime(this.snapshotConfig()),
 						onContextCompacted: messages => {
@@ -1138,8 +1137,6 @@ export class AgentHarness {
 				});
 			}
 		}
-		if (event.type === "task_state_update")
-			this.runKernel.updateTaskState(event.state);
 		if (event.type === "harness_intervention") {
 			const state = this.runKernel.snapshot().state;
 			if (state.taskId && state.runId)

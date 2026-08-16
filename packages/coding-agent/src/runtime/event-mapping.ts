@@ -107,14 +107,13 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 		case "agent_start":
 		case "agent_end":
 		case "phase":
-		case "task_state_update":
 			return null; // Handled separately
 		case "inference_mode_selected":
 			return {
 				type: "notice",
 				level: "info",
 				label: `Auto → ${event.effectiveMode}`,
-				text: `${event.reason} (${event.phase})`,
+				text: `${event.reason}`,
 			};
 		case "context_update":
 			return {
@@ -151,7 +150,7 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				type: "agent_retry_start",
 				attempt: event.attempt,
 				maxRetries: event.maxRetries,
-				delayMs: event.delayMs,
+				delayMs: event.delayMs ?? 0,
 				error: event.error,
 				reason: event.reason,
 			};

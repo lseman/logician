@@ -902,8 +902,7 @@ const HTML = `<!DOCTYPE html>
 				).join('');
 				const counts = Object.entries(trace.candidateCounts || {}).map(([kind, count]) => esc(kind)+': '+count).join(' · ');
 				return '<article class="entry-card">' +
-					'<div class="entry-head"><span class="badge badge-'+(trace.abstained ? 'amber' : 'sage')+'">'+(trace.abstained ? 'ABSTAINED' : 'SELECTED')+'</span>' +
-					'<span class="badge badge-muted">'+esc(trace.phase || 'orient')+'</span><span class="entry-meta" style="margin-left:auto">'+esc(trace.createdAt?.slice(0,19))+'</span></div>' +
+					'<div class="entry-head"><span class="badge badge-'+(trace.abstained ? 'amber' : 'sage')+'">'+(trace.abstained ? 'ABSTAINED' : 'SELECTED')+'</span><span class="entry-meta" style="margin-left:auto">'+esc(trace.createdAt?.slice(0,19))+'</span></div>' +
 					'<div class="entry-title">'+esc(trace.objective || 'Context refresh')+'</div>' +
 					(trace.reason ? '<div class="entry-body" style="color:var(--amber)">'+esc(trace.reason)+'</div>' : '') +
 					'<div class="trace-metrics"><div class="trace-metric"><b>'+Number(trace.latencyMs || 0).toFixed(2)+'</b><span>latency ms</span></div>' +

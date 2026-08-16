@@ -121,7 +121,6 @@ interface TransformContext {
   messages: AgentMessage[]
   iteration: number
   signal?: AbortSignal
-  taskState?: ExplicitTaskState  // Live structured task state
 }
 
 interface TransformContextResult {
@@ -130,7 +129,7 @@ interface TransformContextResult {
 ```
 
 Fired during context assembly. Use to:
-- Modify messages based on task state
+- Modify messages based on conversation context
 - Abort transformation via signal
 - Apply task-aware context shaping
 

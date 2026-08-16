@@ -18,8 +18,6 @@ export type {
 export type { AcceptanceConfig } from "./guards/acceptance-contract.ts";
 export type {
 	HarnessIntervention,
-	HarnessInterventionAction,
-	HarnessInterventionEvidence,
 	HarnessInterventionKind,
 } from "./intervention-controller.ts";
 export type {

@@ -21,7 +21,6 @@ import {
 	type RunKernelViolation,
 	reduceRunKernel,
 } from "./run-kernel-events.ts";
-import type { ExplicitTaskState } from "./tasks/task-state-controller.ts";
 
 export interface ContinuationLimits {
 	maxRuns: number;
@@ -39,7 +38,6 @@ export interface RunBudgetStatus {
 export interface RunKernelStatus {
 	taskId?: string;
 	status: RunKernelReduction["state"]["status"];
-	taskState?: ExplicitTaskState;
 	compactionGeneration: number;
 }
 
@@ -151,7 +149,6 @@ export class RunKernel {
 		return {
 			taskId: state.taskId,
 			status: state.status,
-			taskState: state.taskState ? structuredClone(state.taskState) : undefined,
 			compactionGeneration: state.compactionGeneration,
 		};
 	}
@@ -267,9 +264,6 @@ export class RunKernel {
 		};
 	}
 
-	updateTaskState(state: ExplicitTaskState): void {
-		this.appendForActive({ type: "task_state_updated", state });
-	}
 	recordCompaction(): void {
 		this.appendForActive({
 			type: "compaction_committed",

@@ -21,14 +21,14 @@ void test("trailing system messages are re-roled to user, leading kept", () => {
 		{ role: "user", content: "hi" },
 		{ role: "assistant", content: "yo" },
 		{ role: "system", content: "# Agent Context\n..." },
-		{ role: "system", content: "<task_state>phase: verify</task_state>" },
+		{ role: "system", content: "# Runtime Context\n..." },
 	]);
 	assert.equal(out[0].role, "system");
 	assert.equal(out[0].content, "base");
 	assert.equal(out[3].role, "user");
 	assert.equal(out[3].content, "# Agent Context\n...");
 	assert.equal(out[4].role, "user");
-	assert.equal(out[4].content, "<task_state>phase: verify</task_state>");
+	assert.equal(out[4].content, "# Runtime Context\n...");
 });
 
 void test("without a leading system, any later system becomes user", () => {
@@ -76,7 +76,7 @@ void test("generate sends trailing system context as a user message", async () =
 				{ role: "system", content: "base prompt" },
 				{ role: "user", content: "do the thing" },
 				{ role: "assistant", content: "done" },
-				{ role: "system", content: "<task_state>phase: verify</task_state>" },
+				{ role: "system", content: "# Runtime Context\n..." },
 			],
 			{ maxRetries: 0 },
 		);
@@ -86,7 +86,7 @@ void test("generate sends trailing system context as a user message", async () =
 		assert.equal(sent[0].role, "system");
 		assert.equal(sent[0].content, "base prompt");
 		assert.equal(sent[3].role, "user");
-		assert.equal(sent[3].content, "<task_state>phase: verify</task_state>");
+		assert.equal(sent[3].content, "# Runtime Context\n...");
 	} finally {
 		globalThis.fetch = originalFetch;
 	}

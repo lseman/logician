@@ -1,5 +1,4 @@
 import type { HarnessIntervention } from "./intervention-controller.ts";
-import type { ExplicitTaskState } from "./tasks/task-state-controller.ts";
 
 export const RUN_KERNEL_SCHEMA_VERSION = 1 as const;
 
@@ -30,7 +29,6 @@ export type RunKernelEvent =
 		cause: string;
 		progressFingerprint: string;
 	}
-	| { type: "task_state_updated"; state: ExplicitTaskState }
 	| { type: "intervention_recorded"; intervention: HarnessIntervention }
 	| {
 		type: "budget_consumed";
@@ -149,7 +147,6 @@ export interface RunKernelState {
 	noProgressRuns: number;
 	lastProgressFingerprint: string;
 	lastCause: string;
-	taskState?: ExplicitTaskState;
 	interventions: HarnessIntervention[];
 	budgets: Record<
 		"provider_call" | "tool_call" | "token" | "cost_microusd",
@@ -276,8 +273,6 @@ export function isRunKernelEvent(value: unknown): value is RunKernelEvent {
 			return isString(value.ownerId) && isFiniteNumber(value.expiresAt);
 		case "continuation_requested":
 			return isString(value.cause) && isString(value.progressFingerprint);
-		case "task_state_updated":
-			return isObject(value.state) && isString(value.state.objective);
 		case "intervention_recorded":
 			return (
 				isObject(value.intervention) &&
@@ -515,7 +510,6 @@ export function reduceRunKernel(
 		state.noProgressRuns = 0;
 		state.lastProgressFingerprint = event.progressFingerprint ?? "";
 		state.lastCause = "user_prompt";
-		state.taskState = undefined;
 		state.interventions = [];
 		state.budgets = {
 			provider_call: 0,
@@ -557,8 +551,6 @@ export function reduceRunKernel(
 			state.lastProgressFingerprint = event.progressFingerprint;
 			state.noProgressRuns = 0;
 		} else state.noProgressRuns++;
-	} else if (event.type === "task_state_updated") {
-		state.taskState = structuredClone(event.state);
 	} else if (event.type === "intervention_recorded") {
 		state.interventions.push(structuredClone(event.intervention));
 	} else if (event.type === "budget_consumed") {

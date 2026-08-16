@@ -163,7 +163,7 @@ void test("retryBaseDelayMs configures output-guard retry events", async () => {
 	});
 	const delays: number[] = [];
 	harness.subscribe(event => {
-		if (event.type === "agent_retry_start") delays.push(event.delayMs);
+		if (event.type === "agent_retry_start") delays.push(event.delayMs ?? 0);
 	});
 
 	await harness.prompt("hello");

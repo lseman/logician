@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import type { RunKernel } from "./run-kernel.ts";
 import type { RunTerminalStatus } from "./run-kernel-events.ts";
-import type { ExplicitTaskState } from "./tasks/task-state-controller.ts";
 
 interface LegacyRunProjection {
 	runId: string;
@@ -12,7 +11,6 @@ interface LegacyRunProjection {
 	continuationRuns: number;
 	lastProgressFingerprint: string;
 	lastCause: string;
-	taskState?: ExplicitTaskState;
 	outcome?: {
 		status: RunTerminalStatus;
 		summary?: string;
@@ -87,9 +85,7 @@ function loadLegacyRun(
 			state.lastCause = String(event.cause ?? "legacy_import");
 			const fingerprint = String(event.progressFingerprint ?? "");
 			if (fingerprint) state.lastProgressFingerprint = fingerprint;
-		} else if (event.type === "task_state_updated")
-			state.taskState = event.state as ExplicitTaskState;
-		else if (event.type === "compaction_committed")
+		} else if (event.type === "compaction_committed")
 			state.compactionGeneration++;
 		else if (event.type === "run_outcome")
 			state.outcome = event.outcome as LegacyRunProjection["outcome"];
@@ -160,11 +156,6 @@ export function migrateLegacyRunData(
 						? legacy.lastProgressFingerprint
 						: "",
 			},
-			options,
-		);
-	if (legacy.taskState)
-		kernel.append(
-			{ type: "task_state_updated", state: legacy.taskState },
 			options,
 		);
 	for (

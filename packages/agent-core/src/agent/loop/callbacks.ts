@@ -1,5 +1,4 @@
 import { createSystemMessage } from "../messages.ts";
-import type { ExplicitTaskState } from "../tasks/task-state-controller.ts";
 import type {
 	AgentHooks,
 	AgentMessage,
@@ -42,7 +41,6 @@ export interface LoopCallbacks {
 		messages: AgentMessage[];
 		iteration: number;
 		signal?: AbortSignal;
-		taskState?: ExplicitTaskState;
 	}) =>
 		| Promise<{ messages?: AgentMessage[] } | undefined>
 		| { messages?: AgentMessage[] }
@@ -91,7 +89,6 @@ export async function transformMessages(
 		messages: AgentMessage[];
 		iteration: number;
 		signal?: AbortSignal;
-		taskState?: ExplicitTaskState;
 	},
 ): Promise<AgentMessage[] | undefined> {
 	for (const callback of callbacks) {
