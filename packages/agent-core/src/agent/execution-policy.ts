@@ -20,14 +20,14 @@ export interface StopPolicyContext {
 
 export type StopPolicyDecision =
 	| {
-			action: "continue";
-			messages: Message[];
-	  }
+		action: "continue";
+		messages: Message[];
+	}
 	| {
-			action: "finish";
-			status: RunOutcomeStatus;
-			summary?: string;
-	  };
+		action: "finish";
+		status: RunOutcomeStatus;
+		summary?: string;
+	};
 
 /**
  * Optional policy evaluated when the mechanism has no pending tool calls,
@@ -45,7 +45,7 @@ export interface ResolvedExecutionPolicy {
 export function resolveExecutionPolicy(
 	profile: ExecutionProfile | undefined,
 ): ResolvedExecutionPolicy {
-	const resolvedProfile = profile ?? "autonomous";
+	const resolvedProfile = profile ?? "minimal";
 	return {
 		profile: resolvedProfile,
 		embeddedPoliciesEnabled: resolvedProfile === "autonomous",

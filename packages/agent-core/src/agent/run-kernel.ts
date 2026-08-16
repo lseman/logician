@@ -41,6 +41,8 @@ export interface RunKernelStatus {
 	compactionGeneration: number;
 }
 
+export type RunKernelPersistence = "durable" | "ephemeral";
+
 export type ContinuationDecision =
 	| { action: "continue"; state: RunKernelReduction["state"] }
 	| { action: "pause"; reason: string; state: RunKernelReduction["state"] };
@@ -87,11 +89,11 @@ export interface RunKernelDoctorReport {
 		status: string;
 		recovery: string;
 		recommendedAction:
-			| "retry"
-			| "reuse_result"
-			| "reconcile_receipt"
-			| "quarantine"
-			| "none";
+		| "retry"
+		| "reuse_result"
+		| "reconcile_receipt"
+		| "quarantine"
+		| "none";
 	}>;
 	orphanedSubagents: Array<{
 		agentId: string;
@@ -109,18 +111,28 @@ export class RunKernel {
 	};
 	private sessionId: string;
 	private observedFileSize = 0;
+	private persistence: RunKernelPersistence;
 	private readonly continuationLimits: ContinuationLimits;
 
 	constructor(
 		private readonly cwd: string,
 		sessionId: string,
 		continuationLimits: Partial<ContinuationLimits> = {},
+		persistence?: RunKernelPersistence,
 	) {
 		this.sessionId = sessionId;
+		this.persistence =
+			persistence ?? (sessionId.startsWith("tui_") ? "ephemeral" : "durable");
 		this.continuationLimits = {
 			...DEFAULT_CONTINUATION_LIMITS,
 			...continuationLimits,
 		};
+		this.reload();
+	}
+
+	setPersistence(persistence: RunKernelPersistence): void {
+		if (this.persistence === persistence) return;
+		this.persistence = persistence;
 		this.reload();
 	}
 
@@ -284,7 +296,7 @@ export class RunKernel {
 		runId?: string,
 	): void {
 		const state = this.snapshot().state;
-		if (!state.taskId || !state.runId || this.sessionId.startsWith("tui_"))
+		if (!state.taskId || !state.runId || this.isEphemeral())
 			return;
 		this.append(
 			{ type: "trajectory_recorded", kind, operationId, payload },
@@ -349,7 +361,7 @@ export class RunKernel {
 		event: RunKernelEvent,
 		options: RunKernelAppendOptions,
 	): RunEventEnvelope {
-		if (this.sessionId.startsWith("tui_"))
+		if (this.isEphemeral())
 			return this.appendUnlocked(event, options);
 		return this.withFileLock(() => this.appendUnlocked(event, options));
 	}
@@ -377,7 +389,7 @@ export class RunKernel {
 				`Run Kernel rejected ${event.type}: ${next.violations.map(item => item.message).join("; ")}`,
 			);
 		}
-		if (!this.sessionId.startsWith("tui_")) {
+		if (!this.isEphemeral()) {
 			mkdirSync(path.dirname(this.filePath), { recursive: true });
 			const line = `${JSON.stringify(envelope)}\n`;
 			const existed = existsSync(this.filePath);
@@ -463,7 +475,7 @@ export class RunKernel {
 						: operation.status === "result_recorded"
 							? ("reuse_result" as const)
 							: operation.recovery === "pure" ||
-									operation.recovery === "idempotent"
+								operation.recovery === "idempotent"
 								? ("retry" as const)
 								: operation.recovery === "receipt_recoverable"
 									? ("reconcile_receipt" as const)
@@ -489,6 +501,11 @@ export class RunKernel {
 	}
 
 	private reload(): void {
+		if (this.isEphemeral()) {
+			this.reduction = { state: initialRunKernelState(), violations: [] };
+			this.observedFileSize = 0;
+			return;
+		}
 		let state = initialRunKernelState();
 		const violations: RunKernelViolation[] = [];
 		for (const event of this.read().events) {
@@ -503,7 +520,7 @@ export class RunKernel {
 	}
 
 	private refreshIfChanged(): void {
-		if (this.sessionId.startsWith("tui_")) return;
+		if (this.isEphemeral()) return;
 		const size = existsSync(this.filePath) ? statSync(this.filePath).size : 0;
 		if (size !== this.observedFileSize) this.reload();
 	}
@@ -513,6 +530,8 @@ export class RunKernel {
 		truncatedFinalRecord: boolean;
 		parseErrors: Array<{ line: number; message: string }>;
 	} {
+		if (this.isEphemeral())
+			return { events: [], truncatedFinalRecord: false, parseErrors: [] };
 		if (!existsSync(this.filePath))
 			return { events: [], truncatedFinalRecord: false, parseErrors: [] };
 		const lines = readFileSync(this.filePath, "utf8").split("\n");
@@ -543,5 +562,9 @@ export class RunKernel {
 			}
 		}
 		return { events, truncatedFinalRecord, parseErrors };
+	}
+
+	private isEphemeral(): boolean {
+		return this.persistence === "ephemeral";
 	}
 }

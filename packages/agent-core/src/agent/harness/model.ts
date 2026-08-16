@@ -12,11 +12,11 @@ const THINKING_LEVELS: ThinkingLevel[] = [
 	"xhigh",
 ];
 
-/** Clamp an arbitrary string to a known ThinkingLevel, defaulting to "medium". */
+/** Clamp an arbitrary string to a known ThinkingLevel, defaulting to "off". */
 export function clampThinkingLevel(level: string): ThinkingLevel {
 	const idx = THINKING_LEVELS.indexOf(level as ThinkingLevel);
 	if (idx >= 0) return level as ThinkingLevel;
-	return "medium";
+	return "off";
 }
 
 /** Resolve the baseUrl configured for a given model name, falling back to `defaultBaseUrl`. */

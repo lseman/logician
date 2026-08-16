@@ -1423,9 +1423,10 @@ export class AgentHarness {
 		this.config.runtimeHooksEnabled = enabled;
 	}
 
-	setSessionId(id: string): void {
+	setSessionId(id: string, options: { durable?: boolean } = {}): void {
 		this._sessionId = id;
 		this.config.hookSessionId = id;
+		this.runKernel.setPersistence(options.durable === false ? "ephemeral" : "durable");
 		this.runKernel.useSession(id);
 		this.restoreKernelSessionState();
 	}
@@ -1637,6 +1638,7 @@ export class AgentHarness {
 		this._sessionBaseDir = baseDir;
 		this._session = new Session(sessionId, { baseDir, enabled: true });
 		this._sessionId = sessionId;
+		this.runKernel.setPersistence("durable");
 		this.runKernel.useSession(sessionId);
 		this.restoreKernelSessionState();
 		await this.emitSessionStart("startup");
@@ -1657,6 +1659,7 @@ export class AgentHarness {
 		this._sessionBaseDir = sessionBaseDir;
 		this._session = resumed.session;
 		this._sessionId = sessionId;
+		this.runKernel.setPersistence("durable");
 		this.runKernel.useSession(sessionId);
 		this.restoreKernelSessionState();
 		await this.emitSessionStart("resume");

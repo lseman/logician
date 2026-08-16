@@ -263,7 +263,7 @@ void test("runtimeState is canonical across streaming, tools, and settlement", a
 	assert.deepEqual(settled.outcome, {
 		status: "completed",
 		summary: "done",
-		source: "heuristic",
+		source: "runtime",
 	});
 	assert.ok((settled.lastEventSeq ?? 0) > 0);
 	assert.ok((settled.lastTurnDurationMs ?? -1) >= 0);
@@ -494,6 +494,24 @@ void test("harness records run state and trajectory in the unified kernel ledger
 				item.kind === "agent_event" && item.payload.type === "run_outcome",
 		),
 	);
+});
+
+void test("interactive session IDs keep the kernel in memory", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-ephemeral-kernel-"));
+	const sessionId = "interactive-session";
+	const harness = makeHarness(
+		new FakeBackend([() => textResponse("answer")]),
+		cwd,
+	);
+	harness.setSessionId(sessionId, { durable: false });
+	await harness.prompt("question");
+
+	assert.equal(harness.durableRunState?.rootPrompt, "question");
+	assert.equal(
+		existsSync(join(cwd, ".logician", "run-kernel", `${sessionId}.jsonl`)),
+		false,
+	);
+	assert.equal(new RunKernel(cwd, sessionId).snapshot().state.taskId, undefined);
 });
 
 void test("streaming deltas stay live without entering the durable ledger", async () => {

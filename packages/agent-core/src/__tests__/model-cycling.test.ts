@@ -2,6 +2,7 @@ import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import type { LLMBackend } from "../agent/backend.ts";
 import { AgentHarness } from "../agent/harness.ts";
+import { clampThinkingLevel } from "../agent/harness/model.ts";
 import type { AgentEvent } from "../agent/types.ts";
 
 class FakeBackend implements LLMBackend {
@@ -17,6 +18,10 @@ class FakeBackend implements LLMBackend {
 }
 
 const fakeBackend = new FakeBackend();
+
+it("falls back to thinking off for an invalid level", () => {
+	assert.equal(clampThinkingLevel("invalid"), "off");
+});
 
 function makeHarness(overrides?: Record<string, unknown>) {
 	const config = {
