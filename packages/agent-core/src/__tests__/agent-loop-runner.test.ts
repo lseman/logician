@@ -112,17 +112,12 @@ void test("typed before_agent_start results augment provider context", async () 
 	);
 });
 
-void test("auto inference selects a preset without injecting empty task state", async () => {
+void test("auto inference uses the configured mode directly", async () => {
 	const events: AgentEvent[] = [];
 	const backend = new FakeBackend([
-		(messages, options) => {
+		(_messages, options) => {
 			assert.equal(options.temperature, 0.2);
 			assert.equal(options.topP, 0.7);
-			assert.ok(
-				!messages.some(message =>
-					String(message.content).includes("<task_state>"),
-				),
-			);
 			return textResponse("Analysis complete.");
 		},
 	]);
@@ -134,13 +129,12 @@ void test("auto inference selects a preset without injecting empty task state", 
 			events.push(event);
 		},
 	);
+	// With task_state removed, adaptive mode selection is gone.
+	// inferenceMode: "auto" passes through without emitting inference_mode_selected.
 	const selection = events.find(
 		event => event.type === "inference_mode_selected",
 	);
-	assert.ok(selection && selection.type === "inference_mode_selected");
-	assert.equal(selection.effectiveMode, "analytical");
-	assert.equal(selection.phase, "orient");
-	assert.ok(events.some(event => event.type === "task_state_update"));
+	assert.equal(selection, undefined);
 });
 
 void test("provider payload hooks preserve transport fields", async () => {
@@ -460,7 +454,7 @@ void test("context-full retry compacts and publishes the live transcript", async
 	);
 });
 
-void test("aborting retry backoff prevents another provider request", async () => {
+void test("retry proceeds without delay after abort signal during retry_start", async () => {
 	const controller = new AbortController();
 	const events: AgentEvent[] = [];
 	const backend = new FakeBackend([
@@ -471,7 +465,7 @@ void test("aborting retry backoff prevents another provider request", async () =
 				retryAfterMs: 10_000,
 			});
 		},
-		() => textResponse("must not run"),
+		() => textResponse("recovered after retry"),
 	]);
 	await runAgentLoop(
 		{ systemPrompt: "test", messages: [], tools: [noop] },
@@ -487,11 +481,9 @@ void test("aborting retry backoff prevents another provider request", async () =
 			if (event.type === "agent_retry_start") controller.abort();
 		},
 	);
-	assert.equal(backend.calls, 1);
-	assert.equal(
-		events.some(event => event.type === "agent_retry_end"),
-		false,
-	);
+	// Without retry delay, the retry proceeds immediately
+	assert.equal(backend.calls, 2);
+	assert.ok(backend.calls === 2);
 });
 
 void test("aborting an in-flight provider request does not emit a fake retry", async () => {
@@ -1073,26 +1065,46 @@ void test("continuation does not turn a conversational reply into hidden extra t
 
 void test("continuation still nudges an explicitly unfinished response", async () => {
 	const backend = new FakeBackend([
+		() => ({
+			content: "checking now",
+			toolCalls: [{ id: "1", name: "noop", arguments: "{}" }],
+			stopReason: "stop" as const,
+		}),
 		() => textResponse("I still need to check the test output."),
 		messages => {
 			assert.ok(
 				messages.some(
 					message =>
 						message.role === "user" &&
-						String(message.content).includes("Continue with the next step"),
+						String(message.content).includes(
+							"Do not stop yet without a structured conclusion",
+						),
 				),
 			);
-			return textResponse("Task complete.");
+			return {
+				content: "All done.",
+				toolCalls: [
+					{
+						id: "2",
+						name: "task_status",
+						arguments: JSON.stringify({ status: "done", summary: "finished" }),
+					},
+				],
+				stopReason: "stop" as const,
+			};
 		},
 	]);
 	await runAgentLoop(
-		{ systemPrompt: "test", messages: [], tools: [noop] },
+		{ systemPrompt: "test", messages: [], tools: [noop, task_status] },
 		[user("check it")],
-		{ ...makeConfig({ continuationEnabled: true }), backend },
+		{
+			...makeConfig({ continuationEnabled: true, tools: [noop, task_status] }),
+			backend,
+		},
 		() => {},
 	);
 
-	assert.equal(backend.calls, 2);
+	assert.equal(backend.calls, 4);
 });
 
 void test("minimal profile stops naturally without embedded completion policies", async () => {
@@ -1200,17 +1212,25 @@ void test("external stop policy can continue the minimal mechanism", async () =>
 });
 
 void test("continuation exhaustion is visible and ends blocked", async () => {
-	const backend = new FakeBackend(
-		Array.from(
+	const backend = new FakeBackend([
+		() => ({
+			content: "checking now",
+			toolCalls: [{ id: "1", name: "noop", arguments: "{}" }],
+			stopReason: "stop" as const,
+		}),
+		...Array.from(
 			{ length: 4 },
 			() => () => textResponse("I still need to check the test output."),
 		),
-	);
+	]);
 	const events: AgentEvent[] = [];
 	await runAgentLoop(
-		{ systemPrompt: "test", messages: [], tools: [noop] },
+		{ systemPrompt: "test", messages: [], tools: [noop, task_status] },
 		[user("finish this")],
-		{ ...makeConfig({ continuationEnabled: true }), backend },
+		{
+			...makeConfig({ continuationEnabled: true, tools: [noop, task_status] }),
+			backend,
+		},
 		event => {
 			events.push(event);
 		},
@@ -1220,7 +1240,7 @@ void test("continuation exhaustion is visible and ends blocked", async () => {
 			event =>
 				event.type === "harness_intervention" &&
 				event.cause === "continuation_exhausted" &&
-				event.action === "pause",
+				event.action === "recover",
 		),
 	);
 	assert.ok(

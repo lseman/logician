@@ -30,7 +30,7 @@ stateDiagram-v2
 | Hook | When it runs | Key parameters |
 |---|---|---|
 | `beforeAgentStart` | Before agent starts | `{ prompt, systemPrompt, messages }` |
-| `transformContext` | During context assembly | `{ messages, taskState }` |
+| `transformContext` | During context assembly | `{ messages }` |
 | `beforeProviderRequest` | Before LLM request | `{ model, sessionId, streamOptions }` |
 | `beforeProviderPayload` | Before request payload | `{ model, payload }` |
 | `afterProviderResponse` | After LLM response | `{ model, content, toolCallCount, stopReason }` |

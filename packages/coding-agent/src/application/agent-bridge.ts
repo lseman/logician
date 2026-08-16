@@ -16,11 +16,8 @@ import {
 	type AgentEvent,
 	AgentHarness,
 	type AgentModelConfig,
-	type ExplicitTaskState,
-	formatTaskStateContext,
 	type HarnessPhase,
 	type Message,
-	shouldProjectTaskState,
 	type Tool,
 	type TruncationConfig,
 	type WebSearchConfig,
@@ -35,10 +32,8 @@ import {
 	ExtensionRunner,
 	loadExtensions,
 } from "@logician/agent-core/extensions/index.ts";
-import type {
-	PermissionMode,
-	PermissionRules,
-} from "@logician/agent-core/tools/shared/permissions.ts";
+import { PermissionManager, type PermissionMode, type PermissionRules } from "@logician/agent-core/tools/shared/permissions.ts";
+import type { AskUserContext } from "@logician/agent-core/agent/types/types-tools.ts";
 import {
 	configurePluginRuntimeEnv,
 	type PluginCommandResult,
@@ -88,7 +83,6 @@ import {
 	resolveWebSearchConfig,
 } from "./bridge-environment.ts";
 import { EohController } from "./eoh/controller.ts";
-import { InteractionCoordinator } from "./interaction-coordinator.ts";
 import { RepositoryMap } from "./repository-map.ts";
 import { SubagentCoordinator } from "./subagent-coordinator.ts";
 import { ToolRouter } from "./tool-router.ts";
@@ -254,12 +248,14 @@ export class AgentCoreBridge {
 	private startupPluginCount = 0;
 	private contextTokens = 0;
 	private contextMaxTokens?: number;
-	private currentTaskState: ExplicitTaskState | null = null;
 	private configPath: string | null;
 	private postEditDiagnosticsEnabled: boolean;
 	private lspManager: LspManager;
 	private readonly projectTrusted: boolean;
-	private interaction: InteractionCoordinator;
+	// Permission/question resolvers (inlined from InteractionCoordinator)
+	private readonly permissionResolvers = new Map<string, (d: "allow"|"deny"|"always") => void>();
+	private readonly questionResolvers = new Map<string, { allow: (a: string) => void; deny: () => void }>();
+	private permissionManager!: PermissionManager;
 	private memoryStore: ReturnType<typeof createMemoryStore> | null = null;
 	private memoryCaptureTools: boolean;
 	private memoryInjectContext: boolean;
@@ -432,10 +428,9 @@ export class AgentCoreBridge {
 			console.error("[logician] extension load error:", err);
 		}
 
-		this.interaction = new InteractionCoordinator({
-			emit: event => this.emit(event),
-			permissionMode: opts.permissionMode ?? "acceptEdits",
-			permissionRules: opts.permissionRules,
+		this.permissionManager = new PermissionManager({
+			mode: opts.permissionMode ?? "acceptEdits",
+			rules: opts.permissionRules,
 		});
 
 		// Initialize memory store if enabled
@@ -520,7 +515,7 @@ export class AgentCoreBridge {
 			eventLogPath: eventLogPathFor(this.transcriptPath),
 			steeringInterrupt: opts.steeringInterrupt,
 			maxTotalTokens: opts.maxTotalTokens,
-			permissions: this.interaction.getPermissionManager(),
+			permissions: this.permissionManager,
 			guardsEnabled: opts.guardsEnabled,
 			duplicateGuardEnabled: opts.duplicateGuardEnabled,
 			failureGuardEnabled: opts.failureGuardEnabled,
@@ -544,7 +539,30 @@ export class AgentCoreBridge {
 			allowedPaths: opts.allowedPaths,
 			allowAllPaths: opts.allowAllPaths,
 			truncation: opts.truncation,
-			...this.interaction.buildConfigCallbacks(),
+			// Permission & question callbacks (inlined from InteractionCoordinator)
+			onPermissionRequest: ctx =>
+				new Promise(resolve => {
+					this.permissionResolvers.set(ctx.toolCallId, resolve);
+					this.emit({
+						type: "permission_request",
+						toolName: ctx.toolName,
+						toolCallId: ctx.toolCallId,
+						args: ctx.args,
+					});
+				}),
+			onQuestionRequest: (ctx: AskUserContext) =>
+				new Promise<string>(resolve => {
+					const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+					this.questionResolvers.set(qid, {
+						allow: resolve,
+						deny: () => resolve("__dismissed__"),
+					});
+					this.emit({
+						type: "question_request",
+						questionId: qid,
+						questions: ctx.questions,
+					});
+				}),
 			hooks: this.buildMemoryHooks(
 				createPostEditDiagnosticHooks(
 					this.cwd,
@@ -564,9 +582,7 @@ export class AgentCoreBridge {
 					this.contextTokens = event.tokens;
 					this.contextMaxTokens = event.maxTokens;
 				}
-				if (event.type === "task_state_update") {
-					this.currentTaskState = event.state;
-				}
+	
 				if (event.type === "agent_retry_start") {
 					this.runtimeRetry = `${event.attempt}/${event.maxRetries}`;
 				} else if (event.type === "agent_retry_end")
@@ -940,24 +956,8 @@ export class AgentCoreBridge {
 	}
 
 	private progressFingerprint(): string {
-		const state = this.currentTaskState;
-		if (!state) return "";
-		const evidence = Array.from(
-			new Set(
-				state.evidence.map(
-					item => `${item.kind}:${item.tool ?? ""}:${item.summary}`,
-				),
-			),
-		).sort();
-		return JSON.stringify({
-			phase: state.phase,
-			changedFiles: [...state.changedFiles].sort(),
-			verification: state.verification
-				.map(item => `${item.passed}:${item.command}:${item.summary}`)
-				.sort(),
-			blockers: [...state.blockers].sort(),
-			evidence,
-		});
+		// Simplified — task state was removed; rely on text progress.
+		return "";
 	}
 
 	private scheduleAutoContinuation(
@@ -1071,7 +1071,7 @@ export class AgentCoreBridge {
 		const budget = this.harness.durableRunBudget;
 		this.emit({
 			type: "runtime_status",
-			runPhase: run?.taskState?.phase ?? run?.status ?? "idle",
+			runPhase: run?.status ?? "idle",
 			continuationsRemaining: budget?.continuationsRemaining,
 			noProgressRemaining: budget?.noProgressRemaining,
 			timeRemainingMs: budget?.timeRemainingMs,
@@ -1429,19 +1429,23 @@ export class AgentCoreBridge {
 		return true;
 	}
 
-	// ── Permissions & interactive questions (see interaction-coordinator.ts) ─
+	// ── Permissions & interactive questions (inlined from InteractionCoordinator) ─
 
 	/** Answer a pending permission_request. Returns false for unknown ids. */
 	respondToPermission(
 		toolCallId: string,
 		decision: "allow" | "deny" | "always",
 	): boolean {
-		return this.interaction.respondToPermission(toolCallId, decision);
+		const r = this.permissionResolvers.get(toolCallId);
+		if (!r) return false;
+		this.permissionResolvers.delete(toolCallId);
+		r(decision);
+		return true;
 	}
 
 	/** True while a permission_request awaits a decision. */
 	hasPendingPermission(): boolean {
-		return this.interaction.hasPendingPermission();
+		return this.permissionResolvers.size > 0;
 	}
 
 	/**
@@ -1453,7 +1457,17 @@ export class AgentCoreBridge {
 		question: string,
 		choices: Array<{ value: string; label: string }>,
 	): string {
-		return this.interaction.askQuestion(question, choices);
+		const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+		this.questionResolvers.set(qid, {
+			allow: () => {},
+			deny: () => {},
+		});
+		this.emit({
+			type: "question_request",
+			questionId: qid,
+			questions: [{ id: "answer", question, choices }],
+		});
+		return qid;
 	}
 
 	/**
@@ -1461,25 +1475,39 @@ export class AgentCoreBridge {
 	 * resolver. Returns false if the question id is unknown.
 	 */
 	respondToQuestion(questionId: string, answer: string): boolean {
-		return this.interaction.respondToQuestion(questionId, answer);
+		const r = this.questionResolvers.get(questionId);
+		if (!r) return false;
+		this.questionResolvers.delete(questionId);
+		r.allow(answer);
+		return true;
 	}
 
 	/** True while a question_request awaits an answer. */
 	hasPendingQuestion(): boolean {
-		return this.interaction.hasPendingQuestion();
+		return this.questionResolvers.size > 0;
 	}
 
 	/** Deny every pending permission request (abort / shutdown). */
 	private denyPendingPermissions(): void {
-		this.interaction.denyPendingPermissions();
+		const ids = [...this.permissionResolvers.keys()];
+		for (const id of ids) {
+			const r = this.permissionResolvers.get(id);
+			if (r) { r("deny"); this.permissionResolvers.delete(id); }
+		}
 	}
 
 	setPermissionMode(mode: PermissionMode): void {
-		this.interaction.setPermissionMode(mode);
+		this.permissionManager.setMode(mode);
+		this.emit({
+			type: "notice",
+			level: "info",
+			label: "Permissions",
+			text: `mode: ${mode}`,
+		});
 	}
 
 	getPermissionMode(): PermissionMode {
-		return this.interaction.getPermissionMode();
+		return this.permissionManager.getMode();
 	}
 
 	// ── Sandbox mode (see tool-router.ts) ───────────────────────────────
@@ -2309,16 +2337,7 @@ export class AgentCoreBridge {
 			lines.push("[USER]", memoryContext, "");
 		}
 
-		// The loop appends task state as the final request-time context block
-		// immediately before each provider request (re-roled to `user` by the
-		// backend). Mirror that ordering here so /context reflects the actual
-		// provider payload instead of presenting task state as a side panel.
-		if (
-			this.currentTaskState &&
-			shouldProjectTaskState(this.currentTaskState)
-		) {
-			lines.push("[USER]", formatTaskStateContext(this.currentTaskState), "");
-		}
+
 
 		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;
 	}
@@ -2332,17 +2351,7 @@ export class AgentCoreBridge {
 				.reverse()
 				.find(message => message.role === "user" && message.content?.trim())
 				?.content?.trim() || "";
-		const retrieval = this.currentTaskState
-			? {
-					objective: this.currentTaskState.objective || latestPrompt,
-					phase: this.currentTaskState.phase,
-					changedFiles: this.currentTaskState.changedFiles,
-					recentEvidence: this.currentTaskState.evidence
-						.slice(-6)
-						.map(item => item.summary),
-					toolFailures: this.currentTaskState.toolFailures,
-				}
-			: { objective: latestPrompt };
+		const retrieval = { objective: latestPrompt };
 		return this.memoryStore.getContext(
 			sessionId,
 			this.memoryContextBudget,

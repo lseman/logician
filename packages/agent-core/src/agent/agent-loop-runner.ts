@@ -39,7 +39,6 @@ import {
 } from "./guards/response-patterns.ts";
 import {
 	type HarnessIntervention,
-	type HarnessInterventionAction,
 	HarnessInterventionController,
 	type InterventionInput,
 } from "./intervention-controller.ts";
@@ -69,12 +68,6 @@ import {
 import { RunBudgetController } from "./run-budget.ts";
 import { resolveCompletionGate } from "./tasks/completion-gate.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
-import {
-	type ExplicitTaskState,
-	shouldProjectTaskState,
-	TaskStateController,
-	taskObjectiveFromMessages,
-} from "./tasks/task-state-controller.ts";
 import { getTaskStatus, resetTaskStatus } from "./tasks/task-status-state.ts";
 import { ToolResultCache } from "./tool-cache.ts";
 import type {
@@ -157,8 +150,7 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	extensionBus?: ExtensionEventBus;
 	/** Resolve the acceptance config at call time (allows harness to update it). */
 	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
-	/** Durable checkpoint restored only for a native continuation/resume. */
-	initialTaskState?: ExplicitTaskState;
+
 	/** Prior intervention incidents restored from the typed Run Kernel projection. */
 	initialInterventions?: HarnessIntervention[];
 	/** Task-spanning counters restored from the Run Kernel. */
@@ -206,21 +198,12 @@ async function runAgentLoopInTaskScope(
 		...prompts,
 	];
 	const newMessages: Message[] = [...prompts];
-	const taskState = new TaskStateController(
-		taskObjectiveFromMessages([...context.messages, ...prompts]),
-		config.initialTaskState,
-	);
 	resetTaskStatus();
 	const finish = async (outcome: {
 		status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
 		summary?: string;
 		source: "structured" | "heuristic" | "runtime";
 	}): Promise<Message[]> => {
-		if (outcome.status === "completed") taskState.markHandoff();
-		if (outcome.status === "blocked" || outcome.status === "failed") {
-			taskState.markBlocked(outcome.summary ?? outcome.status);
-		}
-		await emit({ type: "task_state_update", state: taskState.snapshot() });
 		await emit({ type: "run_outcome", ...outcome });
 		await emitTyped(config.extensionBus, {
 			type: "agent_end",
@@ -452,7 +435,6 @@ async function runAgentLoopInTaskScope(
 	}
 
 	await emit({ type: "agent_start" });
-	await emit({ type: "task_state_update", state: taskState.snapshot() });
 	const promptTurnId = "turn_0";
 	for (const prompt of prompts) {
 		await emitMessagePair(emit, promptTurnId, prompt);
@@ -521,7 +503,6 @@ async function runAgentLoopInTaskScope(
 					detector: "run_budget",
 					message: providerBudget.reason ?? "Run budget exhausted.",
 					iteration,
-					action: "pause",
 					counters: {
 						providerCalls: providerBudget.snapshot.providerCalls,
 						toolCalls: providerBudget.snapshot.toolCalls,
@@ -561,7 +542,6 @@ async function runAgentLoopInTaskScope(
 					messages: messages as AgentMessage[],
 					iteration,
 					signal: config.signal,
-					taskState: taskState.snapshot(),
 				},
 			);
 			if (transformed) {
@@ -585,12 +565,6 @@ async function runAgentLoopInTaskScope(
 					messages as AgentMessage[],
 				);
 				const chatMessages = convertToChatFormat(llmMessages);
-				// Trailing system context: OpenAIBackend re-roles it to `user`
-				// for chat templates that require a system message at position 0.
-				if (shouldProjectTaskState(taskState.snapshot())) {
-					chatMessages.push({ role: "system", content: taskState.toContext() });
-				}
-
 				// Apply beforeProviderRequest hook
 				const providerRequestHooks = [
 					config.internalHooks?.beforeProviderRequest,
@@ -599,10 +573,7 @@ async function runAgentLoopInTaskScope(
 				let requestHeaders = config.streamOptions?.headers;
 				let requestTimeoutMs =
 					config.streamOptions?.timeoutMs ?? config.turnTimeoutMs;
-				let requestMaxRetries =
-					config.autoRetryEnabled === false
-						? 0
-						: (config.streamOptions?.maxRetries ?? config.maxRetries ?? 3);
+				let requestMaxRetries = config.streamOptions?.maxRetries ?? config.maxRetries ?? 3;
 				let requestCacheRetention = config.streamOptions?.cacheRetention;
 				let requestMetadata = config.streamOptions?.metadata;
 
@@ -635,24 +606,7 @@ async function runAgentLoopInTaskScope(
 
 				try {
 					// Resolve inference mode params — they override individual config values.
-					const adaptiveDecision =
-						config.inferenceMode === "auto"
-							? taskState.selectAdaptiveMode()
-							: undefined;
-					const effectiveMode = adaptiveDecision?.mode ?? config.inferenceMode;
-					if (adaptiveDecision) {
-						const selectionKey = `${adaptiveDecision.mode}:${adaptiveDecision.reason}`;
-						if (selectionKey !== lastAdaptiveSelection) {
-							lastAdaptiveSelection = selectionKey;
-							await emit({
-								type: "inference_mode_selected",
-								configuredMode: "auto",
-								effectiveMode: adaptiveDecision.mode,
-								reason: adaptiveDecision.reason,
-								phase: taskState.snapshot().phase,
-							});
-						}
-					}
+					const effectiveMode = config.inferenceMode;
 					const modeDef = effectiveMode
 						? getInferenceMode(effectiveMode)
 						: undefined;
@@ -781,7 +735,7 @@ async function runAgentLoopInTaskScope(
 						type: "agent_retry_start",
 						attempt: activeRetryAttempt,
 						maxRetries: guardResult.maxRetries ?? 3,
-						delayMs: guardResult.retryDelayMs ?? 0,
+						delayMs: undefined,
 						error: guardResult.message ?? String(llmError),
 					});
 					await intervene({
@@ -790,13 +744,8 @@ async function runAgentLoopInTaskScope(
 						detector: "provider_error_guard",
 						message: guardResult.message ?? String(llmError),
 						iteration,
-						action: "recover",
 						counters: { attempt: activeRetryAttempt },
 						limits: { maxRetries: guardResult.maxRetries ?? 3 },
-						nextAction:
-							guardResult.action === "compact_then_retry"
-								? "Compact context, then retry the provider request."
-								: "Retry the provider request after backoff.",
 					});
 
 					if (guardResult.action === "compact_then_retry") {
@@ -842,33 +791,14 @@ async function runAgentLoopInTaskScope(
 							detector: "provider_retry",
 							message: `Context compacted from ${compacted.tokensBefore} to ${compacted.tokensAfter} tokens before retrying.`,
 							iteration,
-							action: "continue",
-							counters: {
+								counters: {
 								tokensBefore: compacted.tokensBefore,
 								tokensAfter: compacted.tokensAfter,
 							},
 						});
 					}
 
-					if (guardResult.retryDelayMs && guardResult.retryDelayMs > 0) {
-						const completed = await waitForRetryDelay(
-							guardResult.retryDelayMs,
-							config.signal,
-						);
-						if (!completed) {
-							const steeringInterrupt = isSteeringInterrupt(config.signal);
-							if (!steeringInterrupt) {
-								await emit({ type: "error", message: "Operation aborted" });
-							}
-							return finish({
-								status: "cancelled",
-								summary: steeringInterrupt
-									? STEERING_INTERRUPT_SUMMARY
-									: "Operation aborted during provider retry.",
-								source: "runtime",
-							});
-						}
-					}
+
 				}
 			}
 
@@ -882,7 +812,6 @@ async function runAgentLoopInTaskScope(
 					detector: "run_budget",
 					message: tokenBudget.reason ?? "Token budget exhausted.",
 					iteration,
-					action: "pause",
 					counters: {
 						providerCalls: tokenBudget.snapshot.providerCalls,
 						toolCalls: tokenBudget.snapshot.toolCalls,
@@ -1007,7 +936,6 @@ async function runAgentLoopInTaskScope(
 					detector: "run_budget",
 					message: toolBudget.reason ?? "Run budget exhausted.",
 					iteration,
-					action: "pause",
 					counters: {
 						providerCalls: toolBudget.snapshot.providerCalls,
 						toolCalls: toolBudget.snapshot.toolCalls,
@@ -1044,10 +972,6 @@ async function runAgentLoopInTaskScope(
 				newMessages.push(toolResult);
 				await emitMessagePair(emit, turnId, toolResult);
 				hasMoreToolCalls = true;
-			}
-			if (toolCalls.length > 0) {
-				taskState.recordToolBatch(toolCalls, toolResults, iteration);
-				await emit({ type: "task_state_update", state: taskState.snapshot() });
 			}
 			for (const toolCallId of batch.executedToolCallIds)
 				await config.onToolCommit?.(toolCallId);
@@ -1117,8 +1041,7 @@ async function runAgentLoopInTaskScope(
 							detector: "context_budget",
 							message: `Context compacted from ${compacted.tokensBefore} to ${compacted.tokensAfter} tokens.`,
 							iteration,
-							action: "continue",
-							counters: {
+								counters: {
 								tokensBefore: compacted.tokensBefore,
 								tokensAfter: compacted.tokensAfter,
 							},
@@ -1214,8 +1137,7 @@ async function runAgentLoopInTaskScope(
 							detector: "follow_up_queue",
 							message: `Harness scheduled ${followUpsOnTerminate.length} follow-up message(s) after tool termination.`,
 							iteration,
-							action: "continue",
-						});
+							});
 					}
 					pendingMessages = followUpsOnTerminate;
 					hasMoreToolCalls = false;
@@ -1382,10 +1304,8 @@ async function runAgentLoopInTaskScope(
 					detector: "runner_continuation",
 					message: `Continuation stopped after ${MAX_CONSECUTIVE_RUNNER_NUDGES} consecutive nudges without observable tool progress.`,
 					iteration,
-					action: "pause",
 					counters: { consecutiveRunnerNudges },
 					limits: { maxConsecutiveNudges: MAX_CONSECUTIVE_RUNNER_NUDGES },
-					nextAction: "Resume from the current checkpoint with user guidance.",
 				});
 			} else {
 				// Model signaled completion, has structured stop, or cap reached — reset.

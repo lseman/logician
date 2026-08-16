@@ -368,54 +368,6 @@ void test("/context preserves complete long messages and tool results", () => {
 	assert.doesNotMatch(context, /\.\.\. \[truncated\]/);
 });
 
-void test("/context renders the latest explicit task state", () => {
-	const bridge = new AgentCoreBridge({
-		baseUrl: "http://127.0.0.1:1",
-		model: "test",
-		runtimeHooksEnabled: false,
-		mcpEager: false,
-	});
-	const internal = bridge as unknown as Record<string, any>;
-	internal.currentTaskState = {
-		objective: "Fix authentication retries",
-		phase: "verify",
-		hypotheses: ["The retry cap is ignored"],
-		evidence: [
-			{
-				kind: "change",
-				tool: "edit_file",
-				summary: "Updated retry cap",
-				iteration: 2,
-			},
-		],
-		changedFiles: ["src/auth.ts"],
-		verification: [
-			{ command: "bun test auth.test.ts", passed: true, summary: "4 pass" },
-		],
-		blockers: [],
-		toolCalls: 3,
-		toolFailures: 0,
-	};
-	internal.harness = { messages: [], getMemoryPrompt: () => "" };
-
-	const context = bridge.getContext();
-
-	assert.match(context, /<task_state>/);
-	assert.match(context, /objective: Fix authentication retries/);
-	assert.match(context, /phase: verify/);
-	assert.match(context, /src\/auth\.ts/);
-	assert.match(context, /verification: pass bun test auth\.test\.ts/);
-	assert.match(context, /\[change\] edit_file: Updated retry cap/);
-	assert.match(context, /<\/task_state>/);
-	assert.doesNotMatch(context, /## Task state/);
-	assert.match(context, /## Conversation[\s\S]*\[USER\]\n<task_state>/);
-	assert.ok(
-		context.indexOf("[USER]\n<task_state>") >
-			context.indexOf("## Conversation"),
-		"task state should appear in the final provider-message position",
-	);
-});
-
 void test("/context omits an empty orient task state", () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

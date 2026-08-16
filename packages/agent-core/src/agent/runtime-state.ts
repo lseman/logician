@@ -8,7 +8,7 @@ export interface AgentRuntimeState {
 	turnId?: string;
 	streamingMessage?: Message;
 	pendingToolCalls: readonly string[];
-	retry?: { attempt: number; maxRetries: number; delayMs: number };
+	retry?: { attempt: number; maxRetries: number; delayMs?: number };
 	abortRequested: boolean;
 	lastError?: string;
 	lastEventSeq?: number;

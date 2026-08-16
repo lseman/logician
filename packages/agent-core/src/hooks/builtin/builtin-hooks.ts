@@ -186,16 +186,12 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					detector: "tool_call_guard",
 					message: decision.message ?? "",
 					iteration,
-					signals: [decision.guard ?? "duplicate"],
-					nextAction: "Change the tool arguments or choose another approach.",
 				});
-				if (intervention.action === "pause") {
-					recordTaskStatus({
-						status: "blocked",
-						summary: intervention.evidence.summary,
-						ts: Date.now(),
-					});
-				}
+				recordTaskStatus({
+					status: "blocked",
+					summary: decision.message ?? "Blocked by guard.",
+					ts: Date.now(),
+				});
 				return { content: decision.message, isError: true };
 			}
 		}
@@ -327,7 +323,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					detector: "builtin_continuation",
 					message,
 					iteration,
-					action: "continue",
 				});
 				return [{ role: "user", content: message }];
 			}
@@ -358,7 +353,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				detector: "builtin_continuation",
 				message: content,
 				iteration,
-				action: "continue",
 			});
 			return [{ role: "user", content }];
 		};

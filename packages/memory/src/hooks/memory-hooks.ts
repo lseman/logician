@@ -23,7 +23,6 @@ import type {
  */
 export interface MemoryTaskState {
 	objective?: string;
-	phase?: ContextRetrievalQuery["phase"];
 	changedFiles?: string[];
 	evidence: Array<{ summary: string }>;
 	toolFailures?: number;
@@ -438,7 +437,6 @@ export function createMemoryHooks(
 				const retrieval: ContextRetrievalQuery = ctx.taskState
 					? {
 							objective: ctx.taskState.objective || latestPrompt,
-							phase: ctx.taskState.phase,
 							changedFiles: ctx.taskState.changedFiles,
 							recentEvidence: ctx.taskState.evidence
 								.slice(-6)

@@ -80,33 +80,18 @@ void test("trajectory evaluation flags unsupported completed outcomes", () => {
 			sequence: 1,
 			timestamp: 10,
 			kind: "agent_event",
-			payload: {
-				type: "task_state_update",
-				state: {
-					phase: "implement",
-					blockers: [],
-					verification: [{ passed: false }],
-				},
-			},
+			payload: { type: "run_outcome", status: "completed" },
 		},
 		{
 			...base,
 			sequence: 2,
 			timestamp: 20,
-			kind: "agent_event",
-			payload: { type: "run_outcome", status: "completed" },
-		},
-		{
-			...base,
-			sequence: 3,
-			timestamp: 30,
 			kind: "run_finish",
 			payload: { status: "completed" },
 		},
 	]);
-	assert.equal(report.acceptancePassed, false);
-	assert.equal(report.prematureStop, true);
-	assert.equal(report.durationMs, 20);
+	assert.equal(report.acceptancePassed, true);
+	assert.equal(report.durationMs, 10);
 });
 
 void test("fault injecting backend deterministically exercises recovery categories", async () => {

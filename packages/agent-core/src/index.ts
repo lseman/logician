@@ -17,7 +17,6 @@ export * from "./agent/run-kernel-events.ts";
 export * from "./agent/run-kernel-migration.ts";
 export * from "./agent/runtime-state.ts";
 export * from "./agent/session.ts";
-export * from "./agent/tasks/task-state-controller.ts";
 export type { TaskStatusRecord } from "./agent/tasks/task-status-state.ts";
 // Task/todo state read by built-in hooks. The task_status and todo Tool
 // objects that mutate this state live in @logician/agent-capabilities, which depends

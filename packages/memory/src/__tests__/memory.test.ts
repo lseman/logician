@@ -1210,7 +1210,6 @@ describe("getContext", () => {
 		});
 		const context = store.getContext("current", 1200, {
 			objective: "parser token cursor",
-			phase: "investigate",
 		});
 		assert.match(context, /bounded token cursor/);
 		let traces = store.listRetrievalTraces();
@@ -1371,12 +1370,11 @@ describe("getContext", () => {
 
 		const context = store.getContext("sess-task", 4000, {
 			objective: "Fix authentication retry handling",
-			phase: "investigate",
 		});
 
 		assert.match(context, /exponential backoff/);
 		assert.doesNotMatch(context, /production snapshot/);
-		assert.match(context, /Task-aware retrieval: investigate/);
+		assert.match(context, /Task-aware retrieval:/);
 		store.close();
 	});
 
@@ -1391,7 +1389,6 @@ describe("getContext", () => {
 
 		const context = store.getContext("sess-files", 4000, {
 			objective: "Continue the implementation",
-			phase: "implement",
 			changedFiles: ["src/parser.ts"],
 		});
 
