@@ -232,7 +232,7 @@ const MODE_ORDER: InferenceMode[] = [
 ];
 
 /** Default mode when no explicit mode is set. */
-export const DEFAULT_MODE: InferenceMode = "instruct-general";
+export const DEFAULT_MODE: InferenceMode = "none";
 
 /** Get mode definition by name, or undefined if unknown. */
 export function getInferenceMode(

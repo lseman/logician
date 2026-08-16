@@ -2,6 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
 	cycleInferenceMode,
+	DEFAULT_MODE,
 	getInferenceMode,
 	INFERENCE_MODES,
 	isValidInferenceMode,
@@ -9,6 +10,11 @@ import {
 
 void test("INFERENCE_MODES has exactly 10 entries", () => {
 	assert.equal(INFERENCE_MODES.size, 10);
+});
+
+void test("the default inference mode delegates sampling to the provider", () => {
+	assert.equal(DEFAULT_MODE, "none");
+	assert.equal(getInferenceMode(DEFAULT_MODE)?.useProviderDefaults, true);
 });
 
 void test("getInferenceMode returns correct params", () => {

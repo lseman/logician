@@ -6,6 +6,7 @@ import {
 	STEERING_INTERRUPT_SUMMARY,
 } from "../agent/agent-loop-runner.ts";
 import { BackendError } from "../agent/backend.ts";
+import { resolveExecutionPolicy } from "../agent/execution-policy.ts";
 import { OutputGuard } from "../agent/guards/output-guard.ts";
 import { recordTaskStatus } from "../agent/tasks/task-status-state.ts";
 import type { AgentConfig, AgentEvent, Message, Tool } from "../agent/types.ts";
@@ -40,6 +41,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 		baseUrl: "http://fake",
 		model: "fake",
 		systemPrompt: "test",
+		executionProfile: "autonomous",
 		runtimeHooksEnabled: false,
 		proactiveCompactionEnabled: false,
 		continuationEnabled: false,
@@ -47,6 +49,13 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 		...overrides,
 	};
 }
+
+void test("the default execution profile is minimal", () => {
+	assert.deepEqual(resolveExecutionPolicy(undefined), {
+		profile: "minimal",
+		embeddedPoliciesEnabled: false,
+	});
+});
 
 function user(content: string): Message {
 	return { role: "user", content };
@@ -72,7 +81,7 @@ void test("runAgentLoop injects steering before the next assistant call", async 
 				return [user("steer")];
 			},
 		},
-		() => {},
+		() => { },
 	);
 	assert.deepEqual(
 		newMessages.map(m => `${m.role}:${m.content ?? ""}`),
@@ -108,7 +117,7 @@ void test("typed before_agent_start results augment provider context", async () 
 		{ systemPrompt: "base", messages: [], tools: [noop] },
 		[user("prompt")],
 		{ ...makeConfig(), backend, extensionBus },
-		() => {},
+		() => { },
 	);
 });
 
@@ -213,7 +222,7 @@ void test("provider payload hooks preserve transport fields", async () => {
 				}),
 			},
 		},
-		() => {},
+		() => { },
 	);
 });
 
@@ -632,7 +641,7 @@ void test("runAgentLoop processes follow-up messages after a stop", async () => 
 				return [];
 			},
 		},
-		() => {},
+		() => { },
 	);
 	assert.deepEqual(
 		newMessages.map(m => `${m.role}:${m.content ?? ""}`),
@@ -662,7 +671,7 @@ void test("runAgentLoop executes a tool batch and returns ordered tool results",
 		{ systemPrompt: "test", messages: [], tools: [tool] },
 		[user("prompt")],
 		{ ...makeConfig({ tools: [tool] }), backend },
-		() => {},
+		() => { },
 	);
 	assert.deepEqual(
 		newMessages
@@ -703,7 +712,7 @@ void test("runAgentLoop promotes textual XML tool calls and hides their markup",
 				() => textResponse("Search complete."),
 			]),
 		},
-		() => {},
+		() => { },
 	);
 
 	assert.deepEqual(received, {
@@ -754,7 +763,7 @@ void test("runAgentLoop executes independent tool calls in parallel and preserve
 		{ systemPrompt: "test", messages: [], tools: [tool] },
 		[user("prompt")],
 		{ ...makeConfig({ tools: [tool], toolExecution: "parallel" }), backend },
-		() => {},
+		() => { },
 	);
 	assert.deepEqual(completions, ["fast", "slow"]);
 	assert.deepEqual(
@@ -814,7 +823,7 @@ void test("sequential tools are barriers without disabling parallel stages", asy
 			...makeConfig({ tools: [read, write], toolExecution: "parallel" }),
 			backend,
 		},
-		() => {},
+		() => { },
 	);
 	assert.ok(events.indexOf("start:b") < events.indexOf("end:a"));
 	assert.ok(events.indexOf("write") > events.indexOf("end:a"));
@@ -859,7 +868,7 @@ void test("cancelled sequential batches produce a result for every tool call", a
 			signal: controller.signal,
 			maxIterations: 1,
 		},
-		() => {},
+		() => { },
 	);
 
 	const results = messages.filter(message => message.role === "tool");
@@ -904,7 +913,7 @@ void test("parallel tool batches complete deterministic preflight before executi
 				},
 			},
 		},
-		() => {},
+		() => { },
 	);
 	assert.deepEqual(order.slice(0, 2), ["preflight:1", "preflight:2"]);
 	assert.deepEqual(
@@ -995,7 +1004,7 @@ void test("runAgentLoop does not execute tool calls from a length-truncated resp
 				},
 			},
 		},
-		() => {},
+		() => { },
 	);
 	assert.equal(executions, 0);
 	assert.equal(preflights, 0);
@@ -1038,7 +1047,7 @@ void test("async internal tool hooks fall through to user hooks", async () => {
 				},
 			},
 		},
-		() => {},
+		() => { },
 	);
 
 	assert.equal(beforeCalls, 1);
@@ -1103,7 +1112,7 @@ void test("continuation does not turn a conversational reply into hidden extra t
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("hi")],
 		{ ...makeConfig({ continuationEnabled: true }), backend },
-		() => {},
+		() => { },
 	);
 
 	assert.equal(backend.calls, 1);
@@ -1148,7 +1157,7 @@ void test("continuation still nudges an explicitly unfinished response", async (
 			...makeConfig({ continuationEnabled: true, tools: [noop, task_status] }),
 			backend,
 		},
-		() => {},
+		() => { },
 	);
 
 	assert.equal(backend.calls, 4);
@@ -1233,9 +1242,9 @@ void test("external stop policy can continue the minimal mechanism", async () =>
 					policyCalls++;
 					return policyCalls === 1
 						? {
-								action: "continue" as const,
-								messages: [user("policy follow-up")],
-							}
+							action: "continue" as const,
+							messages: [user("policy follow-up")],
+						}
 						: undefined;
 				},
 			],
@@ -1463,14 +1472,14 @@ void test("reflection feedback re-enters the real provider loop", async () => {
 		() =>
 			textResponse(
 				"```reflection-report\n" +
-					JSON.stringify({
-						assessment: "incomplete",
-						reasoning: "Verification is missing.",
-						issues: ["Tests were not run"],
-						needsMoreWork: true,
-						suggestedSteps: ["Run tests"],
-					}) +
-					"\n```",
+				JSON.stringify({
+					assessment: "incomplete",
+					reasoning: "Verification is missing.",
+					issues: ["Tests were not run"],
+					needsMoreWork: true,
+					suggestedSteps: ["Run tests"],
+				}) +
+				"\n```",
 			),
 		messages => {
 			assert.ok(
@@ -1492,7 +1501,7 @@ void test("reflection feedback re-enters the real provider loop", async () => {
 			}),
 			backend,
 		},
-		() => {},
+		() => { },
 	);
 
 	assert.equal(backend.calls, 3);
@@ -1532,7 +1541,7 @@ void test("malformed reflection fails closed and re-enters the provider loop", a
 			}),
 			backend,
 		},
-		() => {},
+		() => { },
 	);
 
 	assert.equal(backend.calls, 3);
@@ -1620,7 +1629,7 @@ void test("a tool call with unparseable JSON arguments is sanitized before it re
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("prompt")],
 		{ ...makeConfig(), backend },
-		() => {},
+		() => { },
 	);
 
 	// The persisted assistant message keeps the call (so its id still pairs

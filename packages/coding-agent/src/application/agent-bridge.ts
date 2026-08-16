@@ -253,7 +253,7 @@ export class AgentCoreBridge {
 	private lspManager: LspManager;
 	private readonly projectTrusted: boolean;
 	// Permission/question resolvers (inlined from InteractionCoordinator)
-	private readonly permissionResolvers = new Map<string, (d: "allow"|"deny"|"always") => void>();
+	private readonly permissionResolvers = new Map<string, (d: "allow" | "deny" | "always") => void>();
 	private readonly questionResolvers = new Map<string, { allow: (a: string) => void; deny: () => void }>();
 	private permissionManager!: PermissionManager;
 	private memoryStore: ReturnType<typeof createMemoryStore> | null = null;
@@ -340,9 +340,9 @@ export class AgentCoreBridge {
 			extraTools: [
 				...(opts.memoryEnabled !== false
 					? [
-							createMemorySearchTool(() => this.memoryStore),
-							createMemoryGetTool(() => this.memoryStore),
-						]
+						createMemorySearchTool(() => this.memoryStore),
+						createMemoryGetTool(() => this.memoryStore),
+					]
 					: []),
 				...(opts.extraTools ?? []),
 			],
@@ -377,9 +377,9 @@ export class AgentCoreBridge {
 					return (
 						!!queues &&
 						queues.steering.length +
-							queues.followUp.length +
-							queues.nextTurn.length >
-							0
+						queues.followUp.length +
+						queues.nextTurn.length >
+						0
 					);
 				},
 				abort: () => void this.cancel(),
@@ -552,7 +552,7 @@ export class AgentCoreBridge {
 				}),
 			onQuestionRequest: (ctx: AskUserContext) =>
 				new Promise<string>(resolve => {
-					const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+					const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 					this.questionResolvers.set(qid, {
 						allow: resolve,
 						deny: () => resolve("__dismissed__"),
@@ -582,7 +582,7 @@ export class AgentCoreBridge {
 					this.contextTokens = event.tokens;
 					this.contextMaxTokens = event.maxTokens;
 				}
-	
+
 				if (event.type === "agent_retry_start") {
 					this.runtimeRetry = `${event.attempt}/${event.maxRetries}`;
 				} else if (event.type === "agent_retry_end")
@@ -654,9 +654,9 @@ export class AgentCoreBridge {
 				const extractorBackend =
 					this.memoryExtractorBaseUrl && this.backend.withEndpoint
 						? this.backend.withEndpoint(
-								extractorModel,
-								this.memoryExtractorBaseUrl,
-							)
+							extractorModel,
+							this.memoryExtractorBaseUrl,
+						)
 						: this.backend.withModel(extractorModel);
 				try {
 					const response = await extractorBackend.generate(
@@ -823,7 +823,7 @@ export class AgentCoreBridge {
 		const run = this.sendTail.then(() => this.runMessage(message));
 		// Keep the queue usable after a failed startup/provider boundary while
 		// returning the original rejection to this caller.
-		this.sendTail = run.catch(() => {});
+		this.sendTail = run.catch(() => { });
 		return run;
 	}
 
@@ -1037,7 +1037,7 @@ export class AgentCoreBridge {
 				maxIterations: this.config.maxIterations,
 				extensionRunner: this.extensionRunner || undefined,
 			});
-			this.harness.setSessionId(this.sessionId);
+			this.harness.setSessionId(this.sessionId, { durable: false });
 			if (this.compactionSettings)
 				this.harness.setAutoCompactionSettings(this.compactionSettings);
 			// Harness owns the queue state; mirror every change to the UI.
@@ -1389,9 +1389,9 @@ export class AgentCoreBridge {
 		const substitutes = skill.content.includes("$ARGUMENTS");
 		const effective = substitutes
 			? {
-					...skill,
-					content: skill.content.replaceAll("$ARGUMENTS", trimmedArgs),
-				}
+				...skill,
+				content: skill.content.replaceAll("$ARGUMENTS", trimmedArgs),
+			}
 			: skill;
 		const message = formatSkillInvocation(
 			effective,
@@ -1457,10 +1457,10 @@ export class AgentCoreBridge {
 		question: string,
 		choices: Array<{ value: string; label: string }>,
 	): string {
-		const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+		const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 		this.questionResolvers.set(qid, {
-			allow: () => {},
-			deny: () => {},
+			allow: () => { },
+			deny: () => { },
 		});
 		this.emit({
 			type: "question_request",
@@ -1927,7 +1927,7 @@ export class AgentCoreBridge {
 			thinkingLevel: this.config.thinkingLevel ?? "off",
 			inferenceMode: this.config.inferenceMode ?? "none",
 			permissionMode: this.getPermissionMode(),
-			executionProfile: this.config.executionProfile ?? "autonomous",
+			executionProfile: this.config.executionProfile ?? "minimal",
 			guardsEnabled: this.config.guardsEnabled ?? false,
 			proactiveCompactionEnabled:
 				this.config.proactiveCompactionEnabled ?? true,
@@ -1995,7 +1995,7 @@ export class AgentCoreBridge {
 			this.memoryStore.discardEmptySession(provisionalSessionId);
 		}
 		this.sessionId = sessionId;
-		this.harness?.setSessionId(sessionId);
+		this.harness?.setSessionId(sessionId, { durable: false });
 		this.transcriptPath = createHookTranscriptPath(this.cwd, sessionId);
 		this.config.hookSessionId = sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
@@ -2183,7 +2183,7 @@ export class AgentCoreBridge {
 			startup_hook_errors: this.startupHookResult?.errors || [],
 			skills_injected: status.skillsInjected
 				? status.loadedSkills.filter(skill => !skill.disableModelInvocation)
-						.length
+					.length
 				: 0,
 			skills_visible: status.skillsVisible,
 			loaded_skills: status.loadedSkills.map(skill => ({
@@ -2440,15 +2440,15 @@ export class AgentCoreBridge {
 		// not prevent the TUI from starting.
 		const messageContexts = Array.isArray(result.context_messages)
 			? result.context_messages.flatMap(message => {
-					if (
-						!message ||
-						typeof message !== "object" ||
-						typeof message.content !== "string"
-					) {
-						return [];
-					}
-					return [message.content];
-				})
+				if (
+					!message ||
+					typeof message !== "object" ||
+					typeof message.content !== "string"
+				) {
+					return [];
+				}
+				return [message.content];
+			})
 			: [];
 		const contexts = [
 			...(result.additional_contexts || []),
