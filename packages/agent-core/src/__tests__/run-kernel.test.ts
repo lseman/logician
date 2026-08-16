@@ -3,7 +3,41 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { RunKernel } from "../agent/run-kernel.ts";
+import {
+	createRuntimeState,
+	reduceRuntimeState,
+	RunKernel,
+} from "../agent/run-kernel.ts";
+
+void test("kernel runtime projection tracks streaming and settles cleanly", () => {
+	let runtime = createRuntimeState();
+	runtime = reduceRuntimeState(runtime, {
+		type: "agent_start",
+		seq: 1,
+		ts: 10,
+	});
+	runtime = reduceRuntimeState(runtime, {
+		type: "message_start",
+		turnId: "turn_1",
+		role: "assistant",
+	});
+	runtime = reduceRuntimeState(runtime, {
+		type: "text_delta",
+		turnId: "turn_1",
+		delta: "hello",
+	});
+	assert.equal(runtime.isStreaming, true);
+	assert.equal(runtime.streamingMessage?.content, "hello");
+
+	runtime = reduceRuntimeState(runtime, {
+		type: "agent_end",
+		messages: [],
+		ts: 20,
+	});
+	assert.equal(runtime.isStreaming, false);
+	assert.equal(runtime.streamingMessage, undefined);
+	assert.equal(runtime.lastRunDurationMs, 10);
+});
 
 void test("kernel journal persists and deterministically restores its projection", () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-kernel-"));

@@ -2,19 +2,19 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
 	cycleInferenceMode,
-	DEFAULT_MODE,
+	DEFAULT_INFERENCE_MODE,
 	getInferenceMode,
 	INFERENCE_MODES,
 	isValidInferenceMode,
-} from "../agent/configuration/inference-modes.ts";
+} from "../agent/types/types-config.ts";
 
 void test("INFERENCE_MODES has exactly 10 entries", () => {
 	assert.equal(INFERENCE_MODES.size, 10);
 });
 
 void test("the default inference mode delegates sampling to the provider", () => {
-	assert.equal(DEFAULT_MODE, "none");
-	assert.equal(getInferenceMode(DEFAULT_MODE)?.useProviderDefaults, true);
+	assert.equal(DEFAULT_INFERENCE_MODE, "none");
+	assert.equal(getInferenceMode(DEFAULT_INFERENCE_MODE)?.useProviderDefaults, true);
 });
 
 void test("getInferenceMode returns correct params", () => {

@@ -8,8 +8,13 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { AgentModelConfig, TruncationConfig } from "@logician/agent-core";
-import { stripJsonComments } from "@logician/agent-core";
+import {
+	INFERENCE_MODE_ORDER,
+	isValidInferenceMode,
+	stripJsonComments,
+	type AgentModelConfig,
+	type TruncationConfig,
+} from "@logician/agent-core";
 
 /** Validated configuration with warnings collected during load. */
 export interface ResolvedLogicianConfig {
@@ -360,22 +365,10 @@ export function validateConfig(
 	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
 	if (obj.inferenceMode !== undefined) {
 		const im = configString(obj.inferenceMode);
-		const validModes = [
-			"auto",
-			"none",
-			"thinking-general",
-			"thinking-coding",
-			"instruct-general",
-			"instruct-reasoning",
-			"instruct-coding",
-			"deterministic",
-			"creative",
-			"analytical",
-		];
-		if (im && !validModes.includes(im)) {
+		if (im && !isValidInferenceMode(im)) {
 			warn(
 				warnings,
-				`"inferenceMode" must be one of: ${validModes.join(", ")}, got: "${im}".`,
+				`"inferenceMode" must be one of: ${INFERENCE_MODE_ORDER.join(", ")}, got: "${im}".`,
 			);
 		} else if (im) {
 			cfg.inferenceMode = im as LogicianTuiConfig["inferenceMode"];
@@ -945,16 +938,16 @@ export interface LogicianTuiConfig {
 	};
 	// Inference mode — pre-defined sampling parameter set, cycled via Alt+M.
 	inferenceMode?:
-		| "auto"
-		| "none"
-		| "thinking-general"
-		| "thinking-coding"
-		| "instruct-general"
-		| "instruct-reasoning"
-		| "instruct-coding"
-		| "deterministic"
-		| "creative"
-		| "analytical";
+	| "auto"
+	| "none"
+	| "thinking-general"
+	| "thinking-coding"
+	| "instruct-general"
+	| "instruct-reasoning"
+	| "instruct-coding"
+	| "deterministic"
+	| "creative"
+	| "analytical";
 	// Universal output/result truncation limits.
 	truncation?: TruncationConfig;
 	// Whether to auto-resume the most recent session on startup (default: true).
@@ -1102,8 +1095,8 @@ export function saveConfigNestedField(
 	return updateGlobalConfig(raw => {
 		const current =
 			raw[section] &&
-			typeof raw[section] === "object" &&
-			!Array.isArray(raw[section])
+				typeof raw[section] === "object" &&
+				!Array.isArray(raw[section])
 				? (raw[section] as Record<string, unknown>)
 				: {};
 		if (value === undefined) {
@@ -1125,8 +1118,8 @@ export function updateConfigFile(
 		mkdirSync(directory, { recursive: true });
 		const raw = existsSync(configPath)
 			? (JSON.parse(
-					stripJsonComments(readFileSync(configPath, "utf8")),
-				) as Record<string, unknown>)
+				stripJsonComments(readFileSync(configPath, "utf8")),
+			) as Record<string, unknown>)
 			: {};
 		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
 		mutate(raw);

@@ -17,19 +17,21 @@ import {
 	stripTextToolCalls,
 } from "../tools/shared/text-to-tool-calls.ts";
 import type { LLMBackend } from "./backend.ts";
-import { getInferenceMode } from "./configuration/inference-modes.ts";
+import { resolveAgentSettings } from "./agent-settings.ts";
+import { getInferenceMode } from "./types/types-config.ts";
 import {
 	evaluateStopPolicies,
 	resolveExecutionPolicy,
 } from "./execution-policy.ts";
 import {
 	type AcceptanceConfig,
-	type AcceptanceReport,
+	evaluateAcceptanceReport,
 	formatAcceptancePrompt,
 	parseAcceptanceReport,
 	type ResolvedAcceptance,
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
+	verifyAcceptanceCommands,
 } from "./guards/acceptance-contract.ts";
 import type { GuardEngine } from "./guards/guard-engine.ts";
 import type { OutputGuard } from "./guards/output-guard.ts";
@@ -52,7 +54,6 @@ import {
 	shouldStop,
 	stopReasonFor,
 	transformMessages,
-	waitForRetryDelay,
 	withSystemPrompt,
 } from "./loop/callbacks.ts";
 import { runReflection } from "./loop/reflection.ts";
@@ -60,7 +61,6 @@ import {
 	convertToChatFormat,
 	createAssistantMessage,
 	createSystemMessage,
-	createUserMessage,
 	convertToLlm as defaultConvertToLlm,
 	estimateChatPayloadTokens,
 	sanitizeToolCallArguments,
@@ -71,7 +71,7 @@ import {
 	selectAdaptiveMode,
 	taskObjectiveFromMessages,
 } from "./tasks/adaptive-mode.ts";
-import { resolveCompletionGate } from "./tasks/completion-gate.ts";
+import { resolveOutcome } from "./tasks/outcome-resolution.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
 import { getTaskStatus, resetTaskStatus } from "./tasks/task-status-state.ts";
 import { ToolResultCache } from "./tool-cache.ts";
@@ -104,19 +104,6 @@ function isSteeringInterrupt(signal: AbortSignal | undefined): boolean {
 		signal.reason instanceof Error &&
 		signal.reason.name === STEERING_INTERRUPT_NAME
 	);
-}
-
-// Cheap heuristic for "this objective probably needs a subgoal breakdown" —
-// long objectives, or ones with multiple imperative clauses, benefit most
-// from decomposition; short single-action asks ("fix the typo") do not.
-const MULTI_STEP_WORD_THRESHOLD = 25;
-const MULTI_STEP_CONJUNCTION_PATTERN = /\b(?:and then|,\s*then|;\s*|\band\b.*\band\b)/i;
-
-function looksMultiStep(objective: string): boolean {
-	if (!objective) return false;
-	const wordCount = objective.trim().split(/\s+/).filter(Boolean).length;
-	if (wordCount >= MULTI_STEP_WORD_THRESHOLD) return true;
-	return MULTI_STEP_CONJUNCTION_PATTERN.test(objective);
 }
 
 /** Emit a typed extension event if the bus is available. */
@@ -182,8 +169,6 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	onToolCommit?: (toolCallId: string) => void | Promise<void>;
 }
 
-const DEFAULT_MAX_ITERATIONS = 30;
-
 async function runAgentLoopInTaskScope(
 	context: RunAgentLoopContext,
 	prompts: Message[],
@@ -218,8 +203,9 @@ async function runAgentLoopInTaskScope(
 		await emit({ type: "agent_end", messages: newMessages });
 		return newMessages;
 	};
-	const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
+	let settings = resolveAgentSettings(config);
+	const maxIterations = settings.maxIterations;
+	const executionPolicy = resolveExecutionPolicy(settings.executionProfile);
 	const interventionController = new HarnessInterventionController();
 	interventionController.replay(config.initialInterventions ?? []);
 	const intervene = (input: InterventionInput): Promise<void> | void =>
@@ -248,16 +234,7 @@ async function runAgentLoopInTaskScope(
 	let registry = createRegistry(context.tools ?? config.tools ?? []);
 
 	const outputGuard = config.outputGuard;
-	const guardEngine = config.guardEngine;
 	let iteration = 0;
-	// Armed when a restrict-severity guard decision injects a hypothesis
-	// prompt; consumed after the next provider response to parse the model's
-	// reply into stored hypotheses.
-	let awaitingHypothesisParse = false;
-	// Armed when the initial goal-decomposition prompt is injected at agent
-	// start; consumed after the next provider response to parse the model's
-	// reply into a subgoal breakdown.
-	let awaitingGoalBreakdownParse = false;
 	let consecutiveRunnerNudges = 0;
 	let lastRunnerNudgeIteration = -1;
 	let lastToolWorkIteration = -1;
@@ -277,8 +254,6 @@ async function runAgentLoopInTaskScope(
 	let lastAdaptiveSelection = "";
 	const runBudget = new RunBudgetController(
 		{
-			maxProviderCalls: maxIterations,
-			maxToolCalls: maxIterations * 16,
 			maxElapsedMs: 30 * 60_000,
 			maxTokens: config.maxTotalTokens,
 			...config.runBudget,
@@ -334,86 +309,42 @@ async function runAgentLoopInTaskScope(
 		return false;
 	}
 
-	function runAcceptanceVerification(
-		resolved: ResolvedAcceptance,
-		signal?: AbortSignal,
-	): Promise<
-		Array<{ command: string; result: "passed" | "failed"; summary?: string }>
-	> {
-		if (!resolved.verify?.length) return Promise.resolve([]);
-		const { execFile } = require("node:child_process");
-		const { promisify } = require("node:util");
-		const execFileAsync = promisify(execFile);
-
-		return Promise.all(
-			resolved.verify.map(
-				v =>
-					new Promise<
-						Array<{
-							command: string;
-							result: "passed" | "failed";
-							summary?: string;
-						}>
-					>(resolve => {
-						const timeout = v.timeoutMs ?? 30_000;
-						const timeoutId = setTimeout(() => {
-							resolve([
-								{
-									command: v.command,
-									result: "failed",
-									summary: `Timeout after ${timeout}ms`,
-								},
-							]);
-						}, timeout);
-						if (signal?.aborted) {
-							clearTimeout(timeoutId);
-							resolve([
-								{ command: v.command, result: "failed", summary: "Aborted" },
-							]);
-							return;
-						}
-
-						execFileAsync("bash", ["-c", v.command], {
-							cwd: v.cwd ?? config.cwd,
-							timeout,
-							maxBuffer: 1024 * 1024,
-						}).then(
-							(output: { stdout?: string; stderr?: string }) => {
-								clearTimeout(timeoutId);
-								const summary = (output.stdout ?? "").trim().slice(0, 500);
-								resolve([{ command: v.command, result: "passed", summary }]);
-							},
-							(error: NodeJS.ErrnoException) => {
-								clearTimeout(timeoutId);
-								if (v.allowFailure) {
-									resolve([
-										{
-											command: v.command,
-											result: "passed",
-											summary: `Non-zero exit ${error.code ?? "unknown"} (allowed)`,
-										},
-									]);
-								} else {
-									resolve([
-										{
-											command: v.command,
-											result: "failed",
-											summary: error.message.slice(0, 500),
-										},
-									]);
-								}
-							},
-						);
-					}),
-			),
-		).then(results => results.flat());
+	function drainSteering(): Promise<Message[]> {
+		return firstMessages([
+			() => config.getSteeringMessages?.({ messages, iteration }),
+			() =>
+				config.internalHooks?.getSteeringMessages?.({ messages, iteration }),
+			() => config.hooks?.getSteeringMessages?.({ messages, iteration }),
+		]);
 	}
 
-	let pendingMessages = await firstMessages([
-		() => config.getSteeringMessages?.({ messages, iteration }),
-		() => config.internalHooks?.getSteeringMessages?.({ messages, iteration }),
-		() => config.hooks?.getSteeringMessages?.({ messages, iteration }),
-	]);
+	function drainFollowUps(): Promise<Message[]> {
+		return firstMessages([
+			() =>
+				config.getFollowUpMessages?.({
+					messages,
+					iteration,
+					assistantText: assistantText(newMessages.at(-1)),
+					stopReason: "stop",
+				}),
+			() =>
+				config.internalHooks?.getFollowUpMessages?.({
+					messages,
+					iteration,
+					assistantText: assistantText(newMessages.at(-1)),
+					stopReason: "stop",
+				}),
+			() =>
+				config.hooks?.getFollowUpMessages?.({
+					messages,
+					iteration,
+					assistantText: assistantText(newMessages.at(-1)),
+					stopReason: "stop",
+				}),
+		]);
+	}
+
+	let pendingMessages = await drainSteering();
 
 	// Apply beforeAgentStart hook
 	const beforeAgentStartHooks = [
@@ -444,11 +375,11 @@ async function runAgentLoopInTaskScope(
 	// Typed extensions may augment the prompt just like native hooks.
 	const extensionBeforeStart = config.extensionBus
 		? await config.extensionBus.emit({
-				type: "before_agent_start",
-				prompt: prompts.map(p => p.content).join("\n"),
-				systemPrompt:
-					beforeAgentStartResult?.systemPrompt ?? context.systemPrompt ?? "",
-			})
+			type: "before_agent_start",
+			prompt: prompts.map(p => p.content).join("\n"),
+			systemPrompt:
+				beforeAgentStartResult?.systemPrompt ?? context.systemPrompt ?? "",
+		})
 		: undefined;
 	if (extensionBeforeStart?.messages) {
 		beforeAgentStartResult = {
@@ -483,7 +414,7 @@ async function runAgentLoopInTaskScope(
 		context.systemPrompt = beforeAgentStartResult.systemPrompt;
 	}
 
-// ── Inject acceptance contract into system prompt ──────────────────
+	// ── Inject acceptance contract into system prompt ──────────────────
 	const resolved = executionPolicy.embeddedPoliciesEnabled
 		? resolveAcceptance()
 		: resolveEffectiveAcceptance({ explicit: undefined });
@@ -623,14 +554,14 @@ async function runAgentLoopInTaskScope(
 				try {
 					// Resolve inference mode params — they override individual config values.
 					const adaptiveDecision =
-						config.inferenceMode === "auto"
+						settings.inferenceMode === "auto"
 							? selectAdaptiveMode({
-									objective: adaptiveObjective,
-									performedToolWork,
-									toolFailures,
-								})
+								objective: adaptiveObjective,
+								performedToolWork,
+								toolFailures,
+							})
 							: undefined;
-					const effectiveMode = adaptiveDecision?.mode ?? config.inferenceMode;
+					const effectiveMode = adaptiveDecision?.mode ?? settings.inferenceMode;
 					if (adaptiveDecision) {
 						const selectionKey = `${adaptiveDecision.mode}:${adaptiveDecision.reason}`;
 						if (selectionKey !== lastAdaptiveSelection) {
@@ -666,7 +597,7 @@ async function runAgentLoopInTaskScope(
 							repetitionPenalty: modeParams.repetition_penalty,
 						}),
 						signal: config.signal,
-						thinkingLevel: config.thinkingLevel,
+						thinkingLevel: settings.thinkingLevel,
 						callbacks: {
 							onDelta: delta =>
 								queueProviderEvent({ type: "text_delta", turnId, delta }),
@@ -827,7 +758,7 @@ async function runAgentLoopInTaskScope(
 							detector: "provider_retry",
 							message: `Context compacted from ${compacted.tokensBefore} to ${compacted.tokensAfter} tokens before retrying.`,
 							iteration,
-								counters: {
+							counters: {
 								tokensBefore: compacted.tokensBefore,
 								tokensAfter: compacted.tokensAfter,
 							},
@@ -956,7 +887,7 @@ async function runAgentLoopInTaskScope(
 				registry,
 				toolCalls,
 				rawStopReason,
-				toolExecution: config.toolExecution,
+				toolExecution: settings.toolExecution,
 				iteration,
 				signal: config.signal,
 				internalHooks: config.internalHooks,
@@ -982,22 +913,6 @@ async function runAgentLoopInTaskScope(
 			}
 			for (const toolCallId of batch.executedToolCallIds)
 				await config.onToolCommit?.(toolCallId);
-
-			// Turn-level loop detection. Runs after every turn when guard
-			// engine is available; otherwise falls back to output guard.
-			if (
-				executionPolicy.embeddedPoliciesEnabled &&
-				(guardEngine || outputGuard) &&
-				toolCalls.length > 0
-			) {
-				const turnToolCalls = toolCalls.map((call, index) => ({
-					name: call.name,
-					args: call.arguments,
-					result: String(toolResults[index]?.content ?? ""),
-				}));
-
-
-			}
 
 			// The final usage-only SSE chunk is optional and many local providers
 			// omit it. Estimate the serialized conversation as a reliable fallback
@@ -1048,7 +963,7 @@ async function runAgentLoopInTaskScope(
 							detector: "context_budget",
 							message: `Context compacted from ${compacted.tokensBefore} to ${compacted.tokensAfter} tokens.`,
 							iteration,
-								counters: {
+							counters: {
 								tokensBefore: compacted.tokensBefore,
 								tokensAfter: compacted.tokensAfter,
 							},
@@ -1078,6 +993,7 @@ async function runAgentLoopInTaskScope(
 			const refreshedConfig = await config.refreshNextTurnConfig?.();
 			if (refreshedConfig) {
 				Object.assign(config, refreshedConfig);
+				settings = resolveAgentSettings(config);
 				context.systemPrompt = refreshedConfig.systemPrompt;
 				messages = [
 					createSystemMessage(
@@ -1109,29 +1025,7 @@ async function runAgentLoopInTaskScope(
 			// This prevents skipping queued follow-up messages (e.g. steering injected
 			// mid-turn) just because a tool requested termination.
 			if (toolTerminated) {
-				const followUpsOnTerminate = await firstMessages([
-					() =>
-						config.getFollowUpMessages?.({
-							messages,
-							iteration,
-							assistantText: assistantText(newMessages.at(-1)),
-							stopReason: "stop",
-						}),
-					() =>
-						config.internalHooks?.getFollowUpMessages?.({
-							messages,
-							iteration,
-							assistantText: assistantText(newMessages.at(-1)),
-							stopReason: "stop",
-						}),
-					() =>
-						config.hooks?.getFollowUpMessages?.({
-							messages,
-							iteration,
-							assistantText: assistantText(newMessages.at(-1)),
-							stopReason: "stop",
-						}),
-				]);
+				const followUpsOnTerminate = await drainFollowUps();
 				if (followUpsOnTerminate.length > 0) {
 					if (
 						!followUpsOnTerminate.some(message =>
@@ -1144,7 +1038,7 @@ async function runAgentLoopInTaskScope(
 							detector: "follow_up_queue",
 							message: `Harness scheduled ${followUpsOnTerminate.length} follow-up message(s) after tool termination.`,
 							iteration,
-							});
+						});
 					}
 					pendingMessages = followUpsOnTerminate;
 					hasMoreToolCalls = false;
@@ -1152,7 +1046,7 @@ async function runAgentLoopInTaskScope(
 					continue;
 				}
 				return finish(
-					resolveCompletionGate({
+					resolveOutcome({
 						declared: getTaskStatus(),
 						structuredOutcomeRequired:
 							performedToolWork && registry.has("task_status"),
@@ -1167,19 +1061,19 @@ async function runAgentLoopInTaskScope(
 			const stop =
 				toolCalls.length === 0
 					? await shouldStop(
-							[
-								config.shouldStopAfterTurn,
-								config.internalHooks?.shouldStopAfterTurn,
-								config.hooks?.shouldStopAfterTurn,
-							],
-							{
-								messages,
-								iteration,
-								hadToolCalls: false,
-								message: assistant,
-								toolResults,
-							},
-						)
+						[
+							config.shouldStopAfterTurn,
+							config.internalHooks?.shouldStopAfterTurn,
+							config.hooks?.shouldStopAfterTurn,
+						],
+						{
+							messages,
+							iteration,
+							hadToolCalls: false,
+							message: assistant,
+							toolResults,
+						},
+					)
 					: false;
 			// Acceptance stop rules take priority
 			let acceptanceStop = false;
@@ -1188,7 +1082,7 @@ async function runAgentLoopInTaskScope(
 			}
 			if (stop || acceptanceStop) {
 				return finish(
-					resolveCompletionGate({
+					resolveOutcome({
 						declared: getTaskStatus(),
 						structuredOutcomeRequired:
 							performedToolWork && registry.has("task_status"),
@@ -1196,38 +1090,11 @@ async function runAgentLoopInTaskScope(
 				);
 			}
 
-			pendingMessages = await firstMessages([
-				() => config.getSteeringMessages?.({ messages, iteration }),
-				() =>
-					config.internalHooks?.getSteeringMessages?.({ messages, iteration }),
-				() => config.hooks?.getSteeringMessages?.({ messages, iteration }),
-			]);
+			pendingMessages = await drainSteering();
 		}
 
 		// Agent would stop here — drain followUp queue (pi-style outer loop).
-		const followUps = await firstMessages([
-			() =>
-				config.getFollowUpMessages?.({
-					messages,
-					iteration,
-					assistantText: assistantText(newMessages.at(-1)),
-					stopReason: "stop",
-				}),
-			() =>
-				config.internalHooks?.getFollowUpMessages?.({
-					messages,
-					iteration,
-					assistantText: assistantText(newMessages.at(-1)),
-					stopReason: "stop",
-				}),
-			() =>
-				config.hooks?.getFollowUpMessages?.({
-					messages,
-					iteration,
-					assistantText: assistantText(newMessages.at(-1)),
-					stopReason: "stop",
-				}),
-		]);
+		const followUps = await drainFollowUps();
 		if (
 			followUps.length > 0 &&
 			!followUps.some(message =>
@@ -1379,16 +1246,14 @@ async function runAgentLoopInTaskScope(
 		// terminal failure. Give the provider a bounded number of real turns to
 		// correct the report (and, when needed, the underlying work).
 		if (shouldRunAcceptanceFinalization(resolved) && !acceptanceReported) {
-			const verificationResults = await runAcceptanceVerification(
-				resolved,
-				config.signal,
-			);
-			const report = parsedReportOrReview(
+			const verificationResults = await verifyAcceptanceCommands(resolved, {
+				cwd: config.cwd,
+				signal: config.signal,
+			});
+			const report = evaluateAcceptanceReport(
 				lastAssistantContent(newMessages),
 				resolved,
 				verificationResults,
-				config,
-				emit,
 			);
 			if (report.status === "passed") {
 				acceptanceReported = true;
@@ -1505,18 +1370,16 @@ async function runAgentLoopInTaskScope(
 		const finalText = lastAssistantContent(finalMessagesForConclusion);
 
 		// Run verification commands
-		const verificationResults = await runAcceptanceVerification(
-			resolved,
-			config.signal,
-		);
+		const verificationResults = await verifyAcceptanceCommands(resolved, {
+			cwd: config.cwd,
+			signal: config.signal,
+		});
 
 		// Validate criteria and build ledger
-		const report = parsedReportOrReview(
+		const report = evaluateAcceptanceReport(
 			finalText,
 			resolved,
 			verificationResults,
-			config,
-			emit,
 		);
 
 		acceptanceReported = true;
@@ -1529,89 +1392,6 @@ async function runAgentLoopInTaskScope(
 		if (report.status === "failed") {
 			acceptanceFailed = true;
 		}
-	}
-
-	function parsedReportOrReview(
-		finalText: string,
-		resolved: ResolvedAcceptance,
-		verificationResults: Array<{
-			command: string;
-			result: string;
-			summary?: string;
-		}>,
-		_loopConfig: RunAgentLoopConfig,
-		_emitFn: AgentEventSink,
-	): {
-		status: "passed" | "failed" | "timeout";
-		ledger: {
-			status: string;
-			report?: AcceptanceReport;
-			verification?: string[];
-		};
-	} {
-		// Check for model-produced report
-		const parsed = parseAcceptanceReport(finalText);
-		if (!parsed.report && !parsed.error) {
-			return {
-				status: "failed",
-				ledger: { status: "failed", verification: [] },
-			};
-		}
-
-		// Build verification summary
-		const verificationSummary = verificationResults.map(
-			v =>
-				`[${v.result.toUpperCase()}] ${v.command}${v.summary ? ` → ${v.summary.slice(0, 100)}` : ""}`,
-		);
-
-		// Validate criteria against report
-		const report = parsed.report;
-		const criteriaResults = resolved.criteria.map(c => {
-			const satisfied = report?.criteriaSatisfied?.some(
-				cs =>
-					cs.id === c.id &&
-					(cs.status === "satisfied" ||
-						(c.severity === "recommended" && cs.status === "partial")),
-			);
-			return {
-				id: c.id,
-				status: (satisfied ? "satisfied" : "failed") as "satisfied" | "failed",
-				evidence: c.must,
-			};
-		});
-
-		// Check for required review
-		let reviewStatus = "not-required";
-		if (resolved.review?.required) {
-			reviewStatus = report?.criteriaSatisfied?.every(
-				cs => cs.status === "satisfied",
-			)
-				? "passed"
-				: "failed";
-		}
-
-		const allCriteriaPass = criteriaResults.every(
-			c => c.status === "satisfied",
-		);
-		const allVerificationsPass = verificationResults.every(
-			v => v.result === "passed",
-		);
-
-		return {
-			status:
-				allCriteriaPass && allVerificationsPass && reviewStatus !== "failed"
-					? "passed"
-					: "failed",
-			ledger: {
-				status: allCriteriaPass && allVerificationsPass ? "passed" : "failed",
-				report: {
-					...report,
-					criteriaSatisfied: criteriaResults,
-				} as AcceptanceReport,
-				verification:
-					verificationSummary.length > 0 ? verificationSummary : undefined,
-			},
-		};
 	}
 
 	// Final output guard reset when agent ends
@@ -1630,7 +1410,7 @@ async function runAgentLoopInTaskScope(
 		: null;
 	if (declared || (performedToolWork && registry.has("task_status"))) {
 		return finish(
-			resolveCompletionGate({
+			resolveOutcome({
 				declared,
 				structuredOutcomeRequired:
 					performedToolWork && registry.has("task_status"),
@@ -1654,8 +1434,8 @@ async function runAgentLoopInTaskScope(
 	return finish({
 		status:
 			iteration >= maxIterations ||
-			reflectionFailed ||
-			false
+				reflectionFailed ||
+				false
 				? "failed"
 				: "completed",
 		summary: finalText || undefined,

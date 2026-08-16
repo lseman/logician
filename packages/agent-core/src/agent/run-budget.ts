@@ -3,7 +3,6 @@ export interface RunBudgetLimits {
 	maxToolCalls?: number;
 	maxTokens?: number;
 	maxElapsedMs?: number;
-	reserveFinalizationCalls?: number;
 }
 
 export interface RunBudgetSnapshot {
@@ -53,14 +52,11 @@ export class RunBudgetController {
 		this.startedAt = initial.startedAt ?? now();
 	}
 
-	requestProviderCall(finalization = false): RunBudgetDecision {
+	requestProviderCall(): RunBudgetDecision {
 		const elapsed = this.checkElapsed();
 		if (elapsed) return elapsed;
 		const max = this.limits.maxProviderCalls;
-		const reserve = finalization
-			? 0
-			: (this.limits.reserveFinalizationCalls ?? 0);
-		if (max !== undefined && this.providerCalls >= Math.max(0, max - reserve)) {
+		if (max !== undefined && this.providerCalls >= max) {
 			return this.denied("provider-call budget exhausted");
 		}
 		this.providerCalls++;

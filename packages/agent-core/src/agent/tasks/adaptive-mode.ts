@@ -2,7 +2,7 @@
 // Picks a concrete sampling preset for `inferenceMode: "auto"` from cheap,
 // already-tracked loop signals — no durable task ledger required.
 
-import type { InferenceMode } from "../configuration/inference-modes.ts";
+import type { InferenceMode } from "../types/types-config.ts";
 
 export interface AdaptiveModeDecision {
 	mode: Exclude<InferenceMode, "auto">;

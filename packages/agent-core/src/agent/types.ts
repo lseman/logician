@@ -34,6 +34,14 @@ export type {
 	WebSearchConfig,
 } from "./types/types-config.ts";
 export {
+	cycleInferenceMode,
+	DEFAULT_INFERENCE_MODE,
+	getInferenceMode,
+	INFERENCE_MODE_ORDER,
+	INFERENCE_MODES,
+	isValidInferenceMode,
+} from "./types/types-config.ts";
+export {
 	AgentError,
 	type AgentErrorOptions,
 	AgentErrorType,

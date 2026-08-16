@@ -2,35 +2,16 @@
 // Mixes bridge control + status display + disk config persistence for the
 // inference-mode and execution-profile settings.
 
+import {
+	INFERENCE_MODE_ORDER,
+	type InferenceMode,
+} from "@logician/agent-core";
 import type { AgentCoreBridge } from "@logician/coding-agent/application";
 import { saveConfigField } from "@logician/coding-agent/configuration";
 import type { StatusBar } from "../footer/layout.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 
-export type InferenceMode =
-	| "auto"
-	| "none"
-	| "thinking-general"
-	| "thinking-coding"
-	| "instruct-general"
-	| "instruct-reasoning"
-	| "instruct-coding"
-	| "deterministic"
-	| "creative"
-	| "analytical";
-
-export const INFERENCE_MODE_ORDER: readonly InferenceMode[] = [
-	"auto",
-	"none",
-	"thinking-general",
-	"thinking-coding",
-	"instruct-general",
-	"instruct-reasoning",
-	"instruct-coding",
-	"deterministic",
-	"creative",
-	"analytical",
-];
+export { INFERENCE_MODE_ORDER, type InferenceMode };
 
 export interface InferenceSettingsCtx {
 	bridge: AgentCoreBridge;
