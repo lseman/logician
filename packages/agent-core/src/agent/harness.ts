@@ -576,7 +576,7 @@ export class AgentHarness {
 			}
 		}
 		this.recoverInterruptedOperations();
-		// Output guard is pre-configured via GuardEngine in the constructor.
+		// Output guard is pre-configured via GuardCallbacks in the constructor.
 		this._runPromise = new Promise<void>(resolve => {
 			this._runResolve = resolve;
 		});
@@ -701,7 +701,7 @@ export class AgentHarness {
 			this._runResolve = resolve;
 		});
 
-		// Output guard is pre-configured via GuardEngine in the constructor.
+		// Output guard is pre-configured via GuardCallbacks in the constructor.
 
 		return this.runInPhase("turn", "continue", async () => {
 			this.abortController = new AbortController();
@@ -756,7 +756,6 @@ export class AgentHarness {
 						backend: this.backend,
 						signal: snapshot.signal,
 						maxIterations: this.maxIterations,
-						// Use GuardEngine's internal OutputGuard.
 						outputGuard: this.guardCallbacks.outputGuard,
 						extensionBus: this._extensionBus,
 						refreshNextTurnConfig: () =>
@@ -1164,20 +1163,6 @@ export class AgentHarness {
 		}
 	}
 
-	// ── Output guard setup ───────────────────────────────────────────────
-	// GuardEngine owns the OutputGuard; this method is a no-op for
-	// backward compatibility. Use guardEngine.outputGuard directly.
-
-	setOutputGuardConfig(_config: {
-		maxRetries?: number;
-		retryBaseDelayMs?: number;
-		maxRetryDelayMs?: number;
-		autoCompactOnContextFull?: boolean;
-		maxEmptyResponses?: number;
-	}): void {
-		// No-op — GuardEngine is configured in the constructor.
-	}
-
 	getOutputGuard(): OutputGuard | null {
 		return this.guardCallbacks.outputGuard;
 	}
@@ -1250,7 +1235,6 @@ export class AgentHarness {
 		>,
 	): void {
 		Object.assign(this.config, options);
-		// autoRetryEnabled changes are handled by GuardEngine.
 	}
 
 	setTools(tools: Tool[]): void {

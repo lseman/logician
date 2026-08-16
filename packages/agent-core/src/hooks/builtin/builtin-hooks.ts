@@ -3,9 +3,8 @@
 // compaction) as a single AgentHooks object, and composes them with any
 // user-supplied hooks via the typed HookBus so both run.
 //
-// All guard rail logic is delegated to the central GuardEngine, which owns:
-//   - Tool-call guards (duplicate + failure-loop) via LoopDetector
-//   - Output guard (error handling, retries, budget) via OutputGuard.
+// Tool-call guards (duplicate + failure-loop) are powered by LoopDetector,
+// the harness's single live instance.
 
 import { spawnSync } from "node:child_process";
 import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
@@ -16,7 +15,6 @@ import {
 	type WorkspaceSnapshot,
 } from "../../agent/file-checkpoints.ts";
 import type { LoopDetector } from "../../agent/guards/loop-detector.ts";
-import type { GuardEngine } from "../../agent/guards/guard-engine.ts";
 import { awaitsUserInput } from "../../agent/guards/response-patterns.ts";
 import { HarnessInterventionController } from "../../agent/intervention-controller.ts";
 import {
@@ -70,9 +68,7 @@ export interface BuiltinHookDeps {
 	contextWindowTokens: () => number | undefined;
 	// Tool definitions for accurate payload token estimates.
 	toolDefs: () => Record<string, unknown>[];
-	// Central GuardEngine that owns all guard rails (optional when using GuardCallbacks).
-	guardEngine?: GuardEngine;
-	// Legacy LoopDetector reference (for backward compatibility).
+	// LoopDetector instance powering the duplicate/failure-loop tool-call guards.
 	loopDetector?: LoopDetector;
 	// Typed event emitter for structured events (optional).
 	eventBus?: {
@@ -83,7 +79,7 @@ export interface BuiltinHookDeps {
 // Build the default safeguard hooks. Returns undefined per-event when a
 // safeguard is disabled so composition can skip it cleanly.
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
-	const { config, guardEngine, loopDetector } = deps;
+	const { config, loopDetector } = deps;
 	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	const interventions = new HarnessInterventionController();
 	const emitIntervention = (
@@ -93,7 +89,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		deps.eventBus?.emit({ type: "harness_intervention", ...intervention });
 		return intervention;
 	};
-	// Tool guards (duplicate + failure-loop, merged from GuardEngine).
+	// Tool guards (duplicate + failure-loop) via LoopDetector.
 	// Duplicate-call detection defaults ON: blocking exact same-args repeats
 	// (e.g. re-reading the same file over and over) is safe to force a
 	// strategy change. Failure-loop blocking stays default OFF — it can cut
@@ -118,12 +114,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 						: 0,
 				}
 			: undefined;
-	// Recovery memory is independent of the duplicate/failure tool-call
-	// guards above — it should record and warn on failures whenever it's
-	// enabled, not only when one of those thresholds happens to be armed.
-	const recoveryMemoryOn =
-		executionPolicy.embeddedPoliciesEnabled &&
-		config.recoveryMemoryEnabled !== false;
 	// Budget-based early stop is opt-in: it can cut off a legitimate multi-step
 	// run (e.g. one following a todo list) when per-turn token growth is small.
 	const budgetEnabled =
@@ -174,11 +164,11 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				});
 			}
 		}
-		if (guardThresholds) {
-			// GuardEngine is the canonical source; loopDetector is legacy fallback.
-			const decision = loopDetector
-				? loopDetector.checkToolCall(toolCall.name, JSON.stringify(args))
-				: guardEngine?.checkToolCall(toolCall.name, JSON.stringify(args)) ?? { block: false };
+		if (guardThresholds && loopDetector) {
+			const decision = loopDetector.checkToolCall(
+				toolCall.name,
+				JSON.stringify(args),
+			);
 			if (decision.block) {
 				const intervention = emitIntervention({
 					kind: "loop",
@@ -206,24 +196,12 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			recordBashMutations(bashSnapshots.get(toolCall.id) ?? null);
 			bashSnapshots.delete(toolCall.id);
 		}
-		// Delegate failure/success recording to GuardEngine. The duplicate/
-		// failure-loop guard's LoopDetector recording stays gated on
-		// guardThresholds (those are the blocking thresholds); recovery-memory
-		// recording/warnings are independent of that and gated on
-		// recoveryMemoryOn instead, so memory works even with both tool-call
-		// guards off.
-		let content: string | undefined;
-		if (isError && (guardThresholds || recoveryMemoryOn)) {
-			const { warnings } = guardEngine?.checkAndRecordFailure(
-				toolCall.name,
-				toolCall.arguments,
-				result,
-			) ?? { warnings: [] };
-			if (warnings.length > 0) {
-				content = `${result}\n\n${warnings.join("\n")}`;
-			}
-		} else if (!isError && guardThresholds) {
-			guardEngine?.recordSuccess(toolCall.name, toolCall.arguments);
+		// Record failure/success against the duplicate/failure-loop guard's
+		// LoopDetector, gated on guardThresholds (the blocking thresholds).
+		if (isError && guardThresholds && loopDetector) {
+			loopDetector.recordFailure(toolCall.name, toolCall.arguments, result);
+		} else if (!isError && guardThresholds && loopDetector) {
+			loopDetector.recordSuccess(toolCall.name, toolCall.arguments);
 			interventions.recordProgress();
 		}
 		if (
@@ -233,7 +211,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		) {
 			return { terminate: true };
 		}
-		return content ? { content } : undefined;
+		return undefined;
 	};
 
 	if (compactionEnabled) {

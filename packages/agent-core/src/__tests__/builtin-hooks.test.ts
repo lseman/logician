@@ -4,7 +4,6 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { LoopDetector } from "../agent/guards/loop-detector.ts";
-import { createGuardEngine } from "../agent/guards/guard-engine.ts";
 import { awaitsUserInput } from "../agent/guards/response-patterns.ts";
 import {
 	buildBuiltinHooks,
@@ -77,7 +76,6 @@ void test("minimal profile keeps mechanism hooks and omits built-in policies", (
 		},
 		contextWindowTokens: () => 4096,
 		toolDefs: () => [],
-		guardEngine: createGuardEngine(),
 		loopDetector: new LoopDetector(),
 	});
 
@@ -104,7 +102,6 @@ void test("explicitly disabling guards bypasses the default duplicate guard", ()
 		},
 		contextWindowTokens: () => 4096,
 		toolDefs: () => [],
-		guardEngine: createGuardEngine({ guardsEnabled: false }),
 		loopDetector,
 	});
 
@@ -138,138 +135,39 @@ void test("RTK rewrite leaves unsupported commands unchanged", () => {
 	});
 });
 
-// ── GuardEngine: tool-call guards ────────────────────────────────────────
+// ── beforeToolCall/afterToolCall: duplicate + failure-loop guards ─────────
 
-void test("checkToolCall blocks duplicate calls", () => {
-	const guardEngine = createGuardEngine({
-		guardsEnabled: true,
-		duplicateGuardEnabled: true,
-		loopDuplicateThreshold: 3,
-	});
-
-	// First two calls pass
-	assert.equal(guardEngine.checkToolCall("read_file", '{"path":"a.ts"}').block, false);
-	assert.equal(guardEngine.checkToolCall("read_file", '{"path":"a.ts"}').block, false);
-
-	// Third call blocks
-	assert.equal(guardEngine.checkToolCall("read_file", '{"path":"a.ts"}').block, true);
-});
-
-void test("explicitly disabling guards bypasses the duplicate guard", () => {
-	const guardEngine = createGuardEngine({
-		guardsEnabled: false,
-		duplicateGuardEnabled: true,
-	});
-
-	// Even with duplicateGuardEnabled, guardsEnabled=false should skip all checks
-	for (let i = 1; i <= 5; i++) {
-		const result = guardEngine.checkToolCall("read_file", '{"path":"a.ts"}');
-		assert.equal(result.block, false, `should not block on call ${i}`);
-	}
-});
-
-// ── GuardEngine: recovery memory ─────────────────────────────────────────
-
-void test("checkAndRecordFailure returns warnings on repeated failures", () => {
-	const guardEngine = createGuardEngine({ guardsEnabled: false });
-
-	const first = guardEngine.checkAndRecordFailure(
-		"bash", '{"command":"npm test"}', "Error: timeout exceeded",
-	);
-	assert.equal(first.warnings.length, 0);
-
-	const second = guardEngine.checkAndRecordFailure(
-		"bash", '{"command":"npm test"}', "Error: timeout exceeded",
-	);
-	assert.ok(second.warnings.length > 0, "should warn on second failure");
-});
-
-void test("afterToolCall appends a recovery-memory warning on a repeated failure", async () => {
-	const guardEngine = createGuardEngine({ guardsEnabled: false });
+void test("afterToolCall records failures against the LoopDetector when guards are armed", async () => {
+	const loopDetector = new LoopDetector({ failureThreshold: 2 });
 	const hooks = buildBuiltinHooks({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
-			guardsEnabled: false,
+			guardsEnabled: true,
+			failureGuardEnabled: true,
 			executionProfile: "autonomous",
 		},
 		contextWindowTokens: () => 4096,
 		toolDefs: () => [],
-		guardEngine,
+		loopDetector,
 	});
 
 	const call = (n: number) =>
 		hooks.afterToolCall?.({
-			toolCall: { id: String(n), name: "read_file", arguments: '{"path":"/src/missing.ts"}' },
-			args: { path: "/src/missing.ts" },
-			result: "Error: ENOENT no such file",
-			isError: true,
-			iteration: n,
-		});
-
-	const first = await call(1);
-	assert.equal(first, undefined);
-
-	const second = await call(2);
-	assert.ok(second?.content?.includes("recovery-memory"));
-	assert.ok(second?.content?.includes("Error: ENOENT no such file"));
-});
-
-void test("afterToolCall does not warn on the first occurrence of a failure", async () => {
-	const guardEngine = createGuardEngine({ guardsEnabled: false });
-	const hooks = buildBuiltinHooks({
-		config: {
-			baseUrl: "http://fake",
-			model: "fake",
-			guardsEnabled: false,
-			executionProfile: "autonomous",
-		},
-		contextWindowTokens: () => 4096,
-		toolDefs: () => [],
-		guardEngine,
-	});
-
-	const result = await hooks.afterToolCall?.({
-		toolCall: { id: "1", name: "bash", arguments: '{"command":"npm test"}' },
-		args: { command: "npm test" },
-		result: "Error: timeout exceeded",
-		isError: true,
-		iteration: 1,
-	});
-	assert.equal(result, undefined);
-});
-
-void test("recovery memory records and warns even with duplicate/failure tool-call guards off", async () => {
-	// Recovery memory works independently of the tool-call guard.
-	const guardEngine = createGuardEngine({
-		guardsEnabled: false,
-		duplicateGuardEnabled: false,
-		failureGuardEnabled: false,
-	});
-	const hooks = buildBuiltinHooks({
-		config: {
-			baseUrl: "http://fake",
-			model: "fake",
-			guardsEnabled: false,
-			duplicateGuardEnabled: false,
-			failureGuardEnabled: false,
-			executionProfile: "autonomous",
-		},
-		contextWindowTokens: () => 4096,
-		toolDefs: () => [],
-		guardEngine,
-	});
-
-	const call = (n: number) =>
-		hooks.afterToolCall?.({
-			toolCall: { id: String(n), name: "grep", arguments: '{"pattern":"foo"}' },
-			args: { pattern: "foo" },
-			result: "Error: not found",
+			toolCall: { id: String(n), name: "bash", arguments: '{"command":"npm test"}' },
+			args: { command: "npm test" },
+			result: "Error: timeout exceeded",
 			isError: true,
 			iteration: n,
 		});
 
 	await call(1);
-	const second = await call(2);
-	assert.ok(second?.content?.includes("recovery-memory"));
+	await call(2);
+
+	const decision = hooks.beforeToolCall?.({
+		toolCall: { id: "3", name: "bash", arguments: '{"command":"npm test"}' },
+		args: { command: "npm test" },
+		iteration: 3,
+	});
+	assert.equal((await decision)?.isError, true);
 });

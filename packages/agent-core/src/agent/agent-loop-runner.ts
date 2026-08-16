@@ -37,7 +37,6 @@ import {
 	shouldRunAcceptanceFinalization,
 	verifyAcceptanceCommands,
 } from "./guards/acceptance-contract.ts";
-import type { GuardEngine } from "./guards/guard-engine.ts";
 import type { OutputGuard } from "./guards/output-guard.ts";
 import {
 	awaitsUserInput,
@@ -139,11 +138,6 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	// Output guard config (optional). When provided, the loop uses OutputGuard
 	// to handle context_full, retryable errors, and empty responses.
 	outputGuard?: OutputGuard | null;
-	/** Central guard engine (optional). When provided, the loop uses it for
-	 *  composite turn-level loop detection, progress tracking, and graduated
-	 *  intervention (nudge/restrict/pause/abort) instead of the narrower
-	 *  outputGuard-only loop check. */
-	guardEngine?: GuardEngine | null;
 	/** Typed extension event bus for structured extension subscriptions. */
 	extensionBus?: ExtensionEventBus;
 	/** Resolve the acceptance config at call time (allows harness to update it). */
