@@ -11,6 +11,7 @@ import {
 	writeSync,
 } from "node:fs";
 import path from "node:path";
+import type { RunOutcomeStatus } from "./execution-policy.ts";
 import {
 	initialRunKernelState,
 	isRunEventEnvelope,
@@ -40,7 +41,7 @@ export interface AgentRuntimeState {
 	lastTurnDurationMs?: number;
 	lastRunDurationMs?: number;
 	outcome?: {
-		status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
+		status: RunOutcomeStatus;
 		summary?: string;
 		source: "structured" | "heuristic" | "runtime";
 	};
@@ -423,7 +424,7 @@ export class RunKernel {
 		});
 	}
 	finish(
-		status: import("./run-kernel-events.ts").RunTerminalStatus,
+		status: RunOutcomeStatus,
 		summary?: string,
 		source?: "structured" | "heuristic" | "runtime",
 	): void {

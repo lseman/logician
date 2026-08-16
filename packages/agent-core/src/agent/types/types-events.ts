@@ -296,3 +296,4 @@ export type AgentEventBody =
 
 export type AgentEvent = AgentEventBody & AgentEventEnvelope;
 export type EventHandler = (event: AgentEvent) => void;
+export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
