@@ -41,3 +41,30 @@ test("session browser shows the live filter typed in list mode", () => {
 	assert.match(output, /Beta session/);
 	assert.doesNotMatch(output, /Alpha session/);
 });
+
+test("session browser scrolls the window as selection moves past the visible rows", () => {
+	const overlay = new SessionBrowserOverlay();
+	const sessions = Array.from({ length: 20 }, (_, i) => ({
+		id: `s${i}`,
+		title: `Session ${i}`,
+		name: null,
+		preview: "task",
+		lastUpdated: "2026-08-09T00:00:00.000Z",
+		messageCount: 1,
+	}));
+	overlay.setStore({
+		listSessions: () => sessions,
+	} as unknown as SessionStore);
+	overlay.show();
+
+	const initial = plain(overlay.render(100).join("\n"));
+	assert.match(initial, /Session 0/);
+	assert.doesNotMatch(initial, /↑ \d+ more above/);
+	assert.match(initial, /↓ \d+ more below/);
+
+	for (let i = 0; i < 19; i++) overlay.handleInput("\x1b[B");
+
+	const scrolled = plain(overlay.render(100).join("\n"));
+	assert.match(scrolled, /Session 19/);
+	assert.match(scrolled, /↑ \d+ more above/);
+});

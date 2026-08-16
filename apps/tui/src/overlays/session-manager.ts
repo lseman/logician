@@ -11,9 +11,11 @@ import {
 	type ListItem,
 	POPUP_FRAME_OVERHEAD,
 	renderListItem,
+	renderListPopupBody,
 	renderSeparator,
 	renderStatusLine,
 } from "./popup-utils.ts";
+import { SelectorController } from "./selector-controller.ts";
 
 const getHeaderColor = (): string => theme.fg("header", "");
 const getYellow = (): string => theme.fg("levelHigh", "");
@@ -44,7 +46,7 @@ type InputMode = "list" | "rename" | "delete-confirm" | "new";
 export class SessionBrowserOverlay implements Component {
 	private store: SessionStore | null = null;
 	private sessions: SessionInfo[] = [];
-	private selectedIndex = 0;
+	private _selection = new SelectorController();
 	private visible = false;
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
@@ -76,7 +78,7 @@ export class SessionBrowserOverlay implements Component {
 				messageCount: s.messageCount,
 			}));
 		}
-		this.selectedIndex = 0;
+		this._selection.set(0, this.sessions.length);
 		this.invalidate();
 	}
 
@@ -202,17 +204,18 @@ export class SessionBrowserOverlay implements Component {
 
 	private _moveSelection(delta: number): void {
 		if (this.sessions.length === 0) return;
-		this.selectedIndex =
-			(this.selectedIndex + delta + this.sessions.length) %
-			this.sessions.length;
+		this._selection.move(delta, this.sessions.length);
 		this.invalidate();
 	}
 
 	private _select(): void {
-		if (this.sessions.length > 0 && this.selectedIndex < this.sessions.length) {
+		if (
+			this.sessions.length > 0 &&
+			this._selection.index < this.sessions.length
+		) {
 			this.actionCallback?.({
 				type: "select",
-				sessionId: this.sessions[this.selectedIndex].id,
+				sessionId: this.sessions[this._selection.index].id,
 			});
 		}
 		this.hide();
@@ -220,7 +223,7 @@ export class SessionBrowserOverlay implements Component {
 
 	private _startRename(): void {
 		if (this.sessions.length === 0) return;
-		const session = this.sessions[this.selectedIndex];
+		const session = this.sessions[this._selection.index];
 		this.mode = "rename";
 		this.renameSessionId = session.id;
 		this.renameInput = session.title;
@@ -256,7 +259,7 @@ export class SessionBrowserOverlay implements Component {
 					s.preview.toLowerCase().includes(query),
 			);
 		}
-		this.selectedIndex = 0;
+		this._selection.set(0, this.sessions.length);
 	}
 
 	// ── Rename mode ────────────────────────────────────────────────────────
@@ -312,10 +315,10 @@ export class SessionBrowserOverlay implements Component {
 		}
 
 		if (data === "y" || data === "Y") {
-			if (this.selectedIndex < this.sessions.length) {
+			if (this._selection.index < this.sessions.length) {
 				this.actionCallback?.({
 					type: "delete",
-					sessionId: this.sessions[this.selectedIndex].id,
+					sessionId: this.sessions[this._selection.index].id,
 				});
 				this.refresh();
 			}
@@ -367,39 +370,26 @@ export class SessionBrowserOverlay implements Component {
 			lines.push(renderSeparator(popupWidth));
 
 			// Session list
-			const maxListItems = Math.min(12, this.sessions.length);
-			if (this.sessions.length === 0) {
-				lines.push(
-					renderStatusLine(
-						"No sessions found.",
-						innerWidth,
-						theme.fg("warning", ""),
-					),
-				);
-			}
-			for (let i = 0; i < maxListItems; i++) {
-				const s = this.sessions[i];
-				const isSelected = i === this.selectedIndex;
-				const label = s.name ? `${s.name}  (${s.title})` : s.title;
-
-				const item: ListItem = {
-					label,
-					metadata: `${s.messageCount}msg`,
-					selected: isSelected,
-					dim: !!s.name,
-				};
-
-				lines.push(renderListItem(item, innerWidth));
-			}
-
-			if (this.sessions.length > maxListItems) {
-				lines.push(
-					renderStatusLine(
-						`… and ${this.sessions.length - maxListItems} more`,
-						innerWidth,
-					),
-				);
-			}
+			lines.push(
+				...renderListPopupBody(
+					this.sessions,
+					this._selection,
+					innerWidth,
+					12,
+					(s, i) => {
+						const isSelected = i === this._selection.index;
+						const label = s.name ? `${s.name}  (${s.title})` : s.title;
+						const item: ListItem = {
+							label,
+							metadata: `${s.messageCount}msg`,
+							selected: isSelected,
+							dim: !!s.name,
+						};
+						return renderListItem(item, innerWidth);
+					},
+					"No sessions found.",
+				),
+			);
 
 			lines.push(renderSeparator(popupWidth));
 			lines.push(
@@ -453,8 +443,8 @@ export class SessionBrowserOverlay implements Component {
 		// ── Delete confirm mode ──────────────────────────────────────────────
 		if (this.mode === "delete-confirm") {
 			const session =
-				this.selectedIndex < this.sessions.length
-					? this.sessions[this.selectedIndex]
+				this._selection.index < this.sessions.length
+					? this.sessions[this._selection.index]
 					: null;
 			const redFg = getRed();
 			lines.push(`${redFg}${"─".repeat(popupWidth)}${RESET}`);
