@@ -1127,6 +1127,7 @@ export class AgentCoreBridge {
 	/** Toggle mid-stream steering interrupt (cut the stream vs. queue). */
 	setSteeringInterrupt(enabled: boolean): void {
 		this.config.steeringInterrupt = enabled;
+		this.harness?.setSteeringInterrupt(enabled);
 	}
 
 	getSteeringInterrupt(): boolean {

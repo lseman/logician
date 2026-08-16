@@ -51,6 +51,23 @@ void test("setThinkingLevel propagates to the live harness", () => {
 	assert.deepEqual(harnessLevels, ["high"]);
 });
 
+void test("setSteeringInterrupt propagates to the live harness", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const harnessValues: boolean[] = [];
+	(bridge as unknown as { harness: unknown }).harness = {
+		setSteeringInterrupt: (enabled: boolean) => harnessValues.push(enabled),
+	};
+
+	bridge.setSteeringInterrupt(true);
+
+	assert.deepEqual(harnessValues, [true]);
+});
+
 void test("direct /spawn records task and result in harness history", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",
