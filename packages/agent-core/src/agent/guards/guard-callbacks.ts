@@ -36,12 +36,6 @@ export interface ToolResultDecision {
 	terminate?: boolean;
 }
 
-/** Decision returned from `onTurnComplete`. No longer used for loop detection. */
-export interface TurnDecision {
-	/** Reserved for future use. */
-	_?: never;
-}
-
 /** Decision returned from `onError` for backend/provider errors. */
 export interface ErrorDecision {
 	/** What to do about the error. */
@@ -88,12 +82,6 @@ export type OnToolResult = (context: {
 	isError: boolean;
 }) => ToolResultDecision | undefined;
 
-/** Called after each turn. Return a decision if a loop is detected. */
-export type OnTurnComplete = (context: {
-	assistantContent: string;
-	toolCalls: Array<{ name: string; args: string; result: string }>;
-}) => TurnDecision | undefined;
-
 /** Called when a backend error occurs. Return a decision on how to handle it. */
 export type OnError = (error: unknown) => ErrorDecision;
 
@@ -126,8 +114,6 @@ export interface GuardCallbacks {
 	onToolCall?: OnToolCall;
 	/** Called after each tool call. */
 	onToolResult?: OnToolResult;
-	/** Called after each turn. No longer used for loop detection. */
-	onTurnComplete?: OnTurnComplete;
 	/** Called when a backend error occurs. */
 	onError?: OnError;
 	/** Called after each model response. */
@@ -141,7 +127,7 @@ export interface GuardCallbacks {
 // ── Factory ───────────────────────────────────────────────────────────────────
 
 export interface GuardCallbacksConfig {
-	/** Loop detector instance (optional). When provided, powers onToolCall and onTurnComplete. */
+	/** Loop detector instance (optional). When provided, powers onToolCall. */
 	loopDetector?: LoopDetector | null;
 	/** Output guard instance (optional). When provided, powers onError and onResponse. */
 	outputGuard?: OutputGuard | null;
@@ -174,9 +160,6 @@ export function createGuardCallbacks(config: GuardCallbacksConfig = {}): GuardCa
 					return undefined;
 				}
 			: undefined,
-
-		// onTurnComplete kept as a hook point; no longer performs detection.
-		onTurnComplete: undefined,
 
 		onError: outputGuard ? (error) => outputGuard.handleError(error) : undefined,
 
