@@ -161,7 +161,7 @@ void test("beforeCompact cancellation short-circuits later hooks", async () => {
 	assert.equal(laterRan, false);
 });
 
-void test("handlers use deterministic priority ordering and stable diagnostics", async () => {
+void test("handlers use deterministic priority ordering", async () => {
 	const bus = new HookBus();
 	const order: string[] = [];
 	bus.on(
@@ -186,10 +186,6 @@ void test("handlers use deterministic priority ordering and stable diagnostics",
 		stopReason: "stop",
 	});
 	assert.deepEqual(order, ["policy", "normal"]);
-	assert.deepEqual(
-		bus.getDiagnostics().map(item => item.id),
-		["policy", "normal"],
-	);
 	assert.throws(
 		() => bus.on("afterProviderResponse", () => {}, { id: "policy" }),
 		/Duplicate hook handler id/,
@@ -238,5 +234,4 @@ void test("timeout aborts the handler signal instead of only abandoning its prom
 		stopReason: "stop",
 	});
 	assert.equal(observedAbort, true);
-	assert.equal(bus.getDiagnostics()[0]?.timeouts, 1);
 });

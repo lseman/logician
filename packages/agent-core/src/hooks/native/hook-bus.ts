@@ -42,7 +42,6 @@ import type {
 	TransformContextResult,
 } from "../../agent/types.ts";
 import { withTimeout } from "../../tools/shared/async-utils.ts";
-import { HookMetricsCollector } from "./hook-metrics.ts";
 
 export type HookEventName = keyof AgentHooks;
 
@@ -74,18 +73,6 @@ interface Entry<H> {
 	priority: number;
 	timeoutMs?: number;
 	order: number;
-}
-
-export interface HookHandlerDiagnostics {
-	id: string;
-	source?: string;
-	event: HookEventName;
-	priority: number;
-	count: number;
-	errors: number;
-	timeouts: number;
-	totalMs: number;
-	lastMs?: number;
 }
 
 type BeforeHandler = NonNullable<AgentHooks["beforeToolCall"]>;
@@ -122,8 +109,6 @@ export class HookBus {
 	private agentStart: Entry<AgentStartHandler>[] = [];
 	private compact: Entry<CompactHandler>[] = [];
 	private observers: HookObserver[] = [];
-	private metrics = new HookMetricsCollector();
-	private handlerStats = new Map<string, HookHandlerDiagnostics>();
 	private cleanups = new Set<() => void | Promise<void>>();
 	private nextOrder = 0;
 	private nextAnonymousId = 0;
@@ -137,15 +122,6 @@ export class HookBus {
 		this.errorMode = options.errorMode ?? "continue";
 		this.onError = options.onError;
 		this.defaultTimeoutMs = options.defaultTimeoutMs ?? 0;
-	}
-
-	/** Get hook execution metrics. */
-	getMetrics(): HookMetricsCollector {
-		return this.metrics;
-	}
-
-	getDiagnostics(): HookHandlerDiagnostics[] {
-		return [...this.handlerStats.values()].map(value => ({ ...value }));
 	}
 
 	addCleanup(cleanup: () => void | Promise<void>): () => void {
@@ -649,7 +625,6 @@ export class HookBus {
 		parentSignal?: AbortSignal,
 	): Promise<T | undefined> {
 		const effective = timeoutMs ?? this.defaultTimeoutMs;
-		const start = performance.now();
 		const controller = new AbortController();
 		const abort = () => controller.abort(parentSignal?.reason);
 		if (parentSignal?.aborted) abort();
@@ -671,15 +646,9 @@ export class HookBus {
 				effective > 0 ? await withTimeout(run, effective) : await run;
 			if (controller.signal.aborted)
 				throw controller.signal.reason ?? new Error("Hook handler aborted");
-			const duration = performance.now() - start;
-			this.metrics.record(event, duration);
-			this.recordHandler(id, source, event, duration);
 			return result;
 		} catch (e) {
 			const error = e as Error;
-			const duration = performance.now() - start;
-			this.metrics.record(event, duration, error);
-			this.recordHandler(id, source, event, duration, error);
 			this.onError?.(error, event, source);
 			if (this.errorMode === "throw") throw error;
 			return undefined;
@@ -710,50 +679,5 @@ export class HookBus {
 
 	private assertActive(): void {
 		if (this.disposed) throw new Error("HookBus has been disposed");
-	}
-
-	private recordHandler(
-		id: string,
-		source: string | undefined,
-		event: HookEventName,
-		duration: number,
-		error?: Error,
-	): void {
-		const current = this.handlerStats.get(id) ?? {
-			id,
-			source,
-			event,
-			priority: this.findPriority(id),
-			count: 0,
-			errors: 0,
-			timeouts: 0,
-			totalMs: 0,
-		};
-		current.count++;
-		current.totalMs += duration;
-		current.lastMs = duration;
-		if (error) {
-			current.errors++;
-			if (/timeout/i.test(error.message)) current.timeouts++;
-		}
-		this.handlerStats.set(id, current);
-	}
-
-	private findPriority(id: string): number {
-		const entries = [
-			...this.agentStart,
-			...this.before,
-			...this.after,
-			...this.prepare,
-			...this.transform,
-			...this.providerRequest,
-			...this.providerPayload,
-			...this.afterProvider,
-			...this.stop,
-			...this.steering,
-			...this.followUp,
-			...this.compact,
-		] as Array<Entry<unknown>>;
-		return entries.find(entry => entry.id === id)?.priority ?? 0;
 	}
 }
