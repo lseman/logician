@@ -46,10 +46,17 @@ export function steer(
 	if (deps.getPhase() !== "turn") {
 		throw new HarnessBusyError("steer", deps.getPhase(), "turn");
 	}
-	deps.msgManager.queue.steering(text);
-	deps.emitQueueChange();
 	if (steeringInterrupt) {
+		// The current provider call is about to be aborted, which unconditionally
+		// clears any queued "steering" message (settleTurn -> clearCurrentTurn).
+		// Queue as "nextTurn" instead so it survives and the harness's restart
+		// picks it up — matches flushSteeringNow's promotion.
+		deps.msgManager.queue.nextTurn(text);
+		deps.emitQueueChange();
 		abortController?.abort(createSteeringInterruptReason());
+	} else {
+		deps.msgManager.queue.steering(text);
+		deps.emitQueueChange();
 	}
 }
 

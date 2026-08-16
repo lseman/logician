@@ -92,10 +92,10 @@ import type {
 
 export type { ReflectionConfig } from "./loop/reflection.ts";
 
+export { STEERING_INTERRUPT_SUMMARY } from "./run-kernel-events.ts";
+import { STEERING_INTERRUPT_SUMMARY } from "./run-kernel-events.ts";
 
 export const STEERING_INTERRUPT_NAME = "SteeringInterruptError";
-export const STEERING_INTERRUPT_SUMMARY =
-	"Current provider response interrupted to apply steering.";
 
 export function createSteeringInterruptReason(): Error {
 	const error = new Error(STEERING_INTERRUPT_SUMMARY);

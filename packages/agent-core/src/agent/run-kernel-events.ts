@@ -3,6 +3,14 @@ import type { HarnessIntervention } from "./intervention-controller.ts";
 
 export const RUN_KERNEL_SCHEMA_VERSION = 1 as const;
 
+// A steering interrupt cancels the in-flight provider call to redirect the
+// run, not to stop it — the harness auto-continues with the queued steering
+// text right after. Matched by exact summary text so both the loop runner
+// (which produces it) and this reducer (which needs to allow continuation
+// after it, unlike a genuine cancellation) agree on what counts as one.
+export const STEERING_INTERRUPT_SUMMARY =
+	"Current provider response interrupted to apply steering.";
+
 /** @deprecated Use `RunOutcomeStatus` from execution-policy.ts directly. */
 export type RunTerminalStatus = RunOutcomeStatus;
 
@@ -460,8 +468,16 @@ export function reduceRunKernel(
 		envelope.event.type !== "diagnostic_recorded"
 	)
 		return reject("lease_expired", `lease expired at ${prior.leaseExpiresAt}`);
+	// A steering interrupt is a redirect, not a stop: the harness auto-continues
+	// with the queued steering text right after, on the same task/run. Once
+	// that continuation lands, this run is active again in every practical
+	// sense, so don't hold it to the terminal-state restriction.
+	const steeringInterruptResumed =
+		prior.status === "cancelled" &&
+		prior.terminalReason === STEERING_INTERRUPT_SUMMARY;
 	if (
 		TERMINAL.has(prior.status) &&
+		!steeringInterruptResumed &&
 		envelope.event.type !== "diagnostic_recorded" &&
 		envelope.event.type !== "trajectory_recorded" &&
 		envelope.event.type !== "queue_updated" &&
