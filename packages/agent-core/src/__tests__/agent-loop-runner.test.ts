@@ -112,7 +112,7 @@ void test("typed before_agent_start results augment provider context", async () 
 	);
 });
 
-void test("auto inference uses the configured mode directly", async () => {
+void test("auto inference adapts sampling params from the objective", async () => {
 	const events: AgentEvent[] = [];
 	const backend = new FakeBackend([
 		(_messages, options) => {
@@ -129,12 +129,59 @@ void test("auto inference uses the configured mode directly", async () => {
 			events.push(event);
 		},
 	);
-	// With task_state removed, adaptive mode selection is gone.
-	// inferenceMode: "auto" passes through without emitting inference_mode_selected.
 	const selection = events.find(
 		event => event.type === "inference_mode_selected",
 	);
-	assert.equal(selection, undefined);
+	assert.ok(selection && selection.type === "inference_mode_selected");
+	assert.equal(selection.effectiveMode, "analytical");
+});
+
+void test("auto inference escalates after repeated tool failures", async () => {
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => ({
+			content: "trying the build",
+			toolCalls: [{ id: "1", name: "noop", arguments: "{}" }],
+			stopReason: "stop" as const,
+		}),
+		() => ({
+			content: "retrying the build",
+			toolCalls: [{ id: "2", name: "noop", arguments: "{}" }],
+			stopReason: "stop" as const,
+		}),
+		(_messages, options) => {
+			assert.equal(options.temperature, 0.6);
+			return textResponse("Task complete.");
+		},
+	]);
+	const toolWithFailures: Tool = {
+		name: "noop",
+		description: "fails twice then the loop stops asking",
+		parameters: { type: "object", properties: {} },
+		execute: async () => "error: build failed",
+	};
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [toolWithFailures] },
+		[user("fix the build")],
+		{
+			...makeConfig({ inferenceMode: "auto", tools: [toolWithFailures] }),
+			backend,
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	const selections = events.filter(
+		event => event.type === "inference_mode_selected",
+	);
+	assert.ok(
+		selections.some(
+			event =>
+				event.type === "inference_mode_selected" &&
+				event.effectiveMode === "thinking-coding" &&
+				event.reason.includes("repeated tool failures"),
+		),
+	);
 });
 
 void test("provider payload hooks preserve transport fields", async () => {
