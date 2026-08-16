@@ -41,6 +41,67 @@ export type InferenceMode =
 	| "creative"
 	| "analytical";
 
+export interface SamplingParams {
+	temperature: number;
+	top_p: number;
+	top_k: number;
+	min_p: number;
+	presence_penalty: number;
+	repetition_penalty: number;
+}
+
+export interface InferenceModeDef {
+	label: string;
+	description: string;
+	thinking: boolean;
+	useProviderDefaults: boolean;
+	params: SamplingParams;
+}
+
+export const INFERENCE_MODE_ORDER: readonly InferenceMode[] = [
+	"auto",
+	"none",
+	"thinking-general",
+	"thinking-coding",
+	"instruct-general",
+	"instruct-reasoning",
+	"instruct-coding",
+	"deterministic",
+	"creative",
+	"analytical",
+];
+
+export const DEFAULT_INFERENCE_MODE: InferenceMode = "none";
+
+export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
+	new Map([
+		["auto", { label: "Auto", description: "Automatically selects a preset from live task evidence.", thinking: true, useProviderDefaults: false, params: { temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1, repetition_penalty: 1 } }],
+		["none", { label: "Provider", description: "Pass nothing and let the provider use its defaults.", thinking: false, useProviderDefaults: true, params: { temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 0, repetition_penalty: 1 } }],
+		["thinking-general", { label: "Think Gen", description: "General thinking with diverse sampling.", thinking: true, useProviderDefaults: false, params: { temperature: 1, top_p: 0.95, top_k: 20, min_p: 0, presence_penalty: 1.5, repetition_penalty: 1 } }],
+		["thinking-coding", { label: "Think Code", description: "Precise coding-oriented thinking.", thinking: true, useProviderDefaults: false, params: { temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0, presence_penalty: 0, repetition_penalty: 1 } }],
+		["instruct-general", { label: "Instruct", description: "Balanced non-thinking general sampling.", thinking: false, useProviderDefaults: false, params: { temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, repetition_penalty: 1 } }],
+		["instruct-reasoning", { label: "Reason", description: "Non-thinking reasoning sampling.", thinking: false, useProviderDefaults: false, params: { temperature: 1, top_p: 0.95, top_k: 20, min_p: 0, presence_penalty: 1.5, repetition_penalty: 1 } }],
+		["instruct-coding", { label: "Code", description: "Precise non-thinking coding sampling.", thinking: false, useProviderDefaults: false, params: { temperature: 0.3, top_p: 0.9, top_k: 20, min_p: 0, presence_penalty: 0, repetition_penalty: 1 } }],
+		["deterministic", { label: "Exact", description: "Near-deterministic sampling.", thinking: false, useProviderDefaults: false, params: { temperature: 0, top_p: 0, top_k: 1, min_p: 0, presence_penalty: 0, repetition_penalty: 1 } }],
+		["creative", { label: "Creative", description: "High-diversity ideation sampling.", thinking: false, useProviderDefaults: false, params: { temperature: 1.3, top_p: 0.99, top_k: 40, min_p: 0, presence_penalty: 2, repetition_penalty: 0.9 } }],
+		["analytical", { label: "Analyze", description: "Tight sampling for analysis and review.", thinking: false, useProviderDefaults: false, params: { temperature: 0.2, top_p: 0.7, top_k: 20, min_p: 0, presence_penalty: 0.5, repetition_penalty: 1.1 } }],
+	]);
+
+export function getInferenceMode(
+	mode: InferenceMode,
+): InferenceModeDef | undefined {
+	return INFERENCE_MODES.get(mode);
+}
+
+export function cycleInferenceMode(current: InferenceMode): InferenceMode {
+	const index = INFERENCE_MODE_ORDER.indexOf(current);
+	return INFERENCE_MODE_ORDER[(index + 1) % INFERENCE_MODE_ORDER.length];
+}
+
+export function isValidInferenceMode(value: string): value is InferenceMode {
+	return INFERENCE_MODES.has(value as InferenceMode);
+}
+
 /** Curated provider request options owned by the harness and snapshotted per turn. */
 export interface AgentHarnessStreamOptions {
 	/** Timeout in milliseconds. */

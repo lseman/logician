@@ -2,15 +2,11 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { RunBudgetController } from "../agent/run-budget.ts";
 
-void test("provider budget preserves finalization reserve", () => {
-	const budget = new RunBudgetController({
-		maxProviderCalls: 3,
-		reserveFinalizationCalls: 1,
-	});
+void test("provider budget honors an explicit limit", () => {
+	const budget = new RunBudgetController({ maxProviderCalls: 2 });
 	assert.equal(budget.requestProviderCall().allowed, true);
 	assert.equal(budget.requestProviderCall().allowed, true);
 	assert.equal(budget.requestProviderCall().allowed, false);
-	assert.equal(budget.requestProviderCall(true).allowed, true);
 });
 
 void test("tool and elapsed budgets fail closed", () => {

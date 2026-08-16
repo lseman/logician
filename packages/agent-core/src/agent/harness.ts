@@ -77,14 +77,15 @@ import {
 	createUserMessage,
 	estimateChatPayloadTokens,
 } from "./messages.ts";
-import { type ContinuationDecision, RunKernel } from "./run-kernel.ts";
-import type { RunKernelState } from "./run-kernel-events.ts";
 import {
 	type AgentRuntimeState,
+	type ContinuationDecision,
 	createRuntimeState,
 	type HarnessPhase,
 	reduceRuntimeState,
-} from "./runtime-state.ts";
+	RunKernel,
+} from "./run-kernel.ts";
+import type { RunKernelState } from "./run-kernel-events.ts";
 import { Session } from "./session.ts";
 import type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 import { evaluateTrajectory, type TrajectoryReport } from "./trajectory.ts";
@@ -159,7 +160,7 @@ function isDurableAgentEvent(event: AgentEvent): boolean {
 	return !EPHEMERAL_AGENT_EVENTS.has(event.type);
 }
 
-export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
+export type { AgentRuntimeState, HarnessPhase } from "./run-kernel.ts";
 export type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 
 // Conversation checkpoints: a snapshot of history is pushed before each

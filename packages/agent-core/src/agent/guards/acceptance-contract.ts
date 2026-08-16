@@ -86,6 +86,21 @@ export interface AcceptanceLedger {
 	}>;
 }
 
+export interface AcceptanceVerificationResult {
+	command: string;
+	result: "passed" | "failed";
+	summary?: string;
+}
+
+export interface AcceptanceEvaluation {
+	status: "passed" | "failed" | "timeout";
+	ledger: {
+		status: string;
+		report?: AcceptanceReport;
+		verification?: string[];
+	};
+}
+
 const ACCEPTANCE_FENCE = "```\nacceptance-report";
 const ACCEPTANCE_FENCE_NO_NEWLINE = "```acceptance-report";
 const ACCEPTANCE_FENCE_END = "```";
@@ -167,6 +182,78 @@ export function shouldRunAcceptanceFinalization(
 	return resolved.level !== "none";
 }
 
+export async function verifyAcceptanceCommands(
+	resolved: ResolvedAcceptance,
+	options: { cwd?: string; signal?: AbortSignal } = {},
+): Promise<AcceptanceVerificationResult[]> {
+	if (!resolved.verify.length) return [];
+	const { execFile } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	const execFileAsync = promisify(execFile);
+
+	return Promise.all(
+		resolved.verify.map(
+			verification =>
+				new Promise<AcceptanceVerificationResult[]>(resolve => {
+					const timeout = verification.timeoutMs ?? 30_000;
+					const timeoutId = setTimeout(() => {
+						resolve([
+							{
+								command: verification.command,
+								result: "failed",
+								summary: `Timeout after ${timeout}ms`,
+							},
+						]);
+					}, timeout);
+					if (options.signal?.aborted) {
+						clearTimeout(timeoutId);
+						resolve([
+							{
+								command: verification.command,
+								result: "failed",
+								summary: "Aborted",
+							},
+						]);
+						return;
+					}
+
+					execFileAsync("bash", ["-c", verification.command], {
+						cwd: verification.cwd ?? options.cwd,
+						timeout,
+						maxBuffer: 1024 * 1024,
+					}).then(
+						(output: { stdout?: string; stderr?: string }) => {
+							clearTimeout(timeoutId);
+							resolve([
+								{
+									command: verification.command,
+									result: "passed",
+									summary: (output.stdout ?? "").trim().slice(0, 500),
+								},
+							]);
+						},
+						(error: NodeJS.ErrnoException) => {
+							clearTimeout(timeoutId);
+							resolve([
+								verification.allowFailure
+									? {
+										command: verification.command,
+										result: "passed",
+										summary: `Non-zero exit ${error.code ?? "unknown"} (allowed)`,
+									}
+									: {
+										command: verification.command,
+										result: "failed",
+										summary: error.message.slice(0, 500),
+									},
+							]);
+						},
+					);
+				}),
+		),
+	).then(results => results.flat());
+}
+
 export function formatAcceptancePrompt(resolved: ResolvedAcceptance): string {
 	if (resolved.level === "none") return "";
 
@@ -236,6 +323,65 @@ export function parseAcceptanceReport(output: string): {
 	} catch (_e: unknown) {
 		return { error: "Malformed acceptance report JSON" };
 	}
+}
+
+export function evaluateAcceptanceReport(
+	finalText: string,
+	resolved: ResolvedAcceptance,
+	verificationResults: AcceptanceVerificationResult[],
+): AcceptanceEvaluation {
+	const parsed = parseAcceptanceReport(finalText);
+	if (!parsed.report && !parsed.error) {
+		return {
+			status: "failed",
+			ledger: { status: "failed", verification: [] },
+		};
+	}
+
+	const verificationSummary = verificationResults.map(
+		verification =>
+			`[${verification.result.toUpperCase()}] ${verification.command}${verification.summary ? ` → ${verification.summary.slice(0, 100)}` : ""}`,
+	);
+	const report = parsed.report;
+	const criteriaResults = resolved.criteria.map(criterion => ({
+		id: criterion.id,
+		status: (report?.criteriaSatisfied?.some(
+			item =>
+				item.id === criterion.id &&
+				(item.status === "satisfied" ||
+					(criterion.severity === "recommended" && item.status === "partial")),
+		)
+			? "satisfied"
+			: "failed") as "satisfied" | "failed",
+		evidence: criterion.must,
+	}));
+	const reviewStatus = resolved.review?.required
+		? report?.criteriaSatisfied?.every(item => item.status === "satisfied")
+			? "passed"
+			: "failed"
+		: "not-required";
+	const allCriteriaPass = criteriaResults.every(
+		criterion => criterion.status === "satisfied",
+	);
+	const allVerificationsPass = verificationResults.every(
+		verification => verification.result === "passed",
+	);
+
+	return {
+		status:
+			allCriteriaPass && allVerificationsPass && reviewStatus !== "failed"
+				? "passed"
+				: "failed",
+		ledger: {
+			status: allCriteriaPass && allVerificationsPass ? "passed" : "failed",
+			report: {
+				...report,
+				criteriaSatisfied: criteriaResults,
+			},
+			verification:
+				verificationSummary.length > 0 ? verificationSummary : undefined,
+		},
+	};
 }
 
 export function stripAcceptanceReport(output: string): string {
