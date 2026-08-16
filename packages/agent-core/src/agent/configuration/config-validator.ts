@@ -2,37 +2,16 @@
 
 import type {
 	AgentConfig,
-	InferenceMode,
 	QueueMode,
 	ThinkingLevel,
 } from "../types.ts";
-
-const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-]);
-
-const VALID_QUEUE_MODES: ReadonlySet<QueueMode> = new Set([
-	"all",
-	"one-at-a-time",
-]);
-const VALID_TOOL_EXECUTION = new Set(["sequential", "parallel"]);
-const VALID_INFERENCE_MODES: ReadonlySet<InferenceMode> = new Set([
-	"auto",
-	"none",
-	"thinking-general",
-	"thinking-coding",
-	"instruct-general",
-	"instruct-reasoning",
-	"instruct-coding",
-	"deterministic",
-	"creative",
-	"analytical",
-]);
+import {
+	INFERENCE_MODE_ORDER,
+	isValidInferenceMode,
+	QUEUE_MODES,
+	THINKING_LEVELS,
+	VALID_TOOL_EXECUTION,
+} from "../types.ts";
 
 interface ValidationError {
 	field: string;
@@ -69,48 +48,51 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 
 	if (
 		config.thinkingLevel &&
-		!VALID_THINKING_LEVELS.has(config.thinkingLevel)
+		!THINKING_LEVELS.includes(config.thinkingLevel)
 	) {
 		errors.push({
 			field: "thinkingLevel",
-			message: `must be one of: ${[...VALID_THINKING_LEVELS].join(", ")}`,
+			message: `must be one of: ${THINKING_LEVELS.join(", ")}`,
 		});
 	}
 
 	if (
 		config.steeringQueueMode &&
-		!VALID_QUEUE_MODES.has(config.steeringQueueMode)
+		!QUEUE_MODES.includes(config.steeringQueueMode)
 	) {
 		errors.push({
 			field: "steeringQueueMode",
-			message: `must be one of: ${[...VALID_QUEUE_MODES].join(", ")}`,
+			message: `must be one of: ${QUEUE_MODES.join(", ")}`,
 		});
 	}
 
 	if (
 		config.followUpQueueMode &&
-		!VALID_QUEUE_MODES.has(config.followUpQueueMode)
+		!QUEUE_MODES.includes(config.followUpQueueMode)
 	) {
 		errors.push({
 			field: "followUpQueueMode",
-			message: `must be one of: ${[...VALID_QUEUE_MODES].join(", ")}`,
+			message: `must be one of: ${QUEUE_MODES.join(", ")}`,
 		});
 	}
 
-	if (config.toolExecution && !VALID_TOOL_EXECUTION.has(config.toolExecution)) {
+	if (
+		config.toolExecution &&
+		!VALID_TOOL_EXECUTION.includes(config.toolExecution)
+	) {
 		errors.push({
 			field: "toolExecution",
-			message: `must be one of: ${[...VALID_TOOL_EXECUTION].join(", ")}`,
+			message: `must be one of: ${VALID_TOOL_EXECUTION.join(", ")}`,
 		});
 	}
 
 	if (
 		config.inferenceMode &&
-		!VALID_INFERENCE_MODES.has(config.inferenceMode)
+		!isValidInferenceMode(config.inferenceMode)
 	) {
 		errors.push({
 			field: "inferenceMode",
-			message: `must be one of: ${[...VALID_INFERENCE_MODES].join(", ")}`,
+			message: `must be one of: ${INFERENCE_MODE_ORDER.join(", ")}`,
 		});
 	}
 

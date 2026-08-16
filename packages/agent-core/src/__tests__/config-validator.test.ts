@@ -69,6 +69,12 @@ void describe("config validator", () => {
 		expect(errors.some(e => e.field === "thinkingLevel")).toBeTrue();
 	});
 
+	void it("rejects invalid inferenceMode", () => {
+		const config = { ...validConfig, inferenceMode: "bonkers" as any };
+		const errors = validateConfig(config);
+		expect(errors.some(e => e.field === "inferenceMode")).toBeTrue();
+	});
+
 	void it("rejects invalid queue mode", () => {
 		const config = { ...validConfig, steeringQueueMode: "invalid" as any };
 		const errors = validateConfig(config);

@@ -2,15 +2,7 @@
 // Pure helpers; the harness still owns config mutation and event emission.
 
 import type { AgentModelConfig, ThinkingLevel } from "../types.ts";
-
-const THINKING_LEVELS: ThinkingLevel[] = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-];
+import { THINKING_LEVELS } from "../types.ts";
 
 /** Clamp an arbitrary string to a known ThinkingLevel, defaulting to "off". */
 export function clampThinkingLevel(level: string): ThinkingLevel {

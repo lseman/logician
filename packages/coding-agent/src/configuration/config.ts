@@ -11,8 +11,10 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
 	INFERENCE_MODE_ORDER,
 	isValidInferenceMode,
+	THINKING_LEVELS,
 	stripJsonComments,
 	type AgentModelConfig,
+	type ThinkingLevel,
 	type TruncationConfig,
 } from "@logician/agent-core";
 
@@ -49,7 +51,6 @@ const KNOWN_KEYS = new Set([
 	"hooks",
 	"mcp",
 	"mcpServers",
-	"mcpEager",
 	"webSearch",
 	"permissionMode",
 	"permissions",
@@ -61,7 +62,6 @@ const KNOWN_KEYS = new Set([
 	"duplicateToolThreshold",
 	"toolFailureLoopThreshold",
 	"budgetStopEnabled",
-	"guardrails",
 	"continuationEnabled",
 	"reflectionConfig",
 	"postEditDiagnostics",
@@ -374,11 +374,10 @@ export function validateConfig(
 	}
 	if (obj.thinkingLevel !== undefined) {
 		const level = configString(obj.thinkingLevel);
-		const validLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-		if (!level || !validLevels.includes(level)) {
+		if (!level || !THINKING_LEVELS.includes(level as ThinkingLevel)) {
 			warn(
 				warnings,
-				`"thinkingLevel" must be one of: ${validLevels.join(", ")}.`,
+				`"thinkingLevel" must be one of: ${THINKING_LEVELS.join(", ")}.`,
 			);
 		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
 	}
@@ -387,6 +386,7 @@ export function validateConfig(
 	// for backward compatibility (nested values win when both are present).
 	let guardrailsSource = obj;
 	if (obj.guardrails !== undefined) {
+		warn(warnings, '"guardrails" is deprecated — use flat keys instead.');
 		if (typeof obj.guardrails !== "object" || obj.guardrails === null) {
 			warn(warnings, '"guardrails" must be an object.');
 		} else {

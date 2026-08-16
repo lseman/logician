@@ -272,7 +272,7 @@ void test("validateConfig parses guard settings from the nested guardrails objec
 	assert.equal(cfg.failureGuardEnabled, true);
 	assert.equal(cfg.toolFailureLoopThreshold, 7);
 	assert.equal(cfg.budgetStopEnabled, true);
-	assert.deepEqual(warnings, []);
+		assert.deepEqual(warnings, ['Unknown config key: "guardrails".', '"guardrails" is deprecated \u2014 use flat keys instead.']);
 });
 
 void test("validateConfig warns on unknown guardrails subkeys", () => {

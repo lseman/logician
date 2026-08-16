@@ -12,6 +12,29 @@ import type { AgentHooks, EventHandler, Tool } from "./types-messages.ts";
 import type { TruncationConfig } from "./types-truncation.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
+export const QUEUE_MODES: readonly QueueMode[] = ["all", "one-at-a-time"];
+
+export type ThinkingLevel =
+	| "off"
+	| "minimal"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh";
+
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+];
+
+export const VALID_TOOL_EXECUTION: readonly string[] = [
+	"sequential",
+	"parallel",
+];
 
 /** Self-evaluation / reflection config for the agent loop. */
 export interface ReflectionConfig {
@@ -22,14 +45,6 @@ export interface ReflectionConfig {
 	/** Reflection prompt template. $task is replaced with the original task description. */
 	prompt?: string;
 }
-
-export type ThinkingLevel =
-	| "off"
-	| "minimal"
-	| "low"
-	| "medium"
-	| "high"
-	| "xhigh";
 
 export type InferenceMode =
 	| "auto"
