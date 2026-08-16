@@ -3,6 +3,7 @@
 // External consumers import from here; internals import from sub-paths.
 
 export * from "./agent/agent-loop-runner.ts";
+export * from "./agent/agent-settings.ts";
 // Core: loop, harness, types, backend, messages, events, session
 export * from "./agent/backend.ts";
 export * from "./agent/execution-policy.ts";
