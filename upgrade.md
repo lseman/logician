@@ -49,9 +49,11 @@
 |-------|--------|
 | Phase 1: Provider/Response | **Complete** — deleted provider-request.ts, split into provider-options/response/streaming |
 | Phase 2: Exit Path Unification | **Complete** — exit-path.ts is the single decision point (resolveExit/resolveOutcome/evaluatePostTurn); agent-loop-runner.ts and completion-gate.ts flattened into it |
-| Phase 3: Config & Inference | **Partial** — deleted inference-modes.ts, runtime-state.ts; created agent-settings.ts |
-| Phase 4: Hook System | **Partial** — guard system consolidated (900→286 lines); ExtensionEventBus expanded (+192 lines) but AgentHooks still exists in parallel |
-| Phase 5: Kernel Simplification | **Partial** — deleted runtime-state.ts; 4-layer hierarchy partially remains; harness/utilities.ts extracted (hashing/trajectory helpers) |
+| Phase 3: Config & Inference | **Substantially done** — 16 dead config fields removed, resolveAgentSettings exported and de-duplicated in the bridge; ~90 fields remain in AgentConfig but are load-bearing, not cascade duplication |
+| Phase 4: Kernel Simplification | **Superseded — diagnosis was stale** — the "4-layer hierarchy" doesn't exist; target architecture already substantially in place (see Phase 4 audit) |
+| Phase 5: Guard System Cleanup | **Superseded — diagnosis was stale** — all deletion targets are load-bearing (see Phase 5 audit) |
+| Phase 6: Coding-Agent Simplification | **6.1 superseded** (tool-router.ts is a deliberate extraction, not duplication); 6.2–6.4 not audited |
+| Phase 7: TUI Cleanup | **7.2/7.3 moot** (nothing was deleted to clean up after); 7.1 partially done via Phase 3's resolveAgentSettings delegation |
 
 **Net lines removed**: 3,668 lines (since consolidation.md was created)
 
@@ -60,6 +62,27 @@
 - Phase 0 and Phase 5's planned deletions (`tasks/adaptive-mode.ts`, `tasks/run-task-state.ts`, `tasks/task-status-state.ts`, `tasks/todo-state.ts`, `guards/output-guard.ts`, `guards/guard-engine.ts`) have **not** happened — all are still actively imported by agent-loop-runner.ts, harness.ts, builtin-hooks.ts, and/or external packages (agent-capabilities, coding-agent). Deleting them is more invasive than originally scoped; treat those line items as needing a fresh usage audit before touching, not a straight deletion.
 - Found and fixed two unrelated regressions while verifying: a silent temperature-override drop in `loop/provider-options.ts` (useProviderDefaults gate discarded explicit config.temperature), and an `executionProfile` default mismatch between agent-core's "minimal" (from the agent-settings consolidation) and three TUI placeholder fallbacks still hardcoded to "autonomous".
 - Two known-flaky/pre-existing failures confirmed unrelated to this consolidation (present on clean HEAD before any of today's changes): `agent-capabilities/src/__tests__/delegation-runtime.test.ts` (2 tests) and `apps/tui/src/__tests__/pty-regression.test.ts` ("Ctrl+I changes and persists the execution profile").
+
+### Closing summary (session end, 2026-08-16)
+
+This consolidation effort is being wrapped up here. Honest accounting of where it landed:
+
+**What actually shipped** (9 commits, all verified with full `bun run test` + `bun run typecheck` before landing):
+- Phase 1/2's exit-path unification and hook-dispatch work, previously uncommitted, verified and committed.
+- Two real regressions found and fixed along the way: a silent temperature-override drop (`provider-options.ts`), and an `executionProfile` default mismatch between agent-core and the TUI that could leave the footer showing the wrong policy.
+- 16 genuinely dead `AgentConfig` fields removed end-to-end (type → config parsing → bridge → TUI settings UI → tests), including one field wired all the way to a TUI settings toggle that silently did nothing.
+- One dead struct field (`InferenceModeDef.thinking`) removed.
+- The one real "config cascade" duplication found (`resolveAgentSettings` not exported, so the bridge re-declared the same defaults independently) fixed at its source.
+
+**What this session concluded should NOT be done**, after auditing rather than assuming the original plan's diagnosis was still accurate:
+- Every module Phases 0 and 5 proposed deleting (`todo-state.ts`, `task-status-state.ts`, `run-task-state.ts`, `adaptive-mode.ts`, `output-guard.ts`, `guard-engine.ts`) is load-bearing — public API, concurrency-safety mechanism, or documented canonical logic.
+- Phase 4's "4-layer state hierarchy" doesn't exist as described — `agent-settings.ts` is a stateless per-turn function, not a layer, and `RunKernel`/`Session` are already owned as sub-components by the harness, matching Pi's target shape. `harness.ts`'s size is mostly irreducible orchestration glue or already-extracted thin wrappers (`harness/model.ts`, `harness/queue-ops.ts`, etc.), not un-refactored duplication.
+- Phase 6.1's "merge tool-router into agent-bridge" would undo a documented, deliberate prior extraction.
+- Phase 7.2/7.3 are moot because the guard modules they assumed were deleted were never deleted.
+
+**The pattern across all of the above**: this plan was written at a point-in-time snapshot and never re-validated against the codebase as later phases (Phase 1's provider/response split, Phase 3's agent-settings extraction, the tool-router split) actually landed. Every deletion/merge candidate this session actually opened and read turned out to be either already-addressed-differently or actively load-bearing. That's a useful finding in itself: **grep-for-real-usage before deleting** is now the validated approach for whatever's left here, not "trust the plan's line-item list."
+
+**Genuinely still open, not yet audited**: Phase 4.4 (branching/summaries behind a feature flag — independent of the debunked "4-layer" framing, could be real), Phase 6.2 (event-mapping.ts), Phase 6.3 (session-store.ts/transcript.ts redundancy). If this work continues, start each of those with the same usage-audit method before assuming the plan's description is still accurate.
 
 ---
 
@@ -210,23 +233,31 @@ packages/
 
 ---
 
-### Phase 4: Kernel Simplification (Medium Risk)
+### Phase 4: Kernel Simplification (Medium Risk) — **Diagnosis was stale, see audit below**
 
 **Goal**: Reduce state hierarchy from 4 layers to 3.
 
-**Current state**: RunKernel (event ledger) → Harness (phase + queue + steering) → agent-settings → Session (persistence).
+**Current state (as originally written)**: RunKernel (event ledger) → Harness (phase + queue + steering) → agent-settings → Session (persistence).
 
 **Target**: Agent (state + listeners + queue management) → Loop (execution) → Session (persistence). Event ledger becomes an optional feature of the agent, not a separate layer.
 
 | Step | Action | Files | Effort |
 |------|--------|-------|--------|
-| 4.1 | Merge RuntimeState into Agent class (already mostly done) | run-kernel.ts, types.ts | 2 hours |
-| 4.2 | Simplify phase management — reduce intermediate states | harness/phase.ts, harness.ts | 2 hours |
-| 4.3 | Keep Session as persistence-only (remove runtime semantics) | session.ts | 1 hour |
-| 4.4 | Move branching/summaries behind feature flag | harness/branching.ts, harness/compaction.ts | 1 hour |
-| 4.5 | Simplify queue management | harness/queue-ops.ts | 1 hour |
+| ~~4.1~~ | ~~Merge RuntimeState into Agent class~~ — **moot, see audit** | run-kernel.ts, types.ts | — |
+| ~~4.2~~ | ~~Simplify phase management~~ — **moot, see audit** | harness/phase.ts, harness.ts | — |
+| ~~4.3~~ | ~~Keep Session as persistence-only~~ — **already true, see audit** | session.ts | — |
+| ~~4.4~~ | ~~Move branching/summaries behind feature flag~~ — not attempted this session | harness/branching.ts, harness/compaction.ts | deferred |
+| ~~4.5~~ | ~~Simplify queue management~~ — **already done, see audit** | harness/queue-ops.ts | — |
 
-**Expected reduction**: harness.ts 2,216 → ~1,500 lines.
+**Expected reduction**: ~~harness.ts 2,216 → ~1,500 lines~~ — no safe reduction found (see audit).
+
+**2026-08-16 audit**: Before touching anything, checked whether the "4-layer hierarchy" premise actually holds. It doesn't:
+- `agent-settings.ts` is not a stored layer at all — `resolveAgentSettings(config)` is a stateless, pure per-turn resolver called only from `agent-loop-runner.ts`. `harness.ts` never even imports it. There's no third layer sitting between RunKernel and Session; the plan's own diagnosis was inaccurate (likely written before the Phase 3 `agent-settings.ts` extraction landed in its current stateless-function shape).
+- `RunKernel` and `Session` are already owned as sub-components directly by `AgentHarness` (constructed and driven from inside the class, 30+ call sites for RunKernel alone) — this **is** Pi's target shape already: Agent-equivalent (Harness) → owns → ledger (RunKernel) + persistence (Session). The event ledger is already "an optional feature of the agent," not a separate layer — `RunKernel.setPersistence("ephemeral")` exists precisely so TUI sessions can skip durable ledger writes.
+- Checked `harness.ts`'s actual bulk (2,216 lines, ~140 methods) directly rather than trusting the line count as a proxy for "needs splitting." Model management (`getModel`/`setModel`/`cycleModel`/etc.) already delegates to `harness/model.ts`'s pure `cycleModelHelper`/`resolveModelUrl` — the class methods are thin `this.config` read/write wrappers around them. Queue management (`steer`/`followUp`/`nextTurn`/`getQueues`/etc.) already delegates entirely to `harness/queue-ops.ts` via an injected `queueOpsDeps` bag — same pattern. This is 4.5 and half of 4.2, already done, just not narrated as "Phase 4" when it happened.
+- What's left in `harness.ts` after those extractions is either genuinely irreducible stateful orchestration (methods that need direct access to `this.config`/`this.backend`/`this._session`/`this.abortController` and can't be pure functions) or thin public-API wrappers preserving the surface `coding-agent`'s bridge depends on. There's nothing here to *delete* — design principle #6 ("delete over refactor") doesn't apply because none of it is dead; further splitting would mean moving working code around for a line-count number, the same trap Phase 0/5's original deletion targets turned out to be.
+- Not attempted: 4.4 (branching/summaries behind a feature flag) — this is a real, scoped, independent piece of work (not blocked by the "4-layer" misdiagnosis) that could still be worth doing, but wasn't audited this session.
+- **Verdict**: Phase 4 as originally scoped is moot. The target architecture it describes is already substantially in place. Marking done/superseded rather than forcing a rename (`AgentHarness`→`Agent`, `agent-loop-runner.ts`→`agent-loop.ts`) purely for naming parity with Pi — that would be a large-blast-radius change across every consumer in `coding-agent` and `apps/tui` for zero functional benefit.
 
 **Test gate**:
 - run-kernel.test.ts passes
@@ -256,18 +287,20 @@ packages/
 
 ---
 
-### Phase 6: Coding-Agent Simplification (Medium Risk)
+### Phase 6: Coding-Agent Simplification (Medium Risk) — **6.1 diagnosis was stale, 6.2–6.4 unaudited**
 
 **Goal**: Reduce orchestration layer complexity.
 
 | Step | Action | Files | Effort |
 |------|--------|-------|--------|
-| 6.1 | Merge tool-router into agent-bridge | application/tool-router.ts → agent-bridge.ts | 2 hours |
-| 6.2 | Simplify event mapping (runtime/event-mapping.ts) | runtime/event-mapping.ts | 1 hour |
-| 6.3 | Remove redundant session management layers | sessions/session-store.ts, sessions/transcript.ts | 1 hour |
-| 6.4 | Clean up slash-commands dependencies on deleted modules | commands/slash-commands.ts | 1 hour |
+| ~~6.1~~ | ~~Merge tool-router into agent-bridge~~ — **retained, see audit** | application/tool-router.ts → agent-bridge.ts | — |
+| 6.2 | Simplify event mapping (runtime/event-mapping.ts) | runtime/event-mapping.ts | not audited this session |
+| 6.3 | Remove redundant session management layers | sessions/session-store.ts, sessions/transcript.ts | not audited this session |
+| 6.4 | Clean up slash-commands dependencies on deleted modules | commands/slash-commands.ts | **moot** — nothing was actually deleted (see Phase 0/5 audit), so there are no dangling references to clean up |
 
-**Expected reduction**: agent-bridge.ts 2,617 → ~1,800 lines.
+**Expected reduction**: ~~agent-bridge.ts 2,617 → ~1,800 lines~~ — 6.1 alone was most of this estimate and doesn't hold; 6.2/6.3 unaudited so no revised number.
+
+**2026-08-16 audit (6.1 only)**: Read `tool-router.ts`'s header comment before assuming it should be merged back in. It's an explicit, deliberate extraction (525 lines) with its own documented rationale: "Owns 'which tools exist at runtime' ... Extracted from agent-bridge.ts. System-prompt *assembly* ... stays on the bridge — that merge is cross-cutting, not a tool-management concern." That's a considered prior split, not accidental duplication — merging it back would undo a real design decision for a line-count number, the same pattern found in Phase 4's harness.ts audit. 6.2–6.4 were not read this session; they may or may not hold up the same way and are left as genuinely open items for a future pass, not marked done or superseded.
 
 **Test gate**:
 - All coding-agent integration tests pass
@@ -276,15 +309,15 @@ packages/
 
 ---
 
-### Phase 7: TUI Cleanup (Low Risk)
+### Phase 7: TUI Cleanup (Low Risk) — **7.2/7.3 moot, 7.1 partially done**
 
 **Goal**: Align TUI with simplified config and hook models.
 
 | Step | Action | Files | Effort |
 |------|--------|-------|--------|
-| 7.1 | Update inference-settings.ts to new config shape | apps/tui/src/app/inference-settings.ts | 1 hour |
-| 7.2 | Remove references to deleted guard systems | TUI components that reference guards | 1 hour |
-| 7.3 | Simplify tool card rendering (remove guard-related UI) | TUI tool card components | 1 hour |
+| 7.1 | Update inference-settings.ts to new config shape | apps/tui/src/app/inference-settings.ts | **partial** — `getSettingsData()`'s defaults now delegate to `resolveAgentSettings` (see Phase 3), but `inference-settings.ts` itself still reads `AgentConfig` fields directly rather than through `agent-settings.ts` |
+| ~~7.2~~ | ~~Remove references to deleted guard systems~~ — **moot** | TUI components that reference guards | — nothing was deleted (guard-engine.ts/output-guard.ts retained, see Phase 0/5 audit), and a grep of apps/tui/src found zero direct references to those modules anyway |
+| ~~7.3~~ | ~~Simplify tool card rendering (remove guard-related UI)~~ — **moot, same reason as 7.2** | TUI tool card components | — |
 
 ---
 
@@ -406,13 +439,17 @@ Phase 7 (TUI Cleanup)
 
 ## 8. Success Criteria
 
-1. **Line count**: agent-core < 7K lines (down from 13K)
-2. **Single loop exit**: One `checkStopConditions()` call in the loop
-3. **Single hook system**: No parallel hook registration patterns
-4. **3-layer state**: Agent → Loop → Session (no intermediate RuntimeState)
-5. **Config**: AgentConfig < 60 fields (down from 100+)
-6. **All tests pass**: No behavior regressions
-7. **Mental model**: A new contributor can understand the agent loop in < 30 minutes
+Original targets, with actual outcome noted per item (2026-08-16):
+
+1. **Line count**: agent-core < 7K lines (down from 13K) — **not reached**; no safe further reduction found once actually audited (see Phase 4/5 audits). Current size reflects load-bearing code, not un-cleaned duplication.
+2. **Single loop exit**: One `checkStopConditions()` call in the loop — **met**, via `exit-path.ts`'s `resolveExit`.
+3. **Single hook system**: No parallel hook registration patterns — **not met**. `AgentHooks` and `ExtensionEventBus` both still exist; Phase 2's `AgentHooks`-elimination step was never attempted this session (only the exit-path work landed).
+4. **3-layer state**: Agent → Loop → Session (no intermediate RuntimeState) — **already effectively true**, just not under Pi's naming (`AgentHarness` plays the "Agent" role, owns RunKernel + Session directly). See Phase 4 audit.
+5. **Config**: AgentConfig < 60 fields (down from 100+) — **not reached** (~90 fields remain), but the fields that were genuinely dead (16 of them) are gone; the remainder audited as load-bearing, not cascade duplication.
+6. **All tests pass**: No behavior regressions — **met**. Full suite green except two confirmed pre-existing/unrelated failures throughout.
+7. **Mental model**: A new contributor can understand the agent loop in < 30 minutes — not independently verified, but the exit-path unification (#2) and the corrected §5 "what to delete" table should meaningfully help.
+
+Net assessment: line-count-based targets (#1, #5) were the plan's least reliable heuristic — they assumed large surface area implied duplication, which repeated audits this session showed was usually wrong. The structural/behavioral targets (#2, #4, #6) are in better shape than the line counts suggest.
 
 ---
 
