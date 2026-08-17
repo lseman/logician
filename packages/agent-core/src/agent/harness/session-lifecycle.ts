@@ -7,12 +7,12 @@ import {
 	runHookEvent,
 	runSessionStartHooks,
 } from "../../tools/shared/plugins.ts";
-import { Session, SessionManager } from "../session.ts";
+import { Session, SessionManager } from "../core/session.ts";
 import type {
 	BeforeCompactContext,
 	BeforeCompactResult,
 	Message,
-} from "../types.ts";
+} from "../types/index.ts";
 
 export interface HookContext {
 	sessionId: string;

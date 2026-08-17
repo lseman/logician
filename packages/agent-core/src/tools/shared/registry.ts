@@ -7,7 +7,7 @@
 
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { ToolResultCache } from "../../agent/tool-cache.ts";
+import { ToolResultCache } from "../../agent/core/tool-cache.ts";
 import type { AskUserContext } from "../../agent/types/types-messages.ts";
 import { DEFAULT_TRUNCATION } from "../../agent/types/types-truncation.ts";
 import type {
@@ -15,7 +15,7 @@ import type {
 	ToolCall,
 	ToolContext,
 	ToolResult,
-} from "../../agent/types.ts";
+} from "../../agent/types/index.ts";
 import { withTimeout } from "./async-utils.ts";
 import { parseToolInput } from "./parser.ts";
 

@@ -7,7 +7,7 @@ import {
 	type RunKernelEvent,
 	reduceRunKernel,
 	replayRunKernel,
-} from "../agent/run-kernel-events.ts";
+} from "../agent/core/run-kernel-events.ts";
 
 void test("runtime validation rejects unknown and malformed event payloads", () => {
 	assert.equal(

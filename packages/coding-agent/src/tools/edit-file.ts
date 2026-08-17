@@ -5,7 +5,7 @@
 // untouched regions are never rewritten) → line-trimmed with indentation re-application.
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
-import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/agent/types/index.ts";
 import {
 	ensureInsideCwd,
 	resolveReadPath,

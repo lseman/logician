@@ -1,14 +1,14 @@
-import { createSystemMessage } from "../messages.ts";
+import { createSystemMessage } from "../core/messages.ts";
 import type {
 	AgentHooks,
 	AgentMessage,
 	Message,
 	StopReason,
 	ToolCall,
-} from "../types.ts";
+} from "../types/index.ts";
 
 export type EventSink = (
-	event: import("../types.ts").AgentEvent,
+	event: import("../types/index.ts").AgentEvent,
 ) => Promise<void> | void;
 
 export interface LoopCallbacks {
@@ -152,24 +152,6 @@ export async function emitMessagePair(
 ): Promise<void> {
 	await emit({ type: "message_start", turnId, role: message.role });
 	await emit({ type: "message_end", turnId, message });
-}
-
-export function waitForRetryDelay(
-	ms: number,
-	signal?: AbortSignal,
-): Promise<boolean> {
-	if (signal?.aborted) return Promise.resolve(false);
-	return new Promise(resolve => {
-		const timer = setTimeout(() => {
-			signal?.removeEventListener("abort", onAbort);
-			resolve(true);
-		}, ms);
-		const onAbort = () => {
-			clearTimeout(timer);
-			resolve(false);
-		};
-		signal?.addEventListener("abort", onAbort, { once: true });
-	});
 }
 
 export function applyHeaderPatch(

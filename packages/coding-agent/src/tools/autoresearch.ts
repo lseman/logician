@@ -10,7 +10,7 @@
 // arbitrary shell commands and log_experiment runs git commit/checkout, so
 // both go through the same permission prompts as any other mutating tool.
 
-import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/agent/types/index.ts";
 import {
 	type AutoresearchSession,
 	INIT_EXPERIMENT_PARAMETERS,

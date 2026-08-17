@@ -11,9 +11,6 @@ export const RUN_KERNEL_SCHEMA_VERSION = 1 as const;
 export const STEERING_INTERRUPT_SUMMARY =
 	"Current provider response interrupted to apply steering.";
 
-/** @deprecated Use `RunOutcomeStatus` from execution-policy.ts directly. */
-export type RunTerminalStatus = RunOutcomeStatus;
-
 export type RunOperationRecovery =
 	| "pure"
 	| "idempotent"
@@ -22,88 +19,88 @@ export type RunOperationRecovery =
 
 export type RunKernelEvent =
 	| {
-		type: "task_started";
-		rootPrompt: string;
-		createdAt: number;
-		progressFingerprint?: string;
-	}
+			type: "task_started";
+			rootPrompt: string;
+			createdAt: number;
+			progressFingerprint?: string;
+	  }
 	| { type: "run_started"; cause: "prompt" | "continue" | "resume" }
 	| { type: "lease_acquired"; ownerId: string; expiresAt: number }
 	| {
-		type: "continuation_requested";
-		cause: string;
-		progressFingerprint: string;
-	}
+			type: "continuation_requested";
+			cause: string;
+			progressFingerprint: string;
+	  }
 	| { type: "intervention_recorded"; intervention: HarnessIntervention }
 	| {
-		type: "budget_consumed";
-		resource: "provider_call" | "tool_call" | "token" | "cost_microusd";
-		amount: number;
-	}
+			type: "budget_consumed";
+			resource: "provider_call" | "tool_call" | "token" | "cost_microusd";
+			amount: number;
+	  }
 	| {
-		type: "operation_intent_recorded";
-		operationId: string;
-		toolCallId?: string;
-		toolName: string;
-		arguments?: Record<string, unknown>;
-		argumentsDigest: string;
-		idempotencyKey: string;
-		recovery: RunOperationRecovery;
-	}
+			type: "operation_intent_recorded";
+			operationId: string;
+			toolCallId?: string;
+			toolName: string;
+			arguments?: Record<string, unknown>;
+			argumentsDigest: string;
+			idempotencyKey: string;
+			recovery: RunOperationRecovery;
+	  }
 	| {
-		type: "operation_result_recorded";
-		operationId: string;
-		resultDigest: string;
-		result?: string;
-		isError: boolean;
-		receipt?: string;
-	}
+			type: "operation_result_recorded";
+			operationId: string;
+			resultDigest: string;
+			result?: string;
+			isError: boolean;
+			receipt?: string;
+	  }
 	| {
-		type: "permission_decided";
-		toolCallId: string;
-		toolName: string;
-		decision: "allow" | "deny";
-		source: "rule" | "mode" | "user" | "fail_closed";
-		scope?: "once" | "session";
-		approvalRule?: string;
-	}
+			type: "permission_decided";
+			toolCallId: string;
+			toolName: string;
+			decision: "allow" | "deny";
+			source: "rule" | "mode" | "user" | "fail_closed";
+			scope?: "once" | "session";
+			approvalRule?: string;
+	  }
 	| { type: "operation_committed"; operationId: string }
 	| { type: "operation_quarantined"; operationId: string; reason: string }
 	| { type: "compaction_committed"; generation: number }
 	| {
-		type: "queue_updated";
-		steering: string[];
-		followUp: string[];
-		nextTurn: string[];
-	}
+			type: "queue_updated";
+			steering: string[];
+			followUp: string[];
+			nextTurn: string[];
+	  }
 	| {
-		type: "subagent_started";
-		agentId: string;
-		agent: string;
-		task: string;
-		taskIndex?: number;
-	}
+			type: "subagent_started";
+			agentId: string;
+			agent: string;
+			task: string;
+			taskIndex?: number;
+	  }
 	| { type: "subagent_progressed"; agentId: string; eventType: string }
 	| {
-		type: "subagent_finished";
-		agentId: string;
-		agent: string;
-		result: string;
-		isError: boolean;
-		turns?: number;
-	}
+			type: "subagent_finished";
+			agentId: string;
+			agent: string;
+			result: string;
+			isError: boolean;
+			turns?: number;
+	  }
 	| {
-		type: "run_finished";
-		status: RunTerminalStatus;
-		summary?: string;
-		source?: "structured" | "heuristic" | "runtime";
-	}
+			type: "run_finished";
+			status: RunOutcomeStatus;
+			summary?: string;
+			source?: "structured" | "heuristic" | "runtime";
+	  }
 	| {
-		type: "trajectory_recorded";
-		kind: "run_start" | "agent_event" | "run_finish";
-		operationId: string;
-		payload: Record<string, unknown>;
-	}
+			type: "trajectory_recorded";
+			kind: "run_start" | "agent_event" | "run_finish";
+			operationId: string;
+			payload: Record<string, unknown>;
+	  }
 	| { type: "diagnostic_recorded"; code: string; message: string };
 
 export interface RunEventEnvelope {
@@ -147,7 +144,7 @@ export interface RunKernelState {
 	leaseEpoch: number;
 	leaseOwnerId?: string;
 	leaseExpiresAt?: number;
-	status: "idle" | "active" | RunTerminalStatus;
+	status: "idle" | "active" | RunOutcomeStatus;
 	continuationRuns: number;
 	noProgressRuns: number;
 	lastProgressFingerprint: string;
@@ -183,7 +180,7 @@ export interface RunKernelState {
 		}
 	>;
 	outcome?: {
-		status: RunTerminalStatus;
+		status: RunOutcomeStatus;
 		summary?: string;
 		source?: "structured" | "heuristic" | "runtime";
 	};
@@ -201,20 +198,20 @@ export interface RunKernelState {
 
 export interface RunKernelViolation {
 	code:
-	| "invalid_envelope"
-	| "sequence_gap"
-	| "identity_changed"
-	| "stale_lease"
-	| "lease_not_acquired"
-	| "lease_expired"
-	| "event_after_terminal"
-	| "task_not_started"
-	| "duplicate_operation"
-	| "operation_not_found"
-	| "invalid_operation_transition"
-	| "invalid_budget_amount"
-	| "invalid_compaction_generation"
-	| "subagent_not_found";
+		| "invalid_envelope"
+		| "sequence_gap"
+		| "identity_changed"
+		| "stale_lease"
+		| "lease_not_acquired"
+		| "lease_expired"
+		| "event_after_terminal"
+		| "task_not_started"
+		| "duplicate_operation"
+		| "operation_not_found"
+		| "invalid_operation_transition"
+		| "invalid_budget_amount"
+		| "invalid_compaction_generation"
+		| "subagent_not_found";
 	message: string;
 	sequence?: number;
 }

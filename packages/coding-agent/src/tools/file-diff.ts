@@ -4,7 +4,7 @@
 import { execFile } from "node:child_process";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type { Tool } from "@logician/agent-core/agent/types.ts";
+import type { Tool } from "@logician/agent-core/agent/types/index.ts";
 import {
 	ensureInsideCwd,
 	resolveReadPath,

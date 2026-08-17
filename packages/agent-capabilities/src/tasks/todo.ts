@@ -11,7 +11,7 @@ import {
 	type Task,
 	type TaskStatus,
 } from "@logician/agent-core/agent/tasks/todo-state.ts";
-import type { Tool } from "@logician/agent-core/agent/types.ts";
+import type { Tool } from "@logician/agent-core/agent/types/index.ts";
 
 export type {
 	Task,

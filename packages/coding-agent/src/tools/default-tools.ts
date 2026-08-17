@@ -2,7 +2,7 @@ import { getBuiltInTools } from "@logician/agent-capabilities/tools";
 import type {
 	Tool,
 	WebSearchConfig,
-} from "@logician/agent-core/agent/types.ts";
+} from "@logician/agent-core/agent/types/index.ts";
 import { ariadne } from "./ariadne.ts";
 import { bash } from "./bash.ts";
 import { edit_file } from "./edit-file.ts";

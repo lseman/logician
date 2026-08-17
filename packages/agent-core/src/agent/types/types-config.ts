@@ -5,9 +5,9 @@
 // ── Config types ──────────────────────────────────────────────────────────
 
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
-import type { AgentStopPolicy, ExecutionProfile } from "../execution-policy.ts";
+import type { AgentStopPolicy, ExecutionProfile } from "../core/execution-policy.ts";
 import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
-import type { RunBudgetLimits } from "../run-budget.ts";
+import type { RunBudgetLimits } from "../core/run-budget.ts";
 import type { AgentHooks, EventHandler, Tool } from "./types-messages.ts";
 import type { TruncationConfig } from "./types-truncation.ts";
 

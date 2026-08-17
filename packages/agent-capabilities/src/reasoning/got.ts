@@ -32,7 +32,7 @@ export class GoTReasoner extends BaseReasoner {
 	config: GoTConfig;
 
 	constructor(
-		llm: import("@logician/agent-core/agent/backend.ts").LLMBackend,
+		llm: import("@logician/agent-core/agent/core/backend.ts").LLMBackend,
 		config: GoTConfig = {},
 	) {
 		super(llm, config);

@@ -2,7 +2,7 @@
 // Extracted from harness.ts to reduce its line count.
 
 import { createHash } from "node:crypto";
-import type { AgentEvent } from "../types.ts";
+import type { AgentEvent } from "../types/index.ts";
 
 /**
  * Deterministic serialization for SHA-256 hashing.

@@ -9,8 +9,8 @@
  * returns a GenerateCallbacks object suitable for LLMBackend.generate().
  */
 
-import type { GenerateCallbacks } from "../backend.ts";
-import type { AgentEvent } from "../types.ts";
+import type { GenerateCallbacks } from "../core/backend.ts";
+import type { AgentEvent } from "../types/index.ts";
 
 /**
  * Build streaming callbacks that funnel through the per-request event chain.

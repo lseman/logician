@@ -1,140 +1,58 @@
 // ── Tests: simplified guard system ─────────────────────────────────────────
-// Tests for the pi-style guard system: LoopDetector, OutputGuard, GuardCallbacks.
+// Tests for the pi-style guard system: LoopDetector, OutputGuard.
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
+import { describe, it } from "node:test";
 
 import { LoopDetector } from "../agent/guards/loop-detector.ts";
 import { OutputGuard } from "../agent/guards/output-guard.ts";
-import { createGuardCallbacks } from "../agent/guards/guard-callbacks.ts";
-
-describe("GuardCallbacks", () => {
-	it("creates all callbacks when configured", () => {
-		const loopDet = new LoopDetector({ duplicateThreshold: 2 });
-		const outGuard = new OutputGuard({ maxRetries: 1 });
-		const callbacks = createGuardCallbacks({ loopDetector: loopDet, outputGuard: outGuard });
-
-		assert.ok(callbacks.onToolCall);
-		assert.ok(callbacks.onError);
-		assert.ok(callbacks.onResponse);
-		assert.ok(callbacks.onBudget);
-		assert.ok(callbacks.reset);
-	});
-
-	it("blocks duplicate tool calls", () => {
-		const loopDet = new LoopDetector({ duplicateThreshold: 2 });
-		const callbacks = createGuardCallbacks({ loopDetector: loopDet });
-
-		assert.deepEqual(
-			callbacks.onToolCall?.({ toolName: "read", args: '{"path":"a.txt"}' }),
-			{ block: false },
-		);
-		const blocked = callbacks.onToolCall?.({ toolName: "read", args: '{"path":"a.txt"}' });
-		assert.ok(blocked?.block);
-	});
-
-	it("handles backend errors", () => {
-		const outGuard = new OutputGuard({ maxRetries: 2 });
-		const callbacks = createGuardCallbacks({ outputGuard: outGuard });
-
-		const err = new Error("rate limit exceeded");
-		const result = callbacks.onError?.(err);
-		assert.equal(result?.action, "retry");
-	});
-
-	it("checks responses for emptiness", () => {
-		const outGuard = new OutputGuard({ maxEmptyResponses: 3 });
-		const callbacks = createGuardCallbacks({ outputGuard: outGuard });
-
-		assert.equal(
-			callbacks.onResponse?.({ content: null, toolCallsCount: 0 })?.action,
-			"proceed",
-		);
-		assert.equal(
-			callbacks.onResponse?.({ content: "", toolCallsCount: 0 })?.action,
-			"proceed",
-		);
-		// After 3 empty responses, should abort
-		callbacks.onResponse?.({ content: null, toolCallsCount: 0 });
-		callbacks.onResponse?.({ content: null, toolCallsCount: 0 });
-		const aborted = callbacks.onResponse?.({ content: null, toolCallsCount: 0 });
-		assert.equal(aborted?.action, "abort");
-	});
-
-	it("tracks budget", () => {
-		const outGuard = new OutputGuard({ budgetThreshold: 0.9 });
-		const callbacks = createGuardCallbacks({ outputGuard: outGuard });
-
-		assert.equal(
-			callbacks.onBudget?.({ tokensUsed: 950, maxTokens: 1000 })?.action,
-			"budget_exhausted",
-		);
-		assert.equal(
-			callbacks.onBudget?.({ tokensUsed: 500, maxTokens: 1000 })?.action,
-			"proceed",
-		);
-	});
-
-	it("resets all state", () => {
-		const loopDet = new LoopDetector({ duplicateThreshold: 2 });
-		const outGuard = new OutputGuard({ maxRetries: 1 });
-		const callbacks = createGuardCallbacks({ loopDetector: loopDet, outputGuard: outGuard });
-
-		// Use the guards.
-		callbacks.onToolCall?.({ toolName: "read", args: '{"path":"a.txt"}' });
-		callbacks.onToolCall?.({ toolName: "read", args: '{"path":"a.txt"}' });
-		callbacks.onError?.(new Error("rate limit"));
-		callbacks.onResponse?.({ content: null, toolCallsCount: 0 });
-
-		// Reset.
-		callbacks.reset();
-
-		// State should be clean.
-		assert.deepEqual(
-			callbacks.onToolCall?.({ toolName: "read", args: '{"path":"a.txt"}' }),
-			{ block: false },
-		);
-	});
-
-	it("works with no components (pass-through)", () => {
-		const callbacks = createGuardCallbacks();
-
-		assert.equal(
-			callbacks.onToolCall?.({ toolName: "read", args: "{}" }),
-			undefined,
-		);
-		assert.equal(callbacks.onError?.(new Error("test")), undefined);
-		assert.equal(callbacks.onResponse?.({ content: null, toolCallsCount: 0 }), undefined);
-		assert.equal(callbacks.onBudget?.({ tokensUsed: 100, maxTokens: 1000 }), undefined);
-	});
-});
 
 describe("OutputGuard", () => {
 	it("classifies transient errors correctly", () => {
 		const guard = new OutputGuard({ maxRetries: 2 });
 		// Using a BackendError-like object with category property
-		const err = { name: "BackendError", category: "transient" as const, message: "temporary" };
+		const err = {
+			name: "BackendError",
+			category: "transient" as const,
+			message: "temporary",
+		};
 		const result = guard.handleError(err);
 		assert.equal(result.action, "retry");
 	});
 
 	it("classifies rate limit errors correctly", () => {
 		const guard = new OutputGuard({ maxRetries: 2 });
-		const err = { name: "BackendError", category: "rate_limit" as const, message: "429 too many requests" };
+		const err = {
+			name: "BackendError",
+			category: "rate_limit" as const,
+			message: "429 too many requests",
+		};
 		const result = guard.handleError(err);
 		assert.equal(result.action, "retry");
 	});
 
 	it("aborts after max retries exhausted", () => {
 		const guard = new OutputGuard({ maxRetries: 1 });
-		guard.handleError({ name: "BackendError", category: "transient" as const, message: "error 1" });
-		const result = guard.handleError({ name: "BackendError", category: "transient" as const, message: "error 2" });
+		guard.handleError({
+			name: "BackendError",
+			category: "transient" as const,
+			message: "error 1",
+		});
+		const result = guard.handleError({
+			name: "BackendError",
+			category: "transient" as const,
+			message: "error 2",
+		});
 		assert.equal(result.action, "abort");
 	});
 
 	it("context_full returns compact_then_retry", () => {
 		const guard = new OutputGuard({ maxRetries: 1 });
-		const result = guard.handleError({ name: "BackendError", category: "context_full" as const, message: "context too long" });
+		const result = guard.handleError({
+			name: "BackendError",
+			category: "context_full" as const,
+			message: "context too long",
+		});
 		// context_full is retryable, returns "retry" with maxRetries > 0
 		assert.equal(result.action, "retry");
 	});
@@ -151,9 +69,17 @@ describe("OutputGuard", () => {
 
 	it("resets retry count", () => {
 		const guard = new OutputGuard({ maxRetries: 1 });
-		guard.handleError({ name: "BackendError", category: "transient" as const, message: "error" });
+		guard.handleError({
+			name: "BackendError",
+			category: "transient" as const,
+			message: "error",
+		});
 		guard.reset();
-		const result = guard.handleError({ name: "BackendError", category: "transient" as const, message: "error again" });
+		const result = guard.handleError({
+			name: "BackendError",
+			category: "transient" as const,
+			message: "error again",
+		});
 		assert.equal(result.action, "retry");
 	});
 
@@ -174,13 +100,21 @@ describe("OutputGuard", () => {
 
 	it("aborts when maxRetries is 0 for transient errors", () => {
 		const guard = new OutputGuard({ maxRetries: 0 });
-		const result = guard.handleError({ name: "BackendError", category: "transient" as const, message: "error" });
+		const result = guard.handleError({
+			name: "BackendError",
+			category: "transient" as const,
+			message: "error",
+		});
 		assert.equal(result.action, "abort");
 	});
 
 	it("aborts when maxRetries is 0 for context_full errors", () => {
 		const guard = new OutputGuard({ maxRetries: 0 });
-		const result = guard.handleError({ name: "BackendError", category: "context_full" as const, message: "too long" });
+		const result = guard.handleError({
+			name: "BackendError",
+			category: "context_full" as const,
+			message: "too long",
+		});
 		assert.equal(result.action, "abort");
 	});
 

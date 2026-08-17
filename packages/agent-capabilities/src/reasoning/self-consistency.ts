@@ -16,7 +16,7 @@ export class SelfConsistencyReasoner extends BaseReasoner {
 	config: SelfConsistencyConfig;
 
 	constructor(
-		llm: import("@logician/agent-core/agent/backend.ts").LLMBackend,
+		llm: import("@logician/agent-core/agent/core/backend.ts").LLMBackend,
 		config: SelfConsistencyConfig = {},
 	) {
 		super(llm, config);

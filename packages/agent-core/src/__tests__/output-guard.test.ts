@@ -1,6 +1,6 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import { BackendError } from "../agent/backend.ts";
+import { BackendError } from "../agent/core/backend.ts";
 import { OutputGuard } from "../agent/guards/output-guard.ts";
 
 describe("OutputGuard", () => {

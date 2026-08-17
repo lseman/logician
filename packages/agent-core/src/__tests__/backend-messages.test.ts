@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { normalizeProviderMessages, OpenAIBackend } from "../agent/backend.ts";
+import { normalizeProviderMessages, OpenAIBackend } from "../agent/core/backend.ts";
 
 void test("leading system message is preserved", () => {
 	const out = normalizeProviderMessages([

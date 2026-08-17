@@ -2,7 +2,7 @@
 // OpenAI-compatible HTTP client for streaming LLM responses.
 // Mirrors Python LlamaCppClient/VLLMClient but simplified for TS.
 
-import type { ThinkingLevel, ToolCall } from "./types.ts";
+import type { ThinkingLevel, ToolCall } from "../types/index.ts";
 
 // ── Typed backend errors ───────────────────────────────────────────────────
 // The backend classifies provider/network failures at the boundary so the loop

@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { RunBudgetController } from "../agent/run-budget.ts";
+import { RunBudgetController } from "../agent/core/run-budget.ts";
 
 void test("provider budget honors an explicit limit", () => {
 	const budget = new RunBudgetController({ maxProviderCalls: 2 });

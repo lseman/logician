@@ -3,8 +3,8 @@
 // names, and Claude hook responses) to Logician's native AgentHooks contract.
 // This is a compatibility boundary, not Logician's general hook system.
 
-import { createUserMessage } from "../../agent/messages.ts";
-import type { AgentHooks, Message, ToolCall } from "../../agent/types.ts";
+import { createUserMessage } from "../../agent/core/messages.ts";
+import type { AgentHooks, Message, ToolCall } from "../../agent/types/index.ts";
 import {
 	type PluginCommandResult,
 	runHookEvent,

@@ -24,11 +24,11 @@ import {
 	type WebSearchConfig,
 } from "@logician/agent-core";
 import type { QueueMode } from "@logician/agent-core";
-import { OpenAIBackend } from "@logician/agent-core/agent/backend.ts";
+import { OpenAIBackend } from "@logician/agent-core/agent/core/backend.ts";
 import {
 	estimateChatPayloadTokens,
 	estimateTokens,
-} from "@logician/agent-core/agent/messages.ts";
+} from "@logician/agent-core/agent/core/messages.ts";
 import { onTodosChanged } from "@logician/agent-core/agent/tasks/todo-state.ts";
 import {
 	ExtensionRunner,

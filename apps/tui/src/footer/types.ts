@@ -142,7 +142,7 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 		// Row 0 — left group (always shown when relevant)
 		phase: { enabled: true, row: 0, position: 0, align: "left", fill: "none" },
 		"runtime-status": {
-			enabled: true,
+			enabled: false,
 			row: 0,
 			position: 0,
 			align: "right",

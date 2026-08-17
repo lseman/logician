@@ -24,7 +24,7 @@ import {
 	type Tool,
 	type ToolContext,
 } from "@logician/agent-core";
-import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import type { LLMBackend } from "@logician/agent-core/agent/core/backend.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
 
 export interface SubagentCoordinatorDeps {

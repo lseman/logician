@@ -29,7 +29,7 @@ export class AutoCoTReasoner extends BaseReasoner {
 	config: AutoCoTConfig;
 
 	constructor(
-		llm: import("@logician/agent-core/agent/backend.ts").LLMBackend,
+		llm: import("@logician/agent-core/agent/core/backend.ts").LLMBackend,
 		config: AutoCoTConfig = {},
 	) {
 		super(llm, config);

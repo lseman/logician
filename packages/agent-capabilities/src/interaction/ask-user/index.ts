@@ -2,7 +2,7 @@
 // The agent calls this tool when it needs to ask the user a question with
 // multiple-choice options. Execution blocks until the user selects or dismisses.
 
-import type { Tool, ToolContext } from "@logician/agent-core/agent/types.ts";
+import type { Tool, ToolContext } from "@logician/agent-core/agent/types/index.ts";
 
 export const ask_user: Tool = {
 	readOnly: true,

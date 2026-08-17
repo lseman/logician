@@ -1,10 +1,10 @@
-import { createUserMessage } from "../agent/messages.ts";
+import { createUserMessage } from "../agent/core/messages.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
 	AgentHooks,
 	Message,
-} from "../agent/types.ts";
+} from "../agent/types/index.ts";
 import type { MessageDeliveryManager } from "../queue/manager.ts";
 
 export interface HarnessQueueHookDependencies {

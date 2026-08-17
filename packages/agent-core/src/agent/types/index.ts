@@ -12,12 +12,12 @@ export type {
 	RunOutcomeStatus,
 	StopPolicyContext,
 	StopPolicyDecision,
-} from "./execution-policy.ts";
-export type { AcceptanceConfig } from "./guards/acceptance-contract.ts";
+} from "../core/execution-policy.ts";
+export type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
 export type {
 	HarnessIntervention,
 	HarnessInterventionKind,
-} from "./intervention-controller.ts";
+} from "../core/intervention-controller.ts";
 // ── Config, Error, Truncation ─────────────────────────────────────────────
 export type {
 	AcceptanceCriterion,
@@ -32,7 +32,7 @@ export type {
 	ThinkingLevel,
 	WebSearchConfig,
 	AgentErrorOptions,
-} from "./types/types-config.ts";
+} from "./types-config.ts";
 export {
 	cycleInferenceMode,
 	DEFAULT_INFERENCE_MODE,
@@ -46,7 +46,7 @@ export {
 	AgentError,
 	AgentErrorType,
 	wrapError,
-} from "./types/types-config.ts";
+} from "./types-config.ts";
 // ── Message, Tool, Event ──────────────────────────────────────────────────
 export type {
 	AgentEvent,
@@ -72,7 +72,7 @@ export type {
 	ToolContext,
 	ToolExecutionMode,
 	ToolResult,
-} from "./types/types-messages.ts";
+} from "./types-messages.ts";
 // ── Hook context/result types (extracted to types-hooks.ts) ───────────────
 export type {
 	AgentHooks,
@@ -96,9 +96,9 @@ export type {
 	ShouldStopAfterTurnContext,
 	TransformContext,
 	TransformContextResult,
-} from "./types/types-hooks.ts";
-export type { TruncationConfig } from "./types/types-truncation.ts";
+} from "./types-hooks.ts";
+export type { TruncationConfig } from "./types-truncation.ts";
 export {
 	DEFAULT_TRUNCATION,
 	resolveTruncationConfig,
-} from "./types/types-truncation.ts";
+} from "./types-truncation.ts";

@@ -40,7 +40,7 @@ import type {
 	ShouldStopAfterTurnContext,
 	TransformContext,
 	TransformContextResult,
-} from "../../agent/types.ts";
+} from "../../agent/types/index.ts";
 import { withTimeout } from "../../tools/shared/async-utils.ts";
 
 export type HookEventName = keyof AgentHooks;

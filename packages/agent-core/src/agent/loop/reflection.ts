@@ -1,6 +1,6 @@
-import type { LLMBackend } from "../backend.ts";
-import { convertToChatFormat } from "../messages.ts";
-import type { AgentEvent, Message } from "../types.ts";
+import type { LLMBackend } from "../core/backend.ts";
+import { convertToChatFormat } from "../core/messages.ts";
+import type { AgentEvent, Message } from "../types/index.ts";
 
 export interface ReflectionConfig {
 	enabled?: boolean;

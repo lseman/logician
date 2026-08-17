@@ -4,9 +4,9 @@ import type {
 	GenerateOptions,
 	LLMBackend,
 	LLMResponse,
-} from "../agent/backend.ts";
-import { BackendError } from "../agent/backend.ts";
-import { evaluateTrajectory } from "../agent/trajectory.ts";
+} from "../agent/core/backend.ts";
+import { BackendError } from "../agent/core/backend.ts";
+import { evaluateTrajectory } from "../agent/core/trajectory.ts";
 
 type InjectedFault =
 	| "rate_limit"

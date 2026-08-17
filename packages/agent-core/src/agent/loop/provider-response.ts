@@ -7,36 +7,32 @@
  * - afterProviderResponse hook chain
  * - Output guard check for empty/degenerate responses
  * - Assistant message creation (sanitized arguments)
- * - Event emission (message_start/update/end across both buses)
+ * - Event emission (message_start/update/end)
  *
  * Returns a result indicating whether processing succeeded or failed.
  * The runner decides how to handle failures (return finish vs continue).
  */
 
-import type { LLMResponse } from "../backend.ts";
-import type { OutputGuard } from "../guards/output-guard.ts";
 import type { ToolRegistry } from "../../tools/shared/registry.ts";
+import {
+	parseTextToolCalls,
+	stripTextToolCalls,
+} from "../../tools/shared/text-to-tool-calls.ts";
+import type { LLMResponse } from "../core/backend.ts";
+import {
+	createAssistantMessage,
+	sanitizeToolCallArguments,
+} from "../core/messages.ts";
+import type { OutputGuard } from "../guards/output-guard.ts";
 import type {
 	AgentConfig,
-	AgentEvent,
 	AgentEventSink,
 	AgentMessage,
 	Message,
 	StopReason,
 	ToolCall,
-} from "../types.ts";
-import type { ExtensionEventBus } from "../../hooks/extensions/event-bus.ts";
-import type { ExtensionEvent as TypedExtensionEvent } from "../../hooks/extensions/events.ts";
-
-import {
-	createAssistantMessage,
-	sanitizeToolCallArguments,
-} from "../messages.ts";
-import {
-	parseTextToolCalls,
-	stripTextToolCalls,
-} from "../../tools/shared/text-to-tool-calls.ts";
-import { emitMessagePair, stopReasonFor } from "./callbacks.ts";
+} from "../types/index.ts";
+import { stopReasonFor } from "./callbacks.ts";
 
 export interface ProcessResponseResult {
 	success: boolean;
@@ -58,7 +54,6 @@ export interface ProcessResponseContext {
 	iteration: number;
 	emit: AgentEventSink;
 	config: AgentConfig;
-	extensionBus?: ExtensionEventBus;
 }
 
 /**
@@ -81,7 +76,6 @@ export function processProviderResponse(
 		iteration,
 		emit,
 		config,
-		extensionBus,
 	} = ctx;
 
 	// Extract tool calls (with text fallback)
@@ -98,7 +92,9 @@ export function processProviderResponse(
 		}
 	}
 
-	const performedToolWork = toolCalls.some((call: ToolCall) => call.name !== "task_status");
+	const performedToolWork = toolCalls.some(
+		(call: ToolCall) => call.name !== "task_status",
+	);
 
 	const rawStopReason =
 		(response?.stopReason as "stop" | "length" | "error") ?? "stop";
@@ -149,13 +145,9 @@ export function processProviderResponse(
 	messages.push(assistant);
 	newMessages.push(assistant);
 
-	// Emit events (both typed and untyped paths)
-	emitTyped(extensionBus, { type: "message_start", message: assistant });
 	emit({ type: "message_start", turnId, role: "assistant" });
 	emit({ type: "message_update", turnId, message: assistant });
-	emitTyped(extensionBus, { type: "message_update", message: assistant });
 	emit({ type: "message_end", turnId, message: assistant });
-	emitTyped(extensionBus, { type: "message_end", message: assistant });
 
 	if (rawStopReason === "error") {
 		const errorMessage = response?.errorMessage ?? "Model request failed";
@@ -186,15 +178,4 @@ export function processProviderResponse(
 		assistant,
 		performedToolWork,
 	};
-}
-
-/**
- * Helper to emit a typed extension event if the bus is available.
- */
-function emitTyped(
-	bus: ExtensionEventBus | undefined,
-	event: TypedExtensionEvent,
-): void {
-	if (!bus) return;
-	void bus.emit(event);
 }

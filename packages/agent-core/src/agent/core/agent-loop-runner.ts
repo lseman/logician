@@ -2,31 +2,18 @@
 // Pi-style loop contract for Logician's current backend/tool adapter:
 // context + prompts + config + emit => new messages.
 
-import { compactToFit } from "../compaction/index.ts";
-import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
-import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
+import { compactToFit } from "../../compaction/index.ts";
 import {
 	emitConclusion,
 	lastAssistantContent,
 	lastHadToolCalls,
-} from "../runtime/conclusion-policy.ts";
-import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
-import { ToolRegistry } from "../tools/shared/registry.ts";
+} from "../../runtime/conclusion-policy.ts";
+import { executeToolBatch } from "../../runtime/tool-batch-controller.ts";
+import { ToolRegistry } from "../../tools/shared/registry.ts";
 import {
 	parseTextToolCalls,
 	stripTextToolCalls,
-} from "../tools/shared/text-to-tool-calls.ts";
-import type { LLMBackend } from "./backend.ts";
-import { buildProviderRequestOptions } from "./loop/provider-options.ts";
-import { buildStreamingCallbacks } from "./loop/provider-streaming.ts";
-import { processProviderResponse } from "./loop/provider-response.ts";
-import { resolveAgentSettings } from "./agent-settings.ts";
-import { getInferenceMode } from "./types/types-config.ts";
-import {
-	evaluateStopPolicies,
-	resolveExecutionPolicy,
-	type RunOutcomeStatus,
-} from "./execution-policy.ts";
+} from "../../tools/shared/text-to-tool-calls.ts";
 import {
 	type AcceptanceConfig,
 	evaluateAcceptanceReport,
@@ -36,17 +23,9 @@ import {
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
 	verifyAcceptanceCommands,
-} from "./guards/acceptance-contract.ts";
-import type { OutputGuard } from "./guards/output-guard.ts";
-import {
-	awaitsUserInput,
-	looksComplete,
-} from "./guards/response-patterns.ts";
-import {
-	type HarnessIntervention,
-	HarnessInterventionController,
-	type InterventionInput,
-} from "./intervention-controller.ts";
+} from "../guards/acceptance-contract.ts";
+import type { OutputGuard } from "../guards/output-guard.ts";
+import { awaitsUserInput, looksComplete } from "../guards/response-patterns.ts";
 import {
 	applyHeaderPatch,
 	assistantText,
@@ -58,27 +37,19 @@ import {
 	stopReasonFor,
 	transformMessages,
 	withSystemPrompt,
-} from "./loop/callbacks.ts";
-import { runReflection } from "./loop/reflection.ts";
-import {
-	convertToChatFormat,
-	createAssistantMessage,
-	createSystemMessage,
-	convertToLlm as defaultConvertToLlm,
-	estimateChatPayloadTokens,
-	sanitizeToolCallArguments,
-} from "./messages.ts";
-import { type RunBudgetDecision, RunBudgetController } from "./run-budget.ts";
-import { checkBudget } from "./exit-path.ts";
+} from "../loop/callbacks.ts";
+import { buildProviderRequestOptions } from "../loop/provider-options.ts";
+import { processProviderResponse } from "../loop/provider-response.ts";
+import { buildStreamingCallbacks } from "../loop/provider-streaming.ts";
+import { runReflection } from "../loop/reflection.ts";
 import {
 	isToolFailureResult,
 	selectAdaptiveMode,
 	taskObjectiveFromMessages,
-} from "./tasks/adaptive-mode.ts";
-import { resolveOutcome } from "./tasks/outcome-resolution.ts";
-import { runWithTaskState } from "./tasks/run-task-state.ts";
-import { getTaskStatus, resetTaskStatus } from "./tasks/task-status-state.ts";
-import { ToolResultCache } from "./tool-cache.ts";
+} from "../tasks/adaptive-mode.ts";
+import { resolveOutcome } from "../tasks/outcome-resolution.ts";
+import { runWithTaskState } from "../tasks/run-task-state.ts";
+import { getTaskStatus, resetTaskStatus } from "../tasks/task-status-state.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -88,11 +59,34 @@ import type {
 	Message,
 	Tool,
 	ToolCall,
-} from "./types.ts";
+} from "../types/index.ts";
+import { getInferenceMode } from "../types/types-config.ts";
+import { resolveAgentSettings } from "./agent-settings.ts";
+import type { LLMBackend } from "./backend.ts";
+import {
+	evaluateStopPolicies,
+	type RunOutcomeStatus,
+	resolveExecutionPolicy,
+} from "./execution-policy.ts";
+import { checkBudget } from "./exit-path.ts";
+import {
+	type HarnessIntervention,
+	HarnessInterventionController,
+	type InterventionInput,
+} from "./intervention-controller.ts";
+import {
+	convertToChatFormat,
+	createSystemMessage,
+	convertToLlm as defaultConvertToLlm,
+	estimateChatPayloadTokens,
+} from "./messages.ts";
+import { RunBudgetController, type RunBudgetDecision } from "./run-budget.ts";
+import { ToolResultCache } from "./tool-cache.ts";
 
-export type { ReflectionConfig } from "./loop/reflection.ts";
+export type { ReflectionConfig } from "../loop/reflection.ts";
 
 export { STEERING_INTERRUPT_SUMMARY } from "./run-kernel-events.ts";
+
 import { STEERING_INTERRUPT_SUMMARY } from "./run-kernel-events.ts";
 
 export const STEERING_INTERRUPT_NAME = "SteeringInterruptError";
@@ -109,15 +103,6 @@ function isSteeringInterrupt(signal: AbortSignal | undefined): boolean {
 		signal.reason instanceof Error &&
 		signal.reason.name === STEERING_INTERRUPT_NAME
 	);
-}
-
-/** Emit a typed extension event if the bus is available. */
-async function emitTyped(
-	emitter: ExtensionEventBus | undefined,
-	event: TypedExtensionEvent,
-): Promise<void> {
-	if (!emitter) return;
-	await emitter.emit(event);
 }
 
 export interface RunAgentLoopContext {
@@ -138,8 +123,6 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	// Output guard config (optional). When provided, the loop uses OutputGuard
 	// to handle context_full, retryable errors, and empty responses.
 	outputGuard?: OutputGuard | null;
-	/** Typed extension event bus for structured extension subscriptions. */
-	extensionBus?: ExtensionEventBus;
 	/** Resolve the acceptance config at call time (allows harness to update it). */
 	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
 
@@ -158,13 +141,13 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 		amount: number,
 	) => void;
 	onToolIntent?: NonNullable<
-		import("../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolIntent"]
+		import("../../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolIntent"]
 	>;
 	onToolResult?: NonNullable<
-		import("../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolResult"]
+		import("../../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolResult"]
 	>;
 	onPermissionDecision?: NonNullable<
-		import("../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onPermissionDecision"]
+		import("../../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onPermissionDecision"]
 	>;
 	onToolCommit?: (toolCallId: string) => void | Promise<void>;
 }
@@ -195,11 +178,6 @@ async function runAgentLoopInTaskScope(
 		source: "structured" | "heuristic" | "runtime";
 	}): Promise<Message[]> => {
 		await emit({ type: "run_outcome", ...outcome });
-		await emitTyped(config.extensionBus, {
-			type: "agent_end",
-			messages: newMessages,
-			outcome,
-		});
 		await emit({ type: "agent_end", messages: newMessages });
 		return newMessages;
 	};
@@ -372,31 +350,6 @@ async function runAgentLoopInTaskScope(
 			};
 	}
 
-	// Typed extensions may augment the prompt just like native hooks.
-	const extensionBeforeStart = config.extensionBus
-		? await config.extensionBus.emit({
-			type: "before_agent_start",
-			prompt: prompts.map(p => p.content).join("\n"),
-			systemPrompt:
-				beforeAgentStartResult?.systemPrompt ?? context.systemPrompt ?? "",
-		})
-		: undefined;
-	if (extensionBeforeStart?.messages) {
-		beforeAgentStartResult = {
-			...beforeAgentStartResult,
-			messages: [
-				...(beforeAgentStartResult?.messages ?? []),
-				...extensionBeforeStart.messages,
-			],
-		};
-	}
-	if (extensionBeforeStart?.systemPrompt) {
-		beforeAgentStartResult = {
-			...beforeAgentStartResult,
-			systemPrompt: extensionBeforeStart.systemPrompt,
-		};
-	}
-
 	await emit({ type: "agent_start" });
 	const promptTurnId = "turn_0";
 	for (const prompt of prompts) {
@@ -464,10 +417,6 @@ async function runAgentLoopInTaskScope(
 			}
 			iteration++;
 			const turnId = `turn_${iteration}`;
-			await emitTyped(config.extensionBus, {
-				type: "turn_start",
-				turnIndex: iteration,
-			});
 			await emit({ type: "turn_start", turnId });
 
 			if (pendingMessages.length > 0) {
@@ -520,7 +469,8 @@ async function runAgentLoopInTaskScope(
 				let requestHeaders = config.streamOptions?.headers;
 				let requestTimeoutMs =
 					config.streamOptions?.timeoutMs ?? config.turnTimeoutMs;
-				let requestMaxRetries = config.streamOptions?.maxRetries ?? config.maxRetries ?? 3;
+				let requestMaxRetries =
+					config.streamOptions?.maxRetries ?? config.maxRetries ?? 3;
 				let requestCacheRetention = config.streamOptions?.cacheRetention;
 				let requestMetadata = config.streamOptions?.metadata;
 
@@ -556,12 +506,13 @@ async function runAgentLoopInTaskScope(
 					const adaptiveDecision =
 						settings.inferenceMode === "auto"
 							? selectAdaptiveMode({
-								objective: adaptiveObjective,
-								performedToolWork,
-								toolFailures,
-							})
+									objective: adaptiveObjective,
+									performedToolWork,
+									toolFailures,
+								})
 							: undefined;
-					const effectiveMode = adaptiveDecision?.mode ?? settings.inferenceMode;
+					const effectiveMode =
+						adaptiveDecision?.mode ?? settings.inferenceMode;
 					if (adaptiveDecision) {
 						const selectionKey = `${adaptiveDecision.mode}:${adaptiveDecision.reason}`;
 						if (selectionKey !== lastAdaptiveSelection) {
@@ -723,7 +674,11 @@ async function runAgentLoopInTaskScope(
 				}
 			}
 
-			const tokenBudget = checkBudget(runBudget, "tokens", response?.usage?.totalTokens ?? 0);
+			const tokenBudget = checkBudget(
+				runBudget,
+				"tokens",
+				response?.usage?.totalTokens ?? 0,
+			);
 			if (!tokenBudget.allowed) {
 				return finishForBudgetExhaustion(tokenBudget);
 			}
@@ -737,7 +692,6 @@ async function runAgentLoopInTaskScope(
 				iteration,
 				emit,
 				config,
-				extensionBus: config.extensionBus,
 			});
 
 			let toolCalls: ToolCall[];
@@ -754,7 +708,8 @@ async function runAgentLoopInTaskScope(
 			} else {
 				return finish({
 					status: "failed",
-					summary: processResult.errorMessage ?? "Model returned empty response.",
+					summary:
+						processResult.errorMessage ?? "Model returned empty response.",
 					source: "runtime",
 				});
 			}
@@ -782,7 +737,6 @@ async function runAgentLoopInTaskScope(
 				onToolIntent: config.onToolIntent,
 				onToolResult: config.onToolResult,
 				emit,
-				emitExtension: event => emitTyped(config.extensionBus, event),
 			});
 			const toolResults = batch.messages;
 			const toolTerminated = batch.terminated;
@@ -856,13 +810,6 @@ async function runAgentLoopInTaskScope(
 				}
 			}
 
-			await emitTyped(config.extensionBus, {
-				type: "turn_end",
-				turnIndex: iteration,
-				stopReason,
-				message: assistant,
-				toolResults,
-			});
 			await emit({
 				type: "turn_end",
 				turnId,
@@ -945,19 +892,19 @@ async function runAgentLoopInTaskScope(
 			const stop =
 				toolCalls.length === 0
 					? await shouldStop(
-						[
-							config.shouldStopAfterTurn,
-							config.internalHooks?.shouldStopAfterTurn,
-							config.hooks?.shouldStopAfterTurn,
-						],
-						{
-							messages,
-							iteration,
-							hadToolCalls: false,
-							message: assistant,
-							toolResults,
-						},
-					)
+							[
+								config.shouldStopAfterTurn,
+								config.internalHooks?.shouldStopAfterTurn,
+								config.hooks?.shouldStopAfterTurn,
+							],
+							{
+								messages,
+								iteration,
+								hadToolCalls: false,
+								message: assistant,
+								toolResults,
+							},
+						)
 					: false;
 			// Acceptance stop rules take priority
 			let acceptanceStop = false;
@@ -1036,7 +983,8 @@ async function runAgentLoopInTaskScope(
 				consecutiveRunnerNudges < MAX_CONSECUTIVE_RUNNER_NUDGES
 			) {
 				const nudgeTag = "[continuation-nudge:structured-conclusion]";
-				const nudgeContent = `${nudgeTag} Do not stop yet without a structured conclusion. Verify that every requested step is complete. ` +
+				const nudgeContent =
+					`${nudgeTag} Do not stop yet without a structured conclusion. Verify that every requested step is complete. ` +
 					"If work remains, continue with the next step. If the task is complete, blocked, failed, or needs user input, " +
 					"call task_status with the accurate status as your final action.";
 				followUps.push({ role: "user" as const, content: nudgeContent });
@@ -1317,9 +1265,7 @@ async function runAgentLoopInTaskScope(
 	const finalText = lastAssistantContent(finalMessagesForConclusion);
 	return finish({
 		status:
-			iteration >= maxIterations ||
-				reflectionFailed ||
-				false
+			iteration >= maxIterations || reflectionFailed || false
 				? "failed"
 				: "completed",
 		summary: finalText || undefined,

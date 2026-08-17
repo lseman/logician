@@ -4,14 +4,14 @@ import type {
 	AgentConfig,
 	QueueMode,
 	ThinkingLevel,
-} from "../types.ts";
+} from "../types/index.ts";
 import {
 	INFERENCE_MODE_ORDER,
 	isValidInferenceMode,
 	QUEUE_MODES,
 	THINKING_LEVELS,
 	VALID_TOOL_EXECUTION,
-} from "../types.ts";
+} from "../types/index.ts";
 
 interface ValidationError {
 	field: string;
