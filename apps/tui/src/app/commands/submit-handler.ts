@@ -304,10 +304,11 @@ export function createSlashSubmitHandler(
 			}
 			if (match && match.command === "/new") {
 				ctx._autoSaveTurn();
-				ctx.currentSessionId = ctx.sessionStore.createSession({
-					title: "New Session",
-				});
-				ctx.bridge.useConversationSession(ctx.currentSessionId);
+				ctx.currentSessionId = ctx.sessionService.createSession("New Session");
+				ctx.bridge.useConversationSession(
+					ctx.currentSessionId,
+					ctx.sessionService.getRawSession(ctx.currentSessionId) ?? undefined,
+				);
 				ctx.transcript.clear();
 				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 				ctx.statusPanel.update({ sessionTitle: "New Session" });
@@ -323,7 +324,7 @@ export function createSlashSubmitHandler(
 			}
 			if (match && match.command === "/rename") {
 				if (ctx.currentSessionId && args.trim()) {
-					ctx.sessionStore.renameSession(ctx.currentSessionId, args.trim());
+					ctx.sessionService.renameSession(ctx.currentSessionId, args.trim());
 					ctx.bridge.renameConversationSession(
 						ctx.currentSessionId,
 						args.trim(),

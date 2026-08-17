@@ -11,8 +11,8 @@ import {
 import { createSlashCommands } from "@logician/coding-agent/commands";
 import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
 import {
-	SessionStore,
 	Transcript,
+	TuiSessionService,
 	type Turn,
 } from "@logician/coding-agent/sessions";
 import {
@@ -153,7 +153,7 @@ export class LogicianTUI {
 	settingsSelector: SettingsSelectorOverlay;
 	transcriptDisplay: TranscriptDisplay;
 	sessionManager: SessionBrowserOverlay;
-	sessionStore: SessionStore;
+	sessionService: TuiSessionService;
 	private killRing: KillRing;
 	private undoStack: UndoStack<{ value: string; cursor: number }>;
 	loopManager: LoopManager;
@@ -365,18 +365,19 @@ export class LogicianTUI {
 		this.workSurface.setOnInvalidate(() => this.tui.requestRender());
 
 		// ── Session store ────────────────────────────────────────────────────
-		this.sessionStore = new SessionStore(process.cwd());
+		this.sessionService = new TuiSessionService(process.cwd());
 		this.sessionManager = new SessionBrowserOverlay();
-		this.sessionManager.setStore(this.sessionStore);
+		this.sessionManager.setStore(this.sessionService);
 		this.sessionManager.setActionCallback(action =>
 			this.handleSessionAction(action),
 		);
 		// Only create initial session — never auto-resume. Sessions are loaded
 		// explicitly via the --session CLI flag in index.ts.
-		this.currentSessionId = this.sessionStore.createSession({
-			title: "New Session",
-		});
-		this.bridge.useConversationSession(this.currentSessionId);
+		this.currentSessionId = this.sessionService.createSession("New Session");
+		this.bridge.useConversationSession(
+			this.currentSessionId,
+			this.sessionService.getRawSession(this.currentSessionId) ?? undefined,
+		);
 		this.statusPanel.update({ sessionTitle: "New Session" });
 
 		// Wire up dependencies
@@ -493,7 +494,7 @@ export class LogicianTUI {
 
 	/** Load turns for a specific session ID (used by --session CLI flag). */
 	loadTurns(sessionId: string): Turn[] | undefined {
-		return this.sessionStore.loadTurns(sessionId);
+		return this.sessionService.loadTurns(sessionId);
 	}
 
 	/** Restore turns into transcript and bridge (public for CLI --session usage). */

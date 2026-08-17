@@ -275,10 +275,10 @@ async function main(): Promise<void> {
 				// must accumulate onto the resumed session, not a fresh one.
 				const staleSessionId = tui.currentSessionId;
 				tui.restoreSession(turns);
-				tui.sessionStore.setCurrentSession(resumeSessionId);
+				tui.sessionService.setCurrentSession(resumeSessionId);
 				tui.currentSessionId = resumeSessionId;
 				if (staleSessionId && staleSessionId !== resumeSessionId) {
-					tui.sessionStore.deleteSession(staleSessionId);
+					tui.sessionService.deleteSession(staleSessionId);
 				}
 			}
 		} catch (error: unknown) {

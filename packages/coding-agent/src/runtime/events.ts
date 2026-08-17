@@ -36,6 +36,13 @@ export interface MessageUpdateEvent {
 	};
 }
 
+/** Coherent mid-stream reasoning snapshot — the accumulated text so far, not a delta. */
+export interface ReasoningUpdateEvent {
+	type: "message_reasoning_update";
+	turnId: string;
+	reasoning: string;
+}
+
 export interface TurnStartEvent {
 	type: "turn_start";
 	turnId: string;
@@ -314,6 +321,7 @@ export type RuntimeEvent =
 	| TokenEvent
 	| ThinkingTokenEvent
 	| MessageUpdateEvent
+	| ReasoningUpdateEvent
 	| TurnStartEvent
 	| TurnEndEvent
 	| AgentIterationStartEvent
@@ -355,6 +363,7 @@ export type TranscriptEvent = Extract<
 			| "token"
 			| "thinking_token"
 			| "message_update"
+			| "message_reasoning_update"
 			| "notice"
 			| "tool_call_start"
 			| "tool_call_update"
@@ -376,6 +385,7 @@ export function isTranscriptEvent(
 		case "token":
 		case "thinking_token":
 		case "message_update":
+		case "message_reasoning_update":
 		case "notice":
 		case "tool_call_start":
 		case "tool_call_update":

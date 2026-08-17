@@ -10,7 +10,10 @@ import type {
 	GoalManager,
 	LoopManager,
 } from "@logician/coding-agent/application";
-import type { SessionStore, Transcript } from "@logician/coding-agent/sessions";
+import type {
+	Transcript,
+	TuiSessionService,
+} from "@logician/coding-agent/sessions";
 import type { MemoryStore } from "@logician/memory";
 import type { ChoicePopup } from "../../overlays/choice-popup.ts";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";
@@ -31,7 +34,7 @@ export interface SlashCommandsCtx {
 	slashPopup: SlashPopup;
 	thinkingDisplayMode: "collapsed" | "summary" | "expanded";
 	currentSessionId: string | null;
-	sessionStore: SessionStore;
+	sessionService: TuiSessionService;
 	loopManager: LoopManager;
 	loopActive: boolean;
 	goalManager: GoalManager;

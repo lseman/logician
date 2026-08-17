@@ -30,10 +30,28 @@ export function awaitsUserInput(text: string): boolean {
 	const trimmed = text.trim();
 	if (!trimmed) return false;
 
-	// A question at the end may be followed by markdown emphasis or a closing
-	// quote/bracket. Choice lists often follow the actual question, so inspect
-	// the final short block as well as the final character.
-	if (/\?[\s*_`"'"]*\s*$/.test(trimmed)) return true;
+	// A trailing question mark alone is not sufficient to declare user-wait:
+	// models reason aloud with long, self-directed questions
+	// ("Let me check if this works, or should I try another approach?").
+	// Short, direct questions aimed at the user are genuine handoffs.
+	if (/\?[\s*_`"'"]*\s*$/.test(trimmed)) {
+		const lastSentence = trimmed.split(/(?:[.!?:]|\n{2,})/).pop()?.trim() ?? "";
+		// Self-directed reasoning: long (>= 35 chars), contains hedging/
+		// conditional markers, and does not contain a direct user request.
+		if (
+			lastSentence.length >= 35 &&
+			/\b(?:check|verify|try|approach|think|consider|maybe|perhaps)/i.test(
+				lastSentence,
+			) &&
+			!/\b(?:what should|how can|i need your|please |tell me which|let me know|can you help|should i proceed|choose |confirm )/i.test(lastSentence)
+		) {
+			return false; // reasoning, not user handoff
+		}
+		// Not a rejected reasoning question — it's a bare trailing question,
+		// which is a genuine user handoff. Return true before checking for
+		// option lists (already matched above by the ?-at-end check).
+		return true;
+	}
 	const lastQuestion = trimmed.lastIndexOf("?");
 	if (lastQuestion >= 0) {
 		const trailingLines = trimmed

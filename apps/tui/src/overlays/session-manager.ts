@@ -1,9 +1,8 @@
 // ── Session browser overlay ──────────────────────────────────────────────────
-// List, search, rename, and switch sessions. Powered by SessionStore.
-// Not to be confused with agent-core's SessionManager, which manages an
-// internal JSONL crash-recovery journal, not this UI.
+// List, search, rename, and switch sessions. Powered by TuiSessionService,
+// backed by agent-core's Session/SessionManager JSONL tree.
 
-import type { SessionStore } from "@logician/coding-agent/sessions";
+import type { TuiSessionService } from "@logician/coding-agent/sessions";
 import { BOLD, type Component, RESET, visibleWidth } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 import {
@@ -23,8 +22,7 @@ const getRed = (): string => theme.fg("error", "");
 
 export interface SessionInfo {
 	id: string;
-	title: string;
-	name: string | null;
+	name: string;
 	preview: string;
 	lastUpdated: string;
 	messageCount: number;
@@ -44,7 +42,7 @@ export type SessionManagerAction =
 type InputMode = "list" | "rename" | "delete-confirm" | "new";
 
 export class SessionBrowserOverlay implements Component {
-	private store: SessionStore | null = null;
+	private store: TuiSessionService | null = null;
 	private sessions: SessionInfo[] = [];
 	private _selection = new SelectorController();
 	private visible = false;
@@ -57,7 +55,7 @@ export class SessionBrowserOverlay implements Component {
 	private actionCallback: ((action: SessionManagerAction) => void) | null =
 		null;
 
-	setStore(store: SessionStore): void {
+	setStore(store: TuiSessionService): void {
 		this.store = store;
 		this.refresh();
 	}
@@ -68,15 +66,7 @@ export class SessionBrowserOverlay implements Component {
 
 	refresh(): void {
 		if (this.store) {
-			const summaries = this.store.listSessions();
-			this.sessions = summaries.map(s => ({
-				id: s.id,
-				title: s.title,
-				name: s.name,
-				preview: s.preview,
-				lastUpdated: s.lastUpdated,
-				messageCount: s.messageCount,
-			}));
+			this.sessions = this.store.listSessions();
 		}
 		this._selection.set(0, this.sessions.length);
 		this.invalidate();
@@ -226,7 +216,7 @@ export class SessionBrowserOverlay implements Component {
 		const session = this.sessions[this._selection.index];
 		this.mode = "rename";
 		this.renameSessionId = session.id;
-		this.renameInput = session.title;
+		this.renameInput = session.name;
 		this.invalidate();
 	}
 
@@ -239,26 +229,14 @@ export class SessionBrowserOverlay implements Component {
 	private _applyFilter(): void {
 		this.filter = this.renameInput;
 		const query = this.renameInput.toLowerCase();
-		if (!query) {
-			this.sessions = this.store
-				? this.store.listSessions().map(s => ({
-						id: s.id,
-						title: s.title,
-						name: s.name,
-						preview: s.preview,
-						lastUpdated: s.lastUpdated,
-						messageCount: s.messageCount,
-					}))
-				: [];
-		} else {
-			const all = this.store ? this.store.listSessions() : [];
-			this.sessions = all.filter(
-				s =>
-					s.title.toLowerCase().includes(query) ||
-					(s.name ?? "").toLowerCase().includes(query) ||
-					s.preview.toLowerCase().includes(query),
-			);
-		}
+		const all = this.store ? this.store.listSessions() : [];
+		this.sessions = query
+			? all.filter(
+					s =>
+						s.name.toLowerCase().includes(query) ||
+						s.preview.toLowerCase().includes(query),
+				)
+			: all;
 		this._selection.set(0, this.sessions.length);
 	}
 
@@ -378,12 +356,10 @@ export class SessionBrowserOverlay implements Component {
 					12,
 					(s, i) => {
 						const isSelected = i === this._selection.index;
-						const label = s.name ? `${s.name}  (${s.title})` : s.title;
 						const item: ListItem = {
-							label,
+							label: s.name,
 							metadata: `${s.messageCount}msg`,
 							selected: isSelected,
-							dim: !!s.name,
 						};
 						return renderListItem(item, innerWidth);
 					},
@@ -412,7 +388,7 @@ export class SessionBrowserOverlay implements Component {
 
 			if (this.renameSessionId !== null) {
 				const title =
-					this.sessions.find(s => s.id === this.renameSessionId)?.title ||
+					this.sessions.find(s => s.id === this.renameSessionId)?.name ||
 					"Untitled";
 				const titleLine = `Rename: ${title}`;
 				const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
@@ -448,7 +424,7 @@ export class SessionBrowserOverlay implements Component {
 					: null;
 			const redFg = getRed();
 			lines.push(`${redFg}${"─".repeat(popupWidth)}${RESET}`);
-			const titleLine = `${BOLD}${redFg}Delete session?${RESET}${session ? `: ${session.title}` : ""}`;
+			const titleLine = `${BOLD}${redFg}Delete session?${RESET}${session ? `: ${session.name}` : ""}`;
 			const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
 			lines.push(`${redFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
 			lines.push(renderSeparator(popupWidth));

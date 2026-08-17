@@ -1,6 +1,7 @@
+export * from "./transcript.ts";
 export {
 	inferSessionTitle,
 	isGeneratedSessionTitle,
-	SessionStore,
-} from "./session-store.ts";
-export * from "./transcript.ts";
+	type TuiSessionSummary,
+	TuiSessionService,
+} from "./tui-session-service.ts";

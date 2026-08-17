@@ -852,6 +852,46 @@ void test("assistant chunks render as distinct semantic blocks", () => {
 	assert.match(output, /The minimal path delegates continuation/);
 });
 
+void test("a whitespace-only content chunk between two thinking chunks renders no RESPONSE header", () => {
+	const display = new TranscriptDisplay();
+	display.setThinkingMode("summary");
+	display.setTurns([
+		{
+			id: "whitespace-gap",
+			userMessage: { type: "user", content: "hello" },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: true,
+				chunks: [
+					{
+						seq: 0,
+						type: "thinking",
+						contentText: "The",
+						isComplete: true,
+					},
+					{
+						seq: 1,
+						type: "content",
+						contentText: "\n",
+						isComplete: true,
+					},
+					{
+						seq: 2,
+						type: "thinking",
+						contentText: "user is just saying hello again.",
+						isComplete: true,
+					},
+				],
+			},
+			isComplete: true,
+		},
+	]);
+	const output = plain(display.render(100).join("\n"));
+	assert.doesNotMatch(output, /RESPONSE/);
+	assert.match(output, /REASONING.*The/);
+	assert.match(output, /REASONING.*user is just saying hello again/);
+});
+
 void test("expanded reasoning renders fenced code as one labeled block", () => {
 	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
 	display.setTurns([

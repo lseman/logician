@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { LoopManager } from "../application/loop-manager.ts";
+import { LoopManager } from "../application/manager/loop-manager.ts";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 

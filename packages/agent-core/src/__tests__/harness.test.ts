@@ -458,6 +458,23 @@ void test("fork + discardBranch restores the parent conversation", async () => {
 	assert.ok(baseLen > 0);
 });
 
+void test("fork/branchSummary/discardBranch keep an attached session's leaf pointer in sync", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "logician-branch-session-"));
+	const session = new Session("branch-test", { baseDir: dir, enabled: true });
+
+	const harness = makeHarness(new FakeBackend([() => textResponse("base")]));
+	harness.attachSession(session);
+	await harness.prompt("q");
+	const rootLeaf = session.getLeafEntryId();
+	assert.ok(rootLeaf);
+
+	harness.fork();
+	assert.equal(harness.discardBranch(), true);
+	// discardBranch checks out the branch's recorded fork point, which was
+	// the session's leaf at the moment of fork() — i.e. back to rootLeaf.
+	assert.equal(session.getLeafEntryId(), rootLeaf);
+});
+
 void test("enabled session persists real turn messages without placeholders", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-session-"));
 	const harness = makeHarness(

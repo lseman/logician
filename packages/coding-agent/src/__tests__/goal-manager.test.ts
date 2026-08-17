@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { GoalManager } from "../application/goal-manager.ts";
+import { GoalManager } from "../application/manager/goal-manager.ts";
 
 void test("unmet goal remains active until its turn limit", () => {
 	const manager = new GoalManager();

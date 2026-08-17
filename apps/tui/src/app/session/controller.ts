@@ -7,9 +7,9 @@ import type { AgentCoreBridge } from "@logician/coding-agent/application";
 import {
 	inferSessionTitle,
 	isGeneratedSessionTitle,
-	type SessionStore,
 	type Transcript,
 	type Turn,
+	type TuiSessionService,
 } from "@logician/coding-agent/sessions";
 import type { SessionBrowserOverlay } from "../../overlays/session-manager.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
@@ -23,7 +23,7 @@ export interface SessionControllerCtx {
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
 	statusPanel: StatusBar;
-	sessionStore: SessionStore;
+	sessionService: TuiSessionService;
 	sessionManager: SessionBrowserOverlay;
 	currentSessionId: string | null;
 }
@@ -36,8 +36,11 @@ export interface SessionControllerCtx {
  */
 export function restoreSession(ctx: SessionControllerCtx, turns: Turn[]): void {
 	if (ctx.currentSessionId) {
-		ctx.sessionStore.setCurrentSessionId(ctx.currentSessionId);
-		ctx.bridge.useConversationSession(ctx.currentSessionId);
+		ctx.sessionService.setCurrentSession(ctx.currentSessionId);
+		ctx.bridge.useConversationSession(
+			ctx.currentSessionId,
+			ctx.sessionService.getRawSession(ctx.currentSessionId) ?? undefined,
+		);
 	}
 	ctx.transcript.loadTurns(turns);
 	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
@@ -50,11 +53,11 @@ export function autoSaveTurn(ctx: SessionControllerCtx): void {
 	const turns = ctx.transcript.getTurns();
 	const latestTurn = turns[turns.length - 1];
 	if (latestTurn?.isComplete) {
-		ctx.sessionStore.saveTurn(latestTurn);
+		ctx.sessionService.saveTurn(ctx.currentSessionId, latestTurn);
 		// Generated placeholders follow the first meaningful topic. Explicitly
 		// renamed sessions are never overwritten.
 		if (latestTurn.userMessage?.content) {
-			const current = ctx.sessionStore.getSession(ctx.currentSessionId);
+			const current = ctx.sessionService.getSession(ctx.currentSessionId);
 			const agentResponse =
 				latestTurn.assistantMessage?.chunks
 					.filter(chunk => chunk.type === "content" && chunk.contentText)
@@ -64,8 +67,8 @@ export function autoSaveTurn(ctx: SessionControllerCtx): void {
 				latestTurn.userMessage.content,
 				agentResponse,
 			);
-			if (current && inferred && isGeneratedSessionTitle(current.title)) {
-				ctx.sessionStore.renameSession(ctx.currentSessionId, inferred);
+			if (current && inferred && isGeneratedSessionTitle(current.name)) {
+				ctx.sessionService.renameSession(ctx.currentSessionId, inferred);
 				ctx.bridge.renameConversationSession(ctx.currentSessionId, inferred);
 				ctx.statusPanel.update({ sessionTitle: inferred });
 			}
@@ -89,18 +92,18 @@ export function handleSessionAction(
 
 		case "select": {
 			if (!action.sessionId) return;
-			const session = ctx.sessionStore.getSession(action.sessionId);
+			const session = ctx.sessionService.getSession(action.sessionId);
 			if (!session) return;
 
 			// Save current session
 			autoSaveTurn(ctx);
 
 			// Load new session turns into transcript + model context
-			const turns = ctx.sessionStore.loadTurns(action.sessionId);
+			const turns = ctx.sessionService.loadTurns(action.sessionId);
 			ctx.currentSessionId = action.sessionId;
 			restoreSession(ctx, turns);
 			ctx.statusPanel.update({
-				sessionTitle: session.title,
+				sessionTitle: session.name,
 				turnCount: turns.length,
 			});
 			ctx.tui.removeOverlay(ctx.sessionManager);
@@ -110,7 +113,7 @@ export function handleSessionAction(
 
 		case "rename":
 			if (!action.sessionId || !action.title) return;
-			ctx.sessionStore.renameSession(action.sessionId, action.title);
+			ctx.sessionService.renameSession(action.sessionId, action.title);
 			ctx.bridge.renameConversationSession(action.sessionId, action.title);
 			ctx.tui.removeOverlay(ctx.sessionManager);
 			ctx.tui.requestRender();
@@ -118,19 +121,17 @@ export function handleSessionAction(
 
 		case "delete":
 			if (!action.sessionId) return;
-			ctx.sessionStore.deleteSession(action.sessionId);
+			ctx.sessionService.deleteSession(action.sessionId);
 			if (ctx.currentSessionId === action.sessionId) {
 				// Switch to the next most recent session or create new
-				const remaining = ctx.sessionStore.listSessions();
+				const remaining = ctx.sessionService.listSessions();
 				if (remaining.length > 0) {
 					ctx.currentSessionId = remaining[0].id;
-					const turns = ctx.sessionStore.loadTurns(ctx.currentSessionId);
+					const turns = ctx.sessionService.loadTurns(ctx.currentSessionId);
 					restoreSession(ctx, turns);
-					ctx.statusPanel.update({ sessionTitle: remaining[0].title });
+					ctx.statusPanel.update({ sessionTitle: remaining[0].name });
 				} else {
-					ctx.currentSessionId = ctx.sessionStore.createSession({
-						title: "New Session",
-					});
+					ctx.currentSessionId = ctx.sessionService.createSession("New Session");
 					restoreSession(ctx, []);
 				}
 			}
@@ -140,9 +141,7 @@ export function handleSessionAction(
 
 		case "new":
 			autoSaveTurn(ctx);
-			ctx.currentSessionId = ctx.sessionStore.createSession({
-				title: "New Session",
-			});
+			ctx.currentSessionId = ctx.sessionService.createSession("New Session");
 			restoreSession(ctx, []);
 			ctx.statusPanel.update({ sessionTitle: "New Session" });
 			ctx.tui.removeOverlay(ctx.sessionManager);

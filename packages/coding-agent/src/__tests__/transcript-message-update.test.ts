@@ -186,6 +186,135 @@ void test("promoted textual tool calls replace their streamed markup", () => {
 	assert.equal(chunks.map(chunk => chunk.contentText ?? "").join(""), "");
 });
 
+void test("message_update applies streamed tool-call argument snapshots to the matching chunk", () => {
+	const transcript = new Transcript();
+	transcript.addTurn("read a file");
+	transcript.handleEvent({
+		type: "tool_call_start",
+		toolCallId: "call_1",
+		toolName: "read_file",
+		args: {},
+	});
+	transcript.handleEvent({
+		type: "message_update",
+		turnId: "turn_1",
+		message: {
+			role: "assistant",
+			content: "",
+			tool_calls: [
+				{ id: "call_1", name: "read_file", arguments: '{"path":"a.ts"}' },
+			],
+		},
+	});
+	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
+	const toolChunk = chunks.find(chunk => chunk.type === "tool");
+	assert.equal(toolChunk?.tool?.partialResult, '{"path":"a.ts"}');
+});
+
+void test("message_update does not overwrite a completed tool call's partialResult", () => {
+	const transcript = new Transcript();
+	transcript.addTurn("read a file");
+	transcript.handleEvent({
+		type: "tool_execution_start",
+		toolName: "read_file",
+		toolCallId: "call_1",
+		args: { path: "a.ts" },
+	});
+	transcript.handleEvent({
+		type: "tool_execution_end",
+		toolName: "read_file",
+		toolCallId: "call_1",
+		result: "contents",
+	});
+	transcript.handleEvent({
+		type: "message_update",
+		turnId: "turn_1",
+		message: {
+			role: "assistant",
+			content: "",
+			tool_calls: [
+				{ id: "call_1", name: "read_file", arguments: '{"path":"a.ts"}' },
+			],
+		},
+	});
+	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
+	const toolChunk = chunks.find(chunk => chunk.type === "tool");
+	assert.equal(toolChunk?.tool?.partialResult, undefined);
+	assert.equal(toolChunk?.isComplete, true);
+});
+
+void test("message_reasoning_update renders a coherent reasoning snapshot without duplicating streamed prefixes", () => {
+	const transcript = new Transcript();
+	transcript.addTurn("think about it");
+	transcript.handleEvent({ type: "thinking_token", token: "Let me " });
+	transcript.handleEvent({
+		type: "message_reasoning_update",
+		turnId: "turn_1",
+		reasoning: "Let me consider the options",
+	});
+	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
+	const thinkingText = chunks
+		.filter(chunk => chunk.type === "thinking")
+		.map(chunk => chunk.contentText ?? "")
+		.join("");
+	assert.equal(thinkingText, "Let me consider the options");
+});
+
+void test("message_reasoning_update replaces a divergent streamed prefix instead of dropping the update", () => {
+	const transcript = new Transcript();
+	transcript.addTurn("think about it");
+	// The raw delta stream and the snapshot channel can diverge (a provider
+	// revising its own reasoning phrasing mid-stream). The snapshot must win
+	// as a wholesale replacement rather than being silently dropped because it
+	// doesn't share the streamed prefix — losing reasoning text is worse than
+	// a non-incremental redraw.
+	transcript.handleEvent({ type: "thinking_token", token: "The" });
+	transcript.handleEvent({
+		type: "message_reasoning_update",
+		turnId: "turn_1",
+		reasoning: "user said \"hi\" - I should respond warmly.",
+	});
+	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
+	const thinkingChunks = chunks.filter(chunk => chunk.type === "thinking");
+	assert.equal(thinkingChunks.length, 1);
+	assert.equal(
+		thinkingChunks[0]?.contentText,
+		'user said "hi" - I should respond warmly.',
+	);
+});
+
+void test("message_reasoning_update only diffs against the latest contiguous thinking run", () => {
+	const transcript = new Transcript();
+	transcript.addTurn("investigate then answer");
+	// First provider call's reasoning segment, closed out by a tool call.
+	transcript.handleEvent({ type: "thinking_token", token: "Checking the file." });
+	transcript.handleEvent({
+		type: "tool_execution_start",
+		toolName: "read_file",
+		toolCallId: "call_1",
+		args: { path: "a.ts" },
+	});
+	transcript.handleEvent({
+		type: "tool_execution_end",
+		toolName: "read_file",
+		toolCallId: "call_1",
+		result: "contents",
+	});
+	// Second provider call starts its own reasoning from empty — must not be
+	// diffed against (or concatenated with) the first segment.
+	transcript.handleEvent({ type: "thinking_token", token: "Now " });
+	transcript.handleEvent({
+		type: "message_reasoning_update",
+		turnId: "turn_1",
+		reasoning: "Now I have enough context to answer.",
+	});
+	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
+	const thinkingChunks = chunks.filter(chunk => chunk.type === "thinking");
+	assert.equal(thinkingChunks.length, 2);
+	assert.equal(thinkingChunks[0]?.contentText, "Checking the file.");
+	assert.equal(thinkingChunks[1]?.contentText, "Now I have enough context to answer.");
+});
+
 void test("promoted tool calls preserve text and tool chronology across iterations", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("inspect and continue");

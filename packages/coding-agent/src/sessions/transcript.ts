@@ -4,6 +4,7 @@
 
 import type {
 	MessageUpdateEvent,
+	ReasoningUpdateEvent,
 	SubagentChunkEvent,
 	ToolCallStartEvent,
 	ToolCallUpdateEvent,
@@ -166,6 +167,9 @@ export class Transcript {
 				break;
 			case "message_update":
 				this.handleMessageUpdate(event);
+				break;
+			case "message_reasoning_update":
+				this.handleReasoningUpdate(event);
 				break;
 			case "notice":
 				this.handleNotice(event);
@@ -431,13 +435,103 @@ export class Transcript {
 			this.bumpTurnRevision(turn);
 			return;
 		}
+		if (full) {
+			// Streaming backends already delivered this prefix. Append only the
+			// missing suffix; non-streaming backends append the complete response.
+			if (full.startsWith(rendered)) {
+				const missing = full.slice(rendered.length);
+				if (missing) this.handleToken(missing);
+			}
+		}
+		this.applyToolCallSnapshot(turn, event.message.tool_calls);
+	}
+
+	/**
+	 * Apply the backend's coherent per-call argument accumulation to the
+	 * matching tool chunk, replacing handleToolCallUpdate's manual delta
+	 * accumulation the same way the content path above replaces handleToken —
+	 * set the streamed args string wholesale instead of appending deltas.
+	 * A tool call not yet represented as a chunk is left for handleToolStart
+	 * (fired separately once the call's name is authoritative).
+	 */
+	private applyToolCallSnapshot(
+		turn: Turn,
+		toolCalls: MessageUpdateEvent["message"]["tool_calls"],
+	): void {
+		if (!toolCalls?.length || !turn.assistantMessage) return;
+		let changed = false;
+		for (const call of toolCalls) {
+			const chunk = this.findToolChunk(
+				turn.assistantMessage.chunks,
+				call.id,
+				call.name,
+			);
+			if (!chunk?.tool || chunk.isComplete) continue;
+			if (call.arguments && chunk.tool.partialResult !== call.arguments) {
+				chunk.tool.partialResult = call.arguments;
+				changed = true;
+			}
+		}
+		if (changed) this.bumpTurnRevision(turn);
+	}
+
+	/**
+	 * Reconcile the backend's coherent mid-stream reasoning accumulation the
+	 * same way handleMessageUpdate reconciles content: the incoming value is
+	 * the full accumulation for the *current* provider call, not a delta.
+	 * Only the latest contiguous run of thinking chunks belongs to that call —
+	 * a turn can span several provider calls (e.g. before/after a tool round
+	 * trip), each starting its own reasoning from empty, so earlier thinking
+	 * chunks must never be included in the diff base. When the snapshot's
+	 * phrasing doesn't share the streamed prefix (a provider revising its own
+	 * output, or a retried call restarting mid-turn), replace the run wholesale
+	 * instead of silently dropping the update — losing reasoning text is worse
+	 * than an occasional non-incremental redraw.
+	 */
+	private handleReasoningUpdate(event: ReasoningUpdateEvent): void {
+		const full = event.reasoning;
 		if (!full) return;
-		// Streaming backends already delivered this prefix. Append only the
-		// missing suffix; non-streaming backends append the complete response.
+		const turn = this.getCurrentTurn();
+		if (!turn) return;
+		const message = this.ensureAssistant(turn);
+		let latestThinkingEnd = message.chunks.length;
+		while (
+			latestThinkingEnd > 0 &&
+			message.chunks[latestThinkingEnd - 1].type !== "thinking"
+		) {
+			latestThinkingEnd--;
+		}
+		let latestThinkingStart = latestThinkingEnd;
+		while (
+			latestThinkingStart > 0 &&
+			message.chunks[latestThinkingStart - 1].type === "thinking"
+		) {
+			latestThinkingStart--;
+		}
+		const rendered = message.chunks
+			.slice(latestThinkingStart, latestThinkingEnd)
+			.map(chunk => chunk.contentText ?? "")
+			.join("");
 		if (full.startsWith(rendered)) {
 			const missing = full.slice(rendered.length);
-			if (missing) this.handleToken(missing);
+			if (missing) this.handleThinkingToken(missing);
+			return;
 		}
+		if (latestThinkingStart < latestThinkingEnd) {
+			message.chunks.splice(
+				latestThinkingStart,
+				latestThinkingEnd - latestThinkingStart,
+			);
+		}
+		message.chunks.splice(latestThinkingStart, 0, {
+			seq: latestThinkingStart,
+			type: "thinking",
+			contentText: full,
+			isComplete: false,
+		});
+		message.chunks.forEach((chunk, index) => {
+			chunk.seq = index;
+		});
 		this.bumpTurnRevision(turn);
 	}
 

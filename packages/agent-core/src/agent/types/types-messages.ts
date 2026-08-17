@@ -246,6 +246,11 @@ export type AgentEventBody =
 			tokensAfter?: number;
 		}
 	| { type: "thinking_delta"; turnId?: string; delta: string }
+	// The backend's coherent mid-stream reasoning accumulation — a snapshot,
+	// not a delta, fired alongside message_update. Reasoning is never part of
+	// the persisted Message (providers don't echo it back in history), so it
+	// travels as its own event instead of a Message field.
+	| { type: "message_reasoning_update"; turnId: string; reasoning: string }
 	| {
 			type: "tool_call_start";
 			toolName: string;

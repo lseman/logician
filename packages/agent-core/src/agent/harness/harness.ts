@@ -41,11 +41,6 @@ import {
 	ContinuationTracker,
 	type RunBudgetStatus,
 } from "../core/continuation-tracker.ts";
-import {
-	beginFileFrame,
-	clearFileFrames,
-	restoreFileFrame,
-} from "../core/file-checkpoints.ts";
 import { HarnessInterventionController } from "../core/intervention-controller.ts";
 import {
 	createUserMessage,
@@ -74,14 +69,9 @@ import type {
 	QueueMode,
 	Tool,
 } from "../types/index.ts";
-import {
-	type Branch,
-	forkBranch,
-	listBranches as listBranchesHelper,
-	renderBranchTree,
-	summarizeAndMergeBranch,
-} from "./branching.ts";
+import { summarizeAndMergeBranch } from "./branching.ts";
 import { runCompaction, shouldAutoCompact } from "./compaction.ts";
+import { ConversationState } from "./conversation-state.ts";
 import type {
 	AbortResult,
 	AgentHarnessOptions,
@@ -113,15 +103,7 @@ export type {
 } from "./contracts.ts";
 export { HarnessBusyError } from "./phase.ts";
 
-// Conversation checkpoints: a snapshot of history is pushed before each
-// prompt so a bad turn can be rewound. Bounded ring (newest last).
-const MAX_CHECKPOINTS = 20;
-
 type TurnRequest = { kind: "prompt"; text: string } | { kind: "continue" };
-
-interface PreparedTurn {
-	snapshot: HarnessTurnSnapshot;
-}
 
 export class AgentHarness {
 	private config: AgentConfig;
@@ -134,10 +116,7 @@ export class AgentHarness {
 	private idleTools: ToolRegistry;
 	private abortController: AbortController | null = null;
 	private loopConfig: AgentConfig | null = null;
-	private history: Message[] = [];
-	private branches: Branch[] = [];
-	private branchSeq = 0;
-	private checkpoints: Message[][] = [];
+	private conversation = new ConversationState();
 	private msgManager: MessageDeliveryManager;
 	private loopDetector: LoopDetector;
 	// Escalation/cooldown state for the built-in safeguard hooks. Owned here
@@ -156,12 +135,6 @@ export class AgentHarness {
 		nextTurnCount: number,
 		reason: "steering_interrupt" | "normal",
 	) => void;
-	private onSavePoint?: () => void;
-	private onCompaction?: (
-		reason: "auto" | "manual",
-		tokensBefore: number,
-		tokensAfter: number,
-	) => void;
 	private autoCompactionSettings: CompactionSettings = {
 		enabled: false,
 		reserveTokens: 16_384,
@@ -171,7 +144,6 @@ export class AgentHarness {
 
 	// ── Output Guard ─────────────────────────────────────────────────────
 	private outputGuard: OutputGuard;
-	private _streamOptions: AgentHarnessStreamOptions = {};
 	private _hooksEnabled: boolean;
 	private _session?: Session;
 	private _sessionBaseDir?: string;
@@ -201,14 +173,13 @@ export class AgentHarness {
 		throwOnValidationErrors(errors);
 
 		this.config = options.config;
-		this._streamOptions = {
+		this.config.streamOptions = {
 			...options.config.streamOptions,
 			...(options.config.streamOptions?.timeoutMs === undefined &&
 			options.config.turnTimeoutMs !== undefined
 				? { timeoutMs: options.config.turnTimeoutMs }
 				: {}),
 		};
-		this.config.streamOptions = this._streamOptions;
 		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
 		this.backend = options.backend;
 		this.cwd = options.cwd;
@@ -232,10 +203,6 @@ export class AgentHarness {
 			maxConsecutiveCompactions: 3,
 			onEvent: event => {
 				this.emitToSubscribers(event);
-			},
-			onCompact: async () => {
-				const result = await this.compact();
-				return result ?? null;
 			},
 		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
@@ -315,10 +282,6 @@ export class AgentHarness {
 		this.onSettled = cb;
 	}
 
-	setOnSavePoint(cb: () => void): void {
-		this.onSavePoint = cb;
-	}
-
 	subscribe(handler: EventHandler): () => void {
 		this._subscribers.add(handler);
 		return () => this._subscribers.delete(handler);
@@ -347,39 +310,11 @@ export class AgentHarness {
 	// ── Stream options management ──────────────────────────────────────────
 
 	getStreamOptions(): AgentHarnessStreamOptions {
-		return { ...this._streamOptions };
+		return { ...this.config.streamOptions };
 	}
 
 	setStreamOptions(options: Partial<AgentHarnessStreamOptions>): void {
-		this._streamOptions = { ...this._streamOptions, ...options };
-		this.config.streamOptions = this._streamOptions;
-	}
-
-	getTimeoutMs(): number | undefined {
-		return this._streamOptions.timeoutMs;
-	}
-
-	setTimeoutMs(ms: number | undefined): void {
-		this._streamOptions = { ...this._streamOptions, timeoutMs: ms };
-		this.config.streamOptions = this._streamOptions;
-	}
-
-	getMaxRetries(): number | undefined {
-		return this._streamOptions.maxRetries;
-	}
-
-	setMaxRetries(count: number | undefined): void {
-		this._streamOptions = { ...this._streamOptions, maxRetries: count };
-		this.config.streamOptions = this._streamOptions;
-	}
-
-	getCacheRetention(): string | undefined {
-		return this._streamOptions.cacheRetention;
-	}
-
-	setCacheRetention(retention: string | undefined): void {
-		this._streamOptions = { ...this._streamOptions, cacheRetention: retention };
-		this.config.streamOptions = this._streamOptions;
+		this.config.streamOptions = { ...this.config.streamOptions, ...options };
 	}
 
 	private transition(to: HarnessPhase, op: string): void {
@@ -407,7 +342,7 @@ export class AgentHarness {
 		assertIdlePhase(this._phase, op);
 	}
 
-	private settleTurn(): void {
+	private endTurn(): void {
 		this.abortController = null;
 		this.msgManager.queue.clearCurrentTurn();
 		this.emitQueueChange();
@@ -448,7 +383,7 @@ export class AgentHarness {
 	 */
 	async continue(): Promise<Message[]> {
 		this.assertIdle("continue");
-		const nonSystem = this.history.filter(
+		const nonSystem = this.conversation.history.filter(
 			(m): m is Message => m != null && m.role !== "system",
 		);
 		if (nonSystem.length === 0) {
@@ -473,7 +408,7 @@ export class AgentHarness {
 		if (guidance.length === 0) {
 			throw new Error("Cannot continue: no next-turn guidance queued");
 		}
-		this.history = [...this.history, ...guidance];
+		this.conversation.append(guidance);
 		this.emitQueueChange();
 		return this.continue();
 	}
@@ -494,21 +429,26 @@ export class AgentHarness {
 
 		return this.runInPhase("turn", request.kind, async () => {
 			try {
-				const signal = await this.preflight(request);
-				const turn = await this.prepareTurn(request, signal);
-				return await this.executeTurn(request, turn);
+				const signal = await this.beginTurn(request);
+				const snapshot = await this.createSnapshot(request, signal);
+				let compactedContext: Message[] | undefined;
+				const newMessages = await this.runLoop(request, snapshot, messages => {
+					compactedContext = messages;
+				});
+				return this.commitResult(snapshot, newMessages, compactedContext);
 			} finally {
-				this.settleTurn();
+				this.endTurn();
 			}
 		});
 	}
 
-	/** Task setup that must happen before a turn is prepared. */
-	private async preflight(request: TurnRequest): Promise<AbortSignal> {
+	/** Task/checkpoint setup that must happen before a snapshot is created. */
+	private async beginTurn(request: TurnRequest): Promise<AbortSignal> {
 		if (request.kind === "prompt") {
 			this.continuationTracker.startTask();
 		}
 		this.abortController = new AbortController();
+		this.conversation.checkpoint();
 
 		if (!this._hasStartedSession) {
 			await this.emitSessionStart("startup");
@@ -516,36 +456,16 @@ export class AgentHarness {
 		return this.abortController.signal;
 	}
 
-	/** Snapshot the turn's context before execution. */
-	private async prepareTurn(
+	/** Run the loop against the prepared snapshot. */
+	private async runLoop(
 		request: TurnRequest,
-		signal: AbortSignal,
-	): Promise<PreparedTurn> {
-		this.checkpoints.push([...this.history]);
-		if (this.checkpoints.length > MAX_CHECKPOINTS) {
-			this.checkpoints.shift();
-		}
-		beginFileFrame();
-
-		const snapshot =
-			request.kind === "prompt"
-				? await this.createTurnSnapshot(request.text, signal)
-				: await this.createContinueSnapshot(signal);
-
-		return { snapshot };
-	}
-
-	/** Run the loop against the prepared snapshot and fold the result into history. */
-	private async executeTurn(
-		request: TurnRequest,
-		turn: PreparedTurn,
+		snapshot: HarnessTurnSnapshot,
+		onContextCompacted: (messages: Message[]) => void,
 	): Promise<Message[]> {
-		const { snapshot } = turn;
 		this.loopConfig = snapshot.config;
-		let compactedContext: Message[] | undefined;
 		const prompts =
 			request.kind === "prompt" ? [createUserMessage(snapshot.promptText)] : [];
-		const newMessages = await runAgentLoop(
+		return runAgentLoop(
 			{
 				systemPrompt: snapshot.config.systemPrompt,
 				messages: snapshot.initialMessages,
@@ -564,7 +484,7 @@ export class AgentHarness {
 				refreshNextTurnConfig: () =>
 					this.withExtensionRuntime(this.snapshotConfig()),
 				onContextCompacted: messages => {
-					compactedContext = messages;
+					onContextCompacted(messages);
 					this.persistCompactedContext(messages, this.estimatePayloadTokens());
 				},
 			} satisfies RunAgentLoopConfig,
@@ -572,6 +492,14 @@ export class AgentHarness {
 				await this.handleAgentEvent(event);
 			},
 		);
+	}
+
+	/** Fold the loop's result into history, preferring in-loop compacted context. */
+	private commitResult(
+		snapshot: HarnessTurnSnapshot,
+		newMessages: Message[],
+		compactedContext?: Message[],
+	): Message[] {
 		const result = compactedContext ?? [
 			{
 				role: "system" as const,
@@ -583,64 +511,59 @@ export class AgentHarness {
 			),
 			...newMessages,
 		];
-		this.history = result;
+		this.conversation.history = result;
 		return result;
 	}
 
-	private async createContinueSnapshot(
+	/**
+	 * Snapshot the turn's context. `prompt` and `continue` differ only in
+	 * whether a new user message is threaded in: a prompt injects plugin/
+	 * extension before-agent-start messages and drains queued next-turn
+	 * guidance; continue just wraps current history as-is.
+	 */
+	private async createSnapshot(
+		request: TurnRequest,
 		signal: AbortSignal,
 	): Promise<HarnessTurnSnapshot> {
-		const config = this.forwardQueueEvents(
-			this.withExtensionRuntime(this.snapshotConfig()),
-		);
-		const streamOptions = { ...this._streamOptions };
-		config.streamOptions = streamOptions;
-		return {
-			promptText: "",
-			initialMessages: [...this.history],
-			config,
-			streamOptions,
-			signal,
-		};
-	}
+		let initialMessages: Message[] = [...this.conversation.history];
+		let systemPrompt: string | undefined;
+		let pluginHookLayer: ClaudeCodeHookLayer | undefined;
 
-	private async createTurnSnapshot(
-		promptText: string,
-		signal: AbortSignal,
-	): Promise<HarnessTurnSnapshot> {
-		const pluginHookLayer = this.createClaudeCodeHookLayer();
-		const pluginPromptMessages =
-			await pluginHookLayer.userPromptMessages(promptText);
-		const extensionBeforeStart =
-			await this.runExtensionBeforeAgentStart(promptText);
-		const beforeStart = await this._beforeAgentStart?.(promptText);
+		if (request.kind === "prompt") {
+			pluginHookLayer = this.createClaudeCodeHookLayer();
+			const pluginPromptMessages = await pluginHookLayer.userPromptMessages(
+				request.text,
+			);
+			const extensionBeforeStart = await this.runExtensionBeforeAgentStart(
+				request.text,
+			);
+			const beforeStart = await this._beforeAgentStart?.(request.text);
 
-		let initialMessages: Message[] = [...this.history];
+			const injectedMessages = [
+				...pluginPromptMessages,
+				...(extensionBeforeStart?.messages ?? []),
+				...(beforeStart?.messages ?? []),
+			];
+			if (injectedMessages.length) {
+				// These messages were produced for this prompt, so keep them at the
+				// current turn boundary. Prepending them to the complete history made
+				// each new hook message appear before every older conversation turn.
+				initialMessages = [...initialMessages, ...injectedMessages];
+			}
 
-		const injectedMessages = [
-			...pluginPromptMessages,
-			...(extensionBeforeStart?.messages ?? []),
-			...(beforeStart?.messages ?? []),
-		];
-		if (injectedMessages.length) {
-			// These messages were produced for this prompt, so keep them at the
-			// current turn boundary. Prepending them to the complete history made
-			// each new hook message appear before every older conversation turn.
-			initialMessages = [...initialMessages, ...injectedMessages];
+			// nextTurn guidance belongs to the next user-initiated prompt. Consume it
+			// exactly once here, never from an iteration of the currently active run.
+			const nextTurnMessages = this.msgManager.queue
+				.dequeueNextTurn()
+				.map(message => createUserMessage(message.content));
+			if (nextTurnMessages.length > 0) {
+				initialMessages = [...initialMessages, ...nextTurnMessages];
+				this.emitQueueChange();
+			}
+
+			systemPrompt = beforeStart?.systemPrompt ?? extensionBeforeStart?.systemPrompt;
 		}
 
-		// nextTurn guidance belongs to the next user-initiated prompt. Consume it
-		// exactly once here, never from an iteration of the currently active run.
-		const nextTurnMessages = this.msgManager.queue
-			.dequeueNextTurn()
-			.map(message => createUserMessage(message.content));
-		if (nextTurnMessages.length > 0) {
-			initialMessages = [...initialMessages, ...nextTurnMessages];
-			this.emitQueueChange();
-		}
-
-		const systemPrompt =
-			beforeStart?.systemPrompt ?? extensionBeforeStart?.systemPrompt;
 		const baseConfig = {
 			...this.snapshotConfig(),
 			...(systemPrompt ? { systemPrompt } : {}),
@@ -648,14 +571,12 @@ export class AgentHarness {
 		const config = this.forwardQueueEvents(
 			this.withExtensionRuntime(baseConfig, pluginHookLayer),
 		);
-		const streamOptions = { ...this._streamOptions };
-		config.streamOptions = streamOptions;
 
 		return {
-			promptText,
+			promptText: request.kind === "prompt" ? request.text : "",
 			initialMessages,
 			config,
-			streamOptions,
+			streamOptions: config.streamOptions ?? {},
 			signal,
 		};
 	}
@@ -682,7 +603,7 @@ export class AgentHarness {
 			cwd: this.cwd || "",
 			prompt: promptText,
 			systemPrompt: this.config.systemPrompt ?? "",
-			messages: [...this.history],
+			messages: [...this.conversation.history],
 		};
 
 		let nativeMessages: Message[] | undefined;
@@ -855,7 +776,6 @@ export class AgentHarness {
 		// extension delivery must not hold streaming deltas behind an await.
 		this.loopConfig?.onEvent?.(event);
 		if (event.type === "message_end" && event.message) {
-			this.loopConfig?.onEvent?.(event);
 			this.persistTurnMessages([event.message]);
 		}
 		await this.emitExtensionAgentEvent(event);
@@ -1162,16 +1082,6 @@ export class AgentHarness {
 		this.autoCompactionSettings.enabled = enabled;
 	}
 
-	setOnCompaction(
-		cb: (
-			reason: "auto" | "manual",
-			tokensBefore: number,
-			tokensAfter: number,
-		) => void,
-	): void {
-		this.onCompaction = cb;
-	}
-
 	// ── Session & history ──────────────────────────────────────────────────
 
 	async enableSession(baseDir?: string): Promise<void> {
@@ -1182,16 +1092,27 @@ export class AgentHarness {
 		await this.emitSessionStart("startup");
 	}
 
+	/**
+	 * Attach an already-constructed Session (e.g. one a caller's own session
+	 * manager already owns) as this harness's durable branch/compaction/model
+	 * journal, instead of minting a new one via enableSession/resumeSession.
+	 * Conversation history itself is not touched — the caller is responsible
+	 * for loading it (their Session may hold a different persisted shape than
+	 * plain Message[], as the TUI's Turn-based sessions do).
+	 */
+	attachSession(session: Session): void {
+		this._session = session;
+		this._sessionId = session.getMeta().id;
+	}
+
 	async resumeSession(sessionId: string, baseDir?: string): Promise<boolean> {
 		const sessionBaseDir = baseDir ?? this._sessionBaseDir;
 		const resumed = loadSessionMessages(sessionId, sessionBaseDir);
 		if (!resumed) return false;
 
 		if (resumed.messages.length > 0) {
-			this.setActiveHistory(
-				resumed.messages.filter(
-					(m): m is Message => m != null && m.role !== "system",
-				),
+			this.conversation.history = resumed.messages.filter(
+				(m): m is Message => m != null && m.role !== "system",
 			);
 		}
 		this._sessionBaseDir = sessionBaseDir;
@@ -1214,15 +1135,12 @@ export class AgentHarness {
 	}
 
 	get messages(): Message[] {
-		return this.history;
+		return this.conversation.history;
 	}
 
 	clearHistory(): void {
 		this.emitSessionEnd("reset").catch(() => {});
-		this.branches = [];
-		this.checkpoints = [];
-		clearFileFrames();
-		this.setActiveHistory([]);
+		this.conversation.clear();
 		this.emitSessionStart("clear").catch(() => {});
 		this._hasStartedSession = false;
 	}
@@ -1230,12 +1148,7 @@ export class AgentHarness {
 	setHistory(messages: Message[]): void {
 		this.assertIdle("setHistory");
 		this.emitSessionEnd("switch").catch(() => {});
-		this.branches = [];
-		this.checkpoints = [];
-		clearFileFrames();
-		this.setActiveHistory(
-			messages.filter((m): m is Message => m != null && m.role !== "system"),
-		);
+		this.conversation.replace(messages);
 		this.emitSessionStart("resume").catch(() => {});
 		this._hasStartedSession = false;
 	}
@@ -1247,22 +1160,13 @@ export class AgentHarness {
 	 */
 	appendMessages(messages: Message[]): void {
 		this.assertIdle("appendMessages");
-		const toAdd = messages.filter(
-			(m): m is Message => m != null && m.role !== "system",
-		);
-		if (!toAdd.length) return;
-		this.history = [...this.history, ...toAdd];
-		this.persistTurnMessages(toAdd);
+		const toAdd = this.conversation.append(messages);
+		if (toAdd.length) this.persistTurnMessages(toAdd);
 	}
 
 	rewind(): { messages: number; filesRestored: number } | null {
 		this.assertIdle("rewind");
-		const snapshot = this.checkpoints.pop();
-		if (!snapshot) return null;
-		this.branches = [];
-		this.setActiveHistory(snapshot);
-		const filesRestored = restoreFileFrame() ?? 0;
-		return { messages: snapshot.length, filesRestored };
+		return this.conversation.rewind();
 	}
 
 	// ── Branching ──────────────────────────────────────────────────────────
@@ -1275,18 +1179,7 @@ export class AgentHarness {
 	 */
 	fork(customSummary?: BranchSummaryData): string {
 		this.assertIdle("fork");
-		const current = this.activeHistory();
-		const { branch, nextBranchSeq } = forkBranch(
-			this.branches,
-			this.branchSeq,
-			current,
-			customSummary,
-			this._session?.getLeafEntryId(),
-		);
-		this.branchSeq = nextBranchSeq;
-		this.branches.push(branch);
-		this.setActiveHistory([...current]);
-		return branch.id;
+		return this.conversation.fork(customSummary, this._session?.getLeafEntryId());
 	}
 
 	/**
@@ -1300,15 +1193,15 @@ export class AgentHarness {
 		customInstructions?: string;
 	}): Promise<string | null> {
 		this.assertIdle("branchSummary");
-		const branch = this.branches.at(-1);
+		const branch = this.conversation.activeBranch();
 		if (!branch) return null;
 
-		const current = this.activeHistory();
+		const current = this.conversation.history;
 		const diverged = current.slice(branch.forkedAt);
 		if (!diverged.length) {
-			this.branches.pop();
+			this.conversation.popBranch();
 			this._session?.checkout(branch.sessionLeafId);
-			this.setActiveHistory(branch.parent);
+			this.conversation.history = branch.parent;
 			return null;
 		}
 
@@ -1324,14 +1217,14 @@ export class AgentHarness {
 					thinkingLevel: this.config.thinkingLevel,
 				},
 			);
-			this.branches.pop();
+			this.conversation.popBranch();
 			this._session?.checkout(branch.sessionLeafId);
 			if (outcome.summaryText)
 				this._session?.appendBranchSummary(
 					outcome.summaryText,
 					branch.sessionLeafId,
 				);
-			this.setActiveHistory(outcome.history);
+			this.conversation.history = outcome.history;
 			return outcome.summaryText;
 		});
 	}
@@ -1341,10 +1234,9 @@ export class AgentHarness {
 	 */
 	discardBranch(): boolean {
 		this.assertIdle("discardBranch");
-		const branch = this.branches.pop();
+		const branch = this.conversation.discardBranch();
 		if (!branch) return false;
 		this._session?.checkout(branch.sessionLeafId);
-		this.setActiveHistory(branch.parent);
 		return true;
 	}
 
@@ -1353,22 +1245,14 @@ export class AgentHarness {
 	 * Shows parent/child relationships with depth indicators.
 	 */
 	branchTree(): string {
-		return renderBranchTree(this.branches);
+		return this.conversation.branchTree();
 	}
 
 	listBranches(): BranchInfo[] {
-		return listBranchesHelper(this.branches);
+		return this.conversation.listBranches();
 	}
 
 	// ── Conversation management ────────────────────────────────────────────
-
-	private activeHistory(): Message[] {
-		return this.history;
-	}
-
-	private setActiveHistory(messages: Message[]): void {
-		this.history = messages;
-	}
 
 	private persistCompactedContext(
 		messages: Message[],
@@ -1391,182 +1275,120 @@ export class AgentHarness {
 
 	async compact(): Promise<number | null> {
 		this.assertIdle("compact");
-		const messages = this.history;
-		if (!messages.length) return null;
-		const before = this.estimatePayloadTokens();
-
-		return this.runInPhase("compaction", "compact", async () => {
-			this.emitToSubscribers({ type: "compaction", reason: "manual" });
-			await this._extensionRunner?.emit({
-				type: "session_before_compact",
-				context: {
-					sessionId: this._sessionId || "",
-					cwd: this.cwd || "",
-					reason: "manual",
-					tokensBefore: before,
-					messages: [...messages],
-				},
-			});
-			const preResult = await this.emitPreCompact({
-				messages,
-				tokensBefore: before,
-				reason: "manual",
-			});
-			if (preResult?.cancel) {
-				this.emitToSubscribers({
-					type: "compaction",
-					reason: "manual",
-					tokensBefore: before,
-					tokensAfter: before,
-				});
-				return 0;
-			}
-
-			const result = await runCompaction(this.backend, messages, before, {
-				reason: "manual",
-				presetSummary: preResult?.summary,
-				temperature: this.config.temperature,
-				maxTokens: this.config.maxTokens,
-				thinkingLevel: this.config.thinkingLevel,
-			});
-
-			if (
-				this.history !== messages ||
-				!result.changed ||
-				result.tokensAfter >= before
-			) {
-				await this.emitPostCompact();
-				this.emitToSubscribers({
-					type: "compaction",
-					reason: "manual",
-					tokensBefore: before,
-					tokensAfter: before,
-				});
-				return 0;
-			}
-			this.history = result.messages;
-			const after = result.tokensAfter;
-			this.persistCompactedContext(result.messages, before);
-			this.continuationTracker.recordCompaction();
-			this.onCompaction?.("manual", before, after);
-			await this.emitPostCompact();
-			await this._extensionRunner?.emit({
-				type: "session_compact",
-				context: {
-					sessionId: this._sessionId || "",
-					cwd: this.cwd || "",
-					reason: "manual",
-					tokensBefore: before,
-					tokensAfter: after,
-					changed: true,
-					messages: [...result.messages],
-				},
-			});
-			this.emitToSubscribers({
-				type: "compaction",
-				reason: "manual",
-				tokensBefore: before,
-				tokensAfter: after,
-			});
-			return before - after;
-		});
+		if (!this.conversation.history.length) return null;
+		return this.runInPhase("compaction", "compact", () =>
+			this.performCompaction("manual", /* force */ true),
+		);
 	}
 
 	private async runAutoCompaction(reason: "auto" | "manual"): Promise<boolean> {
-		const messages = this.history;
+		const messages = this.conversation.history;
 		if (!messages.length || !this.autoCompactionSettings.enabled) return false;
+		return this.runInPhase("compaction", "autoCompact", () =>
+			this.performCompaction(reason, /* force */ false).then(saved => saved !== 0),
+		);
+	}
 
-		return this.runInPhase("compaction", "autoCompact", async () => {
-			this.emitToSubscribers({ type: "compaction", reason });
+	/**
+	 * Shared compaction transaction used by both the manual `compact()` API
+	 * and threshold-triggered auto-compaction. `force` skips the
+	 * `shouldCompact` threshold check (manual compaction always attempts it);
+	 * both paths otherwise run the identical pre-compact/run/commit/post-compact
+	 * sequence. Returns tokens saved (0 if nothing changed).
+	 */
+	private async performCompaction(
+		reason: "auto" | "manual",
+		force: boolean,
+	): Promise<number> {
+		const messages = this.conversation.history;
+		this.emitToSubscribers({ type: "compaction", reason });
 
-			if (!this.shouldCompact(messages)) {
-				await this.emitPostCompact();
-				this.emitToSubscribers({
-					type: "compaction",
-					reason,
-					tokensBefore: this.estimateContextTokens(),
-					tokensAfter: this.estimateContextTokens(),
-				});
-				return false;
-			}
-
-			const before = this.estimateContextTokens();
-			const preResult = await this.emitPreCompact({
-				messages,
-				tokensBefore: before,
-				reason,
-			});
-			if (preResult?.cancel) {
-				await this.emitPostCompact();
-				this.emitToSubscribers({
-					type: "compaction",
-					reason,
-					tokensBefore: before,
-					tokensAfter: before,
-				});
-				return false;
-			}
-
-			await this._extensionRunner?.emit({
-				type: "session_before_compact",
-				context: {
-					sessionId: this._sessionId || "",
-					cwd: this.cwd || "",
-					reason,
-					tokensBefore: before,
-					messages: [...messages],
-				},
-			});
-
-			const result = await runCompaction(this.backend, messages, before, {
-				reason,
-				presetSummary: preResult?.summary,
-				temperature: this.config.temperature,
-				maxTokens: this.config.maxTokens,
-				thinkingLevel: this.config.thinkingLevel,
-			});
-
-			if (
-				this.history !== messages ||
-				!result.changed ||
-				result.tokensAfter >= before
-			) {
-				await this.emitPostCompact();
-				this.emitToSubscribers({
-					type: "compaction",
-					reason,
-					tokensBefore: before,
-					tokensAfter: before,
-				});
-				return false;
-			}
-
-			this.history = result.messages;
-			const after = this.estimatePayloadTokens();
-			this.persistCompactedContext(result.messages, before);
-			this.continuationTracker.recordCompaction();
-			this.onCompaction?.(reason, before, after);
+		if (!force && !this.shouldCompact(messages)) {
 			await this.emitPostCompact();
-			await this._extensionRunner?.emit({
-				type: "session_compact",
-				context: {
-					sessionId: this._sessionId || "",
-					cwd: this.cwd || "",
-					reason,
-					tokensBefore: before,
-					tokensAfter: after,
-					changed: true,
-					messages: [...result.messages],
-				},
+			this.emitToSubscribers({
+				type: "compaction",
+				reason,
+				tokensBefore: this.estimatePayloadTokens(),
+				tokensAfter: this.estimatePayloadTokens(),
 			});
+			return 0;
+		}
+
+		const before = this.estimatePayloadTokens();
+		const preResult = await this.emitPreCompact({
+			messages,
+			tokensBefore: before,
+			reason,
+		});
+		if (preResult?.cancel) {
+			await this.emitPostCompact();
 			this.emitToSubscribers({
 				type: "compaction",
 				reason,
 				tokensBefore: before,
-				tokensAfter: after,
+				tokensAfter: before,
 			});
-			return true;
+			return 0;
+		}
+
+		await this._extensionRunner?.emit({
+			type: "session_before_compact",
+			context: {
+				sessionId: this._sessionId || "",
+				cwd: this.cwd || "",
+				reason,
+				tokensBefore: before,
+				messages: [...messages],
+			},
 		});
+
+		const result = await runCompaction(this.backend, messages, before, {
+			reason,
+			presetSummary: preResult?.summary,
+			temperature: this.config.temperature,
+			maxTokens: this.config.maxTokens,
+			thinkingLevel: this.config.thinkingLevel,
+		});
+
+		if (
+			this.conversation.history !== messages ||
+			!result.changed ||
+			result.tokensAfter >= before
+		) {
+			await this.emitPostCompact();
+			this.emitToSubscribers({
+				type: "compaction",
+				reason,
+				tokensBefore: before,
+				tokensAfter: before,
+			});
+			return 0;
+		}
+
+		this.conversation.history = result.messages;
+		const after = result.tokensAfter;
+		this.persistCompactedContext(result.messages, before);
+		this.continuationTracker.recordCompaction();
+		await this.emitPostCompact();
+		await this._extensionRunner?.emit({
+			type: "session_compact",
+			context: {
+				sessionId: this._sessionId || "",
+				cwd: this.cwd || "",
+				reason,
+				tokensBefore: before,
+				tokensAfter: after,
+				changed: true,
+				messages: [...result.messages],
+			},
+		});
+		this.emitToSubscribers({
+			type: "compaction",
+			reason,
+			tokensBefore: before,
+			tokensAfter: after,
+		});
+		return before - after;
 	}
 
 	// ── Tool registry ──────────────────────────────────────────────────────
@@ -1730,17 +1552,12 @@ export class AgentHarness {
 		);
 	}
 
-	private estimateContextTokens(): number {
-		return this.estimatePayloadTokens();
-	}
-
 	private shouldCompact(messages: Message[]): boolean {
 		return shouldAutoCompact(this.autoCompactionSettings, messages);
 	}
 
 	private forwardQueueEvents(config: AgentConfig): AgentConfig {
 		return withQueueEventForwarding(config, {
-			onSavePoint: this.onSavePoint,
 			subscribers: this._subscribers,
 		});
 	}
