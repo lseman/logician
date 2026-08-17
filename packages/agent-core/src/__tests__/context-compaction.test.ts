@@ -5,8 +5,8 @@ import {
 	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
-} from "../agent/messages.ts";
-import type { CompactableMessage } from "../agent/types.ts";
+} from "../agent/core/messages.ts";
+import type { CompactableMessage } from "../agent/types/index.ts";
 import { compactToFit } from "../compaction/compaction.ts";
 import { serializeConversation } from "../compaction/utils.ts";
 

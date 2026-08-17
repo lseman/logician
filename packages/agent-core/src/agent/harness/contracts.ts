@@ -1,10 +1,10 @@
 import type { ExtensionRunner } from "../../extensions/index.ts";
-import type { LLMBackend } from "../backend.ts";
+import type { LLMBackend } from "../core/backend.ts";
 import type {
 	AgentConfig,
 	AgentHarnessStreamOptions,
 	Message,
-} from "../types.ts";
+} from "../types/index.ts";
 
 export interface AgentHarnessOptions {
 	config: AgentConfig;

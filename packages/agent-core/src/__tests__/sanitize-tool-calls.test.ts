@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { sanitizeToolCallArguments } from "../agent/messages.ts";
+import { sanitizeToolCallArguments } from "../agent/core/messages.ts";
 
 void test("sanitizeToolCallArguments leaves valid JSON untouched", () => {
 	const calls = [{ id: "a", name: "read_file", arguments: '{"path":"x"}' }];

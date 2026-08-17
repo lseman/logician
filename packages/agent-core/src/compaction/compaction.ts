@@ -13,7 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { DEFAULT_TRUNCATION } from "../agent/types/types-truncation.ts";
-import type { AgentMessage, CompactableMessage } from "../agent/types.ts";
+import type { AgentMessage, CompactableMessage } from "../agent/types/index.ts";
 import { serializeConversation } from "./utils";
 
 // ============================================================================

@@ -189,7 +189,7 @@ export interface ToolContext {
 // ── Event types ───────────────────────────────────────────────────────────
 
 import type { AgentConfig } from "./types-config.ts";
-import type { HarnessIntervention } from "../intervention-controller.ts";
+import type { HarnessIntervention } from "../core/intervention-controller.ts";
 
 /**
  * Envelope metadata stamped onto every event at the emit boundary: a

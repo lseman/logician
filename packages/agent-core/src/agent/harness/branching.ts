@@ -4,14 +4,14 @@
 // applies the returned results; these functions contain the logic that used
 // to live directly on the AgentHarness class.
 
-import type { LLMBackend } from "../backend.ts";
+import type { LLMBackend } from "../core/backend.ts";
 import {
 	collectMessagesForBranchSummary,
 	extractFileOpsFromMessages,
 } from "../summaries/branch-summarization.ts";
 import { generateBranchSummaryText } from "../summaries/summary-generation.ts";
 import type { BranchInfo, BranchSummaryData } from "../summaries/types.ts";
-import type { Message, ThinkingLevel } from "../types.ts";
+import type { Message, ThinkingLevel } from "../types/index.ts";
 
 export interface Branch {
 	id: string;

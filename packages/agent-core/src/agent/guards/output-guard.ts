@@ -15,8 +15,8 @@
 //
 // Usage: create one per harness/loop invocation, feed each response + error.
 
-import { BackendError, type BackendErrorCategory } from "../backend.ts";
-import type { EventHandler } from "../types.ts";
+import { BackendError, type BackendErrorCategory } from "../core/backend.ts";
+import type { EventHandler } from "../types/index.ts";
 import type { LoopDetector } from "./loop-detector.ts";
 
 export interface OutputGuardConfig {

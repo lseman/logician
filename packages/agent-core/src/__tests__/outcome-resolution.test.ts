@@ -1,10 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { resolveCompletionGate } from "../agent/tasks/outcome-resolution.ts";
+import { resolveOutcome } from "../agent/tasks/outcome-resolution.ts";
 
 void test("structured done is authoritative", () => {
 	assert.deepEqual(
-		resolveCompletionGate({
+		resolveOutcome({
 			declared: { status: "done", summary: "verified", ts: 1 },
 			structuredOutcomeRequired: true,
 		}),
@@ -13,7 +13,7 @@ void test("structured done is authoritative", () => {
 });
 
 void test("undeclared tool-bearing stop is blocked", () => {
-	const decision = resolveCompletionGate({
+	const decision = resolveOutcome({
 		declared: null,
 		structuredOutcomeRequired: true,
 	});

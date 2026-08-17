@@ -2,9 +2,9 @@
 // Shared by compaction (condense old messages) and branch summarization
 // (structured goal/progress/decisions summary for an abandoned branch).
 
-import type { LLMBackend } from "../backend.ts";
-import { convertToChatFormat } from "../messages.ts";
-import type { Message, ThinkingLevel } from "../types.ts";
+import type { LLMBackend } from "../core/backend.ts";
+import { convertToChatFormat } from "../core/messages.ts";
+import type { Message, ThinkingLevel } from "../types/index.ts";
 import {
 	computeFileLists,
 	extractFileOpsFromMessages,

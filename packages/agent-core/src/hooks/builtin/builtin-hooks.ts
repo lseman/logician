@@ -1,26 +1,25 @@
 // ── Built-in loop hooks ────────────────────────────────────────────────────
 // Constructs the default safeguard hooks (guards, budget stop, proactive
-// compaction) as a single AgentHooks object, and composes them with any
-// user-supplied hooks via the typed HookBus so both run.
+// compaction) as a single AgentHooks object.
 //
 // Tool-call guards (duplicate + failure-loop) are powered by LoopDetector,
 // the harness's single live instance.
 
 import { spawnSync } from "node:child_process";
-import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
+import { resolveExecutionPolicy } from "../../agent/core/execution-policy.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
-} from "../../agent/file-checkpoints.ts";
-import type { LoopDetector } from "../../agent/guards/loop-detector.ts";
-import { awaitsUserInput } from "../../agent/guards/response-patterns.ts";
-import { HarnessInterventionController } from "../../agent/intervention-controller.ts";
+} from "../../agent/core/file-checkpoints.ts";
+import { HarnessInterventionController } from "../../agent/core/intervention-controller.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
-} from "../../agent/messages.ts";
+} from "../../agent/core/messages.ts";
+import type { LoopDetector } from "../../agent/guards/loop-detector.ts";
+import { awaitsUserInput } from "../../agent/guards/response-patterns.ts";
 import {
 	getTaskStatus,
 	recordTaskStatus,
@@ -31,9 +30,8 @@ import type {
 	AgentHooks,
 	CompactableMessage,
 	Message,
-} from "../../agent/types.ts";
+} from "../../agent/types/index.ts";
 import { compactToFit } from "../../compaction/compaction.ts";
-import { HookBus } from "../native/hook-bus.ts";
 import { BudgetTracker } from "./budget.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
@@ -337,38 +335,4 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	}
 
 	return hooks;
-}
-
-/** A named layer of hooks registered into the shared bus, in order. */
-export interface HookLayer {
-	source: string;
-	hooks: AgentHooks | undefined;
-}
-
-// Compose ordered hook layers via one typed HookBus. Earlier layers run first
-// within each event's reducer and later layers see their output — so the
-// canonical order is built-ins → harness queues → user. Returns a single
-// AgentHooks object the runner consumes unchanged.
-//
-// The bus owns error isolation: a thrown handler is skipped (errorMode
-// "continue") and reported via onError, so the loop's call sites don't need
-// their own try/catch.
-// One stuck handler must not stall every turn: any single hook handler that
-// runs longer than this is skipped (and reported) like a thrown one.
-const HOOK_HANDLER_TIMEOUT_MS = 60_000;
-
-export function composeHooks(
-	layers: HookLayer[],
-	onError?: (error: Error, event: string, source?: string) => void,
-	onHookEvent?: (event: string, ctx: unknown) => void,
-): AgentHooks {
-	const bus = new HookBus({
-		onError,
-		defaultTimeoutMs: HOOK_HANDLER_TIMEOUT_MS,
-	});
-	if (onHookEvent) bus.observe(onHookEvent);
-	for (const layer of layers) {
-		if (layer.hooks) bus.register(layer.hooks, { source: layer.source });
-	}
-	return bus.toHooks();
 }

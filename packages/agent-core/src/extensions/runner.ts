@@ -1,15 +1,11 @@
 // ── Extension runner ─────────────────────────────────────────────────────────
 // Loads and executes extensions, collecting registered tools and commands.
 // Wires extension event handlers into the agent runner via the hook bus.
-// Provides both the legacy untyped EventBus and a structured typed event system.
+// Exposes both an untyped EventBus for cross-extension messaging and a
+// structured typed event bus for agent lifecycle events.
 
-import type { AgentHooks } from "../agent/types.ts";
+import type { AgentHooks } from "../agent/types/index.ts";
 import { createExtensionContext } from "../hooks/extensions/context.ts";
-import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
-import type {
-	ExtensionEventName,
-	ExtensionEvent as TypedExtensionEvent,
-} from "../hooks/extensions/events.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import type { PiRuntimePort } from "./pi-adapter.ts";
 import { PiAdapter } from "./pi-adapter.ts";
@@ -92,8 +88,6 @@ export class ExtensionRunner {
 		[];
 	private piAdapters: PiAdapter[] = [];
 	private eventBus: EventBus;
-	/** Structured typed event bus for lifecycle events */
-	private typedBus: ExtensionEventBus;
 	/** Shared context for extension event handlers */
 	private extContext: ReturnType<typeof createExtensionContext>;
 	/** Session ID and cwd for adapter context */
@@ -102,7 +96,6 @@ export class ExtensionRunner {
 
 	constructor(private readonly options: ExtensionRunnerOptions) {
 		this.eventBus = createEventBus();
-		this.typedBus = new ExtensionEventBus();
 		this.extContext = createExtensionContext();
 		this.adapterSessionId = options.sessionId;
 		this.adapterCwd = options.cwd;
@@ -390,36 +383,6 @@ export class ExtensionRunner {
 		return firstResult;
 	}
 
-	/**
-	 * Emit a structured typed event to extension handlers.
-	 * Also emits to legacy handlers using the same event name (now unified).
-	 */
-	async emitTyped<T extends ExtensionEventName>(
-		event: Extract<TypedExtensionEvent, { type: T }>,
-	): Promise<unknown> {
-		// First, notify typed event bus
-		await this.typedBus.emit(event);
-
-		// Emit to legacy handlers using the unified event name.
-		// Cast to legacy shape — typed events don't have a `context` field,
-		// so we add one with the same data spread into the event object.
-		const legacyEvent: ExtensionEvent = {
-			type: event.type as ExtensionEventType,
-			context: {
-				sessionId: this.options.sessionId,
-				cwd: this.options.cwd,
-				...event,
-			},
-		} as unknown as ExtensionEvent;
-
-		return this.emit(legacyEvent);
-	}
-
-	/** Access the structured typed event bus for direct extension subscriptions. */
-	get typedEvents(): ExtensionEventBus {
-		return this.typedBus;
-	}
-
 	/** Access the shared extension context. */
 	getExtensionContext(): ReturnType<typeof createExtensionContext> {
 		return this.extContext;
@@ -588,7 +551,6 @@ export class ExtensionRunner {
 		this.tools.length = 0;
 		this.commands.length = 0;
 		this.eventBus.clear();
-		this.typedBus.clear();
 		this.extContext = createExtensionContext();
 		this.piAdapters.length = 0;
 	}

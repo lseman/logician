@@ -22,7 +22,7 @@ import {
 	type RunKernelViolation,
 	reduceRunKernel,
 } from "./run-kernel-events.ts";
-import type { AgentEvent, Message } from "./types.ts";
+import type { AgentEvent, Message } from "../types/index.ts";
 
 export type HarnessPhase = "idle" | "turn" | "compaction" | "branch_summary";
 

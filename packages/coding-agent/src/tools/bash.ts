@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { constants, access as fsAccess } from "node:fs/promises";
 
-import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/agent/types/index.ts";
 import {
 	getShellConfig,
 	getShellEnv,

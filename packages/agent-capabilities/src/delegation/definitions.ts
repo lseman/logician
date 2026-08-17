@@ -19,7 +19,7 @@ import {
 	type Tool,
 	type ToolResult,
 } from "@logician/agent-core";
-import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import type { LLMBackend } from "@logician/agent-core/agent/core/backend.ts";
 import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import {
 	budgetFromArgs,

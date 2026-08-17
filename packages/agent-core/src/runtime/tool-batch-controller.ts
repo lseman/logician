@@ -1,16 +1,14 @@
-import { createToolResultMessage } from "../agent/messages.ts";
+import { createToolResultMessage } from "../agent/core/messages.ts";
 import type {
 	AgentEvent,
 	AgentHooks,
 	Message,
 	ToolCall,
-} from "../agent/types.ts";
-import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
+} from "../agent/types/index.ts";
 import type { PermissionManager } from "../tools/shared/permissions.ts";
 import type { ToolRegistry } from "../tools/shared/registry.ts";
 
 type Emit = (event: AgentEvent) => void | Promise<void>;
-type EmitExtension = (event: TypedExtensionEvent) => Promise<void>;
 type OnPermissionRequest = (ctx: {
 	toolName: string;
 	toolCallId: string;
@@ -44,10 +42,10 @@ export interface ToolBatchControllerOptions {
 		toolName: string;
 		args: Record<string, unknown>;
 		recovery:
-		| "pure"
-		| "idempotent"
-		| "receipt_recoverable"
-		| "at_most_once_unknown";
+			| "pure"
+			| "idempotent"
+			| "receipt_recoverable"
+			| "at_most_once_unknown";
 	}) =>
 		| { operationId: string; idempotencyKey: string }
 		| undefined
@@ -60,7 +58,6 @@ export interface ToolBatchControllerOptions {
 		receipt?: string;
 	}) => void | Promise<void>;
 	emit: Emit;
-	emitExtension: EmitExtension;
 }
 
 const PERMISSION_DENIED_PREFIX = "Tool call denied";
@@ -171,7 +168,9 @@ async function evaluatePermission(
 		return `${PERMISSION_DENIED_PREFIX}: the user denied "${call.name}".`;
 	}
 	const approvalRule =
-		answer === "always" ? permissions.addSessionAllow(call.name, args) : undefined;
+		answer === "always"
+			? permissions.addSessionAllow(call.name, args)
+			: undefined;
 	await onDecision?.({
 		toolCallId: call.id,
 		toolName: call.name,
@@ -193,15 +192,8 @@ async function evaluatePermission(
 export async function executeToolBatch(
 	options: ToolBatchControllerOptions,
 ): Promise<ToolBatchResult> {
-	const {
-		registry,
-		toolCalls,
-		rawStopReason,
-		iteration,
-		signal,
-		emit,
-		emitExtension,
-	} = options;
+	const { registry, toolCalls, rawStopReason, iteration, signal, emit } =
+		options;
 	if (rawStopReason === "length") {
 		const messages: Message[] = [];
 		for (const call of toolCalls) {
@@ -212,16 +204,10 @@ export async function executeToolBatch(
 				toolName: prepared.call.name,
 				args: prepared.args,
 			});
-			await emitExtension({
-				type: "tool_execution_start",
-				toolCallId: prepared.call.id,
-				toolName: prepared.call.name,
-				args: prepared.args,
-			});
 			const text =
 				call.name === "write_file"
 					? `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. ` +
-					"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
+						"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
 					: `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
 			await emit({
 				type: "tool_call_end",
@@ -231,13 +217,6 @@ export async function executeToolBatch(
 				isError: true,
 			});
 			await emit({
-				type: "tool_execution_end",
-				toolCallId: call.id,
-				toolName: call.name,
-				result: text,
-				isError: true,
-			});
-			await emitExtension({
 				type: "tool_execution_end",
 				toolCallId: call.id,
 				toolName: call.name,
@@ -259,12 +238,6 @@ export async function executeToolBatch(
 	for (const toolCall of toolCalls) {
 		const prepared = registry.prepare(toolCall);
 		await emit({
-			type: "tool_execution_start",
-			toolCallId: prepared.call.id,
-			toolName: prepared.call.name,
-			args: prepared.args,
-		});
-		await emitExtension({
 			type: "tool_execution_start",
 			toolCallId: prepared.call.id,
 			toolName: prepared.call.name,
@@ -397,13 +370,6 @@ export async function executeToolBatch(
 			isError,
 		});
 		await emit({
-			type: "tool_execution_end",
-			toolCallId: prepared.call.id,
-			toolName: prepared.call.name,
-			result: resultText,
-			isError,
-		});
-		await emitExtension({
 			type: "tool_execution_end",
 			toolCallId: prepared.call.id,
 			toolName: prepared.call.name,

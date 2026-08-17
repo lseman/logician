@@ -2,7 +2,7 @@ import {
 	awaitsUserInput,
 	looksComplete,
 } from "../agent/guards/response-patterns.ts";
-import type { AgentEvent, Message } from "../agent/types.ts";
+import type { AgentEvent, Message } from "../agent/types/index.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 

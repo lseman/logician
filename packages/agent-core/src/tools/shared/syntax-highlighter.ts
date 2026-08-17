@@ -156,24 +156,6 @@ export function highlight(code: string, language: string): HighlightResult {
 	return out;
 }
 
-/** Highlight with a caller-owned style sheet (for structured/non-ANSI renderers). */
-export function highlightWithSheet(
-	code: string,
-	language: string,
-	sheet: Record<string, (text: string) => string>,
-): HighlightResult {
-	const result = instance.highlight(language, code, sheet as Sheet);
-	return { value: result.value ?? code, language: result.language };
-}
-
-export function highlightAutoWithSheet(
-	code: string,
-	sheet: Record<string, (text: string) => string>,
-): HighlightResult {
-	const result = instance.highlightAuto(code, { sheet: sheet as Sheet });
-	return { value: result.value ?? code, language: result.language };
-}
-
 /**
  * List all supported language names.
  */

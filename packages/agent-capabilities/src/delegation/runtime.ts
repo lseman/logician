@@ -4,8 +4,8 @@ import type {
 	Message,
 	Tool,
 } from "@logician/agent-core";
-import { runAgentLoop } from "@logician/agent-core/agent/agent-loop-runner.ts";
-import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import { runAgentLoop } from "@logician/agent-core/agent/core/agent-loop-runner.ts";
+import type { LLMBackend } from "@logician/agent-core/agent/core/backend.ts";
 import {
 	type AcceptanceConfig,
 	type AcceptanceLedger,

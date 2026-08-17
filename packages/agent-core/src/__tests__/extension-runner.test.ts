@@ -4,8 +4,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { AgentHarness } from "../agent/harness.ts";
-import type { AgentConfig } from "../agent/types.ts";
+import { AgentHarness } from "../agent/harness/harness.ts";
+import type { AgentConfig } from "../agent/types/index.ts";
 import { ExtensionRunner } from "../extensions/runner.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 

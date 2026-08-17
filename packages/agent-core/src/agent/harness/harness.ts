@@ -5,97 +5,63 @@
 //
 
 import { randomUUID } from "node:crypto";
-import type { CompactionSettings } from "../compaction/index.ts";
-import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
-import { buildBuiltinHooks } from "../hooks/builtin/builtin-hooks.ts";
-import { HookBus } from "../hooks/native/hook-bus.ts";
-import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import type { CompactionSettings } from "../../compaction/index.ts";
+import type {
+	ExtensionRunner,
+	RegisteredTool,
+} from "../../extensions/index.ts";
+import { buildBuiltinHooks } from "../../hooks/builtin/builtin-hooks.ts";
+import { HookBus } from "../../hooks/native/hook-bus.ts";
 import {
 	type ClaudeCodeHookLayer,
 	claudeToolMatcherName,
 	createClaudeCodeHookLayer,
-} from "../plugins/claude-code/hook-layer.ts";
-import { type DeliveryMode, MessageDeliveryManager } from "../queue/manager.ts";
-import { withHarnessQueueHooks } from "../runtime/harness-queue-hooks.ts";
-import { ToolRegistry } from "../tools/shared/registry.ts";
+} from "../../plugins/claude-code/hook-layer.ts";
 import {
-	type RunAgentLoopConfig,
-	runAgentLoop,
-	runAgentLoopContinue,
-} from "./agent-loop-runner.ts";
-import type { LLMBackend } from "./backend.ts";
+	type DeliveryMode,
+	MessageDeliveryManager,
+} from "../../queue/manager.ts";
+import { withHarnessQueueHooks } from "../../runtime/harness-queue-hooks.ts";
+import { ToolRegistry } from "../../tools/shared/registry.ts";
 import {
 	throwOnValidationErrors,
 	validateConfig,
-} from "./configuration/config-validator.ts";
+} from "../config/config-validator.ts";
+import {
+	type RunAgentLoopConfig,
+	runAgentLoop,
+} from "../core/agent-loop-runner.ts";
+import type { LLMBackend } from "../core/backend.ts";
 import {
 	beginFileFrame,
 	clearFileFrames,
 	restoreFileFrame,
-} from "./file-checkpoints.ts";
-import { LoopDetector } from "./guards/loop-detector.ts";
-import {
-	createGuardCallbacks,
-	type GuardCallbacks,
-} from "./guards/guard-callbacks.ts";
-import { OutputGuard } from "./guards/output-guard.ts";
-import {
-	type Branch,
-	forkBranch,
-	listBranches as listBranchesHelper,
-	navigateToCheckpoint as navigateToCheckpointHelper,
-	renderBranchTree,
-	summarizeAndMergeBranch,
-} from "./harness/branching.ts";
-import { runCompaction, shouldAutoCompact } from "./harness/compaction.ts";
-import type {
-	AbortResult,
-	AgentHarnessOptions,
-	HarnessQueues,
-	HarnessTurnSnapshot,
-} from "./harness/contracts.ts";
-import {
-	cycleModel as cycleModelHelper,
-	resolveModelUrl,
-} from "./harness/model.ts";
-import { assertIdlePhase, assertPhaseTransition } from "./harness/phase.ts";
-import type { QueueOpsDeps } from "./harness/queue-ops.ts";
-import * as queueOps from "./harness/queue-ops.ts";
-import {
-	emitPostCompact as emitPostCompactHelper,
-	emitPreCompact as emitPreCompactHelper,
-	emitSessionEnd as emitSessionEndHelper,
-	emitSessionStart as emitSessionStartHelper,
-	listSessions as listSessionsHelper,
-	loadSessionMessages,
-} from "./harness/session-lifecycle.ts";
-import {
-	stableSerialize,
-	digest,
-	trajectoryEventPayload,
-	EPHEMERAL_AGENT_EVENTS,
-	isDurableAgentEvent,
-} from "./harness/utilities.ts";
+} from "../core/file-checkpoints.ts";
 import {
 	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
-} from "./messages.ts";
+} from "../core/messages.ts";
 import {
 	type AgentRuntimeState,
 	type ContinuationDecision,
 	createRuntimeState,
 	type HarnessPhase,
-	reduceRuntimeState,
 	RunKernel,
-} from "./run-kernel.ts";
+	reduceRuntimeState,
+} from "../core/run-kernel.ts";
 import {
-	STEERING_INTERRUPT_SUMMARY,
 	type RunKernelState,
-} from "./run-kernel-events.ts";
-import { Session } from "./session.ts";
-import type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
-import { evaluateTrajectory, type TrajectoryReport } from "./trajectory.ts";
+	STEERING_INTERRUPT_SUMMARY,
+} from "../core/run-kernel-events.ts";
+import { Session } from "../core/session.ts";
+import {
+	evaluateTrajectory,
+	type TrajectoryReport,
+} from "../core/trajectory.ts";
+import { LoopDetector } from "../guards/loop-detector.ts";
+import { OutputGuard } from "../guards/output-guard.ts";
+import type { BranchInfo, BranchSummaryData } from "../summaries/types.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -107,16 +73,48 @@ import type {
 	Message,
 	QueueMode,
 	Tool,
-} from "./types.ts";
+} from "../types/index.ts";
+import {
+	type Branch,
+	forkBranch,
+	listBranches as listBranchesHelper,
+	navigateToCheckpoint as navigateToCheckpointHelper,
+	renderBranchTree,
+	summarizeAndMergeBranch,
+} from "./branching.ts";
+import { runCompaction, shouldAutoCompact } from "./compaction.ts";
+import type {
+	AbortResult,
+	AgentHarnessOptions,
+	HarnessQueues,
+	HarnessTurnSnapshot,
+} from "./contracts.ts";
+import { cycleModel as cycleModelHelper, resolveModelUrl } from "./model.ts";
+import { assertIdlePhase, assertPhaseTransition } from "./phase.ts";
+import type { QueueOpsDeps } from "./queue-ops.ts";
+import * as queueOps from "./queue-ops.ts";
+import {
+	emitPostCompact as emitPostCompactHelper,
+	emitPreCompact as emitPreCompactHelper,
+	emitSessionEnd as emitSessionEndHelper,
+	emitSessionStart as emitSessionStartHelper,
+	listSessions as listSessionsHelper,
+	loadSessionMessages,
+} from "./session-lifecycle.ts";
+import {
+	digest,
+	isDurableAgentEvent,
+	trajectoryEventPayload,
+} from "./utilities.ts";
 
+export type { AgentRuntimeState, HarnessPhase } from "../core/run-kernel.ts";
+export type { BranchInfo, BranchSummaryData } from "../summaries/types.ts";
 export type {
 	AbortResult,
 	AgentHarnessOptions,
 	HarnessQueues,
-} from "./harness/contracts.ts";
-export { HarnessBusyError } from "./harness/phase.ts";
-export type { AgentRuntimeState, HarnessPhase } from "./run-kernel.ts";
-export type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
+} from "./contracts.ts";
+export { HarnessBusyError } from "./phase.ts";
 
 // Conversation checkpoints: a snapshot of history is pushed before each
 // prompt so a bad turn can be rewound. Bounded ring (newest last).
@@ -138,7 +136,6 @@ export class AgentHarness {
 	private branchSeq = 0;
 	private checkpoints: Message[][] = [];
 	private msgManager: MessageDeliveryManager;
-	private guardCallbacks: GuardCallbacks;
 	private loopDetector: LoopDetector;
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
@@ -160,7 +157,7 @@ export class AgentHarness {
 	};
 
 	// ── Output Guard ─────────────────────────────────────────────────────
-	private outputGuard: OutputGuard | null = null;
+	private outputGuard: OutputGuard;
 	private _streamOptions: AgentHarnessStreamOptions = {};
 	private _hooksEnabled: boolean;
 	private _session?: Session;
@@ -176,10 +173,6 @@ export class AgentHarness {
 	private _runResolve?: () => void;
 	private _subscribers: Set<EventHandler> = new Set();
 	private _extensionRunner?: ExtensionRunner;
-	/** Central hook bus — single source of truth for all hook handlers */
-	private _hookBus: HookBus = new HookBus();
-	/** Typed extension event bus — wired from _hookBus via fromHookBus */
-	private _extensionBus: ExtensionEventBus = ExtensionEventBus.fromHookBus(this._hookBus);
 	private _beforeAgentStart?: (
 		promptText: string,
 	) =>
@@ -195,7 +188,7 @@ export class AgentHarness {
 		this._streamOptions = {
 			...options.config.streamOptions,
 			...(options.config.streamOptions?.timeoutMs === undefined &&
-				options.config.turnTimeoutMs !== undefined
+			options.config.turnTimeoutMs !== undefined
 				? { timeoutMs: options.config.turnTimeoutMs }
 				: {}),
 		};
@@ -215,26 +208,25 @@ export class AgentHarness {
 			duplicateThreshold: options.config.duplicateToolThreshold,
 			failureThreshold: options.config.toolFailureLoopThreshold,
 		});
-		// Create the central GuardCallbacks (callback-based guardrail system).
-		this.guardCallbacks = createGuardCallbacks({
-			loopDetector: this.loopDetector,
-			outputGuard: new OutputGuard({
-				maxRetries: options.config.streamOptions?.maxRetries ?? options.config.maxRetries ?? 3,
-				retryBaseDelayMs: options.config.retryBaseDelayMs ?? 500,
-				maxRetryDelayMs: options.config.streamOptions?.maxRetryDelayMs ?? 15_000,
-				autoCompactOnContextFull: options.config.autoRetryEnabled !== false,
-				maxEmptyResponses: 3,
-				maxNonCommittalResponses: 3,
-				budgetThreshold: 0.95,
-				maxConsecutiveCompactions: 3,
-				onEvent: event => {
-					this.emitToSubscribers(event);
-				},
-				onCompact: async () => {
-					const result = await this.compact();
-					return result ?? null;
-				},
-			}),
+		this.outputGuard = new OutputGuard({
+			maxRetries:
+				options.config.streamOptions?.maxRetries ??
+				options.config.maxRetries ??
+				3,
+			retryBaseDelayMs: options.config.retryBaseDelayMs ?? 500,
+			maxRetryDelayMs: options.config.streamOptions?.maxRetryDelayMs ?? 15_000,
+			autoCompactOnContextFull: options.config.autoRetryEnabled !== false,
+			maxEmptyResponses: 3,
+			maxNonCommittalResponses: 3,
+			budgetThreshold: 0.95,
+			maxConsecutiveCompactions: 3,
+			onEvent: event => {
+				this.emitToSubscribers(event);
+			},
+			onCompact: async () => {
+				const result = await this.compact();
+				return result ?? null;
+			},
 		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
 		this.msgManager = new MessageDeliveryManager({
@@ -487,15 +479,6 @@ export class AgentHarness {
 		this._beforeAgentStart = cb;
 	}
 
-	/** Set or replace the typed extension event bus. */
-	setExtensionBus(bus: ExtensionEventBus | undefined): void {
-		// Dispose any previously wired extension bus (auto-wired from HookBus).
-		if (this._extensionBus && !this._extensionBus.getRegisteredEvents().length) {
-			void this._extensionBus.dispose();
-		}
-		this._extensionBus = bus ?? ExtensionEventBus.fromHookBus(this._hookBus);
-	}
-
 	setExtensionRunner(runner: ExtensionRunner | undefined): void {
 		this._extensionRunner = runner;
 	}
@@ -584,7 +567,7 @@ export class AgentHarness {
 		this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 	}
 
-	// ── Structural operation: prompt ───────────────────────────────────────
+	// ── Structural operation: turns (prompt / continue) ─────────────────────
 
 	async prompt(userMessage: string): Promise<Message[]> {
 		this.assertIdle("prompt");
@@ -595,105 +578,7 @@ export class AgentHarness {
 			}
 		}
 		this.recoverInterruptedOperations();
-		// Output guard is pre-configured via GuardCallbacks in the constructor.
-		this._runPromise = new Promise<void>(resolve => {
-			this._runResolve = resolve;
-		});
-
-		return this.runInPhase("turn", "prompt", async () => {
-			this.runKernel.startTask(userMessage);
-			this.renewRunKernelLease();
-			this.abortController = new AbortController();
-
-			if (!this._hasStartedSession) {
-				try {
-					await this.emitSessionStart("startup");
-				} catch (error) {
-					this.settleTurn();
-					throw error;
-				}
-			}
-
-			this.checkpoints.push([...this.history]);
-			if (this.checkpoints.length > MAX_CHECKPOINTS) {
-				this.checkpoints.shift();
-			}
-			beginFileFrame();
-
-			const promptText = userMessage;
-			let snapshot: HarnessTurnSnapshot;
-			try {
-				snapshot = await this.createTurnSnapshot(
-					promptText,
-					this.abortController.signal,
-				);
-			} catch (error) {
-				this.settleTurn();
-				throw error;
-			}
-			const operationId = randomUUID();
-			this._activeOperationId = operationId;
-			const runId = this.runKernel.snapshot().state.runId ?? operationId;
-			this.recordTrajectoryStart(runId, operationId, snapshot.config, "prompt");
-
-			try {
-				this.loopConfig = snapshot.config;
-				let compactedContext: Message[] | undefined;
-				const newMessages = await runAgentLoop(
-					{
-						systemPrompt: snapshot.config.systemPrompt,
-						messages: snapshot.initialMessages,
-						tools: snapshot.config.tools,
-						cwd: this.cwd,
-					},
-					[createUserMessage(snapshot.promptText)],
-					{
-						...snapshot.config,
-						...this.durableExecutionConfig(),
-						backend: this.backend,
-						signal: snapshot.signal,
-						maxIterations: this.maxIterations,
-						outputGuard: this.guardCallbacks.outputGuard,
-						extensionBus: this._extensionBus,
-						refreshNextTurnConfig: () =>
-							this.withExtensionRuntime(this.snapshotConfig()),
-						onContextCompacted: messages => {
-							compactedContext = messages;
-							this.persistCompactedContext(
-								messages,
-								this.estimatePayloadTokens(),
-							);
-						},
-					} satisfies RunAgentLoopConfig,
-					async event => {
-						await this.handleAgentEvent(event);
-					},
-				);
-				const result = compactedContext ?? [
-					{
-						role: "system" as const,
-						content:
-							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
-					},
-					...snapshot.initialMessages.filter(
-						message => message.role !== "system",
-					),
-					...newMessages,
-				];
-				this.history = result;
-				return result;
-			} finally {
-				this.runKernel.recordTrajectory(
-					"run_finish",
-					operationId,
-					{
-						status: this.runtime.outcome?.status ?? "unknown",
-					},
-					runId,
-				);
-				this.settleTurn();
-			}
-		});
+		return this.runTurn({ kind: "prompt", text: userMessage });
 	}
 
 	/**
@@ -701,6 +586,10 @@ export class AgentHarness {
 	 * The last message in history must be a user or tool-result message (not assistant).
 	 * Mirrors pi's agent.continue() — used when the agent stopped prematurely and
 	 * the caller wants to re-enter the loop without fabricating a follow-up prompt.
+	 *
+	 * Interrupted-operation recovery runs first: it may append a missing tool
+	 * result to history, which is what lets a run that stopped mid-tool-call
+	 * (last message still "assistant") pass the check below.
 	 */
 	async continue(): Promise<Message[]> {
 		this.assertIdle("continue");
@@ -715,107 +604,7 @@ export class AgentHarness {
 		if (last?.role === "assistant") {
 			throw new Error("Cannot continue from message role: assistant");
 		}
-
-		this._runPromise = new Promise<void>(resolve => {
-			this._runResolve = resolve;
-		});
-
-		// Output guard is pre-configured via GuardCallbacks in the constructor.
-
-		return this.runInPhase("turn", "continue", async () => {
-			this.abortController = new AbortController();
-
-			if (!this._hasStartedSession) {
-				try {
-					await this.emitSessionStart("startup");
-				} catch (error) {
-					this.settleTurn();
-					throw error;
-				}
-			}
-
-			this.checkpoints.push([...this.history]);
-			if (this.checkpoints.length > MAX_CHECKPOINTS) {
-				this.checkpoints.shift();
-			}
-			beginFileFrame();
-
-			let snapshot: HarnessTurnSnapshot;
-			try {
-				snapshot = await this.createContinueSnapshot(
-					this.abortController.signal,
-				);
-			} catch (error) {
-				this.settleTurn();
-				throw error;
-			}
-			const operationId = randomUUID();
-			this._activeOperationId = operationId;
-			const runId = this.runKernel.snapshot().state.runId ?? operationId;
-			this.recordTrajectoryStart(
-				runId,
-				operationId,
-				snapshot.config,
-				"continue",
-			);
-
-			try {
-				this.loopConfig = snapshot.config;
-				let compactedContext: Message[] | undefined;
-				const newMessages = await runAgentLoopContinue(
-					{
-						systemPrompt: snapshot.config.systemPrompt,
-						messages: snapshot.initialMessages,
-						tools: snapshot.config.tools,
-						cwd: this.cwd,
-					},
-					{
-						...snapshot.config,
-						...this.durableExecutionConfig(),
-						backend: this.backend,
-						signal: snapshot.signal,
-						maxIterations: this.maxIterations,
-						outputGuard: this.guardCallbacks.outputGuard,
-						extensionBus: this._extensionBus,
-						refreshNextTurnConfig: () =>
-							this.withExtensionRuntime(this.snapshotConfig()),
-						onContextCompacted: messages => {
-							compactedContext = messages;
-							this.persistCompactedContext(
-								messages,
-								this.estimatePayloadTokens(),
-							);
-						},
-					} satisfies RunAgentLoopConfig,
-					async event => {
-						await this.handleAgentEvent(event);
-					},
-				);
-				const result = compactedContext ?? [
-					{
-						role: "system" as const,
-						content:
-							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
-					},
-					...snapshot.initialMessages.filter(
-						(m): m is Message => m != null && m.role !== "system",
-					),
-					...newMessages,
-				];
-				this.history = result;
-				return result;
-			} finally {
-				this.runKernel.recordTrajectory(
-					"run_finish",
-					operationId,
-					{
-						status: this.runtime.outcome?.status ?? "unknown",
-					},
-					runId,
-				);
-				this.settleTurn();
-			}
-		});
+		return this.runTurn({ kind: "continue" });
 	}
 
 	/**
@@ -833,6 +622,132 @@ export class AgentHarness {
 		this.history = [...this.history, ...guidance];
 		this.emitQueueChange();
 		return this.continue();
+	}
+
+	/**
+	 * Shared turn transaction for both entry points. Callers run interrupted-
+	 * operation recovery and kind-specific validation before invoking this —
+	 * `prompt` and `continue` differ only in snapshot creation (prompt injects
+	 * hook/extension messages and drains next-turn guidance; continue just
+	 * wraps current history), in whether a new task starts, and in whether a
+	 * user message is threaded into the loop. Everything else — idle
+	 * bookkeeping, session start, checkpointing, trajectory recording, and
+	 * history reconstruction — is identical, so it lives here once.
+	 */
+	private async runTurn(
+		request: { kind: "prompt"; text: string } | { kind: "continue" },
+	): Promise<Message[]> {
+		this._runPromise = new Promise<void>(resolve => {
+			this._runResolve = resolve;
+		});
+
+		return this.runInPhase("turn", request.kind, async () => {
+			if (request.kind === "prompt") {
+				this.runKernel.startTask(request.text);
+				this.renewRunKernelLease();
+			}
+			this.abortController = new AbortController();
+
+			if (!this._hasStartedSession) {
+				try {
+					await this.emitSessionStart("startup");
+				} catch (error) {
+					this.settleTurn();
+					throw error;
+				}
+			}
+
+			this.checkpoints.push([...this.history]);
+			if (this.checkpoints.length > MAX_CHECKPOINTS) {
+				this.checkpoints.shift();
+			}
+			beginFileFrame();
+
+			let snapshot: HarnessTurnSnapshot;
+			try {
+				snapshot =
+					request.kind === "prompt"
+						? await this.createTurnSnapshot(
+								request.text,
+								this.abortController.signal,
+							)
+						: await this.createContinueSnapshot(this.abortController.signal);
+			} catch (error) {
+				this.settleTurn();
+				throw error;
+			}
+			const operationId = randomUUID();
+			this._activeOperationId = operationId;
+			const runId = this.runKernel.snapshot().state.runId ?? operationId;
+			this.recordTrajectoryStart(
+				runId,
+				operationId,
+				snapshot.config,
+				request.kind,
+			);
+
+			try {
+				this.loopConfig = snapshot.config;
+				let compactedContext: Message[] | undefined;
+				const prompts =
+					request.kind === "prompt"
+						? [createUserMessage(snapshot.promptText)]
+						: [];
+				const newMessages = await runAgentLoop(
+					{
+						systemPrompt: snapshot.config.systemPrompt,
+						messages: snapshot.initialMessages,
+						tools: snapshot.config.tools,
+						cwd: this.cwd,
+					},
+					prompts,
+					{
+						...snapshot.config,
+						...this.durableExecutionConfig(),
+						backend: this.backend,
+						signal: snapshot.signal,
+						maxIterations: this.maxIterations,
+						outputGuard: this.outputGuard,
+						refreshNextTurnConfig: () =>
+							this.withExtensionRuntime(this.snapshotConfig()),
+						onContextCompacted: messages => {
+							compactedContext = messages;
+							this.persistCompactedContext(
+								messages,
+								this.estimatePayloadTokens(),
+							);
+						},
+					} satisfies RunAgentLoopConfig,
+					async event => {
+						await this.handleAgentEvent(event);
+					},
+				);
+				const result = compactedContext ?? [
+					{
+						role: "system" as const,
+						content:
+							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
+					},
+					...snapshot.initialMessages.filter(
+						(message): message is Message =>
+							message != null && message.role !== "system",
+					),
+					...newMessages,
+				];
+				this.history = result;
+				return result;
+			} finally {
+				this.runKernel.recordTrajectory(
+					"run_finish",
+					operationId,
+					{
+						status: this.runtime.outcome?.status ?? "unknown",
+					},
+					runId,
+				);
+				this.settleTurn();
+			}
+		});
 	}
 
 	private async createContinueSnapshot(
@@ -999,7 +914,6 @@ export class AgentHarness {
 			eventBus: {
 				emit: (event: { type: string; [key: string]: unknown }) => {
 					this.emitToSubscribers(event as AgentEvent);
-					void this._extensionBus?.emitLegacy(event);
 				},
 			},
 		});
@@ -1012,9 +926,13 @@ export class AgentHarness {
 		}
 
 		// Layer 3: claude-code compatibility hook layer
-		const claudeHooks = (pluginHookLayer ?? this.createClaudeCodeHookLayer()).hooks;
+		const claudeHooks = (pluginHookLayer ?? this.createClaudeCodeHookLayer())
+			.hooks;
 		if (claudeHooks) {
-			hookBus.register(claudeHooks, { source: "claude-code-compat", priority: 40 });
+			hookBus.register(claudeHooks, {
+				source: "claude-code-compat",
+				priority: 40,
+			});
 		}
 
 		// Layer 4: user hooks (lowest priority)
@@ -1095,26 +1013,26 @@ export class AgentHarness {
 				const kernelEvent =
 					event.type === "subagent_start"
 						? {
-							type: "subagent_started" as const,
-							agentId: event.agentId,
-							agent: event.agent,
-							task: event.task,
-							taskIndex: event.taskIndex,
-						}
-						: event.type === "subagent_event"
-							? {
-								type: "subagent_progressed" as const,
-								agentId: event.agentId,
-								eventType: event.event.type,
-							}
-							: {
-								type: "subagent_finished" as const,
+								type: "subagent_started" as const,
 								agentId: event.agentId,
 								agent: event.agent,
-								result: event.result,
-								isError: event.isError ?? false,
-								turns: event.turns,
-							};
+								task: event.task,
+								taskIndex: event.taskIndex,
+							}
+						: event.type === "subagent_event"
+							? {
+									type: "subagent_progressed" as const,
+									agentId: event.agentId,
+									eventType: event.event.type,
+								}
+							: {
+									type: "subagent_finished" as const,
+									agentId: event.agentId,
+									agent: event.agent,
+									result: event.result,
+									isError: event.isError ?? false,
+									turns: event.turns,
+								};
 				this.runKernel.append(kernelEvent, {
 					taskId: state.taskId,
 					runId: state.runId,
@@ -1183,7 +1101,7 @@ export class AgentHarness {
 	}
 
 	getOutputGuard(): OutputGuard | null {
-		return this.guardCallbacks.outputGuard;
+		return this.outputGuard;
 	}
 
 	getLoopDetector(): LoopDetector {
@@ -1400,7 +1318,9 @@ export class AgentHarness {
 	setSessionId(id: string, options: { durable?: boolean } = {}): void {
 		this._sessionId = id;
 		this.config.hookSessionId = id;
-		this.runKernel.setPersistence(options.durable === false ? "ephemeral" : "durable");
+		this.runKernel.setPersistence(
+			options.durable === false ? "ephemeral" : "durable",
+		);
 		this.runKernel.useSession(id);
 		this.restoreKernelSessionState();
 	}
@@ -1657,25 +1577,25 @@ export class AgentHarness {
 	}
 
 	clearHistory(): void {
-		this.emitSessionEnd("reset").catch(() => { });
+		this.emitSessionEnd("reset").catch(() => {});
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
 		this.setActiveHistory([]);
-		this.emitSessionStart("clear").catch(() => { });
+		this.emitSessionStart("clear").catch(() => {});
 		this._hasStartedSession = false;
 	}
 
 	setHistory(messages: Message[]): void {
 		this.assertIdle("setHistory");
-		this.emitSessionEnd("switch").catch(() => { });
+		this.emitSessionEnd("switch").catch(() => {});
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
 		this.setActiveHistory(
 			messages.filter((m): m is Message => m != null && m.role !== "system"),
 		);
-		this.emitSessionStart("resume").catch(() => { });
+		this.emitSessionStart("resume").catch(() => {});
 		this._hasStartedSession = false;
 	}
 

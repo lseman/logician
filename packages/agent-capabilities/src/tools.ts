@@ -2,7 +2,7 @@
 // Returns all built-in tools for automatic registration at startup.
 
 import type { AgentConfig, AgentEvent, Tool } from "@logician/agent-core";
-import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import type { LLMBackend } from "@logician/agent-core/agent/core/backend.ts";
 import {
 	createSpawnAgentsTool,
 	createSpawnAgentTool,

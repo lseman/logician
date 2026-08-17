@@ -1,7 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { AgentEvent, Tool, ToolCall } from "../agent/types.ts";
-import type { ExtensionEvent } from "../hooks/extensions/events.ts";
+import type { AgentEvent, Tool, ToolCall } from "../agent/types/index.ts";
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
 import { PermissionManager } from "../tools/shared/permissions.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
@@ -49,7 +48,6 @@ async function run(
 		emit: e => {
 			events.push(e);
 		},
-		emitExtension: async (_e: ExtensionEvent) => { },
 	});
 }
 

@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { ToolCall } from "../agent/types.ts";
+import type { ToolCall } from "../agent/types/index.ts";
 import {
 	PermissionManager,
 	primaryArgString,

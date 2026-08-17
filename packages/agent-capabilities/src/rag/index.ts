@@ -5,7 +5,7 @@
 //   - rag_list_docs() — list indexed document IDs
 //   - rag_delete_doc(docId) — remove a document and its chunks
 
-import type { Tool, ToolContext } from "@logician/agent-core/agent/types.ts";
+import type { Tool, ToolContext } from "@logician/agent-core/agent/types/index.ts";
 import {
 	IngestionPipeline,
 	type SearchHit,

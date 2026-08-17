@@ -5,7 +5,7 @@ import type {
 	GenerateOptions,
 	LLMBackend,
 	LLMResponse,
-} from "@logician/agent-core/agent/backend.ts";
+} from "@logician/agent-core/agent/core/backend.ts";
 import {
 	BUILTIN_AGENTS,
 	createSpawnAgentsTool,

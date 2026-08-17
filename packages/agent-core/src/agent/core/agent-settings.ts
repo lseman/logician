@@ -3,7 +3,7 @@ import type {
     ExecutionProfile,
     InferenceMode,
     ThinkingLevel,
-} from "./types.ts";
+} from "../types/index.ts";
 
 export const DEFAULT_MAX_ITERATIONS = 30;
 

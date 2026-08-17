@@ -2,7 +2,7 @@
 // Abstract base class for algorithmic multi-step reasoners.
 // Adapted from Python src/reasoners/base.py.
 
-import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import type { LLMBackend } from "@logician/agent-core/agent/core/backend.ts";
 
 export interface ReasoningTrace {
 	reasoning: string;

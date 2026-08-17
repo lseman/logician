@@ -1,7 +1,7 @@
 // ── Message handling ──────────────────────────────────────────────────────────────
 // Message creation, chat format conversion, and compaction integration.
 
-import { microCompactMessages as microCompactCompactable } from "../compaction/compaction.ts";
+import { microCompactMessages as microCompactCompactable } from "../../compaction/compaction.ts";
 import type {
 	AgentMessage,
 	BashExecutionMessage,
@@ -9,7 +9,7 @@ import type {
 	CompactionSummaryMessage,
 	CustomMessage,
 	Message,
-} from "./types.ts";
+} from "../types/index.ts";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 

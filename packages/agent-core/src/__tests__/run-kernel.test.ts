@@ -7,7 +7,7 @@ import {
 	createRuntimeState,
 	reduceRuntimeState,
 	RunKernel,
-} from "../agent/run-kernel.ts";
+} from "../agent/core/run-kernel.ts";
 
 void test("kernel runtime projection tracks streaming and settles cleanly", () => {
 	let runtime = createRuntimeState();

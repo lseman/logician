@@ -2,25 +2,25 @@
 // Thin barrel re-exporting the three sub-modules plus the tools barrel.
 // External consumers import from here; internals import from sub-paths.
 
-export * from "./agent/agent-loop-runner.ts";
-export * from "./agent/agent-settings.ts";
+export * from "./agent/core/agent-loop-runner.ts";
+export * from "./agent/core/agent-settings.ts";
 // Core: loop, harness, types, backend, messages, events, session
-export * from "./agent/backend.ts";
-export * from "./agent/execution-policy.ts";
-export * from "./agent/file-checkpoints.ts";
+export * from "./agent/core/backend.ts";
+export * from "./agent/core/execution-policy.ts";
+export * from "./agent/core/file-checkpoints.ts";
 export * from "./agent/guards/loop-detector.ts";
-export * from "./agent/harness.ts";
-export * from "./agent/intervention-controller.ts";
-export * from "./agent/messages.ts";
-export * from "./agent/run-kernel.ts";
-export * from "./agent/run-kernel-events.ts";
+export * from "./agent/harness/harness.ts";
+export * from "./agent/core/intervention-controller.ts";
+export * from "./agent/core/messages.ts";
+export * from "./agent/core/run-kernel.ts";
+export * from "./agent/core/run-kernel-events.ts";
 export {
 	createRuntimeState,
 	reduceRuntimeState,
 	type AgentRuntimeState,
 	type HarnessPhase,
-} from "./agent/run-kernel.ts";
-export * from "./agent/session.ts";
+} from "./agent/core/run-kernel.ts";
+export * from "./agent/core/session.ts";
 export type { TaskStatusRecord } from "./agent/tasks/task-status-state.ts";
 // Task/todo state read by built-in hooks. The task_status and todo Tool
 // objects that mutate this state live in @logician/agent-capabilities, which depends
@@ -31,9 +31,9 @@ export {
 } from "./agent/tasks/task-status-state.ts";
 export type { Task, TaskStatus } from "./agent/tasks/todo-state.ts";
 export { getTasks, onTodosChanged } from "./agent/tasks/todo-state.ts";
-export * from "./agent/tool-cache.ts";
-export * from "./agent/trajectory.ts";
-export * from "./agent/types.ts";
+export * from "./agent/core/tool-cache.ts";
+export * from "./agent/core/trajectory.ts";
+export * from "./agent/types/index.ts";
 // Compaction: single engine shared by harness compact, the loop's
 // context-full retry, and the builtin proactive hook.
 export {

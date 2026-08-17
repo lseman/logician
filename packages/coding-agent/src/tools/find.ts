@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import type { Tool } from "@logician/agent-core/agent/types.ts";
+import type { Tool } from "@logician/agent-core/agent/types/index.ts";
 import {
 	ensureInsideCwd,
 	resolvePath,

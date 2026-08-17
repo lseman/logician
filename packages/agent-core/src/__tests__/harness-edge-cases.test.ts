@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { AgentHarness, HarnessBusyError } from "../agent/harness.ts";
-import type { AgentConfig } from "../agent/types.ts";
+import { AgentHarness, HarnessBusyError } from "../agent/harness/harness.ts";
+import type { AgentConfig } from "../agent/types/index.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 
 function makeHarness(

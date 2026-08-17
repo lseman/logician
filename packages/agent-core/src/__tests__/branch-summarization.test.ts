@@ -11,7 +11,7 @@ import {
 	parseBranchSummary,
 	serializeMessages,
 } from "../agent/summaries/branch-summarization.ts";
-import type { Message } from "../agent/types.ts";
+import type { Message } from "../agent/types/index.ts";
 
 describe("createFileOps", () => {
 	it("creates empty ops", () => {

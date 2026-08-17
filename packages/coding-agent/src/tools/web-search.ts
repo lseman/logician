@@ -5,7 +5,7 @@ import type {
 	Tool,
 	ToolContext,
 	WebSearchConfig,
-} from "@logician/agent-core/agent/types.ts";
+} from "@logician/agent-core/agent/types/index.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./truncate.ts";
 
 type FetchLike = (

@@ -1,4 +1,4 @@
-import type { Message } from "./types/types-messages.ts";
+import type { Message } from "../types/types-messages.ts";
 
 export type RunOutcomeStatus =
 	| "completed"
