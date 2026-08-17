@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BackendError } from "../agent/core/backend.ts";
 import { AgentHarness, HarnessBusyError } from "../agent/harness/harness.ts";
-import { RunKernel } from "../agent/core/run-kernel.ts";
 import { Session } from "../agent/core/session.ts";
 import type { AgentConfig } from "../agent/types/index.ts";
 import { PermissionManager } from "../tools/shared/permissions.ts";
@@ -478,127 +477,8 @@ void test("enabled session persists real turn messages without placeholders", as
 	);
 });
 
-void test("enabled sessions use the kernel as the sole execution journal", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "logician-journal-"));
-	const harness = makeHarness(
-		new FakeBackend([() => textResponse("answer")]),
-		dir,
-	);
-	await harness.enableSession(dir);
-	await harness.prompt("question");
-
-	const sessionInfo = harness.listSessions()[0];
-	const session = new Session(sessionInfo.id, { baseDir: dir, enabled: true });
-	assert.ok(session);
-	assert.equal(
-		existsSync(join(dir, ".logician", "runtime", `${sessionInfo.id}.jsonl`)),
-		false,
-	);
-	assert.equal(
-		existsSync(
-			join(dir, ".logician", "trajectories", `${sessionInfo.id}.jsonl`),
-		),
-		false,
-	);
-	const trajectory = new RunKernel(dir, sessionInfo.id).snapshot().state
-		.trajectory;
-	assert.ok(trajectory.some(event => event.kind === "run_start"));
-	assert.ok(
-		trajectory.some(
-			event =>
-				event.kind === "agent_event" && event.payload.type === "turn_start",
-		),
-	);
-	assert.ok(trajectory.some(event => event.kind === "run_finish"));
-});
-
-void test("harness records run state and trajectory in the unified kernel ledger", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-harness-"));
-	const sessionId = "kernel-session";
-	const harness = new AgentHarness({
-		cwd,
-		config: {
-			baseUrl: "http://fake",
-			model: "fake",
-			systemPrompt: "test",
-			runtimeHooksEnabled: false,
-			proactiveCompactionEnabled: false,
-			continuationEnabled: false,
-			tools: [],
-		},
-		backend: new FakeBackend([() => textResponse("answer")]),
-		maxIterations: 5,
-	});
-	harness.setSessionId(sessionId);
-	await harness.prompt("question");
-
-	const replay = new RunKernel(cwd, sessionId).snapshot();
-	assert.deepEqual(replay.violations, []);
-	assert.equal(replay.state.rootPrompt, "question");
-	assert.ok(replay.state.trajectory.some(item => item.kind === "run_start"));
-	assert.ok(replay.state.trajectory.some(item => item.kind === "run_finish"));
-	assert.ok(
-		replay.state.trajectory.some(
-			item =>
-				item.kind === "agent_event" && item.payload.type === "run_outcome",
-		),
-	);
-});
-
-void test("interactive session IDs keep the kernel in memory", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-ephemeral-kernel-"));
-	const sessionId = "interactive-session";
-	const harness = makeHarness(
-		new FakeBackend([() => textResponse("answer")]),
-		cwd,
-	);
-	harness.setSessionId(sessionId, { durable: false });
-	await harness.prompt("question");
-
-	assert.equal(harness.durableRunState?.rootPrompt, "question");
-	assert.equal(
-		existsSync(join(cwd, ".logician", "run-kernel", `${sessionId}.jsonl`)),
-		false,
-	);
-	assert.equal(new RunKernel(cwd, sessionId).snapshot().state.taskId, undefined);
-});
-
-void test("streaming deltas stay live without entering the durable ledger", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-stream-"));
-	const sessionId = "stream-session";
-	const chunks = 250;
-	const backend = new FakeBackend([
-		(_messages, options) => {
-			options.callbacks?.onTextStart?.();
-			for (let index = 0; index < chunks; index++)
-				options.callbacks?.onDelta?.("x");
-			options.callbacks?.onTextEnd?.();
-			return textResponse("x".repeat(chunks));
-		},
-	]);
-	const harness = makeHarness(backend, cwd);
-	harness.setSessionId(sessionId);
-	let observedDeltas = 0;
-	harness.subscribe(event => {
-		if (event.type === "text_delta") observedDeltas++;
-	});
-
-	await harness.prompt("stream");
-
-	assert.equal(observedDeltas, chunks);
-	const trajectory = new RunKernel(cwd, sessionId).snapshot().state.trajectory;
-	assert.equal(
-		trajectory.filter(
-			entry =>
-				entry.kind === "agent_event" && entry.payload.type === "text_delta",
-		).length,
-		0,
-	);
-	assert.ok(trajectory.length < 30, "stream telemetry must remain bounded");
-});
-
-void test("provider budget remains exhausted across native continuation runs", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-budget-"));
+void test("continuation is gated by the in-memory provider-call budget", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-continuation-budget-"));
 	let backendCalls = 0;
 	const backend = new FakeBackend([
 		() => {
@@ -635,13 +515,11 @@ void test("provider budget remains exhausted across native continuation runs", a
 	await harness.continueWithNextTurn();
 
 	assert.equal(backendCalls, 1);
-	const replay = new RunKernel(cwd, "budget-session").snapshot();
-	assert.equal(replay.state.budgets.provider_call, 1);
-	assert.equal(replay.state.status, "blocked");
+	assert.equal(harness.runtimeState.outcome?.status, "blocked");
 });
 
-void test("token usage is persisted before a token-budget stop", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-tokens-"));
+void test("token usage over budget stops the run", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-token-budget-"));
 	const harness = new AgentHarness({
 		cwd,
 		config: {
@@ -666,266 +544,10 @@ void test("token usage is persisted before a token-budget stop", async () => {
 	});
 	harness.setSessionId("token-session");
 	await harness.prompt("start");
-	const state = new RunKernel(cwd, "token-session").snapshot().state;
-	assert.equal(state.budgets.token, 60);
-	assert.equal(state.status, "blocked");
+	assert.equal(harness.runtimeState.outcome?.status, "blocked");
 });
 
-void test("kernel restores task and budget state in a fresh harness process", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-restart-"));
-	const config: AgentConfig = {
-		baseUrl: "http://fake",
-		model: "fake",
-		systemPrompt: "test",
-		runtimeHooksEnabled: false,
-		proactiveCompactionEnabled: false,
-		continuationEnabled: false,
-		runBudget: { maxProviderCalls: 1, maxToolCalls: 10 },
-		tools: [],
-	};
-	const first = new AgentHarness({
-		cwd,
-		config: { ...config },
-		backend: new FakeBackend([() => textResponse("done")]),
-		maxIterations: 5,
-	});
-	first.setSessionId("restart-session");
-	await first.prompt("original task");
-
-	let restartedBackendCalls = 0;
-	const restarted = new AgentHarness({
-		cwd,
-		config: { ...config },
-		backend: new FakeBackend([
-			() => {
-				restartedBackendCalls++;
-				return textResponse("must not execute");
-			},
-		]),
-		maxIterations: 5,
-	});
-	restarted.setSessionId("restart-session");
-	restarted.setHistory([{ role: "user", content: "continue saved task" }]);
-	assert.equal(
-		restarted.requestContinuation("restart", "new-progress").action,
-		"continue",
-	);
-	await restarted.continue();
-
-	assert.equal(restartedBackendCalls, 0);
-	const state = new RunKernel(cwd, "restart-session").snapshot().state;
-	assert.equal(state.rootPrompt, "original task");
-	assert.equal(state.budgets.provider_call, 1);
-	assert.equal(state.status, "blocked");
-	assert.ok(state.leaseEpoch >= 3);
-});
-
-void test("kernel restores pending next-turn guidance after restart", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-queue-"));
-	const first = makeHarness(
-		new FakeBackend([() => textResponse("waiting")]),
-		cwd,
-	);
-	first.setSessionId("queue-session");
-	await first.prompt("start");
-	first.nextTurn("preserve this guidance");
-
-	const restarted = makeHarness(new FakeBackend([]), cwd);
-	restarted.setSessionId("queue-session");
-	assert.deepEqual(restarted.getQueues().nextTurn, ["preserve this guidance"]);
-	assert.deepEqual(
-		new RunKernel(cwd, "queue-session").snapshot().state.queues.nextTurn,
-		["preserve this guidance"],
-	);
-});
-
-void test("real tool execution durably records intent, result, and commit", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-tool-"));
-	let receivedIdempotencyKey: string | undefined;
-	const harness = new AgentHarness({
-		cwd,
-		config: {
-			baseUrl: "http://fake",
-			model: "fake",
-			systemPrompt: "test",
-			runtimeHooksEnabled: false,
-			proactiveCompactionEnabled: false,
-			continuationEnabled: false,
-			tools: [
-				{
-					name: "lookup",
-					description: "pure lookup",
-					parameters: { type: "object" },
-					readOnly: true,
-					recoverySemantics: "receipt_recoverable",
-					execute: async (args, context) => {
-						receivedIdempotencyKey = context.idempotencyKey;
-						return {
-							content: `value:${String(args.key)}`,
-							recoveryReceipt: "provider-receipt-1",
-						};
-					},
-				},
-			],
-		},
-		backend: new FakeBackend([
-			() => ({
-				content: "",
-				toolCalls: [
-					{ id: "call-lookup", name: "lookup", arguments: '{"key":"x"}' },
-				],
-				stopReason: "stop",
-			}),
-			() => textResponse("done"),
-		]),
-		maxIterations: 5,
-	});
-	harness.setSessionId("tool-session");
-	await harness.prompt("look it up");
-
-	const state = new RunKernel(cwd, "tool-session").snapshot().state;
-	const operations = Object.values(state.operations);
-	assert.equal(operations.length, 1);
-	assert.equal(operations[0]?.toolName, "lookup");
-	assert.equal(operations[0]?.recovery, "receipt_recoverable");
-	assert.equal(operations[0]?.status, "committed");
-	assert.equal(operations[0]?.receipt, "provider-receipt-1");
-	assert.match(operations[0]?.argumentsDigest ?? "", /^[a-f0-9]{64}$/);
-	assert.match(operations[0]?.resultDigest ?? "", /^[a-f0-9]{64}$/);
-	assert.equal(receivedIdempotencyKey, operations[0]?.idempotencyKey);
-});
-
-void test("kernel audits and restores session-scoped permission decisions", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-permission-"));
-	const permissions = new PermissionManager({ mode: "ask" });
-	const config: AgentConfig = {
-		baseUrl: "http://fake",
-		model: "fake",
-		runtimeHooksEnabled: false,
-		proactiveCompactionEnabled: false,
-		continuationEnabled: false,
-		permissions,
-		onPermissionRequest: async () => "always",
-		tools: [
-			{
-				name: "mutate",
-				description: "mutate",
-				parameters: { type: "object", properties: {} },
-				execute: async () => "changed",
-			},
-		],
-	};
-	const harness = new AgentHarness({
-		cwd,
-		config,
-		backend: new FakeBackend([
-			() => ({
-				content: null,
-				toolCalls: [{ id: "permission-call", name: "mutate", arguments: "{}" }],
-				stopReason: "stop",
-			}),
-			() => textResponse("done"),
-		]),
-	});
-	harness.setSessionId("permission-session");
-	await harness.prompt("change it");
-	const decision = new RunKernel(cwd, "permission-session").snapshot().state
-		.permissionDecisions[0];
-	assert.deepEqual(decision && { ...decision, sequence: undefined }, {
-		toolCallId: "permission-call",
-		toolName: "mutate",
-		decision: "allow",
-		source: "user",
-		scope: "session",
-		approvalRule: "mutate({})",
-		sequence: undefined,
-	});
-
-	const restoredPermissions = new PermissionManager({ mode: "ask" });
-	const restarted = new AgentHarness({
-		cwd,
-		config: { ...config, permissions: restoredPermissions },
-		backend: new FakeBackend([]),
-	});
-	restarted.setSessionId("permission-session");
-	assert.equal(
-		restoredPermissions.evaluate(
-			{ id: "later", name: "mutate", arguments: "{}" },
-			{},
-		).decision,
-		"allow",
-	);
-});
-
-void test("continuation recovers recorded results and quarantines intent-only effects", async () => {
-	for (const frontier of ["result", "intent"] as const) {
-		const cwd = mkdtempSync(join(tmpdir(), `logician-recovery-${frontier}-`));
-		const sessionId = `${frontier}-session`;
-		const kernel = new RunKernel(cwd, sessionId);
-		const ids = { taskId: "task", runId: "run", leaseEpoch: 1 };
-		kernel.append(
-			{ type: "task_started", rootPrompt: "recover", createdAt: Date.now() },
-			ids,
-		);
-		kernel.append(
-			{
-				type: "operation_intent_recorded",
-				operationId: "operation",
-				toolCallId: "call",
-				toolName: "noop",
-				arguments: {},
-				argumentsDigest: "args",
-				idempotencyKey: "key",
-				recovery: frontier === "intent" ? "at_most_once_unknown" : "pure",
-			},
-			ids,
-		);
-		if (frontier === "result")
-			kernel.append(
-				{
-					type: "operation_result_recorded",
-					operationId: "operation",
-					resultDigest: "result",
-					result: "durable result",
-					isError: false,
-				},
-				ids,
-			);
-
-		let recoveredToolContent = "";
-		const harness = makeHarness(
-			new FakeBackend([
-				messages => {
-					const recovered = messages.find(message => message.role === "tool");
-					recoveredToolContent = String(recovered?.content ?? "");
-					return textResponse("done");
-				},
-			]),
-			cwd,
-		);
-		harness.setSessionId(sessionId);
-		harness.setHistory([
-			{
-				role: "assistant",
-				content: null,
-				tool_calls: [{ id: "call", name: "noop", arguments: "{}" }],
-			},
-		]);
-		await harness.continue();
-		const operation = new RunKernel(cwd, sessionId).snapshot().state.operations
-			.operation;
-		assert.equal(
-			operation.status,
-			frontier === "result" ? "committed" : "quarantined",
-		);
-		assert.match(
-			recoveredToolContent,
-			frontier === "result" ? /durable result/ : /indeterminate/,
-		);
-	}
-});
-
-void test("enabled sessions persist resumable checkpoints at tool boundaries", async () => {
+void test("enabled sessions persist tool results across a resume", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-checkpoint-"));
 	const harness = makeHarness(
 		new FakeBackend([
@@ -942,15 +564,13 @@ void test("enabled sessions persist resumable checkpoints at tool boundaries", a
 	await harness.prompt("run the tool");
 
 	const sessionInfo = harness.listSessions()[0];
-	const state = new RunKernel(dir, sessionInfo.id).snapshot().state;
-	const toolEnd = state.trajectory.find(
-		event =>
-			event.kind === "agent_event" &&
-			event.payload.type === "tool_execution_end" &&
-			event.payload.toolCallId === "call_1",
+	const resumed = makeHarness(new FakeBackend([]));
+	assert.equal(await resumed.resumeSession(sessionInfo.id, dir), true);
+	assert.ok(
+		resumed.messages.some(
+			m => m.role === "tool" && m.tool_call_id === "call_1",
+		),
 	);
-	assert.ok(toolEnd);
-	assert.equal(Object.values(state.operations)[0]?.status, "committed");
 });
 
 void test("session typed entries build deterministic context", () => {

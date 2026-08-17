@@ -209,7 +209,7 @@ export async function runDelegatedAgent(params: {
 	// never sets `terminate: true` and the child loops on runner nudges
 	// ("call task_status with the accurate status") until maxIterations,
 	// surfacing as a spurious isError result even though the model finished.
-	const priorAfterToolCall = params.config.internalHooks?.afterToolCall;
+	const priorAfterToolCall = params.config.hooks?.afterToolCall;
 	const afterToolCall = async (
 		ctx: AfterToolCallContext,
 		signal?: AbortSignal,
@@ -223,7 +223,7 @@ export async function runDelegatedAgent(params: {
 	};
 	const configWithTermination: AgentConfig = {
 		...params.config,
-		internalHooks: { ...params.config.internalHooks, afterToolCall },
+		hooks: { ...params.config.hooks, afterToolCall },
 	};
 
 	let messages: Message[] = [];

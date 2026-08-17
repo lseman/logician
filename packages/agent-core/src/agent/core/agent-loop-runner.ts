@@ -30,12 +30,7 @@ import {
 	applyHeaderPatch,
 	assistantText,
 	emitMessagePair,
-	firstMessages,
-	type LoopCallbacks,
-	prepareMessages,
-	shouldStop,
 	stopReasonFor,
-	transformMessages,
 	withSystemPrompt,
 } from "../loop/callbacks.ts";
 import { buildProviderRequestOptions } from "../loop/provider-options.ts";
@@ -70,7 +65,6 @@ import {
 } from "./execution-policy.ts";
 import { checkBudget } from "./exit-path.ts";
 import {
-	type HarnessIntervention,
 	HarnessInterventionController,
 	type InterventionInput,
 } from "./intervention-controller.ts";
@@ -85,9 +79,13 @@ import { ToolResultCache } from "./tool-cache.ts";
 
 export type { ReflectionConfig } from "../loop/reflection.ts";
 
-export { STEERING_INTERRUPT_SUMMARY } from "./run-kernel-events.ts";
-
-import { STEERING_INTERRUPT_SUMMARY } from "./run-kernel-events.ts";
+// A steering interrupt cancels the in-flight provider call to redirect the
+// run, not to stop it — the harness auto-continues with the queued steering
+// text right after. Matched by exact summary text so both the loop runner
+// (which produces it) and the harness (which decides whether to resume as a
+// plain turn vs. an autonomous continuation) agree on what counts as one.
+export const STEERING_INTERRUPT_SUMMARY =
+	"Current provider response interrupted to apply steering.";
 
 export const STEERING_INTERRUPT_NAME = "SteeringInterruptError";
 
@@ -112,7 +110,7 @@ export interface RunAgentLoopContext {
 	cwd?: string;
 }
 
-export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
+export interface RunAgentLoopConfig extends AgentConfig {
 	backend: LLMBackend;
 	signal?: AbortSignal;
 	maxIterations?: number;
@@ -126,30 +124,20 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	/** Resolve the acceptance config at call time (allows harness to update it). */
 	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
 
-	/** Prior intervention incidents restored from the typed Run Kernel projection. */
-	initialInterventions?: HarnessIntervention[];
-	/** Task-spanning counters restored from the Run Kernel. */
+	/** Escalation state persists here across turns; defaults to a fresh, single-turn controller. */
+	interventionController?: HarnessInterventionController;
+	/** Task-spanning counters carried over from an earlier turn in this session. */
 	durableBudgetState?: {
 		providerCalls: number;
 		toolCalls: number;
 		tokens: number;
 		startedAt?: number;
 	};
-	/** Persist accepted budget consumption before the corresponding work starts. */
+	/** Notified as budget is consumed, so the harness can carry counters into the next turn. */
 	onBudgetConsumed?: (
 		resource: "provider_call" | "tool_call" | "token",
 		amount: number,
 	) => void;
-	onToolIntent?: NonNullable<
-		import("../../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolIntent"]
-	>;
-	onToolResult?: NonNullable<
-		import("../../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolResult"]
-	>;
-	onPermissionDecision?: NonNullable<
-		import("../../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onPermissionDecision"]
-	>;
-	onToolCommit?: (toolCallId: string) => void | Promise<void>;
 }
 
 async function runAgentLoopInTaskScope(
@@ -184,8 +172,8 @@ async function runAgentLoopInTaskScope(
 	let settings = resolveAgentSettings(config);
 	const maxIterations = settings.maxIterations;
 	const executionPolicy = resolveExecutionPolicy(settings.executionProfile);
-	const interventionController = new HarnessInterventionController();
-	interventionController.replay(config.initialInterventions ?? []);
+	const interventionController =
+		config.interventionController ?? new HarnessInterventionController();
 	const intervene = (input: InterventionInput): Promise<void> | void =>
 		emit({
 			type: "harness_intervention",
@@ -287,68 +275,29 @@ async function runAgentLoopInTaskScope(
 		return false;
 	}
 
-	function drainSteering(): Promise<Message[]> {
-		return firstMessages([
-			() => config.getSteeringMessages?.({ messages, iteration }),
-			() =>
-				config.internalHooks?.getSteeringMessages?.({ messages, iteration }),
-			() => config.hooks?.getSteeringMessages?.({ messages, iteration }),
-		]);
+	async function drainSteering(): Promise<Message[]> {
+		return (await config.hooks?.getSteeringMessages?.({ messages, iteration })) ?? [];
 	}
 
-	function drainFollowUps(): Promise<Message[]> {
-		return firstMessages([
-			() =>
-				config.getFollowUpMessages?.({
-					messages,
-					iteration,
-					assistantText: assistantText(newMessages.at(-1)),
-					stopReason: "stop",
-				}),
-			() =>
-				config.internalHooks?.getFollowUpMessages?.({
-					messages,
-					iteration,
-					assistantText: assistantText(newMessages.at(-1)),
-					stopReason: "stop",
-				}),
-			() =>
-				config.hooks?.getFollowUpMessages?.({
-					messages,
-					iteration,
-					assistantText: assistantText(newMessages.at(-1)),
-					stopReason: "stop",
-				}),
-		]);
+	async function drainFollowUps(): Promise<Message[]> {
+		return (
+			(await config.hooks?.getFollowUpMessages?.({
+				messages,
+				iteration,
+				assistantText: assistantText(newMessages.at(-1)),
+				stopReason: "stop",
+			})) ?? []
+		);
 	}
 
 	let pendingMessages = await drainSteering();
 
 	// Apply beforeAgentStart hook
-	const beforeAgentStartHooks = [
-		config.internalHooks?.beforeAgentStart,
-		config.hooks?.beforeAgentStart,
-	];
-	let beforeAgentStartResult:
-		| { messages?: AgentMessage[]; systemPrompt?: string }
-		| undefined;
-	for (const hook of beforeAgentStartHooks) {
-		const result = await hook?.({
-			prompt: prompts.map(p => p.content).join("\n"),
-			systemPrompt: context.systemPrompt ?? "",
-			messages: messages as AgentMessage[],
-		});
-		if (result?.messages)
-			beforeAgentStartResult = {
-				...beforeAgentStartResult,
-				messages: result.messages,
-			};
-		if (result?.systemPrompt)
-			beforeAgentStartResult = {
-				...beforeAgentStartResult,
-				systemPrompt: result.systemPrompt,
-			};
-	}
+	const beforeAgentStartResult = await config.hooks?.beforeAgentStart?.({
+		prompt: prompts.map(p => p.content).join("\n"),
+		systemPrompt: context.systemPrompt ?? "",
+		messages: messages as AgentMessage[],
+	});
 
 	await emit({ type: "agent_start" });
 	const promptTurnId = "turn_0";
@@ -428,18 +377,12 @@ async function runAgentLoopInTaskScope(
 				pendingMessages = [];
 			}
 
-			const transformed = await transformMessages(
-				[
-					config.transformContext,
-					config.internalHooks?.transformContext,
-					config.hooks?.transformContext,
-				],
-				{
-					messages: messages as AgentMessage[],
-					iteration,
-					signal: config.signal,
-				},
-			);
+			const transformResult = await config.hooks?.transformContext?.({
+				messages: messages as AgentMessage[],
+				iteration,
+				signal: config.signal,
+			});
+			const transformed = transformResult?.messages;
 			if (transformed) {
 				messages = transformed as Message[];
 				if (contextWasCompacted) config.onContextCompacted?.(messages);
@@ -462,10 +405,6 @@ async function runAgentLoopInTaskScope(
 				);
 				const chatMessages = convertToChatFormat(llmMessages);
 				// Apply beforeProviderRequest hook
-				const providerRequestHooks = [
-					config.internalHooks?.beforeProviderRequest,
-					config.hooks?.beforeProviderRequest,
-				];
 				let requestHeaders = config.streamOptions?.headers;
 				let requestTimeoutMs =
 					config.streamOptions?.timeoutMs ?? config.turnTimeoutMs;
@@ -474,8 +413,8 @@ async function runAgentLoopInTaskScope(
 				let requestCacheRetention = config.streamOptions?.cacheRetention;
 				let requestMetadata = config.streamOptions?.metadata;
 
-				for (const hook of providerRequestHooks) {
-					const result = await hook?.({
+				{
+					const result = await config.hooks?.beforeProviderRequest?.({
 						model: config.model ?? "",
 						sessionId: config.hookSessionId ?? "",
 						iteration,
@@ -493,13 +432,9 @@ async function runAgentLoopInTaskScope(
 					if (result?.metadata !== undefined) requestMetadata = result.metadata;
 				}
 
-				// Payload hooks must receive the backend's transport-ready payload.
+				// Payload hook must receive the backend's transport-ready payload.
 				// Building a parallel camelCase payload here used to replace fields
 				// such as `stream` and `max_tokens`, silently disabling SSE.
-				const payloadHooks = [
-					config.internalHooks?.beforeProviderPayload,
-					config.hooks?.beforeProviderPayload,
-				];
 
 				try {
 					// Resolve inference mode params — they override individual config values.
@@ -540,7 +475,7 @@ async function runAgentLoopInTaskScope(
 						requestMetadata,
 						modeDef,
 						signal: config.signal,
-						payloadHooks,
+						payloadHook: config.hooks?.beforeProviderPayload,
 					});
 					requestOptions.callbacks = buildStreamingCallbacks(
 						turnId,
@@ -729,13 +664,9 @@ async function runAgentLoopInTaskScope(
 				toolExecution: settings.toolExecution,
 				iteration,
 				signal: config.signal,
-				internalHooks: config.internalHooks,
 				hooks: config.hooks,
 				permissions: config.permissions,
 				onPermissionRequest: config.onPermissionRequest,
-				onPermissionDecision: config.onPermissionDecision,
-				onToolIntent: config.onToolIntent,
-				onToolResult: config.onToolResult,
 				emit,
 			});
 			const toolResults = batch.messages;
@@ -749,8 +680,6 @@ async function runAgentLoopInTaskScope(
 				await emitMessagePair(emit, turnId, toolResult);
 				hasMoreToolCalls = true;
 			}
-			for (const toolCallId of batch.executedToolCallIds)
-				await config.onToolCommit?.(toolCallId);
 
 			// The final usage-only SSE chunk is optional and many local providers
 			// omit it. Estimate the serialized conversation as a reliable fallback
@@ -835,18 +764,12 @@ async function runAgentLoopInTaskScope(
 				registry = createRegistry(refreshedConfig.tools ?? []);
 			}
 
-			const prepared = await prepareMessages(
-				[
-					config.prepareNextTurn,
-					config.internalHooks?.prepareNextTurn,
-					config.hooks?.prepareNextTurn,
-				],
-				{
-					messages,
-					iteration,
-					hadToolCalls: toolCalls.length > 0,
-				},
-			);
+			const prepareResult = await config.hooks?.prepareNextTurn?.({
+				messages,
+				iteration,
+				hadToolCalls: toolCalls.length > 0,
+			});
+			const prepared = prepareResult?.messages;
 			if (prepared) {
 				messages = prepared;
 				if (contextWasCompacted) config.onContextCompacted?.(messages);
@@ -891,20 +814,11 @@ async function runAgentLoopInTaskScope(
 			// hooks have stale state from a previous no-tool turn.
 			const stop =
 				toolCalls.length === 0
-					? await shouldStop(
-							[
-								config.shouldStopAfterTurn,
-								config.internalHooks?.shouldStopAfterTurn,
-								config.hooks?.shouldStopAfterTurn,
-							],
-							{
-								messages,
-								iteration,
-								hadToolCalls: false,
-								message: assistant,
-								toolResults,
-							},
-						)
+					? ((await config.hooks?.shouldStopAfterTurn?.({
+							messages,
+							iteration,
+							hadToolCalls: false,
+						})) ?? false)
 					: false;
 			// Acceptance stop rules take priority
 			let acceptanceStop = false;
@@ -1285,25 +1199,4 @@ export function runAgentLoop(
 	return runWithTaskState(() =>
 		runAgentLoopInTaskScope(context, prompts, config, emit),
 	);
-}
-
-/**
- * Resume an agent loop from an existing conversation without adding a new user prompt.
- * Used for retries and continuations where the last message is already a user/tool-result.
- * Throws if the context is empty or ends on an assistant message (nothing to continue from).
- */
-export async function runAgentLoopContinue(
-	context: RunAgentLoopContext,
-	config: RunAgentLoopConfig,
-	emit: AgentEventSink,
-): Promise<Message[]> {
-	if (context.messages.length === 0) {
-		throw new Error("Cannot continue: no messages in context");
-	}
-	const last = context.messages[context.messages.length - 1];
-	if (last?.role === "assistant") {
-		throw new Error("Cannot continue from message role: assistant");
-	}
-	// Re-enter the loop with empty prompts — the existing messages already contain the user turn.
-	return runAgentLoop(context, [], config, emit);
 }

@@ -100,21 +100,15 @@ export function processProviderResponse(
 		(response?.stopReason as "stop" | "length" | "error") ?? "stop";
 	const stopReason = stopReasonFor(rawStopReason, toolCalls);
 
-	// afterProviderResponse hooks
-	const responseHooks = [
-		config.internalHooks?.afterProviderResponse,
-		config.hooks?.afterProviderResponse,
-	];
-	for (const hook of responseHooks) {
-		hook?.({
-			model: config.model ?? "",
-			content: assistantContent,
-			toolCallCount: toolCalls.length,
-			stopReason,
-			usageTokens: response?.usage?.totalTokens,
-			iteration,
-		});
-	}
+	// afterProviderResponse hook
+	config.hooks?.afterProviderResponse?.({
+		model: config.model ?? "",
+		content: assistantContent,
+		toolCallCount: toolCalls.length,
+		stopReason,
+		usageTokens: response?.usage?.totalTokens,
+		iteration,
+	});
 
 	// Output guard: check for empty/degenerate responses
 	if (outputGuard) {

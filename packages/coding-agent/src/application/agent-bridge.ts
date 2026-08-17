@@ -1056,7 +1056,7 @@ export class AgentCoreBridge {
 				maxIterations: this.config.maxIterations,
 				extensionRunner: this.extensionRunner || undefined,
 			});
-			this.harness.setSessionId(this.sessionId, { durable: false });
+			this.harness.setSessionId(this.sessionId);
 			if (this.compactionSettings)
 				this.harness.setAutoCompactionSettings(this.compactionSettings);
 			// Harness owns the queue state; mirror every change to the UI.
@@ -1092,8 +1092,8 @@ export class AgentCoreBridge {
 
 	private emitRuntimeStatus(): void {
 		if (!this.harness) return;
-		const run = this.harness.durableRunStatus;
-		const budget = this.harness.durableRunBudget;
+		const run = this.harness.continuationStatus;
+		const budget = this.harness.continuationBudget;
 		this.emit({
 			type: "runtime_status",
 			runPhase: run?.status ?? "idle",
@@ -1677,8 +1677,6 @@ export class AgentCoreBridge {
 				pendingToolCalls: [],
 				abortRequested: false,
 			},
-			durable_run_state: this.harness?.durableRunState,
-			trajectory_report: this.harness?.trajectoryReport,
 			config_path: this.configPath || "",
 			connected: true,
 			reasoner: this.reasonerId,
@@ -2018,7 +2016,7 @@ export class AgentCoreBridge {
 			this.memoryStore.discardEmptySession(provisionalSessionId);
 		}
 		this.sessionId = sessionId;
-		this.harness?.setSessionId(sessionId, { durable: false });
+		this.harness?.setSessionId(sessionId);
 		this.transcriptPath = createHookTranscriptPath(this.cwd, sessionId);
 		this.config.hookSessionId = sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
@@ -2191,8 +2189,6 @@ export class AgentCoreBridge {
 				pendingToolCalls: [],
 				abortRequested: false,
 			},
-			durable_run_state: this.harness?.durableRunState,
-			trajectory_report: this.harness?.trajectoryReport,
 			config_path: this.configPath || "",
 			hooks_enabled: this.config.runtimeHooksEnabled !== false,
 			hook_transcript_path: this.config.hookTranscriptPath || "",

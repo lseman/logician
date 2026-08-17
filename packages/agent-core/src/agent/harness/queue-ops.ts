@@ -9,7 +9,7 @@ import type {
 	MessageDeliveryManager,
 } from "../../queue/manager.ts";
 import { createSteeringInterruptReason } from "../core/agent-loop-runner.ts";
-import type { HarnessPhase } from "../core/run-kernel.ts";
+import type { HarnessPhase } from "../core/runtime-state.ts";
 import type { QueueMode } from "../types/index.ts";
 import type { AbortResult, HarnessQueues } from "./contracts.ts";
 import { HarnessBusyError } from "./phase.ts";

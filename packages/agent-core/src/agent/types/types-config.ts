@@ -172,7 +172,6 @@ export interface AgentConfig {
 	hookSessionId?: string;
 	hookTranscriptPath?: string;
 	hooks?: AgentHooks;
-	internalHooks?: AgentHooks;
 	convertToLlm?: (
 		messages: import("./types-messages.ts").AgentMessage[],
 	) => import("./types-messages.ts").Message[];

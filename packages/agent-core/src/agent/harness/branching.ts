@@ -5,10 +5,7 @@
 // to live directly on the AgentHarness class.
 
 import type { LLMBackend } from "../core/backend.ts";
-import {
-	collectMessagesForBranchSummary,
-	extractFileOpsFromMessages,
-} from "../summaries/branch-summarization.ts";
+import { collectMessagesForBranchSummary } from "../summaries/branch-summarization.ts";
 import { generateBranchSummaryText } from "../summaries/summary-generation.ts";
 import type { BranchInfo, BranchSummaryData } from "../summaries/types.ts";
 import type { Message, ThinkingLevel } from "../types/index.ts";
@@ -105,53 +102,6 @@ export async function summarizeAndMergeBranch(
 		history: [...branch.parent, summaryEntry],
 		summaryText: summary.full,
 	};
-}
-
-export interface CheckpointNavigationOutcome {
-	history: Message[];
-	summary: BranchSummaryData | null;
-}
-
-/**
- * Navigate to a previous checkpoint, optionally summarizing the abandoned
- * path first. Returns the new active history and the abandoned-path summary
- * (or null).
- */
-export async function navigateToCheckpoint(
-	backend: LLMBackend,
-	checkpoints: Message[][],
-	checkpointIndex: number,
-	currentHistory: Message[],
-	options: {
-		summarize?: boolean;
-		customInstructions?: string;
-		maxTokens?: number;
-		thinkingLevel?: ThinkingLevel;
-	} = {},
-): Promise<CheckpointNavigationOutcome | null> {
-	if (checkpointIndex < 0 || checkpointIndex >= checkpoints.length) {
-		return null;
-	}
-
-	const target = checkpoints[checkpointIndex];
-	const abandoned = currentHistory;
-
-	let summary: BranchSummaryData | null = null;
-
-	if (options.summarize && abandoned.length > target.length) {
-		const abandonedMessages = abandoned.slice(target.length);
-		const fileOps = extractFileOpsFromMessages(abandonedMessages);
-		summary = await generateBranchSummaryText(backend, abandonedMessages, {
-			customInstructions: options.customInstructions,
-			fileOps,
-			maxTokens: options.maxTokens,
-			thinkingLevel: options.thinkingLevel,
-		});
-	}
-
-	// Matches prior harness behavior: navigating to a checkpoint always
-	// resets history to exactly the target snapshot, regardless of summarize.
-	return { history: [...target], summary };
 }
 
 /** Render the branch tree as an ASCII summary string. */

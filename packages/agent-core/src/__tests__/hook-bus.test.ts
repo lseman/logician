@@ -53,44 +53,6 @@ void test("a throwing handler is skipped and reported, chain continues", async (
 	assert.deepEqual(errors, ["shouldStopAfterTurn:bad:boom"]);
 });
 
-void test("a slow handler is timed out and skipped", async () => {
-	const errors: string[] = [];
-	const bus = new HookBus({
-		defaultTimeoutMs: 30,
-		onError: e => errors.push(e.message),
-	});
-	bus.on(
-		"afterToolCall",
-		() => new Promise(() => {}), // never settles
-		{ source: "stuck" },
-	);
-	bus.on("afterToolCall", () => ({ content: "patched" }));
-	const r = await bus.toHooks().afterToolCall?.({
-		...ctx,
-		result: "raw",
-		isError: false,
-	});
-	assert.equal(r?.content, "patched");
-	assert.equal(errors.length, 1);
-	assert.match(errors[0], /timed out/);
-});
-
-void test("per-registration timeout overrides bus default", async () => {
-	const bus = new HookBus({ defaultTimeoutMs: 10 });
-	bus.on(
-		"getSteeringMessages",
-		async () => {
-			await new Promise(r => setTimeout(r, 30));
-			return [{ role: "user" as const, content: "late but allowed" }];
-		},
-		{ timeoutMs: 200 },
-	);
-	const r = await bus
-		.toHooks()
-		.getSteeringMessages?.({ messages: [], iteration: 1 });
-	assert.equal(r?.[0]?.content, "late but allowed");
-});
-
 void test("beforeAgentStart threads context through every layer", async () => {
 	const bus = new HookBus();
 	bus.on("beforeAgentStart", ({ messages }) => ({
@@ -161,22 +123,22 @@ void test("beforeCompact cancellation short-circuits later hooks", async () => {
 	assert.equal(laterRan, false);
 });
 
-void test("handlers use deterministic priority ordering", async () => {
+void test("handlers run in registration order", async () => {
 	const bus = new HookBus();
 	const order: string[] = [];
 	bus.on(
 		"afterProviderResponse",
 		() => {
-			order.push("normal");
+			order.push("first");
 		},
-		{ id: "normal", source: "extension" },
+		{ id: "first", source: "builtin" },
 	);
 	bus.on(
 		"afterProviderResponse",
 		() => {
-			order.push("policy");
+			order.push("second");
 		},
-		{ id: "policy", source: "builtin", priority: 100 },
+		{ id: "second", source: "extension" },
 	);
 	await bus.toHooks().afterProviderResponse?.({
 		content: "",
@@ -185,30 +147,15 @@ void test("handlers use deterministic priority ordering", async () => {
 		model: "test",
 		stopReason: "stop",
 	});
-	assert.deepEqual(order, ["policy", "normal"]);
+	assert.deepEqual(order, ["first", "second"]);
 	assert.throws(
-		() => bus.on("afterProviderResponse", () => {}, { id: "policy" }),
+		() => bus.on("afterProviderResponse", () => {}, { id: "first" }),
 		/Duplicate hook handler id/,
 	);
 });
 
-void test("dispose runs cleanups once and rejects new registrations", async () => {
+void test("a parent abort signal propagates to the handler's signal", async () => {
 	const bus = new HookBus();
-	const order: number[] = [];
-	bus.addCleanup(() => {
-		order.push(1);
-	});
-	bus.addCleanup(async () => {
-		order.push(2);
-	});
-	await bus.dispose();
-	await bus.dispose();
-	assert.deepEqual(order, [2, 1]);
-	assert.throws(() => bus.on("afterProviderResponse", () => {}), /disposed/);
-});
-
-void test("timeout aborts the handler signal instead of only abandoning its promise", async () => {
-	const bus = new HookBus({ defaultTimeoutMs: 15 });
 	let observedAbort = false;
 	bus.on(
 		"afterProviderResponse",
@@ -226,12 +173,18 @@ void test("timeout aborts the handler signal instead of only abandoning its prom
 		},
 		{ id: "abort-aware" },
 	);
-	await bus.toHooks().afterProviderResponse?.({
-		content: "",
-		toolCallCount: 0,
-		iteration: 1,
-		model: "test",
-		stopReason: "stop",
-	});
+	const controller = new AbortController();
+	const run = bus.toHooks().afterProviderResponse?.(
+		{
+			content: "",
+			toolCallCount: 0,
+			iteration: 1,
+			model: "test",
+			stopReason: "stop",
+		},
+		controller.signal,
+	);
+	controller.abort();
+	await run;
 	assert.equal(observedAbort, true);
 });

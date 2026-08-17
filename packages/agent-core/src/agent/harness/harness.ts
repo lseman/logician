@@ -4,13 +4,16 @@
 // nextTurn queues drained at save points.
 //
 
-import { randomUUID } from "node:crypto";
 import type { CompactionSettings } from "../../compaction/index.ts";
 import type {
 	ExtensionRunner,
 	RegisteredTool,
 } from "../../extensions/index.ts";
-import { buildBuiltinHooks } from "../../hooks/builtin/builtin-hooks.ts";
+import { BudgetTracker } from "../../hooks/builtin/budget.ts";
+import {
+	buildBuiltinHooks,
+	COMPACTION_COOLDOWN_TURNS,
+} from "../../hooks/builtin/builtin-hooks.ts";
 import { HookBus } from "../../hooks/native/hook-bus.ts";
 import {
 	type ClaudeCodeHookLayer,
@@ -21,7 +24,7 @@ import {
 	type DeliveryMode,
 	MessageDeliveryManager,
 } from "../../queue/manager.ts";
-import { withHarnessQueueHooks } from "../../runtime/harness-queue-hooks.ts";
+import { withQueueEventForwarding } from "../../runtime/harness-queue-hooks.ts";
 import { ToolRegistry } from "../../tools/shared/registry.ts";
 import {
 	throwOnValidationErrors,
@@ -30,35 +33,31 @@ import {
 import {
 	type RunAgentLoopConfig,
 	runAgentLoop,
+	STEERING_INTERRUPT_SUMMARY,
 } from "../core/agent-loop-runner.ts";
 import type { LLMBackend } from "../core/backend.ts";
+import {
+	type ContinuationDecision,
+	ContinuationTracker,
+	type RunBudgetStatus,
+} from "../core/continuation-tracker.ts";
 import {
 	beginFileFrame,
 	clearFileFrames,
 	restoreFileFrame,
 } from "../core/file-checkpoints.ts";
+import { HarnessInterventionController } from "../core/intervention-controller.ts";
 import {
-	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
 } from "../core/messages.ts";
 import {
 	type AgentRuntimeState,
-	type ContinuationDecision,
 	createRuntimeState,
 	type HarnessPhase,
-	RunKernel,
 	reduceRuntimeState,
-} from "../core/run-kernel.ts";
-import {
-	type RunKernelState,
-	STEERING_INTERRUPT_SUMMARY,
-} from "../core/run-kernel-events.ts";
+} from "../core/runtime-state.ts";
 import { Session } from "../core/session.ts";
-import {
-	evaluateTrajectory,
-	type TrajectoryReport,
-} from "../core/trajectory.ts";
 import { LoopDetector } from "../guards/loop-detector.ts";
 import { OutputGuard } from "../guards/output-guard.ts";
 import type { BranchInfo, BranchSummaryData } from "../summaries/types.ts";
@@ -66,6 +65,7 @@ import type {
 	AgentConfig,
 	AgentEvent,
 	AgentHarnessStreamOptions,
+	AgentHooks,
 	AgentModelConfig,
 	BeforeCompactContext,
 	BeforeCompactResult,
@@ -78,7 +78,6 @@ import {
 	type Branch,
 	forkBranch,
 	listBranches as listBranchesHelper,
-	navigateToCheckpoint as navigateToCheckpointHelper,
 	renderBranchTree,
 	summarizeAndMergeBranch,
 } from "./branching.ts";
@@ -101,13 +100,11 @@ import {
 	listSessions as listSessionsHelper,
 	loadSessionMessages,
 } from "./session-lifecycle.ts";
-import {
-	digest,
-	isDurableAgentEvent,
-	trajectoryEventPayload,
-} from "./utilities.ts";
 
-export type { AgentRuntimeState, HarnessPhase } from "../core/run-kernel.ts";
+export type {
+	AgentRuntimeState,
+	HarnessPhase,
+} from "../core/runtime-state.ts";
 export type { BranchInfo, BranchSummaryData } from "../summaries/types.ts";
 export type {
 	AbortResult,
@@ -119,6 +116,12 @@ export { HarnessBusyError } from "./phase.ts";
 // Conversation checkpoints: a snapshot of history is pushed before each
 // prompt so a bad turn can be rewound. Bounded ring (newest last).
 const MAX_CHECKPOINTS = 20;
+
+type TurnRequest = { kind: "prompt"; text: string } | { kind: "continue" };
+
+interface PreparedTurn {
+	snapshot: HarnessTurnSnapshot;
+}
 
 export class AgentHarness {
 	private config: AgentConfig;
@@ -137,6 +140,16 @@ export class AgentHarness {
 	private checkpoints: Message[][] = [];
 	private msgManager: MessageDeliveryManager;
 	private loopDetector: LoopDetector;
+	// Escalation/cooldown state for the built-in safeguard hooks. Owned here
+	// (not inside buildBuiltinHooks) because withExtensionRuntime() rebuilds
+	// the hooks object on every loop iteration (via refreshNextTurnConfig) —
+	// state that must persist across iterations (intervention escalation,
+	// budget-stop's consecutive-turn comparison, the compaction cooldown)
+	// would otherwise silently reset every time and never do its job.
+	private interventions: HarnessInterventionController =
+		new HarnessInterventionController();
+	private budgetTracker: BudgetTracker | null = null;
+	private compactionCooldown = { lastTurn: -COMPACTION_COOLDOWN_TURNS };
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (
@@ -165,10 +178,13 @@ export class AgentHarness {
 	private _sessionId?: string;
 	private _transcriptPath?: string;
 	private _hasStartedSession = false;
-	private _activeOperationId?: string;
-	private runKernel: RunKernel;
-	private readonly runKernelOwnerId = randomUUID();
-	private activeToolOperations = new Map<string, string>();
+	private continuationTracker = new ContinuationTracker();
+	private durableBudgetState = {
+		providerCalls: 0,
+		toolCalls: 0,
+		tokens: 0,
+		startedAt: undefined as number | undefined,
+	};
 	private _runPromise?: Promise<void>;
 	private _runResolve?: () => void;
 	private _subscribers: Set<EventHandler> = new Set();
@@ -196,12 +212,6 @@ export class AgentHarness {
 		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
 		this.backend = options.backend;
 		this.cwd = options.cwd;
-		const initialSessionId =
-			options.config.hookSessionId ?? `tui_${randomUUID()}`;
-		this.runKernel = new RunKernel(
-			options.cwd ?? process.cwd(),
-			initialSessionId,
-		);
 		this.maxIterations = options.maxIterations;
 		this._extensionRunner = options.extensionRunner;
 		this.loopDetector = new LoopDetector({
@@ -253,190 +263,41 @@ export class AgentHarness {
 		};
 	}
 
-	get durableRunState(): RunKernelState | undefined {
-		const state = this.runKernel.snapshot().state;
-		return state.taskId ? state : undefined;
+	get continuationStatus() {
+		const state = this.continuationTracker.snapshot();
+		return state.taskId
+			? { taskId: state.taskId, status: state.status, compactionGeneration: state.compactionGeneration }
+			: undefined;
 	}
 
-	get durableRunStatus() {
-		const status = this.runKernel.status();
-		return status.taskId ? status : undefined;
+	get continuationBudget(): RunBudgetStatus | undefined {
+		return this.continuationTracker.budgetStatus();
 	}
 
-	get durableRunBudget() {
-		return this.runKernel.budgetStatus();
-	}
-
-	get trajectoryReport(): TrajectoryReport {
-		const state = this.runKernel.snapshot().state;
-		return evaluateTrajectory(
-			state.trajectory.map(entry => ({
-				version: 1,
-				sequence: entry.sequence,
-				timestamp: entry.timestamp,
-				sessionId: state.sessionId ?? "",
-				runId: entry.runId,
-				operationId: entry.operationId,
-				kind: entry.kind,
-				payload: entry.payload,
-			})),
-		);
-	}
-
-	private recordTrajectoryStart(
-		runId: string,
-		operationId: string,
-		config: AgentConfig,
-		cause: "prompt" | "continue",
-	): void {
-		this.runKernel.recordTrajectory(
-			"run_start",
-			operationId,
-			{
-				cause,
-				metadata: {
-					harnessVersion: "0.3.0",
-					model: config.model,
-					baseUrl: config.baseUrl,
-					executionProfile: config.executionProfile,
-					inferenceMode: config.inferenceMode,
-					tools: (config.tools ?? []).map(tool => ({
-						name: tool.name,
-						description: tool.description,
-					})),
-				},
-			},
-			runId,
-		);
-	}
-
-	private renewRunKernelLease(): void {
-		const state = this.runKernel.snapshot().state;
-		if (!state.taskId || !state.runId || state.status === "idle") return;
-		this.runKernel.acquireLease(this.runKernelOwnerId, {
-			taskId: state.taskId,
-			runId: state.runId,
-			force: true,
-		});
-	}
-
+	/** Carries cumulative budget counters across turns in this session. */
 	private durableExecutionConfig(): Pick<
 		RunAgentLoopConfig,
-		| "durableBudgetState"
-		| "initialInterventions"
-		| "onBudgetConsumed"
-		| "onPermissionDecision"
-		| "onToolIntent"
-		| "onToolResult"
-		| "onToolCommit"
+		"durableBudgetState" | "onBudgetConsumed"
 	> {
-		this.renewRunKernelLease();
-		const state = this.runKernel.snapshot().state;
-		const appendOptions = (operationId?: string) => {
-			const current = this.runKernel.snapshot().state;
-			if (!current.taskId || !current.runId) return undefined;
-			return {
-				taskId: current.taskId,
-				runId: current.runId,
-				operationId,
-				leaseEpoch: current.leaseEpoch,
-			};
-		};
 		return {
-			initialInterventions: state.interventions,
-			durableBudgetState: {
-				providerCalls: state.budgets.provider_call,
-				toolCalls: state.budgets.tool_call,
-				tokens: state.budgets.token,
-				startedAt: state.createdAt,
-			},
+			durableBudgetState: { ...this.durableBudgetState },
 			onBudgetConsumed: (resource, amount) => {
-				const options = appendOptions();
-				if (!options) return;
-				this.runKernel.append(
-					{ type: "budget_consumed", resource, amount },
-					options,
-				);
-			},
-			onPermissionDecision: decision => {
-				const options = appendOptions();
-				if (!options) return;
-				this.runKernel.append(
-					{ type: "permission_decided", ...decision },
-					options,
-				);
-			},
-			onToolIntent: input => {
-				const current = this.runKernel.snapshot().state;
-				if (!current.taskId) return;
-				const argumentsDigest = digest(input.args);
-				const operationId = digest({
-					taskId: current.taskId,
-					toolCallId: input.toolCallId,
-					toolName: input.toolName,
-					argumentsDigest,
-				}).slice(0, 32);
-				const options = appendOptions(operationId);
-				if (!options) return;
-				this.runKernel.append(
-					{
-						type: "operation_intent_recorded",
-						operationId,
-						toolCallId: input.toolCallId,
-						toolName: input.toolName,
-						arguments: structuredClone(input.args),
-						argumentsDigest,
-						idempotencyKey: operationId,
-						recovery: input.recovery,
-					},
-					options,
-				);
-				this.activeToolOperations.set(input.toolCallId, operationId);
-				return { operationId, idempotencyKey: operationId };
-			},
-			onToolResult: input => {
-				const operationId = this.activeToolOperations.get(input.toolCallId);
-				if (!operationId)
-					throw new Error(`Missing durable intent for ${input.toolCallId}`);
-				const options = appendOptions(operationId);
-				if (!options) return;
-				this.runKernel.append(
-					{
-						type: "operation_result_recorded",
-						operationId,
-						resultDigest: digest(input.result),
-						result: input.result,
-						isError: input.isError,
-						receipt: input.receipt,
-					},
-					options,
-				);
-			},
-			onToolCommit: toolCallId => {
-				const operationId = this.activeToolOperations.get(toolCallId);
-				if (!operationId)
-					throw new Error(`Missing durable result for ${toolCallId}`);
-				const options = appendOptions(operationId);
-				if (!options) return;
-				this.runKernel.append(
-					{ type: "operation_committed", operationId },
-					options,
-				);
-				this.activeToolOperations.delete(toolCallId);
+				if (resource === "provider_call") this.durableBudgetState.providerCalls += amount;
+				else if (resource === "tool_call") this.durableBudgetState.toolCalls += amount;
+				else if (resource === "token") this.durableBudgetState.tokens += amount;
 			},
 		};
 	}
 
 	requestContinuation(
-		cause: string,
+		_cause: string,
 		progressFingerprint: string,
 	): ContinuationDecision {
-		this.renewRunKernelLease();
-		return this.runKernel.requestContinuation(cause, progressFingerprint);
+		return this.continuationTracker.requestContinuation(progressFingerprint);
 	}
 
 	failRun(reason?: string): void {
-		this.runKernel.finish("failed", reason, "runtime");
+		this.continuationTracker.finish("failed", reason);
 	}
 
 	setOnPhaseChange(
@@ -547,7 +408,6 @@ export class AgentHarness {
 	}
 
 	private settleTurn(): void {
-		this._activeOperationId = undefined;
 		this.abortController = null;
 		this.msgManager.queue.clearCurrentTurn();
 		this.emitQueueChange();
@@ -577,7 +437,6 @@ export class AgentHarness {
 				return this.prompt(userMessage);
 			}
 		}
-		this.recoverInterruptedOperations();
 		return this.runTurn({ kind: "prompt", text: userMessage });
 	}
 
@@ -586,14 +445,9 @@ export class AgentHarness {
 	 * The last message in history must be a user or tool-result message (not assistant).
 	 * Mirrors pi's agent.continue() — used when the agent stopped prematurely and
 	 * the caller wants to re-enter the loop without fabricating a follow-up prompt.
-	 *
-	 * Interrupted-operation recovery runs first: it may append a missing tool
-	 * result to history, which is what lets a run that stopped mid-tool-call
-	 * (last message still "assistant") pass the check below.
 	 */
 	async continue(): Promise<Message[]> {
 		this.assertIdle("continue");
-		this.recoverInterruptedOperations();
 		const nonSystem = this.history.filter(
 			(m): m is Message => m != null && m.role !== "system",
 		);
@@ -625,135 +479,118 @@ export class AgentHarness {
 	}
 
 	/**
-	 * Shared turn transaction for both entry points. Callers run interrupted-
-	 * operation recovery and kind-specific validation before invoking this —
-	 * `prompt` and `continue` differ only in snapshot creation (prompt injects
-	 * hook/extension messages and drains next-turn guidance; continue just
-	 * wraps current history), in whether a new task starts, and in whether a
-	 * user message is threaded into the loop. Everything else — idle
-	 * bookkeeping, session start, checkpointing, trajectory recording, and
-	 * history reconstruction — is identical, so it lives here once.
+	 * Shared turn transaction for both entry points. Callers run kind-specific
+	 * validation before invoking this — `prompt` and `continue` differ only in
+	 * snapshot creation (prompt injects hook/extension messages and drains
+	 * next-turn guidance; continue just wraps current history), in whether a
+	 * new task starts, and in whether a user message is threaded into the
+	 * loop. Everything else — idle bookkeeping, session start, checkpointing,
+	 * and history reconstruction — is identical, so it lives here once.
 	 */
-	private async runTurn(
-		request: { kind: "prompt"; text: string } | { kind: "continue" },
-	): Promise<Message[]> {
+	private async runTurn(request: TurnRequest): Promise<Message[]> {
 		this._runPromise = new Promise<void>(resolve => {
 			this._runResolve = resolve;
 		});
 
 		return this.runInPhase("turn", request.kind, async () => {
-			if (request.kind === "prompt") {
-				this.runKernel.startTask(request.text);
-				this.renewRunKernelLease();
-			}
-			this.abortController = new AbortController();
-
-			if (!this._hasStartedSession) {
-				try {
-					await this.emitSessionStart("startup");
-				} catch (error) {
-					this.settleTurn();
-					throw error;
-				}
-			}
-
-			this.checkpoints.push([...this.history]);
-			if (this.checkpoints.length > MAX_CHECKPOINTS) {
-				this.checkpoints.shift();
-			}
-			beginFileFrame();
-
-			let snapshot: HarnessTurnSnapshot;
 			try {
-				snapshot =
-					request.kind === "prompt"
-						? await this.createTurnSnapshot(
-								request.text,
-								this.abortController.signal,
-							)
-						: await this.createContinueSnapshot(this.abortController.signal);
-			} catch (error) {
-				this.settleTurn();
-				throw error;
-			}
-			const operationId = randomUUID();
-			this._activeOperationId = operationId;
-			const runId = this.runKernel.snapshot().state.runId ?? operationId;
-			this.recordTrajectoryStart(
-				runId,
-				operationId,
-				snapshot.config,
-				request.kind,
-			);
-
-			try {
-				this.loopConfig = snapshot.config;
-				let compactedContext: Message[] | undefined;
-				const prompts =
-					request.kind === "prompt"
-						? [createUserMessage(snapshot.promptText)]
-						: [];
-				const newMessages = await runAgentLoop(
-					{
-						systemPrompt: snapshot.config.systemPrompt,
-						messages: snapshot.initialMessages,
-						tools: snapshot.config.tools,
-						cwd: this.cwd,
-					},
-					prompts,
-					{
-						...snapshot.config,
-						...this.durableExecutionConfig(),
-						backend: this.backend,
-						signal: snapshot.signal,
-						maxIterations: this.maxIterations,
-						outputGuard: this.outputGuard,
-						refreshNextTurnConfig: () =>
-							this.withExtensionRuntime(this.snapshotConfig()),
-						onContextCompacted: messages => {
-							compactedContext = messages;
-							this.persistCompactedContext(
-								messages,
-								this.estimatePayloadTokens(),
-							);
-						},
-					} satisfies RunAgentLoopConfig,
-					async event => {
-						await this.handleAgentEvent(event);
-					},
-				);
-				const result = compactedContext ?? [
-					{
-						role: "system" as const,
-						content:
-							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
-					},
-					...snapshot.initialMessages.filter(
-						(message): message is Message =>
-							message != null && message.role !== "system",
-					),
-					...newMessages,
-				];
-				this.history = result;
-				return result;
+				const signal = await this.preflight(request);
+				const turn = await this.prepareTurn(request, signal);
+				return await this.executeTurn(request, turn);
 			} finally {
-				this.runKernel.recordTrajectory(
-					"run_finish",
-					operationId,
-					{
-						status: this.runtime.outcome?.status ?? "unknown",
-					},
-					runId,
-				);
 				this.settleTurn();
 			}
 		});
 	}
 
+	/** Task setup that must happen before a turn is prepared. */
+	private async preflight(request: TurnRequest): Promise<AbortSignal> {
+		if (request.kind === "prompt") {
+			this.continuationTracker.startTask();
+		}
+		this.abortController = new AbortController();
+
+		if (!this._hasStartedSession) {
+			await this.emitSessionStart("startup");
+		}
+		return this.abortController.signal;
+	}
+
+	/** Snapshot the turn's context before execution. */
+	private async prepareTurn(
+		request: TurnRequest,
+		signal: AbortSignal,
+	): Promise<PreparedTurn> {
+		this.checkpoints.push([...this.history]);
+		if (this.checkpoints.length > MAX_CHECKPOINTS) {
+			this.checkpoints.shift();
+		}
+		beginFileFrame();
+
+		const snapshot =
+			request.kind === "prompt"
+				? await this.createTurnSnapshot(request.text, signal)
+				: await this.createContinueSnapshot(signal);
+
+		return { snapshot };
+	}
+
+	/** Run the loop against the prepared snapshot and fold the result into history. */
+	private async executeTurn(
+		request: TurnRequest,
+		turn: PreparedTurn,
+	): Promise<Message[]> {
+		const { snapshot } = turn;
+		this.loopConfig = snapshot.config;
+		let compactedContext: Message[] | undefined;
+		const prompts =
+			request.kind === "prompt" ? [createUserMessage(snapshot.promptText)] : [];
+		const newMessages = await runAgentLoop(
+			{
+				systemPrompt: snapshot.config.systemPrompt,
+				messages: snapshot.initialMessages,
+				tools: snapshot.config.tools,
+				cwd: this.cwd,
+			},
+			prompts,
+			{
+				...snapshot.config,
+				...this.durableExecutionConfig(),
+				backend: this.backend,
+				signal: snapshot.signal,
+				maxIterations: this.maxIterations,
+				outputGuard: this.outputGuard,
+				interventionController: this.interventions,
+				refreshNextTurnConfig: () =>
+					this.withExtensionRuntime(this.snapshotConfig()),
+				onContextCompacted: messages => {
+					compactedContext = messages;
+					this.persistCompactedContext(messages, this.estimatePayloadTokens());
+				},
+			} satisfies RunAgentLoopConfig,
+			async event => {
+				await this.handleAgentEvent(event);
+			},
+		);
+		const result = compactedContext ?? [
+			{
+				role: "system" as const,
+				content: snapshot.config.systemPrompt ?? "You are a helpful assistant.",
+			},
+			...snapshot.initialMessages.filter(
+				(message): message is Message =>
+					message != null && message.role !== "system",
+			),
+			...newMessages,
+		];
+		this.history = result;
+		return result;
+	}
+
 	private async createContinueSnapshot(
 		signal: AbortSignal,
 	): Promise<HarnessTurnSnapshot> {
-		const config = this.withDrainHook(
+		const config = this.forwardQueueEvents(
 			this.withExtensionRuntime(this.snapshotConfig()),
 		);
 		const streamOptions = { ...this._streamOptions };
@@ -808,7 +645,7 @@ export class AgentHarness {
 			...this.snapshotConfig(),
 			...(systemPrompt ? { systemPrompt } : {}),
 		};
-		const config = this.withDrainHook(
+		const config = this.forwardQueueEvents(
 			this.withExtensionRuntime(baseConfig, pluginHookLayer),
 		);
 		const streamOptions = { ...this._streamOptions };
@@ -905,45 +742,63 @@ export class AgentHarness {
 		// Using a fresh bus avoids stale registrations between turns.
 		const hookBus = new HookBus();
 
-		// Layer 1: builtin hooks (highest priority)
+		// Budget-stop's tracker must survive across rebuilds to compare
+		// consecutive turns (buildBuiltinHooks decides whether it's actually
+		// enabled — this just ensures the same instance is reused if it is).
+		this.budgetTracker ??= new BudgetTracker();
+
+		// Layers run in registration order: builtin safeguards, then the
+		// harness's own queue-draining, then extensions, then claude-code
+		// compat, then caller-supplied hooks last so callers can override.
 		const builtinHooks = buildBuiltinHooks({
 			config,
 			contextWindowTokens: () => config.contextWindowTokens,
 			toolDefs: () => tools as unknown as Record<string, unknown>[],
 			loopDetector: this.loopDetector,
-			eventBus: {
-				emit: (event: { type: string; [key: string]: unknown }) => {
-					this.emitToSubscribers(event as AgentEvent);
-				},
+			emitEvent: (event: { type: string; [key: string]: unknown }) => {
+				this.emitToSubscribers(event as AgentEvent);
 			},
+			interventions: this.interventions,
+			budget: this.budgetTracker,
+			compactionCooldown: this.compactionCooldown,
 		});
-		hookBus.register(builtinHooks, { source: "builtin", priority: 100 });
+		hookBus.register(builtinHooks, { source: "builtin" });
+		hookBus.register(this.drainHooks(), { source: "queue-drain" });
 
-		// Layer 2: extension runner hooks
 		const extensionHooks = runner?.getHooks();
 		if (extensionHooks) {
-			hookBus.register(extensionHooks, { source: "extensions", priority: 50 });
+			hookBus.register(extensionHooks, { source: "extensions" });
 		}
 
-		// Layer 3: claude-code compatibility hook layer
 		const claudeHooks = (pluginHookLayer ?? this.createClaudeCodeHookLayer())
 			.hooks;
 		if (claudeHooks) {
-			hookBus.register(claudeHooks, {
-				source: "claude-code-compat",
-				priority: 40,
-			});
+			hookBus.register(claudeHooks, { source: "claude-code-compat" });
 		}
 
-		// Layer 4: user hooks (lowest priority)
 		if (config.hooks) {
-			hookBus.register(config.hooks, { source: "user", priority: 0 });
+			hookBus.register(config.hooks, { source: "user" });
 		}
 
 		return {
 			...config,
 			tools,
 			hooks: hookBus.toHooks(),
+		};
+	}
+
+	/** Steering/follow-up messages drained from the harness's own queues. */
+	private drainHooks(): AgentHooks {
+		const inject = (texts: string[]): Message[] | undefined => {
+			if (!texts.length) return undefined;
+			this.emitQueueChange();
+			return texts.map(createUserMessage);
+		};
+		return {
+			getSteeringMessages: async () =>
+				inject(this.msgManager.afterTurn().map(message => message.content)),
+			getFollowUpMessages: async () =>
+				inject(this.msgManager.onIdle().map(message => message.content)),
 		};
 	}
 
@@ -992,69 +847,9 @@ export class AgentHarness {
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
 		this.reduceRuntimeEvent(event);
-		if (this._activeOperationId && isDurableAgentEvent(event)) {
-			const runId = this.runKernel.snapshot().state.runId;
-			if (runId) {
-				this.runKernel.recordTrajectory(
-					"agent_event",
-					this._activeOperationId,
-					trajectoryEventPayload(event),
-					runId,
-				);
-			}
-		}
-		if (
-			event.type === "subagent_start" ||
-			(event.type === "subagent_event" && isDurableAgentEvent(event.event)) ||
-			event.type === "subagent_end"
-		) {
-			const state = this.runKernel.snapshot().state;
-			if (state.taskId && state.runId) {
-				const kernelEvent =
-					event.type === "subagent_start"
-						? {
-								type: "subagent_started" as const,
-								agentId: event.agentId,
-								agent: event.agent,
-								task: event.task,
-								taskIndex: event.taskIndex,
-							}
-						: event.type === "subagent_event"
-							? {
-									type: "subagent_progressed" as const,
-									agentId: event.agentId,
-									eventType: event.event.type,
-								}
-							: {
-									type: "subagent_finished" as const,
-									agentId: event.agentId,
-									agent: event.agent,
-									result: event.result,
-									isError: event.isError ?? false,
-									turns: event.turns,
-								};
-				this.runKernel.append(kernelEvent, {
-					taskId: state.taskId,
-					runId: state.runId,
-					leaseEpoch: state.leaseEpoch,
-				});
-			}
-		}
-		if (event.type === "harness_intervention") {
-			const state = this.runKernel.snapshot().state;
-			if (state.taskId && state.runId)
-				this.runKernel.append(
-					{ type: "intervention_recorded", intervention: event },
-					{
-						taskId: state.taskId,
-						runId: state.runId,
-						leaseEpoch: state.leaseEpoch,
-					},
-				);
-		}
-		if (event.type === "compaction") this.runKernel.recordCompaction();
+		if (event.type === "compaction") this.continuationTracker.recordCompaction();
 		if (event.type === "run_outcome") {
-			this.runKernel.finish(event.status, event.summary, event.source);
+			this.continuationTracker.finish(event.status, event.summary);
 		}
 		// The primary application event path is synchronous and latency-sensitive;
 		// extension delivery must not hold streaming deltas behind an await.
@@ -1264,17 +1059,6 @@ export class AgentHarness {
 
 	private emitQueueChange(): void {
 		const queues = queueOps.getQueues(this.queueOpsDeps);
-		const run = this.runKernel.snapshot().state;
-		if (run.taskId && run.runId) {
-			this.runKernel.append(
-				{ type: "queue_updated", ...queues },
-				{
-					taskId: run.taskId,
-					runId: run.runId,
-					leaseEpoch: run.leaseEpoch,
-				},
-			);
-		}
 		this.onQueueChange?.(queues);
 		this.emitToSubscribers({
 			type: "queue_update",
@@ -1315,145 +1099,9 @@ export class AgentHarness {
 		this.config.runtimeHooksEnabled = enabled;
 	}
 
-	setSessionId(id: string, options: { durable?: boolean } = {}): void {
+	setSessionId(id: string): void {
 		this._sessionId = id;
 		this.config.hookSessionId = id;
-		this.runKernel.setPersistence(
-			options.durable === false ? "ephemeral" : "durable",
-		);
-		this.runKernel.useSession(id);
-		this.restoreKernelSessionState();
-	}
-
-	private restoreKernelSessionState(): void {
-		const state = this.runKernel.snapshot().state;
-		this.msgManager.queue.restore(state.queues);
-		this.config.permissions?.restoreSessionAllow(
-			state.permissionDecisions
-				.filter(
-					decision =>
-						decision.decision === "allow" &&
-						decision.source === "user" &&
-						decision.scope === "session",
-				)
-				.map(decision => decision.approvalRule)
-				.filter((rule): rule is string => typeof rule === "string"),
-		);
-	}
-
-	/** Resolve crash frontiers into valid conversation history before re-entry. */
-	private recoverInterruptedOperations(): void {
-		const initial = this.runKernel.snapshot().state;
-		const recoverable = Object.values(initial.operations).filter(
-			operation =>
-				operation.status === "intent_recorded" ||
-				operation.status === "result_recorded" ||
-				(operation.status === "committed" && operation.result !== undefined) ||
-				operation.status === "quarantined",
-		);
-		if (!initial.taskId || !initial.runId) return;
-		const runningSubagents = Object.values(initial.subagents).filter(
-			child => child.status === "running",
-		);
-		if (recoverable.length === 0 && runningSubagents.length === 0) return;
-		if (
-			runningSubagents.length > 0 ||
-			recoverable.some(
-				operation =>
-					operation.status === "intent_recorded" ||
-					operation.status === "result_recorded",
-			)
-		)
-			this.renewRunKernelLease();
-		for (const operation of recoverable) {
-			const toolCallId = operation.toolCallId;
-			if (!toolCallId) continue;
-			const alreadyRecovered = this.history.some(
-				message =>
-					message.role === "tool" && message.tool_call_id === toolCallId,
-			);
-			let content: string;
-			let isError: boolean;
-			if (
-				operation.status === "result_recorded" ||
-				operation.status === "committed"
-			) {
-				content =
-					operation.result ?? "Tool completed without a textual result.";
-				isError = operation.isError ?? false;
-			} else if (operation.status === "quarantined") {
-				content =
-					operation.quarantineReason ??
-					"Tool execution was quarantined after an interrupted effect.";
-				isError = true;
-			} else {
-				const guidance =
-					operation.recovery === "pure" || operation.recovery === "idempotent"
-						? "The interrupted operation is safe to retry with the same arguments."
-						: operation.recovery === "receipt_recoverable"
-							? "Reconcile the external receipt before retrying this operation."
-							: "The external effect is indeterminate; do not retry without verification.";
-				content = `Tool execution was interrupted after its durable intent was recorded. ${guidance}`;
-				isError = true;
-			}
-			if (!alreadyRecovered) {
-				const message = createToolResultMessage(
-					toolCallId,
-					operation.toolName,
-					content,
-					isError,
-				);
-				this.history.push(message);
-				this.persistTurnMessages([message]);
-			}
-			if (
-				operation.status === "committed" ||
-				operation.status === "quarantined"
-			)
-				continue;
-			const current = this.runKernel.snapshot().state;
-			if (!current.taskId || !current.runId) continue;
-			const options = {
-				taskId: current.taskId,
-				runId: current.runId,
-				operationId: operation.operationId,
-				leaseEpoch: current.leaseEpoch,
-			};
-			if (operation.status === "result_recorded")
-				this.runKernel.append(
-					{ type: "operation_committed", operationId: operation.operationId },
-					options,
-				);
-			else
-				this.runKernel.append(
-					{
-						type: "operation_quarantined",
-						operationId: operation.operationId,
-						reason: content,
-					},
-					options,
-				);
-		}
-		for (const child of runningSubagents) {
-			const current = this.runKernel.snapshot().state;
-			if (!current.taskId || !current.runId) break;
-			this.runKernel.append(
-				{
-					type: "subagent_finished",
-					agentId: child.agentId,
-					agent: child.agent,
-					result:
-						"Subagent execution was interrupted by process termination; its result is unavailable.",
-					isError: true,
-					turns: child.turns,
-				},
-				{
-					taskId: current.taskId,
-					runId: current.runId,
-					leaseEpoch: current.leaseEpoch,
-				},
-			);
-		}
 	}
 
 	setTranscriptPath(path: string): void {
@@ -1492,7 +1140,6 @@ export class AgentHarness {
 		return emitPreCompactHelper(
 			this._hooksEnabled,
 			this.hookContext(),
-			this.config.internalHooks?.beforeCompact,
 			this.config.hooks?.beforeCompact,
 			ctx,
 		);
@@ -1532,9 +1179,6 @@ export class AgentHarness {
 		this._sessionBaseDir = baseDir;
 		this._session = new Session(sessionId, { baseDir, enabled: true });
 		this._sessionId = sessionId;
-		this.runKernel.setPersistence("durable");
-		this.runKernel.useSession(sessionId);
-		this.restoreKernelSessionState();
 		await this.emitSessionStart("startup");
 	}
 
@@ -1553,9 +1197,6 @@ export class AgentHarness {
 		this._sessionBaseDir = sessionBaseDir;
 		this._session = resumed.session;
 		this._sessionId = sessionId;
-		this.runKernel.setPersistence("durable");
-		this.runKernel.useSession(sessionId);
-		this.restoreKernelSessionState();
 		await this.emitSessionStart("resume");
 		return true;
 	}
@@ -1708,40 +1349,6 @@ export class AgentHarness {
 	}
 
 	/**
-	 * Navigate to a previous checkpoint with optional branch summary merge.
-	 * Like rewind but accepts a checkpoint index and optionally summarizes the
-	 * abandoned path before navigating back.
-	 * @param checkpointIndex Index in the checkpoints array (0 = oldest).
-	 * @param options.summarize Whether to summarize the abandoned path.
-	 * @param options.customInstructions Optional LLM instructions for summarization.
-	 * @returns Summary of the abandoned path, or null.
-	 */
-	async navigateToCheckpoint(
-		checkpointIndex: number,
-		options?: { summarize?: boolean; customInstructions?: string },
-	): Promise<BranchSummaryData | null> {
-		this.assertIdle("navigateToCheckpoint");
-		const outcome = await navigateToCheckpointHelper(
-			this.backend,
-			this.checkpoints,
-			checkpointIndex,
-			this.history,
-			{
-				summarize: options?.summarize,
-				customInstructions: options?.customInstructions,
-				maxTokens: this.config.maxTokens,
-				thinkingLevel: this.config.thinkingLevel,
-			},
-		);
-		if (!outcome) return null;
-
-		this.history = outcome.history;
-		this.checkpoints = this.checkpoints.slice(0, checkpointIndex);
-		this.branches = [];
-		return outcome.summary;
-	}
-
-	/**
 	 * Visualize the branch tree as an ASCII art string.
 	 * Shows parent/child relationships with depth indicators.
 	 */
@@ -1840,7 +1447,7 @@ export class AgentHarness {
 			this.history = result.messages;
 			const after = result.tokensAfter;
 			this.persistCompactedContext(result.messages, before);
-			this.runKernel.recordCompaction();
+			this.continuationTracker.recordCompaction();
 			this.onCompaction?.("manual", before, after);
 			await this.emitPostCompact();
 			await this._extensionRunner?.emit({
@@ -1937,7 +1544,7 @@ export class AgentHarness {
 			this.history = result.messages;
 			const after = this.estimatePayloadTokens();
 			this.persistCompactedContext(result.messages, before);
-			this.runKernel.recordCompaction();
+			this.continuationTracker.recordCompaction();
 			this.onCompaction?.(reason, before, after);
 			await this.emitPostCompact();
 			await this._extensionRunner?.emit({
@@ -2131,10 +1738,8 @@ export class AgentHarness {
 		return shouldAutoCompact(this.autoCompactionSettings, messages);
 	}
 
-	private withDrainHook(config: AgentConfig): AgentConfig {
-		return withHarnessQueueHooks(config, {
-			messageDelivery: this.msgManager,
-			onQueueChange: () => this.emitQueueChange(),
+	private forwardQueueEvents(config: AgentConfig): AgentConfig {
+		return withQueueEventForwarding(config, {
 			onSavePoint: this.onSavePoint,
 			subscribers: this._subscribers,
 		});

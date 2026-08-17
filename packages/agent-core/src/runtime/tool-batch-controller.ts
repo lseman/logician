@@ -14,14 +14,6 @@ type OnPermissionRequest = (ctx: {
 	toolCallId: string;
 	args: Record<string, unknown>;
 }) => Promise<"allow" | "deny" | "always">;
-export interface PermissionDecisionRecord {
-	toolCallId: string;
-	toolName: string;
-	decision: "allow" | "deny";
-	source: "rule" | "mode" | "user" | "fail_closed";
-	scope?: "once" | "session";
-	approvalRule?: string;
-}
 
 export interface ToolBatchControllerOptions {
 	registry: ToolRegistry;
@@ -30,33 +22,9 @@ export interface ToolBatchControllerOptions {
 	toolExecution?: "parallel" | "sequential";
 	iteration: number;
 	signal?: AbortSignal;
-	internalHooks?: AgentHooks;
 	hooks?: AgentHooks;
 	permissions?: PermissionManager;
 	onPermissionRequest?: OnPermissionRequest;
-	onPermissionDecision?: (
-		decision: PermissionDecisionRecord,
-	) => void | Promise<void>;
-	onToolIntent?: (input: {
-		toolCallId: string;
-		toolName: string;
-		args: Record<string, unknown>;
-		recovery:
-			| "pure"
-			| "idempotent"
-			| "receipt_recoverable"
-			| "at_most_once_unknown";
-	}) =>
-		| { operationId: string; idempotencyKey: string }
-		| undefined
-		| Promise<{ operationId: string; idempotencyKey: string } | undefined>;
-	onToolResult?: (input: {
-		toolCallId: string;
-		toolName: string;
-		result: string;
-		isError: boolean;
-		receipt?: string;
-	}) => void | Promise<void>;
 	emit: Emit;
 }
 
@@ -85,17 +53,10 @@ async function evaluatePermission(
 	call: ToolCall,
 	args: Record<string, unknown>,
 	tool: ReturnType<ToolRegistry["get"]>,
-	onDecision: ToolBatchControllerOptions["onPermissionDecision"],
 	emit: Emit,
 ): Promise<string | undefined> {
 	const verdict = permissions.evaluate(call, args, tool);
 	if (verdict.decision === "allow") {
-		await onDecision?.({
-			toolCallId: call.id,
-			toolName: call.name,
-			decision: "allow",
-			source: verdict.source,
-		});
 		await emit({
 			type: "tool_permission_decision",
 			toolCallId: call.id,
@@ -106,12 +67,6 @@ async function evaluatePermission(
 		return undefined;
 	}
 	if (verdict.decision === "deny") {
-		await onDecision?.({
-			toolCallId: call.id,
-			toolName: call.name,
-			decision: "deny",
-			source: verdict.source,
-		});
 		await emit({
 			type: "tool_permission_decision",
 			toolCallId: call.id,
@@ -124,12 +79,6 @@ async function evaluatePermission(
 
 	// decision === "ask"
 	if (!onPermissionRequest) {
-		await onDecision?.({
-			toolCallId: call.id,
-			toolName: call.name,
-			decision: "deny",
-			source: "fail_closed",
-		});
 		await emit({
 			type: "tool_permission_decision",
 			toolCallId: call.id,
@@ -151,13 +100,6 @@ async function evaluatePermission(
 		args,
 	});
 	if (answer === "deny") {
-		await onDecision?.({
-			toolCallId: call.id,
-			toolName: call.name,
-			decision: "deny",
-			source: "user",
-			scope: "once",
-		});
 		await emit({
 			type: "tool_permission_decision",
 			toolCallId: call.id,
@@ -167,18 +109,7 @@ async function evaluatePermission(
 		});
 		return `${PERMISSION_DENIED_PREFIX}: the user denied "${call.name}".`;
 	}
-	const approvalRule =
-		answer === "always"
-			? permissions.addSessionAllow(call.name, args)
-			: undefined;
-	await onDecision?.({
-		toolCallId: call.id,
-		toolName: call.name,
-		decision: "allow",
-		source: "user",
-		scope: answer === "always" ? "session" : "once",
-		...(approvalRule ? { approvalRule } : {}),
-	});
+	if (answer === "always") permissions.addSessionAllow(call.name, args);
 	await emit({
 		type: "tool_permission_decision",
 		toolCallId: call.id,
@@ -256,23 +187,15 @@ export async function executeToolBatch(
 				prepared.call,
 				prepared.args,
 				registry.get(prepared.call.name),
-				options.onPermissionDecision,
 				emit,
 			);
 		}
 
 		const context = { toolCall: prepared.call, args: prepared.args, iteration };
-		let before =
+		const before =
 			signal?.aborted || permissionDenial !== undefined
 				? undefined
-				: await options.internalHooks?.beforeToolCall?.(context, signal);
-		if (
-			!signal?.aborted &&
-			permissionDenial === undefined &&
-			before === undefined
-		) {
-			before = await options.hooks?.beforeToolCall?.(context, signal);
-		}
+				: await options.hooks?.beforeToolCall?.(context, signal);
 		const immediateContent =
 			before?.content ??
 			prepared.error ??
@@ -305,23 +228,10 @@ export async function executeToolBatch(
 		let accepting = true;
 		let executed = false;
 		if (resultText === undefined) {
-			const tool = registry.get(prepared.call.name);
-			const durableIntent = await options.onToolIntent?.({
-				toolCallId: prepared.call.id,
-				toolName: prepared.call.name,
-				args,
-				recovery:
-					tool?.recoverySemantics ??
-					(tool?.readOnly === true || tool?.cacheable === true
-						? "pure"
-						: "at_most_once_unknown"),
-			});
 			const result = await registry.execute(
 				prepared.call,
 				{
 					signal,
-					operationId: durableIntent?.operationId,
-					idempotencyKey: durableIntent?.idempotencyKey,
 					onUpdate: async partialResult => {
 						if (!accepting) return;
 						await emit({
@@ -340,13 +250,6 @@ export async function executeToolBatch(
 			isError = result.isError === true;
 			terminate = result.terminate === true;
 			executed = true;
-			await options.onToolResult?.({
-				toolCallId: prepared.call.id,
-				toolName: prepared.call.name,
-				result: resultText,
-				isError,
-				receipt: result.recoveryReceipt,
-			});
 		}
 		accepting = false;
 		const context = {
@@ -356,10 +259,7 @@ export async function executeToolBatch(
 			isError,
 			iteration,
 		};
-		let after = await options.internalHooks?.afterToolCall?.(context, signal);
-		if (after === undefined) {
-			after = await options.hooks?.afterToolCall?.(context, signal);
-		}
+		const after = await options.hooks?.afterToolCall?.(context, signal);
 		if (after?.content !== undefined) resultText = after.content;
 		if (after?.isError !== undefined) isError = after.isError;
 		await emit({
