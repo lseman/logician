@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
 	inferSessionTitle,
 	isGeneratedSessionTitle,
-} from "../sessions/session-store.ts";
+} from "../sessions/tui-session-service.ts";
 
 describe("session title inference", () => {
 	test("extracts the topic from request phrasing", () => {

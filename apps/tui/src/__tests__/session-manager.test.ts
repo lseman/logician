@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { SessionStore } from "@logician/coding-agent/sessions";
+import type { TuiSessionService } from "@logician/coding-agent/sessions";
 import { SessionBrowserOverlay } from "../overlays/session-manager.ts";
 import { initTheme } from "../terminal/theme.ts";
 
@@ -15,22 +15,20 @@ test("session browser shows the live filter typed in list mode", () => {
 		listSessions: () => [
 			{
 				id: "alpha",
-				title: "Alpha session",
-				name: null,
+				name: "Alpha session",
 				preview: "first task",
 				lastUpdated: "2026-08-09T00:00:00.000Z",
 				messageCount: 2,
 			},
 			{
 				id: "beta",
-				title: "Beta session",
-				name: null,
+				name: "Beta session",
 				preview: "second task",
 				lastUpdated: "2026-08-09T00:00:00.000Z",
 				messageCount: 3,
 			},
 		],
-	} as unknown as SessionStore);
+	} as unknown as TuiSessionService);
 	overlay.show();
 
 	overlay.handleInput("b");
@@ -46,15 +44,14 @@ test("session browser scrolls the window as selection moves past the visible row
 	const overlay = new SessionBrowserOverlay();
 	const sessions = Array.from({ length: 20 }, (_, i) => ({
 		id: `s${i}`,
-		title: `Session ${i}`,
-		name: null,
+		name: `Session ${i}`,
 		preview: "task",
 		lastUpdated: "2026-08-09T00:00:00.000Z",
 		messageCount: 1,
 	}));
 	overlay.setStore({
 		listSessions: () => sessions,
-	} as unknown as SessionStore);
+	} as unknown as TuiSessionService);
 	overlay.show();
 
 	const initial = plain(overlay.render(100).join("\n"));

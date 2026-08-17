@@ -255,6 +255,16 @@ export interface GenerateCallbacks {
 	onToolCallStart?: (toolCallId: string, name: string, args: string) => void;
 	onToolCallDelta?: (toolCallId: string, delta: string) => void;
 	onToolCallIdUpdate?: (previousToolCallId: string, toolCallId: string) => void;
+	// The backend's own coherent accumulation so far — the same content/
+	// toolCalls shape the final LLMResponse resolves to, plus reasoning (which
+	// LLMResponse doesn't carry — it's mid-stream-only). Fired after every
+	// chunk that changes it. A consumer can trust this wholesale instead of
+	// reconciling onDelta/onThinking/onToolCallDelta itself.
+	onSnapshot?: (snapshot: {
+		content: string;
+		reasoning: string;
+		toolCalls: ToolCall[];
+	}) => void;
 }
 
 /** Options for a generate() call. */
@@ -377,6 +387,7 @@ export class OpenAIBackend implements LLMBackend {
 			onToolCallStart,
 			onToolCallDelta,
 			onToolCallIdUpdate,
+			onSnapshot,
 		} = callbacks;
 
 		const providerMessages = normalizeProviderMessages(messages);
@@ -465,6 +476,7 @@ export class OpenAIBackend implements LLMBackend {
 		const decoder = new TextDecoder();
 		let buffer = "";
 		let fullContent = "";
+		let fullReasoning = "";
 		let toolCalls: ToolCall[] = [];
 		let stopReason: LLMResponse["stopReason"] = "stop";
 		let finishReason: string | undefined;
@@ -512,19 +524,26 @@ export class OpenAIBackend implements LLMBackend {
 						onTextStart?.();
 					}
 
+					let changed = false;
 					if (delta.content) {
 						onDelta?.(delta.content);
 						fullContent += delta.content;
+						changed = true;
 					}
 
 					if (delta.reasoning) {
 						onThinking?.(delta.reasoning);
+						fullReasoning += delta.reasoning;
+						changed = true;
 					}
 					if (delta.reasoning_content) {
 						onThinking?.(delta.reasoning_content);
+						fullReasoning += delta.reasoning_content;
+						changed = true;
 					}
 
 					if (delta.tool_calls) {
+						changed = true;
 						for (const tc of delta.tool_calls) {
 							// Accumulate tool call across chunks.
 							if (!toolCalls[tc.index]) {
@@ -567,6 +586,20 @@ export class OpenAIBackend implements LLMBackend {
 								);
 							}
 						}
+					}
+
+					if (changed && onSnapshot) {
+						onSnapshot({
+							content: fullContent,
+							reasoning: fullReasoning,
+							toolCalls: toolCalls
+								.filter(tc => tc?.name)
+								.map((tc, index) => ({
+									id: tc.id || `tool_${index}`,
+									name: tc.name,
+									arguments: tc.arguments || "",
+								})),
+						});
 					}
 				} catch (_e: unknown) {
 					// Skip parse errors (partial JSON is normal in streaming)

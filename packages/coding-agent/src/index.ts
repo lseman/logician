@@ -43,8 +43,13 @@ export {
 	type RuntimeEventType,
 	type TranscriptEvent,
 } from "./runtime/events.ts";
-export { SessionStore } from "./sessions/session-store.ts";
 export { Transcript, type Turn } from "./sessions/transcript.ts";
+export {
+	inferSessionTitle,
+	isGeneratedSessionTitle,
+	type TuiSessionSummary,
+	TuiSessionService,
+} from "./sessions/tui-session-service.ts";
 export * from "./skills/index.ts";
 export * from "./tools/index.ts";
 export * from "./trust/index.ts";

@@ -36,8 +36,6 @@ export interface OutputGuardConfig {
 	budgetThreshold?: number;
 	/** Max consecutive context_full→compact_then_retry cycles before aborting (default 3). */
 	maxConsecutiveCompactions?: number;
-	/** Hook to trigger compaction. Returns tokens saved, or null if no compaction. */
-	onCompact?: () => Promise<number | null>;
 	/** Emit events to the UI/event bus. */
 	onEvent?: EventHandler;
 	/** The loop detector for turn-level patterns (optional). */
@@ -61,7 +59,7 @@ export interface OutputGuardResult {
 
 /** Default config values. */
 const DEFAULT_CONFIG: Required<
-	Omit<OutputGuardConfig, "onCompact" | "onEvent" | "loopDetector">
+	Omit<OutputGuardConfig, "onEvent" | "loopDetector">
 > = {
 	maxRetries: 3,
 	retryBaseDelayMs: 500,
@@ -75,7 +73,7 @@ const DEFAULT_CONFIG: Required<
 
 export class OutputGuard {
 	private config: Required<
-		Omit<OutputGuardConfig, "onCompact" | "onEvent" | "loopDetector">
+		Omit<OutputGuardConfig, "onEvent" | "loopDetector">
 	>;
 	private readonly onEvent: OutputGuardConfig["onEvent"];
 	// loopDetector field kept for type compatibility but no longer used for turn detection.

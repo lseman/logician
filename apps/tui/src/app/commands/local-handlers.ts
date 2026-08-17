@@ -249,13 +249,13 @@ export function createLocalHandlers(
 				return;
 			}
 			const currentSessionId =
-				ctx.currentSessionId || ctx.sessionStore.getCurrentSessionId();
-			const olderSessions = ctx.sessionStore
+				ctx.currentSessionId || ctx.sessionService.getCurrentSessionId();
+			const olderSessions = ctx.sessionService
 				.listSessions()
 				.filter(session => session.id !== currentSessionId);
 			let removedSessions = 0;
 			for (const session of olderSessions) {
-				if (ctx.sessionStore.deleteSession(session.id)) removedSessions++;
+				if (ctx.sessionService.deleteSession(session.id)) removedSessions++;
 			}
 			const memoryStore = ctx.bridge.getMemoryStore();
 			const memoryResult = memoryStore?.clearSessions(
@@ -268,10 +268,11 @@ export function createLocalHandlers(
 		},
 		newSession: () => {
 			ctx._autoSaveTurn();
-			ctx.currentSessionId = ctx.sessionStore.createSession({
-				title: "New Session",
-			});
-			ctx.bridge.useConversationSession(ctx.currentSessionId);
+			ctx.currentSessionId = ctx.sessionService.createSession("New Session");
+			ctx.bridge.useConversationSession(
+				ctx.currentSessionId,
+				ctx.sessionService.getRawSession(ctx.currentSessionId) ?? undefined,
+			);
 			ctx.transcript.clear();
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			ctx.statusPanel.update({ sessionTitle: "New Session" });
@@ -290,7 +291,7 @@ export function createLocalHandlers(
 			if (!ctx.currentSessionId) return;
 			const newTitle = typeof title === "string" ? title : String(title || "");
 			if (!newTitle.trim()) return;
-			ctx.sessionStore.renameSession(ctx.currentSessionId, newTitle.trim());
+			ctx.sessionService.renameSession(ctx.currentSessionId, newTitle.trim());
 			ctx.bridge.renameConversationSession(
 				ctx.currentSessionId,
 				newTitle.trim(),

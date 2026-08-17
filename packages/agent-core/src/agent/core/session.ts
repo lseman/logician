@@ -27,7 +27,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { markPathIgnoredByCloudSync } from "../../tools/shared/path-utils.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -120,6 +120,20 @@ export interface LabelSessionEntry {
 	label?: string;
 }
 
+/**
+ * Opaque app-defined data, keyed by `customType`. Lets a consumer (e.g. the
+ * TUI) persist its own render-time shape in the same tree without agent-core
+ * needing to know what it is. Never participates in `buildContext()`.
+ */
+export interface CustomSessionEntry<T = unknown> {
+	type: "custom";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	customType: string;
+	data: T;
+}
+
 export type SessionEntry =
 	| MessageSessionEntry
 	| ModelChangeSessionEntry
@@ -128,7 +142,8 @@ export type SessionEntry =
 	| SettingsChangeSessionEntry
 	| CompactionSessionEntry
 	| BranchSummarySessionEntry
-	| LabelSessionEntry;
+	| LabelSessionEntry
+	| CustomSessionEntry;
 
 export interface SessionContext {
 	messages: SessionMessage[];
@@ -146,6 +161,8 @@ export interface SessionMeta {
 	messageCount: number;
 	lastActivity: number;
 	name?: string;
+	/** Working directory the session was started in — scopes browser listing to a project. */
+	cwd?: string;
 	/** UUID of the parent session (for forked sessions). */
 	parentId?: string;
 	/** Selected entry leaf for durable branch checkout. */
@@ -162,10 +179,18 @@ export interface SessionConfig {
 	baseDir?: string;
 	/** Whether to enable session persistence (default: false). */
 	enabled?: boolean;
-	/** UUID of parent session (for forked sessions). */
+	/** Working directory the session was started in — scopes browser listing to a project. */
+	cwd?: string;
+	/** UUID of the parent session (for forked sessions). */
 	parentId?: string;
 	/** Session format version (auto-upgraded on load). */
 	version?: number;
+}
+
+/** Session listing entry for the browser UI — metadata plus a text preview. */
+export interface SessionInfo extends SessionMeta {
+	/** First user message text, for browser preview. */
+	preview: string;
 }
 
 const DEFAULT_BASE_DIR = ".logician/sessions";
@@ -174,10 +199,8 @@ const META_FILE = "meta.json";
 
 // ── Session class ───────────────────────────────────────────────────────
 // Append-only JSONL conversation tree for one harness session. Execution state
-// belongs exclusively to the Run Kernel. This is distinct from coding-agent's
-// SessionStore (SQLite-backed session browser/rename/switch UI) or tui's
-// SessionManager component (the overlay for that browser) — this one is
-// internal to the agent loop and has no user-facing UI of its own.
+// belongs exclusively to the Run Kernel. Also the sole persistence layer for
+// TUI conversation history and its session browser — see SessionManager below.
 
 export class Session {
 	private readonly dir: string;
@@ -187,6 +210,7 @@ export class Session {
 	private readonly createdAt: number;
 	private lastActivity: number;
 	private name?: string;
+	private cwd?: string;
 	private parentId?: string;
 	private activeLeafId?: string;
 	private version = 3;
@@ -203,6 +227,7 @@ export class Session {
 		this.filePath = join(this.dir, "messages.jsonl");
 		this.metaPath = join(this.dir, META_FILE);
 		this.parentId = config?.parentId;
+		this.cwd = config?.cwd;
 		this.createdAt = Date.now();
 		this.lastActivity = this.createdAt;
 
@@ -213,6 +238,7 @@ export class Session {
 			this.messageCount = existingMeta.messageCount ?? this.messageCount;
 			this.lastActivity = existingMeta.lastActivity ?? this.lastActivity;
 			this.name = existingMeta.name;
+			this.cwd = config?.cwd ?? existingMeta.cwd;
 			this.parentId = config?.parentId ?? existingMeta.parentId;
 			this.activeLeafId = existingMeta.activeLeafId;
 			this.version = (config?.version ?? existingMeta.version ?? 1) as number;
@@ -238,6 +264,7 @@ export class Session {
 					createdAt: this.createdAt,
 					messageCount: 0,
 					lastActivity: this.lastActivity,
+					cwd: this.cwd,
 					name: this.name,
 					parentId: this.parentId,
 					version: this.version,
@@ -340,6 +367,16 @@ export class Session {
 			timestamp: Date.now(),
 			targetId,
 			label,
+		});
+	}
+
+	appendCustom<T>(customType: string, data: T): void {
+		this.appendEntry({
+			type: "custom",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			customType,
+			data,
 		});
 	}
 
@@ -459,6 +496,10 @@ export class Session {
 		return this.dir;
 	}
 
+	getCwd(): string | undefined {
+		return this.cwd;
+	}
+
 	// ── Cleanup ─────────────────────────────────────────────────────────
 
 	/** Remove the session directory and its conversation data. */
@@ -553,6 +594,7 @@ export class Session {
 				messageCount: this.messageCount,
 				lastActivity: this.lastActivity,
 				name: this.name,
+				cwd: this.cwd,
 				parentId: this.parentId,
 				activeLeafId: this.activeLeafId,
 				version: this.version,
@@ -615,9 +657,8 @@ export class Session {
 
 // ── Session Manager ─────────────────────────────────────────────────────
 // Manages multiple JSONL Session journals (above): listing, loading,
-// creating, forking. Unrelated to tui's SessionManager component (same
-// name, different package) — that one is a UI overlay over coding-agent's
-// SQLite SessionStore, not this file's journal system.
+// creating, forking, renaming, deleting — the sole backing store for the
+// TUI's session browser (project-scoped by cwd).
 
 export class SessionManager {
 	private baseDir: string;
@@ -626,8 +667,7 @@ export class SessionManager {
 		this.baseDir = join(config?.baseDir ?? DEFAULT_BASE_DIR, SESSIONS_DIR);
 	}
 
-	/** List all sessions with their metadata. */
-	listSessions(): SessionMeta[] {
+	private allMeta(): SessionMeta[] {
 		if (!existsSync(this.baseDir)) return [];
 		return readdirSync(this.baseDir)
 			.filter(id => {
@@ -639,8 +679,38 @@ export class SessionManager {
 				if (!existsSync(metaPath)) return null;
 				return JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta;
 			})
-			.filter((meta): meta is SessionMeta => meta !== null)
-			.sort((a, b) => b.lastActivity - a.lastActivity);
+			.filter((meta): meta is SessionMeta => meta !== null);
+	}
+
+	/** List all sessions with their metadata, newest-active first. */
+	listSessions(): SessionMeta[] {
+		return this.allMeta().sort((a, b) => b.lastActivity - a.lastActivity);
+	}
+
+	/**
+	 * List sessions scoped to a working directory, each with a text preview
+	 * (first user message) for the session browser. Sessions predating cwd
+	 * scoping (no `cwd` recorded) are excluded — they can still be opened by id.
+	 */
+	listSessionInfos(cwd: string): SessionInfo[] {
+		const resolvedCwd = resolve(cwd);
+		return this.allMeta()
+			.filter(meta => meta.cwd && resolve(meta.cwd) === resolvedCwd)
+			.sort((a, b) => b.lastActivity - a.lastActivity)
+			.map(meta => ({ ...meta, preview: this.previewFor(meta.id) }));
+	}
+
+	private previewFor(sessionId: string): string {
+		const session = this.getSession(sessionId);
+		if (!session) return "";
+		const firstUserMessage = session
+			.getPathToRootEntries()
+			.find(
+				(entry): entry is MessageSessionEntry =>
+					entry.type === "message" && entry.message.role === "user",
+			);
+		const content = firstUserMessage?.message.content;
+		return typeof content === "string" ? content : "";
 	}
 
 	/** Open an existing session by ID. Returns null if not found. */
@@ -652,14 +722,39 @@ export class SessionManager {
 		});
 	}
 
-	/** Create a new session with a unique ID. */
-	createSession(name?: string): Session {
+	/** Create a new session with a unique ID, scoped to a working directory. */
+	createSession(cwd: string, name?: string): Session {
 		const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		const session = new Session(sessionId, {
 			baseDir: join(this.baseDir, ".."),
+			cwd,
 		});
 		if (name) session.setName(name);
 		return session;
+	}
+
+	/** Rename a session. Returns false if the session doesn't exist. */
+	renameSession(sessionId: string, name: string): boolean {
+		const session = this.getSession(sessionId);
+		if (!session) return false;
+		session.setName(name);
+		return true;
+	}
+
+	/** Delete a session by ID. Returns false if it didn't exist. */
+	deleteSession(sessionId: string): boolean {
+		const session = this.getSession(sessionId);
+		if (!session) return false;
+		session.clear();
+		return true;
+	}
+
+	/** Delete all but the `keep` most recently active sessions for a cwd. Returns count deleted. */
+	keepRecent(cwd: string, keep: number): number {
+		const infos = this.listSessionInfos(cwd);
+		const toDelete = infos.slice(keep);
+		for (const info of toDelete) this.deleteSession(info.id);
+		return toDelete.length;
 	}
 
 	/**
@@ -679,11 +774,5 @@ export class SessionManager {
 		}
 
 		return tree.reverse();
-	}
-
-	/** Delete a session by ID. */
-	deleteSession(sessionId: string): void {
-		const session = this.getSession(sessionId);
-		session?.clear();
 	}
 }

@@ -184,6 +184,7 @@ export function handleEvent(
 		case "token":
 		case "thinking_token":
 		case "message_update":
+		case "message_reasoning_update":
 		case "tool_call_start":
 		case "tool_call_update":
 		case "tool_call_id_update":

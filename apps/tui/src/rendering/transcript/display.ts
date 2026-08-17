@@ -776,8 +776,11 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			// (tables, code fences) that spans chunk boundaries renders whole.
 			let contentBuffer = "";
 			const flushContent = () => {
-				if (!contentBuffer) return;
-				const answer = stripThinkTags(contentBuffer);
+				if (!contentBuffer.trim()) {
+					contentBuffer = "";
+					return;
+				}
+				const answer = stripThinkTags(contentBuffer).trim();
 				contentBuffer = "";
 				if (lastThinkingSection) {
 					lines.push(

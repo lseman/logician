@@ -29,6 +29,12 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				turnId: event.turnId,
 				message: event.message,
 			};
+		case "message_reasoning_update":
+			return {
+				type: "message_reasoning_update",
+				turnId: event.turnId,
+				reasoning: event.reasoning,
+			};
 		case "thinking_delta":
 			return { type: "thinking_token", token: event.delta };
 		case "tool_call_start":

@@ -72,25 +72,24 @@ void test("direct /spawn records task and result in harness history", async () =
 		runtimeHooksEnabled: false,
 	});
 	const internal = bridge as unknown as {
-		toolRouter: {
-			getDefaultTools: () => Array<{
-				name: string;
-				execute: (
-					args: Record<string, unknown>,
-					ctx: { onUpdate?: (delta: string) => void },
-				) => Promise<
-					string | { content: string; isError?: boolean; details?: unknown }
-				>;
-			}>;
-		};
+		_defaultTools: Array<{
+			name: string;
+			execute: (
+				args: Record<string, unknown>,
+				ctx: { onUpdate?: (delta: string) => void },
+			) => Promise<
+				string | { content: string; isError?: boolean; details?: unknown }
+			>;
+		}>;
 		ensureHarness: () => {
 			messages: unknown[];
 			appendMessages: (m: unknown[]) => void;
 		};
 		subagents: { injected: boolean };
 	};
-	// defaultTools now lives on ToolRouter; stub its getter for this test's fake spawn_agent.
-	internal.toolRouter.getDefaultTools = () => [
+	// SubagentCoordinator reads default tools via a closure over _defaultTools
+	// (captured at bridge-construction time), so stub the field directly.
+	internal._defaultTools = [
 		{
 			name: "spawn_agent",
 			execute: async () => ({
@@ -257,7 +256,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.toolRouter.mcpManager = {
+	internal.mcpManager = {
 		load: async () => ({
 			tools: [],
 			servers: 0,
@@ -265,7 +264,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		}),
 	};
 
-	await internal.toolRouter.loadMcpToolsOnce();
+	await internal.loadMcpToolsOnce();
 
 	assert.match(
 		internal.config.systemPrompt,
@@ -286,9 +285,8 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.toolRouter.getSkillsContext = () =>
-		"<available-skills>skill catalog</available-skills>";
-	internal.toolRouter.mcpManager = {
+	internal._skillsContext = "<available-skills>skill catalog</available-skills>";
+	internal.mcpManager = {
 		load: async () => ({
 			tools: [],
 			servers: 0,
@@ -296,7 +294,7 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		}),
 	};
 
-	await internal.toolRouter.loadMcpToolsOnce();
+	await internal.loadMcpToolsOnce();
 	internal.applyPluginHookContext({
 		additional_contexts: ["startup instructions"],
 		context_messages: [
@@ -477,7 +475,11 @@ void test("/context renders request-time memory injection", () => {
 	bridge.getMemoryStore()?.close();
 });
 
-void test("matching skills are injected only for the selected turn", async () => {
+void test("loaded skills are exposed as a persistent catalog, not scored per turn", async () => {
+	// Skill activation is no longer scored/selected per prompt: every visible
+	// skill's name+description is folded into the base system prompt once
+	// (via _skillsContext/applyPluginHookContext), and the model pulls a
+	// skill's full body on demand via read_skill.
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
@@ -485,42 +487,32 @@ void test("matching skills are injected only for the selected turn", async () =>
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal.toolRouter.isMcpLoaded = () => true;
-	internal.toolRouter.getLoadedSkills = () => [
-		{
-			name: "typescript-code-review",
-			displayName: "TypeScript Code Review",
-			description: "Review TypeScript code for correctness and type safety.",
-			content: "Check runtime correctness before maintainability.",
-			filePath: "/skills/typescript-code-review/SKILL.md",
-			baseDir: "/skills/typescript-code-review",
-			slashName: "typescript-code-review",
-			disableModelInvocation: false,
-			source: "user",
-			triggers: ["TypeScript code review", "review TS"],
-		},
-	];
-	const originalPrompt = internal.config.systemPrompt;
-	let activePrompt = originalPrompt;
+	internal._skillsContext =
+		"<available-skills>\n" +
+		'  <skill name="typescript-code-review" slash_command="/typescript-code-review" />\n' +
+		"</available-skills>";
+	internal.applyPluginHookContext({
+		additional_contexts: [],
+		context_messages: [],
+		initial_user_message: "",
+	});
+
 	let promptSeenByTurn = "";
 	internal.harness = {
 		messages: [],
-		setSystemPrompt: (value: string) => {
-			activePrompt = value;
-		},
+		setSystemPrompt: () => {},
 		prompt: async () => {
-			promptSeenByTurn = activePrompt;
+			promptSeenByTurn = internal.config.systemPrompt;
 		},
 	};
 
 	await bridge.sendMessage("Review this TypeScript service.");
 
-	assert.match(promptSeenByTurn, /<activated-skills>/);
-	assert.match(promptSeenByTurn, /Check runtime correctness/);
-	assert.equal(activePrompt, originalPrompt);
+	assert.match(promptSeenByTurn, /<available-skills>/);
+	assert.match(promptSeenByTurn, /typescript-code-review/);
 });
 
-void test("automatic continuation retains the active skill", async () => {
+void test("automatic continuation reuses the current system prompt", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
@@ -528,34 +520,17 @@ void test("automatic continuation retains the active skill", async () => {
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal.toolRouter.isMcpLoaded = () => true;
-	internal.toolRouter.getLoadedSkills = () => [
-		{
-			name: "typescript-debugging",
-			displayName: "TypeScript Debugging",
-			description: "Diagnose TypeScript errors.",
-			content: "Keep debugging until the root cause is verified.",
-			filePath: "/skills/typescript-debugging/SKILL.md",
-			baseDir: "/skills/typescript-debugging",
-			slashName: "typescript-debugging",
-			disableModelInvocation: false,
-			source: "user",
-			triggers: ["TypeScript error"],
-		},
-	];
-	let activePrompt = internal.config.systemPrompt;
+	internal.config.systemPrompt = "Keep debugging until the root cause is verified.";
 	const seen: Array<{ kind: string; systemPrompt: string }> = [];
 	internal.harness = {
 		messages: [],
-		setSystemPrompt: (value: string) => {
-			activePrompt = value;
-		},
+		setSystemPrompt: () => {},
 		prompt: async () => {
-			seen.push({ kind: "prompt", systemPrompt: activePrompt });
+			seen.push({ kind: "prompt", systemPrompt: internal.config.systemPrompt });
 			if (seen.length === 1) internal.pendingAutoContinue = true;
 		},
 		continueWithNextTurn: async () => {
-			seen.push({ kind: "continue", systemPrompt: activePrompt });
+			seen.push({ kind: "continue", systemPrompt: internal.config.systemPrompt });
 		},
 		requestContinuation: () => ({
 			action: "continue",

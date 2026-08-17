@@ -10,6 +10,7 @@
  */
 
 import type { GenerateCallbacks } from "../core/backend.ts";
+import { createAssistantMessage } from "../core/messages.ts";
 import type { AgentEvent } from "../types/index.ts";
 
 /**
@@ -50,5 +51,31 @@ export function buildStreamingCallbacks(
 				previousToolCallId,
 				toolCallId,
 			}),
+		// The backend's own coherent mid-stream accumulation. A consumer (e.g.
+		// the TUI's Transcript) can apply this wholesale instead of manually
+		// reconciling onDelta/onThinking/onToolCallDelta against a prior snapshot.
+		onSnapshot: snapshot => {
+			// During a pure-reasoning phase (no content or tool calls yet),
+			// createAssistantMessage pads empty content to " " so a *final*
+			// assistant message stays API-valid — but that padding isn't
+			// meaningful for a mid-stream snapshot. Emitting it as a
+			// message_update would inject a phantom whitespace content chunk
+			// that closes the in-progress thinking chunk, fragmenting one
+			// reasoning segment into two.
+			if (snapshot.content || snapshot.toolCalls.length) {
+				queueProviderEvent({
+					type: "message_update",
+					turnId,
+					message: createAssistantMessage(snapshot.content, snapshot.toolCalls),
+				});
+			}
+			if (snapshot.reasoning) {
+				queueProviderEvent({
+					type: "message_reasoning_update",
+					turnId,
+					reasoning: snapshot.reasoning,
+				});
+			}
+		},
 	};
 }
