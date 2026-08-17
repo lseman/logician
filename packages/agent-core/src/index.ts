@@ -6,20 +6,25 @@ export * from "./agent/core/agent-loop-runner.ts";
 export * from "./agent/core/agent-settings.ts";
 // Core: loop, harness, types, backend, messages, events, session
 export * from "./agent/core/backend.ts";
+export {
+	type ContinuationDecision,
+	type ContinuationLimits,
+	type ContinuationState,
+	ContinuationTracker,
+	type RunBudgetStatus,
+} from "./agent/core/continuation-tracker.ts";
 export * from "./agent/core/execution-policy.ts";
 export * from "./agent/core/file-checkpoints.ts";
 export * from "./agent/guards/loop-detector.ts";
 export * from "./agent/harness/harness.ts";
 export * from "./agent/core/intervention-controller.ts";
 export * from "./agent/core/messages.ts";
-export * from "./agent/core/run-kernel.ts";
-export * from "./agent/core/run-kernel-events.ts";
 export {
 	createRuntimeState,
 	reduceRuntimeState,
 	type AgentRuntimeState,
 	type HarnessPhase,
-} from "./agent/core/run-kernel.ts";
+} from "./agent/core/runtime-state.ts";
 export * from "./agent/core/session.ts";
 export type { TaskStatusRecord } from "./agent/tasks/task-status-state.ts";
 // Task/todo state read by built-in hooks. The task_status and todo Tool
@@ -32,7 +37,6 @@ export {
 export type { Task, TaskStatus } from "./agent/tasks/todo-state.ts";
 export { getTasks, onTodosChanged } from "./agent/tasks/todo-state.ts";
 export * from "./agent/core/tool-cache.ts";
-export * from "./agent/core/trajectory.ts";
 export * from "./agent/types/index.ts";
 // Compaction: single engine shared by harness compact, the loop's
 // context-full retry, and the builtin proactive hook.

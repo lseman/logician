@@ -24,7 +24,7 @@ export interface ProviderOptionsContext {
 	requestMetadata: Record<string, unknown> | undefined;
 	modeDef: InferenceModeDef | undefined;
 	signal?: AbortSignal;
-	payloadHooks: Array<AgentHooks["beforeProviderPayload"] | undefined>;
+	payloadHook: AgentHooks["beforeProviderPayload"] | undefined;
 }
 
 /**
@@ -50,7 +50,7 @@ export function buildProviderRequestOptions(
 		requestMetadata,
 		modeDef,
 		signal,
-		payloadHooks,
+		payloadHook,
 	} = ctx;
 
 	const useProviderDefaults = modeDef?.useProviderDefaults ?? false;
@@ -79,15 +79,11 @@ export function buildProviderRequestOptions(
 		cacheRetention: requestCacheRetention,
 		metadata: requestMetadata,
 		transformPayload: async basePayload => {
-			let payload = basePayload;
-			for (const hook of payloadHooks) {
-				const result = await hook?.({
-					model: config.model ?? "",
-					payload,
-				});
-				if (result?.payload) payload = result.payload;
-			}
-			return payload;
+			const result = await payloadHook?.({
+				model: config.model ?? "",
+				payload: basePayload,
+			});
+			return result?.payload ?? basePayload;
 		},
 	};
 

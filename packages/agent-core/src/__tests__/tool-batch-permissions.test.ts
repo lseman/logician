@@ -32,23 +32,20 @@ async function run(
 	onPermissionRequest?: Parameters<
 		typeof executeToolBatch
 	>[0]["onPermissionRequest"],
-	onPermissionDecision?: Parameters<
-		typeof executeToolBatch
-	>[0]["onPermissionDecision"],
 ) {
 	const events: AgentEvent[] = [];
-	return executeToolBatch({
+	const batch = await executeToolBatch({
 		registry,
 		toolCalls: [call],
 		rawStopReason: "stop",
 		iteration: 1,
 		permissions,
 		onPermissionRequest,
-		onPermissionDecision,
 		emit: e => {
 			events.push(e);
 		},
 	});
+	return { ...batch, events };
 }
 
 void test("denied tool call short-circuits without executing", async () => {
@@ -164,28 +161,20 @@ void test("acceptAll mode never invokes the permission handler", async () => {
 });
 
 void test("permission decisions are attributed before execution", async () => {
-	const decisions: Array<{
-		decision: string;
-		source: string;
-		scope?: string;
-	}> = [];
-	await run(
+	const { events } = await run(
 		registryWithBash(),
 		callFor("make build"),
 		new PermissionManager({ mode: "ask" }),
 		async () => "always",
-		decision => {
-			decisions.push(decision);
-		},
 	);
+	const decisions = events.filter(e => e.type === "tool_permission_decision");
 	assert.deepEqual(decisions, [
 		{
+			type: "tool_permission_decision",
 			toolCallId: "c1",
 			toolName: "bash",
-			decision: "allow",
+			decision: "always",
 			source: "user",
-			scope: "session",
-			approvalRule: "bash(make build)",
 		},
 	]);
 });

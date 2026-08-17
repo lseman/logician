@@ -86,10 +86,12 @@ void test("runAgentLoop injects steering before the next assistant call", async 
 		{
 			...makeConfig(),
 			backend,
-			getSteeringMessages: () => {
-				if (drained) return [];
-				drained = true;
-				return [user("steer")];
+			hooks: {
+				getSteeringMessages: () => {
+					if (drained) return [];
+					drained = true;
+					return [user("steer")];
+				},
 			},
 		},
 		() => {},
@@ -615,9 +617,11 @@ void test("runAgentLoop processes follow-up messages after a stop", async () => 
 		{
 			...makeConfig(),
 			backend,
-			getFollowUpMessages: () => {
-				if (followUps++ === 0) return [user("follow")];
-				return [];
+			hooks: {
+				getFollowUpMessages: () => {
+					if (followUps++ === 0) return [user("follow")];
+					return [];
+				},
 			},
 		},
 		() => {},
@@ -993,7 +997,7 @@ void test("runAgentLoop does not execute tool calls from a length-truncated resp
 	);
 });
 
-void test("async internal tool hooks fall through to user hooks", async () => {
+void test("tool hooks run before and after tool execution", async () => {
 	let beforeCalls = 0;
 	let afterCalls = 0;
 	const backend = new FakeBackend([
@@ -1011,10 +1015,6 @@ void test("async internal tool hooks fall through to user hooks", async () => {
 		{
 			...makeConfig(),
 			backend,
-			internalHooks: {
-				beforeToolCall: async () => undefined,
-				afterToolCall: async () => undefined,
-			},
 			hooks: {
 				beforeToolCall: () => {
 					beforeCalls++;

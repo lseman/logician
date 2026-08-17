@@ -62,14 +62,6 @@ export async function emitSessionEnd(
 export async function emitPreCompact(
 	hooksEnabled: boolean,
 	ctx: HookContext,
-	internalHook:
-		| ((
-				ctx: BeforeCompactContext,
-		  ) =>
-				| Promise<BeforeCompactResult | undefined>
-				| BeforeCompactResult
-				| undefined)
-		| undefined,
 	userHook:
 		| ((
 				ctx: BeforeCompactContext,
@@ -83,16 +75,10 @@ export async function emitPreCompact(
 	let hookResult: BeforeCompactResult | undefined;
 	if (compactCtx) {
 		try {
-			hookResult =
-				(await internalHook?.(compactCtx)) ??
-				(await userHook?.(compactCtx)) ??
-				undefined;
+			hookResult = await userHook?.(compactCtx);
 		} catch (_e: unknown) {
 			// must not block compaction
-			console.error(
-				"[harness-session] emitPreCompact internalHook failed:",
-				_e,
-			);
+			console.error("[harness-session] emitPreCompact hook failed:", _e);
 		}
 	}
 	if (!hooksEnabled) return hookResult;

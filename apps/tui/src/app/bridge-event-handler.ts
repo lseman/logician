@@ -130,7 +130,11 @@ export function handleEvent(
 			ctx.todoBar.setTodos(event.todos);
 			break;
 		case "queue_update":
-			ctx.steerQueue.setItems(event.steering || [], event.followUp || []);
+			ctx.steerQueue.setItems(
+				event.steering || [],
+				event.followUp || [],
+				event.nextTurn || [],
+			);
 			break;
 		case "permission_request": {
 			ctx.pendingPermission = {

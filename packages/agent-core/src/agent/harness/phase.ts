@@ -1,4 +1,4 @@
-import type { HarnessPhase } from "../core/run-kernel.ts";
+import type { HarnessPhase } from "../core/runtime-state.ts";
 
 const PHASE_TRANSITIONS: Record<HarnessPhase, readonly HarnessPhase[]> = {
 	idle: ["turn", "compaction", "branch_summary"],

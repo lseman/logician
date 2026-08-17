@@ -321,7 +321,6 @@ async function _runSpawn(
 		allowedPaths: parent.allowedPaths,
 		allowAllPaths: parent.allowAllPaths,
 		hooks: parent.hooks,
-		internalHooks: parent.internalHooks,
 		thinkingLevel: parent.thinkingLevel,
 		autoRetryEnabled: parent.autoRetryEnabled,
 		maxRetries: parent.maxRetries,
@@ -430,7 +429,6 @@ function resolveChildTools(def: AgentDefinition, parentTools: Tool[]): Tool[] {
 export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 	return {
 		name: "spawn_agent",
-		recoverySemantics: "at_most_once_unknown",
 		description:
 			"Delegate a self-contained task to a subagent with its own context " +
 			"window. The subagent works autonomously and returns only its final " +
@@ -497,7 +495,6 @@ function truncateResult(text: string, maxChars: number): string {
 export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 	return {
 		name: "spawn_agents",
-		recoverySemantics: "at_most_once_unknown",
 		description:
 			"Spawn multiple subagents concurrently, bounded by maxParallelAgents. " +
 			"Returns results in the same order as the input tasks. " +

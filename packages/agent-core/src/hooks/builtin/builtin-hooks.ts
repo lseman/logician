@@ -39,7 +39,7 @@ import { BudgetTracker } from "./budget.ts";
 // window is actually full).
 const DEFAULT_COMPACTION_FRACTION = 0.8;
 // Don't run proactive compaction every turn — cooldown in turns.
-const COMPACTION_COOLDOWN_TURNS = 3;
+export const COMPACTION_COOLDOWN_TURNS = 3;
 const RTK_REWRITE_TIMEOUT_MS = 2_000;
 
 /**
@@ -68,10 +68,26 @@ export interface BuiltinHookDeps {
 	toolDefs: () => Record<string, unknown>[];
 	// LoopDetector instance powering the duplicate/failure-loop tool-call guards.
 	loopDetector?: LoopDetector;
-	// Typed event emitter for structured events (optional).
-	eventBus?: {
-		emit: (event: { type: string; [key: string]: unknown }) => void;
-	};
+	// Sink for structured events this module raises (optional). Distinct from
+	// extensions/event-bus.ts's cross-extension pub/sub — this is a single
+	// emit callback, forwarded by the harness to its own AgentEvent stream.
+	emitEvent?: (event: { type: string; [key: string]: unknown }) => void;
+	// Escalation state for guard/continuation/budget interventions. Callers
+	// that rebuild hooks mid-run (e.g. a config refresh between loop
+	// iterations) MUST pass the same instance across rebuilds — escalation
+	// (attempt counts) and `recordProgress()`'s incident-clearing only work
+	// across repeated detections if this outlives a single hook build.
+	interventions?: HarnessInterventionController;
+	// Diminishing-returns budget-stop tracker, reused across rebuilds for the
+	// same reason as `interventions` — BudgetTracker compares consecutive
+	// turns, so a fresh instance every rebuild can never trigger. Only
+	// consulted while the feature is actually enabled (config + execution
+	// policy); a fresh instance is created locally when omitted.
+	budget?: BudgetTracker;
+	// Proactive-compaction cooldown, in loop iterations since the last
+	// compaction. Boxed in an object (not a bare number) so callers that
+	// rebuild hooks mid-run can share and mutate it across rebuilds.
+	compactionCooldown?: { lastTurn: number };
 }
 
 // Build the default safeguard hooks. Returns undefined per-event when a
@@ -79,12 +95,13 @@ export interface BuiltinHookDeps {
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const { config, loopDetector } = deps;
 	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
-	const interventions = new HarnessInterventionController();
+	const interventions =
+		deps.interventions ?? new HarnessInterventionController();
 	const emitIntervention = (
 		input: Parameters<HarnessInterventionController["record"]>[0],
 	) => {
 		const intervention = interventions.record(input);
-		deps.eventBus?.emit({ type: "harness_intervention", ...intervention });
+		deps.emitEvent?.({ type: "harness_intervention", ...intervention });
 		return intervention;
 	};
 	// Tool guards (duplicate + failure-loop) via LoopDetector.
@@ -121,11 +138,13 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// context mid-task. Consider disabling for long-running tasks.
 	const compactionEnabled = config.proactiveCompactionEnabled !== false;
 
-	const budget = budgetEnabled ? new BudgetTracker() : null;
+	const budget = budgetEnabled ? (deps.budget ?? new BudgetTracker()) : null;
 
 	const fraction =
 		config.proactiveCompactionFraction ?? DEFAULT_COMPACTION_FRACTION;
-	let lastCompactionTurn = -COMPACTION_COOLDOWN_TURNS;
+	const compactionCooldown = deps.compactionCooldown ?? {
+		lastTurn: -COMPACTION_COOLDOWN_TURNS,
+	};
 
 	const hooks: AgentHooks = {};
 
@@ -168,7 +187,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				JSON.stringify(args),
 			);
 			if (decision.block) {
-				const intervention = emitIntervention({
+				emitIntervention({
 					kind: "loop",
 					cause: decision.guard ?? "duplicate",
 					detector: "tool_call_guard",
@@ -216,7 +235,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		hooks.prepareNextTurn = async ({ messages, iteration }) => {
 			const max = deps.contextWindowTokens();
 			if (!max || max <= 0) return undefined;
-			if (iteration - lastCompactionTurn < COMPACTION_COOLDOWN_TURNS) {
+			if (iteration - compactionCooldown.lastTurn < COMPACTION_COOLDOWN_TURNS) {
 				return undefined;
 			}
 			// Shared ladder: estimate → micro → full-if-still-over. Fires at
@@ -227,9 +246,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					contextWindow: Math.round(max * COMPACTION_TARGET_FRACTION * 1.5),
 				},
 			});
-			lastCompactionTurn = iteration;
+			compactionCooldown.lastTurn = iteration;
 			if (result.changed) {
-				deps.eventBus?.emit({
+				deps.emitEvent?.({
 					type: "compaction",
 					reason: "threshold",
 					tokensBefore: estimateChatPayloadTokens(messages, deps.toolDefs()),
