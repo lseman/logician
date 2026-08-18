@@ -10,8 +10,8 @@ import {
 	formatFileOperations,
 	parseBranchSummary,
 	serializeMessages,
-} from "../agent/summaries/branch-summarization.ts";
-import type { Message } from "../agent/types/index.ts";
+} from "../summaries/branch-summarization.ts";
+import type { Message } from "../types/index.ts";
 
 describe("createFileOps", () => {
 	it("creates empty ops", () => {

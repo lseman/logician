@@ -3,18 +3,18 @@
 // and plugin command loading. Extracted from AgentCoreBridge.
 
 import {
-	type ExtensionDefinition,
-	loadExtensions,
-	ExtensionRunner,
-} from "@logician/agent-core/extensions/index.ts";
-import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
-import {
 	readdir as readdirAsync,
 	readFile as readFileAsync,
 } from "node:fs/promises";
 import path from "node:path";
+import {
+	type ExtensionDefinition,
+	ExtensionRunner,
+	type ExtensionRunnerOptions,
+	loadExtensions,
+	parseFrontmatter,
+} from "@logician/agent-core";
 import type { Skill } from "../../skills/index.ts";
-import type { ExtensionRunnerOptions } from "@logician/agent-core/extensions/runner.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Tool, ToolResult } from "@logician/agent-core/agent/types/index.ts";
+import type { Tool, ToolResult } from "@logician/agent-core";
 import { formatSize, truncateHead } from "./truncate.ts";
 
 const DEFAULT_LIMIT = 50;

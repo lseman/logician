@@ -4,9 +4,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { AgentHarness } from "../agent/harness/harness.ts";
-import type { AgentConfig } from "../agent/types/index.ts";
-import { ExtensionRunner } from "../extensions/runner.ts";
+import { AgentHarness } from "../harness/harness.ts";
+import type { AgentConfig } from "../types/index.ts";
+import { ExtensionRunner } from "../extension/runner.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 
 function extensionFile(source: string): string {

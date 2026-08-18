@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
 	parseTextToolCalls,
 	stripTextToolCalls,
-} from "../tools/shared/text-to-tool-calls.ts";
+} from "../tools/text-to-tool-calls.ts";
 
 const textualGrepCall = `I will inspect the notices.
 <tool_call>

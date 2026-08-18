@@ -4,8 +4,8 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { LoopDetector } from "../agent/guards/loop-detector.ts";
-import { OutputGuard } from "../agent/guards/output-guard.ts";
+import { LoopDetector } from "../guards/loop-detector.ts";
+import { OutputGuard } from "../guards/output-guard.ts";
 
 describe("OutputGuard", () => {
 	it("classifies transient errors correctly", () => {

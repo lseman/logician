@@ -6,12 +6,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Tool, ToolResult } from "@logician/agent-core/agent/types/index.ts";
-import {
-	ensureInsideCwd,
-	readUtf8IfExists,
-	resolvePath,
-} from "@logician/agent-core/tools/shared/path-utils.ts";
+import type { Tool, ToolResult } from "@logician/agent-core";
+import { ensureInsideCwd, readUtf8IfExists, resolvePath } from "@logician/agent-core";
 import {
 	hasBeenRead,
 	isStaleSinceRead,

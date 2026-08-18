@@ -8,7 +8,7 @@ import { constants, access as fsAccess, rm as fsRm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { Tool, ToolResult } from "@logician/agent-core/agent/types/index.ts";
+import type { Tool, ToolResult } from "@logician/agent-core";
 import { getShellConfig, getShellEnv, killProcessTree } from "./shell.ts";
 import {
 	DEFAULT_MAX_BYTES,

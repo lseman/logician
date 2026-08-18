@@ -5,8 +5,7 @@
 // the bridge's job is just to forward session-id transitions and call
 // createHooks() once at construction.
 
-import type { OpenAIBackend } from "@logician/agent-core/agent/core/backend.ts";
-import type { AgentConfig } from "@logician/agent-core";
+import type { AgentConfig, OpenAIBackend } from "@logician/agent-core";
 import {
 	createMemoryHooks,
 	createMemoryStore,

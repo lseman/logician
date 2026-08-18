@@ -1,4 +1,4 @@
-export { ask_user } from "@logician/agent-capabilities/interaction/ask-user/index.ts";
+export { ask_user } from "@logician/agent-blocks/interaction/ask-user/index.ts";
 export { ariadne } from "./ariadne.ts";
 export { createAutoresearchTools } from "./autoresearch.ts";
 export { type BashDetails, bash } from "./bash.ts";

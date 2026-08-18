@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {
 	throwOnValidationErrors,
 	validateConfig,
-} from "../agent/config/config-validator.ts";
-import type { AgentConfig } from "../agent/types/index.ts";
+} from "../config/config-validator.ts";
+import type { AgentConfig } from "../types/index.ts";
 
 function describe(_name: string, fn: () => void) {
 	fn();

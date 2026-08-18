@@ -2,10 +2,7 @@
 // Renders assistant reasoning chunks (collapsed/summary/expanded modes) with
 // code-block syntax highlighting in expanded mode.
 
-import {
-	highlight,
-	highlightAuto,
-} from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import { highlight, highlightAuto } from "@logician/agent-core";
 import type {
 	AssistantChunk,
 	ThinkingDisplayStyle,

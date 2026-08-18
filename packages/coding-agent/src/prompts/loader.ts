@@ -7,7 +7,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
+import { parseFrontmatter } from "@logician/agent-core";
 
 export interface Prompt {
 	/** Stable invocation id, derived from the filename (without extension). */

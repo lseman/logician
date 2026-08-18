@@ -6,31 +6,31 @@
 // the harness's single live instance.
 
 import { spawnSync } from "node:child_process";
-import { resolveExecutionPolicy } from "../../agent/core/execution-policy.ts";
+import { resolveExecutionPolicy } from "../../core/execution-policy.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
-} from "../../agent/core/file-checkpoints.ts";
-import { HarnessInterventionController } from "../../agent/core/intervention-controller.ts";
+} from "../../core/file-checkpoints.ts";
+import { HarnessInterventionController } from "../../core/intervention-controller.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
-} from "../../agent/core/messages.ts";
-import type { LoopDetector } from "../../agent/guards/loop-detector.ts";
-import { awaitsUserInput } from "../../agent/guards/response-patterns.ts";
+} from "../../core/messages.ts";
+import type { LoopDetector } from "../../guards/loop-detector.ts";
+import { awaitsUserInput } from "../../guards/response-patterns.ts";
 import {
 	getTaskStatus,
 	recordTaskStatus,
-} from "../../agent/tasks/task-status-state.ts";
-import { getTasks } from "../../agent/tasks/todo-state.ts";
+} from "../../tasks/task-status-state.ts";
+import { getTasks } from "../../tasks/todo-state.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
 	CompactableMessage,
 	Message,
-} from "../../agent/types/index.ts";
+} from "../../types/index.ts";
 import { compactToFit } from "../../compaction/compaction.ts";
 import { BudgetTracker } from "./budget.ts";
 

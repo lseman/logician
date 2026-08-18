@@ -7,7 +7,7 @@ import {
 	ensureInsideCwd,
 	resolvePath,
 	resolveReadPath,
-} from "../tools/shared/path-utils.ts";
+} from "../tools/path-utils.ts";
 
 void test("resolvePath normalizes pasted agent paths", () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-path-"));

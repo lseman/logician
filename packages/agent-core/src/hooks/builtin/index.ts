@@ -1,4 +1,5 @@
-// Internal policies that protect and maintain the agent loop.
+// ── Built-in hooks ──────────────────────────────────────────────────────────
+// Default safeguard hooks (guards, budget stop, proactive compaction).
 
 export * from "./budget.ts";
 export * from "./builtin-hooks.ts";

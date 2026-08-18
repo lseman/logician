@@ -4,8 +4,7 @@
 
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
-import { stripAcceptanceReport } from "@logician/agent-core/agent/guards/acceptance-contract.ts";
-import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
+import { stripAcceptanceReport, stripTextToolCalls } from "@logician/agent-core";
 import type { AssistantChunk } from "@logician/coding-agent/sessions";
 import { BOLD, DIM, RESET } from "../../terminal/core.ts";
 import { hyperlink, supportsHyperlinks } from "../../terminal/hyperlinks.ts";

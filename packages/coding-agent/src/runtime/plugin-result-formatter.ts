@@ -3,7 +3,7 @@
 // the transcript. Pure formatting, no bridge state — extracted from
 // AgentCoreBridge.
 
-import type { PluginCommandResult } from "@logician/agent-core/tools/shared/plugins.ts";
+import type { PluginCommandResult } from "@logician/agent-core";
 import { tableRow } from "../tui-utils.ts";
 
 export function formatPluginResult(

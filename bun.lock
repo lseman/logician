@@ -34,7 +34,7 @@
       "name": "@logician/tui",
       "version": "0.2.0",
       "dependencies": {
-        "@logician/agent-capabilities": "0.2.0",
+        "@logician/agent-blocks": "0.2.0",
         "@logician/agent-core": "0.2.0",
         "@logician/autoresearch": "0.2.0",
         "@logician/coding-agent": "0.2.0",
@@ -50,8 +50,8 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/agent-capabilities": {
-      "name": "@logician/agent-capabilities",
+    "packages/agent-blocks": {
+      "name": "@logician/agent-blocks",
       "version": "0.2.0",
       "dependencies": {
         "@logician/agent-core": "0.2.0",
@@ -107,7 +107,7 @@
       "name": "@logician/coding-agent",
       "version": "0.2.0",
       "dependencies": {
-        "@logician/agent-capabilities": "0.2.0",
+        "@logician/agent-blocks": "0.2.0",
         "@logician/agent-core": "0.2.0",
         "@logician/autoresearch": "0.2.0",
         "@logician/eoh": "0.1.0",
@@ -310,7 +310,7 @@
 
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.34.5", "", { "os": "win32", "cpu": "x64" }, "sha512-+29YMsqY2/9eFEiW93eqWnuLcWcufowXewwSNIT6UwZdUUCrM3oFjMWH/Z6/TMmb4hlFenmfAVbpWeup2jryCw=="],
 
-    "@logician/agent-capabilities": ["@logician/agent-capabilities@workspace:packages/agent-capabilities"],
+    "@logician/agent-blocks": ["@logician/agent-blocks@workspace:packages/agent-blocks"],
 
     "@logician/agent-core": ["@logician/agent-core@workspace:packages/agent-core"],
 

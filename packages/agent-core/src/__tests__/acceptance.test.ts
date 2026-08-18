@@ -8,7 +8,7 @@ import {
 	shouldRunAcceptanceFinalization,
 	stripAcceptanceReport,
 	validateAcceptanceInput,
-} from "../agent/guards/acceptance-contract.ts";
+} from "../guards/acceptance-contract.ts";
 
 function reportFence(report: Record<string, unknown>): string {
 	const bt = "`";
