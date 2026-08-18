@@ -9,22 +9,22 @@ import path from "node:path";
 import {
 	type AgentDefinition,
 	loadAgentDefinitions,
-} from "@logician/agent-capabilities/delegation/definitions.ts";
+} from "@logician/agent-blocks/delegation/definitions.ts";
 import {
 	getBuiltInSubagentTools,
 	type SubagentToolDeps,
-} from "@logician/agent-capabilities/tools";
+} from "@logician/agent-blocks/tools";
 import {
 	type AgentConfig,
 	type AgentHarness,
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
+	type LLMBackend,
 	type Message,
 	type Tool,
 	type ToolContext,
 } from "@logician/agent-core";
-import type { LLMBackend } from "@logician/agent-core/agent/core/backend.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
 
 export interface SubagentCoordinatorDeps {

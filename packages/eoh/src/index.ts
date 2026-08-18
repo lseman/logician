@@ -3,7 +3,7 @@
  *
  * Generic autonomous heuristic evolution infrastructure: seed a heuristic,
  * evolve it via LLM-driven operators, evaluate fitness, keep improvements.
- * Ported from agent-capabilities/src/eoh.
+ * Ported from agent-blocks/src/eoh.
  *
  * This module owns the pure session state/logic — the `EohSession` class
  * exposes plain methods (initEvolution/runGeneration/getStatus/best) with no

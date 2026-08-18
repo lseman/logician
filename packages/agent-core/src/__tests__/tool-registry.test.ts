@@ -1,8 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { Tool } from "../agent/types/index.ts";
+import type { Tool } from "../types/index.ts";
 import { microCompactMessages } from "../compaction/compaction.ts";
-import { ToolRegistry } from "../tools/shared/registry.ts";
+import { ToolRegistry } from "../tools/registry.ts";
 
 function makeTool(overrides: Partial<Tool> & { name: string }): Tool {
 	return {

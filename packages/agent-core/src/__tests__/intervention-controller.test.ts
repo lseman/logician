@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 
-import { HarnessInterventionController } from "../agent/core/intervention-controller.ts";
+import { HarnessInterventionController } from "../core/intervention-controller.ts";
 
 const input = (iteration: number) => ({
 	kind: "loop" as const,

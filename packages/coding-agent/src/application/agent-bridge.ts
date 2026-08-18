@@ -6,43 +6,40 @@ import { envNumber } from "../tui-utils.ts";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type ReasonerConfig } from "@logician/agent-capabilities/reasoning";
+import { type ReasonerConfig } from "@logician/agent-blocks/reasoning";
 import {
 	type AbortResult,
 	type AgentConfig,
 	type AgentEvent,
 	AgentHarness,
 	type AgentModelConfig,
-	type HarnessPhase,
-	type Message,
-	resolveAgentSettings,
-	type Session,
-	type Tool,
-	type TruncationConfig,
-	type WebSearchConfig,
-} from "@logician/agent-core";
-import type { QueueMode } from "@logician/agent-core";
-import { OpenAIBackend } from "@logician/agent-core/agent/core/backend.ts";
-import {
+	type AskUserContext,
+	configurePluginRuntimeEnv,
 	estimateChatPayloadTokens,
 	estimateTokens,
-} from "@logician/agent-core/agent/core/messages.ts";
-import { onTodosChanged } from "@logician/agent-core/agent/tasks/todo-state.ts";
-import { PermissionManager, type PermissionMode, type PermissionRules } from "@logician/agent-core/tools/shared/permissions.ts";
-import { ExtensionManager, loadPluginCommands } from "./manager/extension-manager.ts";
-import { SessionManager } from "./manager/session-manager.ts";
-import { AgentCoordinator } from "./manager/agent-coordinator.ts";
-import type { AskUserContext } from "@logician/agent-core/agent/types/types-messages.ts";
-import {
-	configurePluginRuntimeEnv,
+	type HarnessPhase,
+	type Message,
+	onTodosChanged,
+	OpenAIBackend,
+	PermissionManager,
+	type PermissionMode,
+	type PermissionRules,
 	type PluginCommandResult,
+	type QueueMode,
+	resolveAgentSettings,
 	runHookEvent,
 	runPluginBackend,
 	runSessionStartHooks,
+	type Session,
 	splitPluginArgs,
-} from "@logician/agent-core/tools/shared/plugins.ts";
-
-import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
+	type Tool,
+	ToolRegistry,
+	type TruncationConfig,
+	type WebSearchConfig,
+} from "@logician/agent-core";
+import { ExtensionManager, loadPluginCommands } from "./manager/extension-manager.ts";
+import { SessionManager } from "./manager/session-manager.ts";
+import { AgentCoordinator } from "./manager/agent-coordinator.ts";
 import { MemoryManager, type MemoryManagerOptions, type MemoryManagerRuntime } from "./manager/memory-manager.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { LspManager } from "../developer-tools/lsp-manager.ts";

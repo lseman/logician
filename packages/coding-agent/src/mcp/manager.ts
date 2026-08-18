@@ -4,8 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Tool } from "@logician/agent-core";
-import { parseJsonWithComments } from "@logician/agent-core/tools/shared/json-utils.ts";
-import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
+import { parseJsonWithComments, runPluginBackend } from "@logician/agent-core";
 import { updateConfigFile } from "../configuration/config.ts";
 import {
 	allocateMcpToolName,

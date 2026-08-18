@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { HarnessInterventionController } from "../agent/core/intervention-controller.ts";
-import { LoopDetector } from "../agent/guards/loop-detector.ts";
-import { awaitsUserInput } from "../agent/guards/response-patterns.ts";
+import { HarnessInterventionController } from "../core/intervention-controller.ts";
+import { LoopDetector } from "../guards/loop-detector.ts";
+import { awaitsUserInput } from "../guards/response-patterns.ts";
 import { BudgetTracker } from "../hooks/builtin/budget.ts";
 import {
 	buildBuiltinHooks,

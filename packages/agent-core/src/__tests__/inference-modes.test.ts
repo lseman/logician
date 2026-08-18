@@ -6,7 +6,7 @@ import {
 	getInferenceMode,
 	INFERENCE_MODES,
 	isValidInferenceMode,
-} from "../agent/types/types-config.ts";
+} from "../types/types-config.ts";
 
 void test("INFERENCE_MODES has exactly 10 entries", () => {
 	assert.equal(INFERENCE_MODES.size, 10);

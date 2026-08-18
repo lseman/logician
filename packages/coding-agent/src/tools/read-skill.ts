@@ -3,7 +3,7 @@
 // advertises a compact catalog (name + description); the model calls this tool
 // to pull the full SKILL.md body when it decides to use a skill.
 
-import type { Tool } from "@logician/agent-core/agent/types/index.ts";
+import type { Tool } from "@logician/agent-core";
 import {
 	findSkillByName,
 	formatSkillInvocation,

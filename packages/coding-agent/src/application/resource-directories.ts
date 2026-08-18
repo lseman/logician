@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
+import { runPluginBackend } from "@logician/agent-core";
 
 export async function getSkillsDirs(cwd: string): Promise<string[]> {
 	const dirs: string[] = [];

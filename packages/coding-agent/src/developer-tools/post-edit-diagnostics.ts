@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentHooks } from "@logician/agent-core";
-import { ensureInsideCwd } from "@logician/agent-core/tools/shared/path-utils.ts";
+import { ensureInsideCwd } from "@logician/agent-core";
 import type { LspManager } from "./lsp-manager.ts";
 
 const execFileAsync = promisify(execFile);

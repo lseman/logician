@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { buildStreamingCallbacks } from "../agent/loop/provider-streaming.ts";
-import type { AgentEvent } from "../agent/types/index.ts";
+import { buildStreamingCallbacks } from "../loop/provider-streaming.ts";
+import type { AgentEvent } from "../types/index.ts";
 
 void test("onSnapshot does not emit message_update for a pure-reasoning snapshot", () => {
 	const events: AgentEvent[] = [];

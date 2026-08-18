@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BackendError } from "../agent/core/backend.ts";
-import { AgentHarness, HarnessBusyError } from "../agent/harness/harness.ts";
-import { Session } from "../agent/core/session.ts";
-import type { AgentConfig } from "../agent/types/index.ts";
-import { PermissionManager } from "../tools/shared/permissions.ts";
+import { BackendError } from "../core/backend.ts";
+import { AgentHarness, HarnessBusyError } from "../harness/harness.ts";
+import { Session } from "../core/session.ts";
+import type { AgentConfig } from "../types/index.ts";
+import { PermissionManager } from "../tools/permissions.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 
 function makeHarness(backend: FakeBackend, cwd?: string): AgentHarness {

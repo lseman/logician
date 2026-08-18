@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadExtensions } from "../extensions/loader.ts";
+import { loadExtensions } from "../extension/loader.ts";
 
 test("discovers Pi-compatible global and project extension locations", () => {
 	const root = mkdtempSync(join(tmpdir(), "logician-extension-loader-"));

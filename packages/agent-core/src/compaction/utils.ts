@@ -1,6 +1,6 @@
 // ── Compaction utilities ────────────────────────────────────────────────────────
 
-import { DEFAULT_TRUNCATION } from "../agent/types/types-truncation.ts";
+import { DEFAULT_TRUNCATION } from "../types/types-config.ts";
 
 // ============================================================================
 // Message Serialization — Pi's version with thinking block support

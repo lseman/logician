@@ -13,9 +13,11 @@ import {
 import os from "node:os";
 import path from "node:path";
 import type { Tool } from "@logician/agent-core";
-import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
-import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
-import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
+import {
+	parseFrontmatter,
+	runPluginBackend,
+	ToolRegistry,
+} from "@logician/agent-core";
 import {
 	McpManager,
 	type McpSnapshotResult,

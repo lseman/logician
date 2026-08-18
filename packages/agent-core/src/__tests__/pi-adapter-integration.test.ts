@@ -4,8 +4,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ExtensionRunner } from "../extensions/runner.ts";
-import type { ExtensionDefinition } from "../extensions/types.ts";
+import { ExtensionRunner } from "../extension/runner.ts";
+import type { ExtensionDefinition } from "../extension/types.ts";
 
 function piExtensionFile(content: string): string {
 	const dir = mkdtempSync(join(tmpdir(), "logician-pi-ext-"));

@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
-import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
+import { parseFrontmatter } from "@logician/agent-core";
 import ignore from "ignore";
 
 // ── Types ────────────────────────────────────────────────────────────────────
