@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { grade } from "../graders.ts";
 import { runProcess } from "../process.ts";
 import { buildReport } from "../report.ts";
+import { replayTrial } from "../runner.ts";
 import { validateCorpus } from "../schema.ts";
 
 describe("agent eval", () => {
@@ -83,5 +85,54 @@ describe("agent eval", () => {
 		});
 		expect(result.timedOut).toBe(true);
 		expect(result.durationMs).toBeLessThan(2500);
+	});
+
+	test("replays a recorded trajectory against current graders", async () => {
+		const workspace = mkdtempSync(path.join(tmpdir(), "logician-replay-"));
+		writeFileSync(path.join(workspace, "result.txt"), "verified\n");
+		execFileSync("git", ["init", "-q"], { cwd: workspace });
+		execFileSync("git", ["add", "."], { cwd: workspace });
+		execFileSync(
+			"git",
+			[
+				"-c",
+				"user.name=Eval",
+				"-c",
+				"user.email=eval@localhost",
+				"commit",
+				"-qm",
+				"baseline",
+			],
+			{ cwd: workspace },
+		);
+		const task = {
+			schemaVersion: 1 as const,
+			id: "replay",
+			title: "Replay",
+			kind: "bugfix" as const,
+			prompt: "verify",
+			fixture: { repository: workspace, revision: "HEAD" },
+			agent: { command: "true" },
+			graders: [
+				{
+					id: "result",
+					type: "file_contains" as const,
+					path: "result.txt",
+					pattern: "verified",
+				},
+			],
+		};
+		const trajectory = [
+			JSON.stringify({ type: "agent_start", ts: 100 }),
+			JSON.stringify({ type: "tool_execution_start", ts: 140 }),
+			JSON.stringify({ type: "permission_request", ts: 141 }),
+			JSON.stringify({ type: "agent_end", status: "completed", ts: 180 }),
+		].join("\n");
+		const trial = await replayTrial(task, workspace, trajectory);
+		expect(trial.environmentGradedPass).toBe(true);
+		expect(trial.agentDeclaredComplete).toBe(true);
+		expect(trial.metrics.toolCalls).toBe(1);
+		expect(trial.metrics.permissionRequests).toBe(1);
+		expect(trial.metrics.timeToFirstToolMs).toBe(40);
 	});
 });

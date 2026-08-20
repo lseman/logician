@@ -20,7 +20,7 @@ export type CompactableMessage = {
 	role: string;
 	content?: unknown[] | string | null;
 	usage?: Record<string, number>;
-	/** UUID for tree-based entry tracking (Pi-compatible). */
+	/** UUID for tree-based entry tracking. */
 	entryId?: string;
 };
 
@@ -301,12 +301,6 @@ export type AgentEventBody =
 	| { type: "model_select"; model: string; index: number }
 	| { type: "max_iterations"; iterations: number; limit: number }
 	| {
-			type: "task_failed";
-			reason: string;
-			iteration: number;
-			lastContent?: string;
-	  }
-	| {
 			type: "loop_detected";
 			message: string;
 			attempt?: number;
@@ -382,8 +376,6 @@ export type AgentEventBody =
 				| "duplicate"
 				| "failure"
 				| "continuation_nudge"
-				| "acceptance_retry"
-				| "reflection_retry"
 				| "loop_detected"
 				| "budget_stop"
 				| "follow_up"
@@ -421,17 +413,6 @@ export type AgentEventBody =
 			type: "acceptance_complete";
 			status: "passed" | "failed" | "timeout";
 			report?: Record<string, unknown>;
-	  }
-	| {
-			type: "reflection_start";
-			turnId: string;
-	  }
-	| {
-			type: "reflection_end";
-			turnId: string;
-			assessment: "complete" | "incomplete";
-			needsMoreWork: boolean;
-			issues: string[];
 	  }
 	// Session tree entries
 	| {

@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { LoopDetector } from "../../../core/guards/loop-detector.ts";
 import { awaitsUserInput } from "../../../core/guards/response-patterns.ts";
-import { BudgetTracker } from "../../../core/hooks/builtin/budget.ts";
 import {
 	buildBuiltinHooks,
 	COMPACTION_COOLDOWN_TURNS,
 	rewriteCommandWithRtk,
 } from "../../../core/hooks/builtin/builtin-hooks.ts";
 import { HarnessInterventionController } from "../../../core/policy/intervention-controller.ts";
+import { ProgressTracker } from "../../../core/policy/progress-tracker.ts";
 
 // Capture the real PATH once at module load so cleanup always restores the
 // true original value, even when other tests mutate process.env.PATH.
@@ -74,7 +74,7 @@ void test("minimal profile keeps mechanism hooks and omits built-in policies", (
 			model: "fake",
 			executionProfile: "minimal",
 			continuationEnabled: true,
-			budgetStopEnabled: true,
+			progressStopEnabled: true,
 			proactiveCompactionEnabled: true,
 		},
 		contextWindowTokens: () => 4096,
@@ -272,16 +272,16 @@ void test("compaction cooldown resets every rebuild when the cooldown box is NOT
 	);
 });
 
-void test("budget-stop tracks consecutive low-progress turns across rebuilds when the tracker is shared", () => {
+void test("progress-stop tracks repeated evidence-free turns across hook rebuilds", () => {
 	const config = {
 		baseUrl: "http://fake",
 		model: "fake",
 		executionProfile: "autonomous" as const,
-		budgetStopEnabled: true,
+		progressStopEnabled: true,
 	};
-	const budget = new BudgetTracker({
-		diminishingFloor: 500,
-		minContinuations: 1,
+	const progress = new ProgressTracker({
+		minimumChecks: 1,
+		stalledChecks: 1,
 	});
 	const build = () =>
 		buildBuiltinHooks({
@@ -289,10 +289,10 @@ void test("budget-stop tracks consecutive low-progress turns across rebuilds whe
 			contextWindowTokens: () => 100_000,
 			toolDefs: () => [],
 			loopDetector: new LoopDetector(),
-			budget,
+			progress,
 		});
 
-	// Same token count each call → zero delta both times → stalls on the 2nd.
+	// No successful tool evidence or task-state transition → stalls on the 2nd.
 	const messages = [{ role: "user" as const, content: "x" }];
 	const first = build().shouldStopAfterTurn?.({
 		messages,

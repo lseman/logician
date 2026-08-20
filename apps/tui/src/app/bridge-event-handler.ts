@@ -3,17 +3,14 @@
 // bridge-event handling with overlay-opening side effects for
 // permission/question requests.
 
-import { formatContextSize } from "@logician/agent-core/formatting";
 import type {
 	AgentCoreBridge,
 	GoalManager,
 	GoalState,
 } from "@logician/agent-core/application";
-import {
-	isTranscriptEvent,
-	type RuntimeEvent,
-} from "@logician/agent-core/events";
+import { formatContextSize } from "@logician/agent-core/formatting";
 import type { Transcript } from "@logician/agent-core/sessions";
+import { isTranscriptEvent, type RuntimeEvent } from "@logician/agent-protocol";
 import type { AutoresearchSession } from "@logician/autoresearch";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";
 import type { PermissionPopup } from "../overlays/permission-popup.ts";
@@ -66,7 +63,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 		handleEvent(ctx, event);
 	};
 
-	ctx.bridge.on(eventHandler);
+	ctx.bridge.onNotification(notification => eventHandler(notification.event));
 	ctx.bridge.onError(err => {
 		// Also display in transcript so the user sees connection/server errors
 		ctx.transcript.addSystemMessage(`Connection error: ${err.message}`);

@@ -6,6 +6,7 @@ import type {
 	ExecutionProfile,
 } from "../policy/execution-policy.ts";
 import type { RunBudgetLimits } from "../policy/run-budget.ts";
+import type { TaskLedger } from "../policy/task-ledger.ts";
 import type { PermissionManager } from "../tools/permissions.ts";
 import type { AgentHooks, EventHandler, Tool } from "./types-messages.ts";
 
@@ -293,11 +294,13 @@ export interface AgentConfig {
 	maxIterations?: number;
 	/**
 	 * `minimal` keeps the provider/tool/queue mechanism while disabling the
-	 * runner's built-in completion, reflection, acceptance, and repair policies.
+	 * runner's built-in continuation, acceptance, and repair policies.
 	 */
 	executionProfile?: ExecutionProfile;
 	/** Policies evaluated externally when the agent loop naturally becomes idle. */
 	stopPolicies?: AgentStopPolicy[];
+	/** Optional task capability observed by autonomous policy. */
+	taskLedger?: TaskLedger;
 	loopDetectionWindow?: number;
 	degenerateLoopThreshold?: number;
 	stagnationThreshold?: number;
@@ -319,7 +322,8 @@ export interface AgentConfig {
 	failureGuardEnabled?: boolean;
 	duplicateToolThreshold?: number;
 	toolFailureLoopThreshold?: number;
-	budgetStopEnabled?: boolean;
+	/** Enable evidence-based no-progress stopping. */
+	progressStopEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
 	proactiveCompactionFraction?: number;
 	ariadneEnabled?: boolean;

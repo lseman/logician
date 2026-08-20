@@ -10,31 +10,31 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-	McpManager,
-	type McpSnapshotResult,
-	type McpToggleResult,
-} from "../capabilities/mcp/manager.ts";
+import type { RuntimeEvent } from "@logician/agent-protocol";
+import { runPluginBackend } from "../adapters/claude-code/plugin-runtime.ts";
 import { loadPrompts, type Prompt } from "../capabilities/prompts/loader.ts";
 import {
 	formatSkillCatalog,
 	loadSkills,
 	type Skill,
 } from "../capabilities/skills/loader.ts";
-import type { RuntimeEvent } from "../core/types/runtime-events.ts";
+import { createReadSkillTool } from "../capabilities/skills/read-skill-tool.ts";
+import { parseFrontmatter } from "../core/configuration/frontmatter.ts";
+import { ToolRegistry } from "../core/tools/registry.ts";
 import type { Tool } from "../core/types/types-messages.ts";
 import { ariadne } from "../infrastructure/tools/ariadne.ts";
 import { createDefaultTools } from "../infrastructure/tools/default-tools.ts";
-import { runPluginBackend } from "../adapters/claude-code/plugin-runtime.ts";
-import { ToolRegistry } from "../core/tools/registry.ts";
-import { parseFrontmatter } from "../infrastructure/tools/utils/frontmatter.ts";
-import { createReadSkillTool } from "../infrastructure/tools/read-skill.ts";
 import {
 	getDefaultSandboxProfile,
 	type SandboxProfile,
 	setDefaultSandboxProfile,
 } from "../infrastructure/tools/sandbox.ts";
 import { resolveWebSearchConfig } from "./bridge/environment.ts";
+import {
+	McpManager,
+	type McpSnapshotResult,
+	type McpToggleResult,
+} from "./capabilities/mcp-manager.ts";
 import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,

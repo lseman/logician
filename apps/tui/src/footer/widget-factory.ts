@@ -140,12 +140,14 @@ function phaseWidget(status: WidgetFactoryStatus): WidgetData {
 }
 
 function runtimeStatusWidget(status: WidgetFactoryStatus): WidgetData {
-	if (!status.runPhase || status.runPhase === "idle")
-		return empty("runtime-status");
-	const parts = [status.runPhase];
+	// The visible phase widget already communicates READY/THINKING/TOOL. The
+	// harness phase (usually just "turn") is internal plumbing and duplicated
+	// that information as "◈ turn" in the footer. Keep only actionable details.
+	const parts: string[] = [];
 	if (status.runtimeRetry) parts.push(`retry ${status.runtimeRetry}`);
 	if (status.runtimeRepair) parts.push(`repair ${status.runtimeRepair}`);
 	if (status.activeSubagents) parts.push(`agents ${status.activeSubagents}`);
+	if (parts.length === 0) return empty("runtime-status");
 	return withIcon(
 		"runtime-status",
 		"◈",

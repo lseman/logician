@@ -10,6 +10,8 @@ import {
 	shouldAutoCompact,
 } from "../compaction/orchestration.ts";
 import { validateAgentConfig } from "../configuration/config-validator.ts";
+import { ConfigurationStore } from "../configuration/configuration-store.ts";
+import { ContextEngine } from "../context/context-engine.ts";
 import {
 	createSteeringInterruptReason,
 	type RunAgentLoopConfig,
@@ -19,6 +21,7 @@ import type { ExtensionRunner } from "../extension/runner.ts";
 import { LoopDetector } from "../guards/loop-detector.ts";
 import { OutputGuard } from "../guards/output-guard.ts";
 import { HarnessInterventionController } from "../policy/intervention-controller.ts";
+import { AgentRunController } from "../policy/run-controller.ts";
 import type { LLMBackend } from "../provider/backend.ts";
 import {
 	createUserMessage,
@@ -29,6 +32,7 @@ import type {
 	BranchInfo,
 	BranchSummaryData,
 } from "../session/summaries/types.ts";
+import type { ThreadItem } from "../session/thread-ledger.ts";
 import {
 	type AgentRuntimeState,
 	createRuntimeState,
@@ -40,7 +44,6 @@ import type {
 	AgentConfig,
 	AgentModelConfig,
 	QueueMode,
-	ThinkingLevel,
 } from "../types/types-config.ts";
 import type {
 	AgentEvent,
@@ -54,19 +57,17 @@ import {
 	composeHarnessConfig,
 	HarnessConfigurationError,
 } from "./internal/configuration.ts";
+import { HarnessEventRouter } from "./internal/event-router.ts";
+import { HarnessModelController } from "./internal/model-controller.ts";
 import { HarnessObservation } from "./internal/observation.ts";
 import { HarnessQueueController } from "./internal/queue-controller.ts";
 import { HarnessTurnController } from "./internal/turn-controller.ts";
 import type { ExtensionRuntimeDeps } from "./runtime/extension-runtime.ts";
 import {
-	createExtensionRuntimeState,
+	resolveRuntimeTools,
 	runExtensionBeforeAgentStart as runExtensionBeforeAgentStartHelper,
 	withExtensionRuntime as withExtensionRuntimeHelper,
 } from "./runtime/extension-runtime.ts";
-import {
-	cycleModel as calculateNextModel,
-	resolveModelUrl,
-} from "./runtime/model.ts";
 import {
 	assertIdlePhase,
 	assertPhaseTransition,
@@ -83,10 +84,10 @@ import {
 import type {
 	AbortResult,
 	AgentHarnessOptions,
-	HarnessCompatibilityHookFactory,
-	HarnessCompatibilityHookLayer,
-	HarnessCompatibilityLifecycle,
 	HarnessObserver,
+	HarnessPluginHookFactory,
+	HarnessPluginHookLayer,
+	HarnessPluginLifecycle,
 	HarnessQueues,
 	HarnessTurnSnapshot,
 } from "./types.ts";
@@ -95,6 +96,7 @@ export type {
 	BranchInfo,
 	BranchSummaryData,
 } from "../session/summaries/types.ts";
+export type { ThreadItem } from "../session/thread-ledger.ts";
 export type {
 	AgentRuntimeState,
 	HarnessPhase,
@@ -114,8 +116,8 @@ export { HarnessConfigurationError };
 type TurnRequest = { kind: "prompt"; text: string } | { kind: "continue" };
 
 export class AgentHarness {
-	private config: AgentConfig;
-	private backend: LLMBackend;
+	private readonly configuration: ConfigurationStore<AgentConfig>;
+	private readonly modelController: HarnessModelController;
 	private cwd?: string;
 	private maxIterations?: number;
 
@@ -125,18 +127,17 @@ export class AgentHarness {
 	private readonly turn = new HarnessTurnController();
 	private loopConfig: AgentConfig | null = null;
 	private conversation = new ConversationState();
+	private readonly contextEngine = new ContextEngine(messages =>
+		estimateChatPayloadTokens([...messages]),
+	);
 	private queue: HarnessQueueController;
 	private loopDetector: LoopDetector;
-	// Escalation/cooldown state for the built-in safeguard hooks. Owned here
-	// (not inside buildBuiltinHooks) because withExtensionRuntime() rebuilds
-	// the hooks object on every loop iteration (via refreshNextTurnConfig) —
-	// state that must persist across iterations (intervention escalation,
-	// budget-stop's consecutive-turn comparison, the compaction cooldown)
-	// would otherwise silently reset every time and never do its job.
+	// Durable intervention history spans turns; run policy is reset per prompt.
 	private interventions: HarnessInterventionController =
 		new HarnessInterventionController();
-	private extensionRuntimeState = createExtensionRuntimeState();
+	private runController = new AgentRunController();
 	private observation: HarnessObservation;
+	private readonly eventRouter: HarnessEventRouter;
 	private autoCompactionSettings: CompactionSettings = {
 		enabled: false,
 		reserveTokens: 16_384,
@@ -158,8 +159,8 @@ export class AgentHarness {
 		startedAt: undefined as number | undefined,
 	};
 	private _extensionRunner?: ExtensionRunner;
-	private readonly compatibilityHookFactory?: HarnessCompatibilityHookFactory;
-	private readonly compatibilityLifecycle?: HarnessCompatibilityLifecycle;
+	private readonly pluginHookFactory?: HarnessPluginHookFactory;
+	private readonly pluginLifecycle?: HarnessPluginLifecycle;
 	private _beforeAgentStart?: (
 		promptText: string,
 	) =>
@@ -169,27 +170,35 @@ export class AgentHarness {
 
 	constructor(options: AgentHarnessOptions) {
 		const config = composeHarnessConfig(options.modules ?? [], options.config);
-		const errors = validateAgentConfig(config);
-		if (errors.length > 0)
-			throw new Error(
-				`Invalid config: ${errors.map(e => `${e.field}: ${e.message}`).join("; ")}`,
-			);
-
-		this.config = config;
-		this.config.streamOptions = {
-			...options.config.streamOptions,
-			...(options.config.streamOptions?.timeoutMs === undefined &&
-			options.config.turnTimeoutMs !== undefined
-				? { timeoutMs: options.config.turnTimeoutMs }
-				: {}),
-		};
+		this.configuration = new ConfigurationStore(config, {
+			clone: AgentHarness.cloneConfig,
+			validate: candidate =>
+				validateAgentConfig(candidate).map(
+					error => `Invalid config: ${error.field}: ${error.message}`,
+				),
+		});
+		this.configuration.update({
+			streamOptions: {
+				...options.config.streamOptions,
+				...(options.config.streamOptions?.timeoutMs === undefined &&
+				options.config.turnTimeoutMs !== undefined
+					? { timeoutMs: options.config.turnTimeoutMs }
+					: {}),
+			},
+		});
 		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
-		this.backend = options.backend;
+		this.modelController = new HarnessModelController({
+			backend: options.backend,
+			configuration: this.configuration,
+			emit: event => this.emitToSubscribers(event),
+			persistModel: model => this._session?.appendModelChange(model),
+			persistThinking: level => this._session?.appendThinkingLevelChange(level),
+		});
 		this.cwd = options.cwd;
 		this.maxIterations = options.maxIterations;
 		this._extensionRunner = options.extensionRunner;
-		this.compatibilityHookFactory = options.compatibilityHookFactory;
-		this.compatibilityLifecycle = options.compatibilityLifecycle;
+		this.pluginHookFactory = options.pluginHookFactory;
+		this.pluginLifecycle = options.pluginLifecycle;
 		this.loopDetector = new LoopDetector({
 			duplicateThreshold: options.config.duplicateToolThreshold,
 			failureThreshold: options.config.toolFailureLoopThreshold,
@@ -221,6 +230,42 @@ export class AgentHarness {
 		this.observation = new HarnessObservation(
 			(options.modules ?? []).flatMap(module => module.observers ?? []),
 		);
+		this.eventRouter = new HarnessEventRouter({
+			reduce: event => {
+				this.runtime = reduceRuntimeState(this.runtime, event, this._phase);
+			},
+			notifyApplication: event => this.loopConfig?.onEvent?.(event),
+			persistCompletedMessage: event => {
+				if (event.type === "message_end" && event.message) {
+					this.persistTurnMessages([event.message]);
+				}
+			},
+			getExtensionRunner: () => this._extensionRunner,
+			getExtensionContext: () => ({
+				sessionId: this._sessionId ?? "",
+				cwd: this.cwd ?? "",
+			}),
+		});
+	}
+
+	private static cloneConfig(config: AgentConfig): AgentConfig {
+		return {
+			...config,
+			tools: config.tools ? [...config.tools] : undefined,
+			models: config.models ? [...config.models] : undefined,
+			streamOptions: config.streamOptions
+				? { ...config.streamOptions }
+				: undefined,
+			allowedPaths: config.allowedPaths ? [...config.allowedPaths] : undefined,
+		};
+	}
+
+	private get config(): Readonly<AgentConfig> {
+		return this.configuration.current;
+	}
+
+	private get backend(): LLMBackend {
+		return this.modelController.backend;
 	}
 
 	get phase(): HarnessPhase {
@@ -237,6 +282,11 @@ export class AgentHarness {
 			retry: this.runtime.retry ? { ...this.runtime.retry } : undefined,
 			outcome: this.runtime.outcome ? { ...this.runtime.outcome } : undefined,
 		};
+	}
+
+	/** Append-only conversation provenance for persistence, replay, and clients. */
+	get threadItems(): readonly ThreadItem[] {
+		return this.conversation.items;
 	}
 
 	/** Carries cumulative budget counters across turns in this session. */
@@ -394,6 +444,7 @@ export class AgentHarness {
 
 	/** Task/checkpoint setup that must happen before a snapshot is created. */
 	private async beginTurn(_request: TurnRequest): Promise<void> {
+		this.runController = new AgentRunController();
 		this.conversation.checkpoint();
 
 		if (!this._hasStartedSession) {
@@ -426,15 +477,24 @@ export class AgentHarness {
 				maxIterations: this.maxIterations,
 				outputGuard: this.outputGuard,
 				interventionController: this.interventions,
-				refreshNextTurnConfig: () =>
-					this.withExtensionRuntime(this.snapshotConfig()),
+				runController: this.runController,
+				refreshNextTurnConfig: () => {
+					const refreshed = this.snapshotConfig();
+					return {
+						...refreshed,
+						tools: resolveRuntimeTools(this.extensionRuntimeDeps, refreshed),
+						// Extension and policy composition has run lifetime. Provider and
+						// model settings refresh without rebuilding hook state.
+						hooks: snapshot.config.hooks,
+					};
+				},
 				onContextCompacted: messages => {
 					onContextCompacted(messages);
 					this.persistCompactedContext(messages, this.estimatePayloadTokens());
 				},
 			} satisfies RunAgentLoopConfig,
 			async event => {
-				await this.handleAgentEvent(event);
+				await this.eventRouter.route(event);
 			},
 		);
 	}
@@ -472,10 +532,10 @@ export class AgentHarness {
 	): Promise<HarnessTurnSnapshot> {
 		let initialMessages: Message[] = [...this.conversation.history];
 		let systemPrompt: string | undefined;
-		let pluginHookLayer: HarnessCompatibilityHookLayer | undefined;
+		let pluginHookLayer: HarnessPluginHookLayer | undefined;
 
 		if (request.kind === "prompt") {
-			pluginHookLayer = this.createCompatibilityHookLayer();
+			pluginHookLayer = this.createPluginHookLayer();
 			const pluginPromptMessages = await pluginHookLayer.userPromptMessages(
 				request.text,
 			);
@@ -484,30 +544,34 @@ export class AgentHarness {
 			);
 			const beforeStart = await this._beforeAgentStart?.(request.text);
 
-			const injectedMessages = [
-				...pluginPromptMessages,
-				...(extensionBeforeStart?.messages ?? []),
-				...(beforeStart?.messages ?? []),
-			];
-			if (injectedMessages.length) {
-				// These messages were produced for this prompt, so keep them at the
-				// current turn boundary. Prepending them to the complete history made
-				// each new hook message appear before every older conversation turn.
-				initialMessages = [...initialMessages, ...injectedMessages];
-			}
-
 			// nextTurn guidance belongs to the next user-initiated prompt. Consume it
 			// exactly once here, never from an iteration of the currently active run.
 			const nextTurnMessages = this.queue
 				.dequeueNextTurn()
 				.map(message => createUserMessage(message.content));
-			if (nextTurnMessages.length > 0) {
-				initialMessages = [...initialMessages, ...nextTurnMessages];
-				this.emitQueueChange();
-			}
+			if (nextTurnMessages.length > 0) this.emitQueueChange();
 
-			systemPrompt =
-				beforeStart?.systemPrompt ?? extensionBeforeStart?.systemPrompt;
+			const assembled = this.contextEngine.assemble({
+				history: initialMessages,
+				baseSystemPrompt: this.config.systemPrompt,
+				contributions: [
+					{ source: "plugins", messages: pluginPromptMessages },
+					{
+						source: "extension",
+						messages: extensionBeforeStart?.messages,
+						systemPrompt: extensionBeforeStart?.systemPrompt,
+					},
+					{
+						source: "application",
+						messages: beforeStart?.messages,
+						systemPrompt: beforeStart?.systemPrompt,
+						priority: 1,
+					},
+					{ source: "next-turn", messages: nextTurnMessages },
+				],
+			});
+			initialMessages = assembled.messages;
+			systemPrompt = assembled.systemPrompt;
 		}
 
 		const baseConfig = {
@@ -527,16 +591,9 @@ export class AgentHarness {
 		};
 	}
 
-	/** Capture mutable runtime config at a turn boundary. */
+	/** Capture an immutable runtime config revision at a turn boundary. */
 	private snapshotConfig(): AgentConfig {
-		return {
-			...this.config,
-			tools: this.config.tools ? [...this.config.tools] : undefined,
-			models: this.config.models ? [...this.config.models] : undefined,
-			streamOptions: this.config.streamOptions
-				? { ...this.config.streamOptions }
-				: undefined,
-		};
+		return this.configuration.snapshot().value as AgentConfig;
 	}
 
 	private get extensionRuntimeDeps(): ExtensionRuntimeDeps {
@@ -565,9 +622,9 @@ export class AgentHarness {
 		);
 	}
 
-	private createCompatibilityHookLayer(): HarnessCompatibilityHookLayer {
+	private createPluginHookLayer(): HarnessPluginHookLayer {
 		return (
-			this.compatibilityHookFactory?.({
+			this.pluginHookFactory?.({
 				enabled: this._hooksEnabled,
 				sessionId: this._sessionId ?? "",
 				transcriptPath: this._transcriptPath ?? "",
@@ -581,11 +638,11 @@ export class AgentHarness {
 
 	private withExtensionRuntime(
 		config: AgentConfig,
-		pluginHookLayer?: HarnessCompatibilityHookLayer,
+		pluginHookLayer?: HarnessPluginHookLayer,
 	): AgentConfig {
 		return withExtensionRuntimeHelper(
 			this.extensionRuntimeDeps,
-			this.extensionRuntimeState,
+			this.runController,
 			config,
 			pluginHookLayer,
 		);
@@ -625,54 +682,9 @@ export class AgentHarness {
 		}
 	}
 
-	private async handleAgentEvent(event: AgentEvent): Promise<void> {
-		this.reduceRuntimeEvent(event);
-		// The primary application event path is synchronous and latency-sensitive;
-		// extension delivery must not hold streaming deltas behind an await.
-		this.loopConfig?.onEvent?.(event);
-		if (event.type === "message_end" && event.message) {
-			this.persistTurnMessages([event.message]);
-		}
-		await this.emitExtensionAgentEvent(event);
-	}
-
-	private reduceRuntimeEvent(event: AgentEvent): void {
-		this.runtime = reduceRuntimeState(this.runtime, event, this._phase);
-	}
-
-	private async emitExtensionAgentEvent(event: AgentEvent): Promise<void> {
-		const runner = this._extensionRunner;
-		if (!runner) return;
-		const context = {
-			sessionId: this._sessionId || "",
-			cwd: this.cwd || "",
-			...event,
-		};
-		switch (event.type) {
-			case "agent_start":
-			case "agent_end":
-			case "turn_start":
-			case "turn_end":
-			case "message_start":
-			case "message_update":
-			case "message_end":
-			case "tool_execution_start":
-			case "tool_execution_update":
-			case "tool_execution_end":
-			case "agent_retry_start":
-			case "agent_retry_end":
-			case "agent_error":
-			case "agent_settled":
-			case "session_delete":
-			case "model_select":
-				await runner.emitToAll({ type: event.type, context });
-				break;
-		}
-	}
-
 	// Configuration changes become visible at the next turn snapshot.
 	configure(patch: Partial<AgentConfig>): void {
-		Object.assign(this.config, patch);
+		this.configuration.update(patch);
 		if (patch.maxIterations !== undefined) {
 			this.maxIterations = patch.maxIterations;
 		}
@@ -790,7 +802,7 @@ export class AgentHarness {
 
 	setSessionId(id: string): void {
 		this._sessionId = id;
-		this.config.hookSessionId = id;
+		this.configuration.update({ hookSessionId: id });
 	}
 
 	private hookContext(): {
@@ -810,7 +822,7 @@ export class AgentHarness {
 			this._hooksEnabled,
 			this.hookContext(),
 			source,
-			this.compatibilityLifecycle,
+			this.pluginLifecycle,
 		);
 		if (started) this._hasStartedSession = true;
 	}
@@ -820,7 +832,7 @@ export class AgentHarness {
 			this._hooksEnabled,
 			this.hookContext(),
 			reason,
-			this.compatibilityLifecycle,
+			this.pluginLifecycle,
 		);
 	}
 
@@ -832,7 +844,7 @@ export class AgentHarness {
 			this.hookContext(),
 			this.config.hooks?.beforeCompact,
 			ctx,
-			this.compatibilityLifecycle,
+			this.pluginLifecycle,
 		);
 	}
 
@@ -840,7 +852,7 @@ export class AgentHarness {
 		await emitPostCompactHelper(
 			this._hooksEnabled,
 			this.hookContext(),
-			this.compatibilityLifecycle,
+			this.pluginLifecycle,
 		);
 	}
 
@@ -1136,104 +1148,44 @@ export class AgentHarness {
 	// ── Model / thinking-level operations ─────────────────────────────────
 
 	getModel(): string {
-		return this.config.model;
+		return this.modelController.model;
 	}
 
 	getBaseUrl(): string {
-		return this.config.baseUrl;
+		return this.modelController.baseUrl;
 	}
 
 	getModels(): string[] {
-		const configured = this.config.models ?? [];
-		return [
-			...(configured.some(option => option.model === this.config.model)
-				? []
-				: [this.config.model]),
-			...configured.map(option => option.model),
-		];
+		return this.modelController.models();
 	}
 
 	setModelEndpoint(model: string, baseUrl: string): void {
-		this.config.model = model;
-		this.config.baseUrl = baseUrl;
-		this.backend =
-			this.backend.withEndpoint?.(model, baseUrl) ??
-			this.backend.withModel(model);
+		this.modelController.setEndpoint(model, baseUrl);
 	}
 
 	/** Set the models array for cycling. */
 	setModels(models: AgentModelConfig[]): void {
-		this.config.models = models;
+		this.modelController.setModels(models);
 	}
 
 	cycleModel(direction: "forward" | "backward" = "forward"): string {
-		const currentLevel = this.config.thinkingLevel ?? "off";
-		const result = calculateNextModel(
-			this.config.model,
-			this.config.baseUrl,
-			this.config.thinkingLevel,
-			this.config.models ?? [],
-			direction,
-		);
-		if (!result.didCycle) return result.model;
-		this.config.baseUrl = result.baseUrl;
-		if (result.thinkingLevelClamped) {
-			this.config.thinkingLevel = result.thinkingLevel;
-			this.emitToSubscribers({
-				type: "thinking_level_clamped",
-				level: result.thinkingLevel,
-				reason: `Model ${result.model} does not support ${currentLevel} thinking level`,
-			});
-		}
-		this.config.model = result.model;
-		this._session?.appendModelChange(result.model);
-		this.emitToSubscribers({
-			type: "model_cycle",
-			model: result.model,
-			fromModel: result.fromModel,
-			thinkingLevel: result.thinkingLevel,
-		});
-		return result.model;
+		return this.modelController.cycle(direction);
 	}
 
 	// ── Thinking level ─────────────────────────────────────────────────────
 
 	getThinkingLevel(): string {
-		return this.config.thinkingLevel ?? "off";
+		return this.modelController.thinkingLevel;
 	}
 
 	setThinkingLevel(level: string): void {
-		const previous = this.config.thinkingLevel;
-		this.config.thinkingLevel = level as ThinkingLevel;
-		this._session?.appendThinkingLevelChange(level as ThinkingLevel);
-		this.emitToSubscribers({ type: "thinking_level_changed", level });
-		if (level !== previous) {
-			this.emitToSubscribers({
-				type: "model_cycle",
-				model: this.config.model,
-				fromModel: this.config.model,
-				thinkingLevel: level,
-			});
-		}
+		this.modelController.setThinkingLevel(level);
 	}
 
 	// ── Model & provider ──────────────────────────────────────────────────
 
 	setModel(model: string): void {
-		const oldModel = this.config.model;
-		this.config.baseUrl = resolveModelUrl(
-			this.config.models,
-			model,
-			this.config.baseUrl,
-		);
-		this.config.model = model;
-		this._session?.appendModelChange(model);
-		this.emitToSubscribers({
-			type: "model_cycle",
-			model,
-			fromModel: oldModel,
-			thinkingLevel: this.config.thinkingLevel,
-		});
+		this.modelController.setModel(model);
 	}
 
 	// ── Internals ──────────────────────────────────────────────────────────

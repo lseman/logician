@@ -7,21 +7,22 @@
 	"main": "src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./adapters/pi": "./src/adapters/pi/index.ts",
 		"./adapters/claude-code": "./src/adapters/claude-code/index.ts",
 		"./application": "./src/application/index.ts",
 		"./commands": "./src/capabilities/commands/index.ts",
 		"./configuration": "./src/infrastructure/configuration/index.ts",
 		"./configuration/runtime": "./src/application/configuration/runtime-config.ts",
 		"./context": "./src/infrastructure/context/index.ts",
-		"./developer-tools": "./src/infrastructure/developer-tools/index.ts",
+		"./developer-tools": "./src/developer-tools.ts",
 		"./harness": "./src/core/harness/agent-harness.ts",
-		"./events": "./src/core/types/runtime-events.ts",
+		"./evaluation": "./src/core/evaluation/trajectory.ts",
+		"./extensions": "./src/extensions.ts",
 		"./formatting": "./src/formatting.ts",
 		"./frontmatter": "./src/frontmatter.ts",
 		"./sessions": "./src/application/session/index.ts",
+		"./skills": "./src/capabilities/skills/loader.ts",
 		"./permissions": "./src/core/tools/permissions.ts",
-		"./tools": "./src/infrastructure/tools/index.ts",
+		"./tools": "./src/tools.ts",
 		"./trust": "./src/infrastructure/trust/index.ts"
 	},
 	"scripts": {
@@ -29,6 +30,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@logician/agent-protocol": "0.1.0",
 		"emphasize": "^7.0.0",
 		"ignore": "^7.0.5",
 		"yaml": "^2.9.0"

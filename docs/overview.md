@@ -56,9 +56,9 @@ graph TB
 
 | Package | Responsibility |
 |---|---|
-| `agent-core` | Agent loop, backend, configuration, compaction, hooks, tools |
-| `coding-agent` | System prompt, skills loading, sessions, trust model, TUI utilities |
-| `agent-capabilities` | Reasoners (ToT, SSR, Reflexion), subagents, todo management, EOH |
+| `agent-protocol` | Dependency-free, versioned notifications for clients |
+| `agent-core` | Agent loop, harness, context, configuration, sessions, skills, MCP, trust, and product orchestration |
+| `agent-blocks` | Optional reasoners, subagents, todo management, interaction, and RAG tools |
 | `tui` | Terminal UI components, engine, layers, state management |
 
 ### Key concepts

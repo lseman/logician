@@ -1,7 +1,7 @@
 // ── Acceptance Contract ───────────────────────────────────────────────────
-// Post-run self-review/verification gated by an acceptance contract defined
-// in AgentConfig. The agent must produce a ```acceptance-report JSON block
-// in its final turn output, or the run is marked failed/timeout.
+// Outcome verification gated by an acceptance contract defined in AgentConfig.
+// Deterministic commands are authoritative; the final report supplies evidence
+// for criteria that cannot be checked mechanically.
 
 export type EvidenceKind =
 	| "changed-files"
@@ -11,12 +11,11 @@ export type EvidenceKind =
 	| "residual-risks"
 	| "no-staged-files"
 	| "diff-summary"
-	| "review-findings"
 	| "manual-notes";
 
 export type CriterionSeverity = "required" | "recommended";
 
-export type AcceptanceLevel = "none" | "checked" | "verified" | "reviewed";
+export type AcceptanceLevel = "none" | "checked" | "verified";
 
 export interface AcceptanceCriterion {
 	id: string;
@@ -33,17 +32,10 @@ export interface AcceptanceVerification {
 	allowFailure?: boolean;
 }
 
-export interface AcceptanceReview {
-	agent: string;
-	focus?: string;
-	required?: boolean;
-}
-
 export interface AcceptanceConfig {
 	criteria?: string[] | AcceptanceCriterion[];
 	evidence?: EvidenceKind[];
 	verify?: AcceptanceVerification[];
-	review?: AcceptanceReview;
 	stopRules?: string[];
 }
 
@@ -53,7 +45,6 @@ export interface ResolvedAcceptance {
 	criteria: AcceptanceCriterion[];
 	evidence: EvidenceKind[];
 	verify: AcceptanceVerification[];
-	review?: AcceptanceReview;
 	stopRules?: string[];
 }
 
@@ -90,6 +81,20 @@ export interface AcceptanceVerificationResult {
 	summary?: string;
 }
 
+export function formatVerificationRepair(
+	results: readonly AcceptanceVerificationResult[],
+): string {
+	const failures = results.filter(result => result.result === "failed");
+	return [
+		"[verification-repair] Deterministic verification failed. Fix the underlying issue, then finish normally.",
+		...failures.map(
+			failure =>
+				`- ${failure.command}: ${failure.summary?.trim() || "non-zero exit"}`,
+		),
+		"Do not merely rewrite the acceptance report; change or diagnose the workspace and rerun relevant checks.",
+	].join("\n");
+}
+
 export interface AcceptanceEvaluation {
 	status: "passed" | "failed" | "timeout";
 	ledger: {
@@ -120,7 +125,6 @@ export function resolveEffectiveAcceptance(params: {
 			criteria: [],
 			evidence: [],
 			verify: [],
-			review: undefined,
 			stopRules: [],
 		};
 	}
@@ -128,11 +132,9 @@ export function resolveEffectiveAcceptance(params: {
 	const evidence = explicit.evidence ?? DEFAULT_EVIDENCE;
 	const criteria = normalizeCriteria(explicit.criteria ?? [], evidence);
 	const verify = explicit.verify ?? [];
-	const review = explicit.review;
 
 	let level: AcceptanceLevel = "checked";
 	if (verify.length > 0) level = "verified";
-	else if (review) level = "reviewed";
 
 	return {
 		level,
@@ -140,7 +142,6 @@ export function resolveEffectiveAcceptance(params: {
 		criteria,
 		evidence,
 		verify,
-		review,
 		stopRules: explicit.stopRules ?? [],
 	};
 }
@@ -351,11 +352,6 @@ export function evaluateAcceptanceReport(
 			: "failed") as "satisfied" | "failed",
 		evidence: criterion.must,
 	}));
-	const reviewStatus = resolved.review?.required
-		? report?.criteriaSatisfied?.every(item => item.status === "satisfied")
-			? "passed"
-			: "failed"
-		: "not-required";
 	const allCriteriaPass = criteriaResults.every(
 		criterion => criterion.status === "satisfied",
 	);
@@ -364,10 +360,7 @@ export function evaluateAcceptanceReport(
 	);
 
 	return {
-		status:
-			allCriteriaPass && allVerificationsPass && reviewStatus !== "failed"
-				? "passed"
-				: "failed",
+		status: allCriteriaPass && allVerificationsPass ? "passed" : "failed",
 		ledger: {
 			status: allCriteriaPass && allVerificationsPass ? "passed" : "failed",
 			report: {
@@ -397,20 +390,14 @@ export function stripAcceptanceReport(output: string): string {
 
 export function validateAcceptanceInput(config: AcceptanceConfig): string[] {
 	const errors: string[] = [];
-	const validKeys = new Set([
-		"criteria",
-		"evidence",
-		"verify",
-		"review",
-		"stopRules",
-	]);
+	const validKeys = new Set(["criteria", "evidence", "verify", "stopRules"]);
 	for (const key of Object.keys(config)) {
 		if (!validKeys.has(key)) {
 			errors.push(`Unknown acceptance config key: ${key}`);
 		}
 	}
-	if (!config.criteria && !config.verify && !config.review) {
-		errors.push("Must specify at least one of: criteria, verify, review");
+	if (!config.criteria && !config.verify) {
+		errors.push("Must specify at least one of: criteria, verify");
 	}
 	if (config.criteria) {
 		const items = config.criteria;

@@ -5,6 +5,7 @@
 // the bridge's job is just to forward session-id transitions and call
 // createHooks() once at construction.
 
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import {
 	createMemoryHooks,
 	createMemoryStore,
@@ -14,7 +15,6 @@ import {
 	startViewerServer,
 } from "@logician/memory";
 import type { OpenAIBackend } from "../../core/provider/backend.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 import type { AgentConfig } from "../../core/types/types-config.ts";
 
 export interface MemoryManagerOptions {

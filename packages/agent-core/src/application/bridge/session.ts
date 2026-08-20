@@ -4,13 +4,13 @@
 // mirrors it to the UI, wires slash commands, and drives the autonomous
 // continuation budget policy.
 
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import {
 	formatActivatedSkills,
 	type SkillActivation,
 } from "../../capabilities/skills/activation.ts";
 import type { AgentHarness } from "../../core/harness/agent-harness.ts";
 import type { HarnessPhase } from "../../core/state/runtime-state.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 import type { QueueMode } from "../../core/types/types-config.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────

@@ -5,9 +5,9 @@ import {
 	getReasonerMeta,
 	type ReasonerConfig,
 } from "@logician/agent-blocks/reasoning";
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import type { AgentHarness } from "../../core/harness/agent-harness.ts";
 import type { LLMBackend } from "../../core/provider/backend.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 import type { Tool } from "../../core/types/types-messages.ts";
 import { EohController } from "../eoh/controller.ts";
 import { SubagentCoordinator } from "../subagent-coordinator.ts";

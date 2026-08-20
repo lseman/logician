@@ -1,12 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Writable } from "node:stream";
-import type { RuntimeEvent } from "@logician/agent-core/events";
+import type { AgentProtocolNotification } from "@logician/agent-protocol";
 
 export const EXEC_STREAM_SCHEMA = "logician.exec-stream";
 export const EXEC_STREAM_SCHEMA_VERSION = 1;
 
 export interface ExecBridge {
-	on(callback: (event: RuntimeEvent) => void): () => void;
+	onNotification(
+		callback: (notification: AgentProtocolNotification) => void,
+	): () => void;
 	onError(callback: (error: Error) => void): void;
 	init(): Promise<Record<string, unknown>>;
 	sendMessage(message: string): Promise<void>;
@@ -64,7 +66,7 @@ export async function runHeadlessExec(
 		);
 	};
 
-	const unsubscribe = bridge.on(event => {
+	const unsubscribe = bridge.onNotification(({ event }) => {
 		switch (event.type) {
 			case "token":
 				output += event.token;

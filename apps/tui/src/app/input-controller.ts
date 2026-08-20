@@ -483,56 +483,31 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		// Always push to history (both slash and regular messages)
 		ctx.inputBar.pushHistory(text);
 
-		// User bash: `!command` or `!!command` (Pi-style user bash)
+		// User bash: `!command` or `!!command`.
 		// `!` = execute without adding to LLM context
 		// `!!` = execute and exclude from LLM context (same as `!` but double-bang)
 		if (text.startsWith("!")) {
 			const excludeFromContext = text.startsWith("!!");
 			const command = excludeFromContext ? text.slice(2) : text.slice(1);
 			if (command.trim()) {
-				// Emit Pi user_bash event for Pi extension interception
-				void (async () => {
-					const result = await ctx.bridge.emitUserBashEvent(
-						command.trim(),
-						excludeFromContext,
-					);
-					if (result) {
-						if (result.action === "replace" && result.result) {
-							const output = result.result.output || "(no output)";
-							ctx.transcript.addSystemMessage(
-								`!${excludeFromContext ? "!" : ""}${command}: exit ${result.result.exitCode}\n${output}`,
-							);
-						} else if (result.action === "intercept") {
-							ctx.transcript.addSystemMessage(
-								`User bash intercepted: !${excludeFromContext ? "!" : ""}${command}`,
-							);
-						}
-						// If action is 'continue', fall through to normal handling
-					} else {
-						// No Pi handler — execute the command locally
-						ctx.statusPanel.update({ phase: "bash" });
-						ctx.statusPanel.startAnimation();
-						ctx.tui.renderNow();
-						setImmediate(async () => {
-							try {
-								const output = await ctx.bridge.executeBashCommand(
-									command.trim(),
-								);
-								ctx.transcript.addSystemMessage(
-									`!${excludeFromContext ? "!" : ""}${command}: exit ${output.exitCode}\n${output.output}`,
-								);
-							} catch (err) {
-								ctx.transcript.addSystemMessage(
-									`!${excludeFromContext ? "!" : ""}${command}: Error: ${err instanceof Error ? err.message : String(err)}`,
-								);
-							} finally {
-								ctx.statusPanel.update({ phase: "ready" });
-								ctx.tui.requestRender();
-							}
-						});
+				ctx.statusPanel.update({ phase: "bash" });
+				ctx.statusPanel.startAnimation();
+				ctx.tui.renderNow();
+				setImmediate(async () => {
+					try {
+						const output = await ctx.bridge.executeBashCommand(command.trim());
+						ctx.transcript.addSystemMessage(
+							`!${excludeFromContext ? "!" : ""}${command}: exit ${output.exitCode}\n${output.output}`,
+						);
+					} catch (err) {
+						ctx.transcript.addSystemMessage(
+							`!${excludeFromContext ? "!" : ""}${command}: Error: ${err instanceof Error ? err.message : String(err)}`,
+						);
+					} finally {
+						ctx.statusPanel.update({ phase: "ready" });
+						ctx.tui.requestRender();
 					}
-					ctx.tui.requestRender();
-				})();
+				});
 				return;
 			}
 		}

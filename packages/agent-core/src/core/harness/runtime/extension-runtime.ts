@@ -8,13 +8,11 @@
 import type { ExtensionRunner } from "../../extension/runner.ts";
 import type { RegisteredTool } from "../../extension/types.ts";
 import type { LoopDetector } from "../../guards/loop-detector.ts";
-import { BudgetTracker } from "../../hooks/builtin/budget.ts";
-import {
-	buildBuiltinHooks,
-	COMPACTION_COOLDOWN_TURNS,
-} from "../../hooks/builtin/builtin-hooks.ts";
+import { buildBuiltinHooks } from "../../hooks/builtin/builtin-hooks.ts";
+import { extensionHooks, runControlHooks } from "../../hooks/contracts.ts";
 import { HookBus } from "../../hooks/hook-bus.ts";
 import type { HarnessInterventionController } from "../../policy/intervention-controller.ts";
+import type { AgentRunController } from "../../policy/run-controller.ts";
 import type { AgentConfig } from "../../types/types-config.ts";
 import type {
 	AgentEvent,
@@ -36,28 +34,6 @@ export interface ExtensionRuntimeDeps {
 	/** Steering/follow-up messages drained from the harness's own queues. */
 	drainHooks: () => AgentHooks;
 }
-
-/**
- * Owns state that must persist across hook-bus rebuilds within one harness
- * instance: BudgetTracker compares consecutive turns and the compaction
- * cooldown counts turns since the last compaction, so a fresh instance per
- * turn would never trigger either safeguard.
- */
-export function createExtensionRuntimeState() {
-	let budgetTracker: BudgetTracker | null = null;
-	const compactionCooldown = { lastTurn: -COMPACTION_COOLDOWN_TURNS };
-	return {
-		getBudgetTracker: (): BudgetTracker => {
-			budgetTracker ??= new BudgetTracker();
-			return budgetTracker;
-		},
-		compactionCooldown,
-	};
-}
-
-export type ExtensionRuntimeState = ReturnType<
-	typeof createExtensionRuntimeState
->;
 
 function wrapExtensionTool(
 	deps: ExtensionRuntimeDeps,
@@ -86,6 +62,18 @@ function wrapExtensionTool(
 	};
 }
 
+export function resolveRuntimeTools(
+	deps: ExtensionRuntimeDeps,
+	config: AgentConfig,
+): Tool[] {
+	const extensionTools =
+		deps
+			.getExtensionRunner()
+			?.getTools()
+			.map(tool => wrapExtensionTool(deps, tool)) ?? [];
+	return [...(config.tools ?? []), ...extensionTools];
+}
+
 export async function runExtensionBeforeAgentStart(
 	deps: ExtensionRuntimeDeps,
 	promptText: string,
@@ -106,7 +94,7 @@ export async function runExtensionBeforeAgentStart(
 	let nativeMessages: Message[] | undefined;
 	let nativeSystemPrompt: string | undefined;
 
-	// Emit before_agent_start (→ native extensions + Pi's before_agent_start)
+	// Emit before_agent_start to native extensions.
 	if (runner.hasHandlers("before_agent_start")) {
 		const result = await runner.emitToAll({
 			type: "before_agent_start",
@@ -132,23 +120,17 @@ export async function runExtensionBeforeAgentStart(
 /** Compose the effective AgentConfig (tools + hooks) for one turn. */
 export function withExtensionRuntime(
 	deps: ExtensionRuntimeDeps,
-	state: ExtensionRuntimeState,
+	run: AgentRunController,
 	config: AgentConfig,
-	compatibilityHookLayer?: { hooks?: AgentHooks },
+	pluginHookLayer?: { hooks?: AgentHooks },
 ): AgentConfig {
 	const runner = deps.getExtensionRunner();
-	const extensionTools = runner
-		? runner.getTools().map(tool => wrapExtensionTool(deps, tool))
-		: [];
-	const tools = [...(config.tools ?? []), ...extensionTools];
+	const tools = resolveRuntimeTools(deps, config);
 
-	// Rebuild HookBus layers each turn (extensions may add/remove tools/hooks).
-	// Using a fresh bus avoids stale registrations between turns.
-	const hookBus = new HookBus();
-
-	// Layers run in registration order: builtin safeguards, then the
-	// harness's own queue-draining, then extensions, then claude-code
-	// compat, then caller-supplied hooks last so callers can override.
+	// External interception and internal run control have different lifetimes
+	// and authority. Compose them independently through AgentHooks.
+	const extensionBus = new HookBus();
+	const controlBus = new HookBus();
 	const builtinHooks = buildBuiltinHooks({
 		config,
 		contextWindowTokens: () => config.contextWindowTokens,
@@ -158,28 +140,42 @@ export function withExtensionRuntime(
 			deps.emit(event as AgentEvent);
 		},
 		interventions: deps.interventions,
-		budget: state.getBudgetTracker(),
-		compactionCooldown: state.compactionCooldown,
+		progress: run.progress,
+		compactionCooldown: run.compaction,
 	});
-	hookBus.register(builtinHooks, { source: "builtin" });
-	hookBus.register(deps.drainHooks(), { source: "queue-drain" });
+	controlBus.register(runControlHooks(builtinHooks), { source: "builtin" });
+	extensionBus.register(extensionHooks(builtinHooks), { source: "builtin" });
+	controlBus.register(runControlHooks(deps.drainHooks()), {
+		source: "queue-drain",
+	});
 
-	const extensionHooks = runner?.getHooks();
-	if (extensionHooks) {
-		hookBus.register(extensionHooks, { source: "extensions" });
+	const extensionLayer = runner?.getHooks();
+	if (extensionLayer) {
+		extensionBus.register(extensionLayer, { source: "extensions" });
 	}
 
-	if (compatibilityHookLayer?.hooks) {
-		hookBus.register(compatibilityHookLayer.hooks, { source: "compatibility" });
+	if (pluginHookLayer?.hooks) {
+		extensionBus.register(extensionHooks(pluginHookLayer.hooks), {
+			source: "plugins",
+		});
+		controlBus.register(runControlHooks(pluginHookLayer.hooks), {
+			source: "plugins",
+		});
 	}
 
 	if (config.hooks) {
-		hookBus.register(config.hooks, { source: "user" });
+		extensionBus.register(extensionHooks(config.hooks), { source: "user" });
+		controlBus.register(runControlHooks(config.hooks), { source: "user" });
 	}
+	const external = extensionBus.toHooks();
+	const control = controlBus.toHooks();
 
 	return {
 		...config,
 		tools,
-		hooks: hookBus.toHooks(),
+		hooks: {
+			...extensionHooks(external),
+			...runControlHooks(control),
+		},
 	};
 }

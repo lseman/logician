@@ -1,7 +1,38 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import { AgentCoreBridge } from "../../application/bridge/agent-bridge.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
+
+void test("bridge publishes ordered versioned protocol notifications", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+	});
+	const notifications: Array<{
+		protocolVersion: number;
+		sequence: number;
+		event: RuntimeEvent;
+	}> = [];
+	bridge.onNotification(notification => notifications.push(notification));
+	const internal = bridge as unknown as {
+		emit(event: RuntimeEvent): void;
+	};
+	internal.emit({ type: "phase", state: "thinking" });
+	internal.emit({ type: "phase", state: "ready" });
+
+	assert.deepEqual(
+		notifications.map(notification => ({
+			version: notification.protocolVersion,
+			sequence: notification.sequence,
+			type: notification.event.type,
+		})),
+		[
+			{ version: 1, sequence: 1, type: "phase" },
+			{ version: 1, sequence: 2, type: "phase" },
+		],
+	);
+});
 
 void test("runtime settings update the live harness and preserve guard auto mode", () => {
 	const bridge = new AgentCoreBridge({
@@ -559,7 +590,7 @@ void test("core iterations reconcile output without completing the UI turn early
 		},
 	};
 	const events: RuntimeEvent[] = [];
-	bridge.on(event => events.push(event));
+	bridge.onNotification(({ event }) => events.push(event));
 
 	await bridge.sendMessage("do work");
 

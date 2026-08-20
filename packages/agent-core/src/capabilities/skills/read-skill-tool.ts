@@ -3,13 +3,13 @@
 // advertises a compact catalog (name + description); the model calls this tool
 // to pull the full SKILL.md body when it decides to use a skill.
 
+import type { Tool } from "../../core/types/types-messages.ts";
 import {
 	findSkillByName,
 	formatSkillInvocation,
 	type Skill,
 	skillLookupKeys,
-} from "../../capabilities/skills/loader.ts";
-import type { Tool } from "../../core/types/types-messages.ts";
+} from "./loader.ts";
 
 /**
  * Build a read_skill tool bound to the given skills. Pass the skills loaded at

@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { RuntimeEvent } from "@logician/agent-core/events";
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import {
 	beginPendingTurn,
 	INITIAL_TURN_STATE,

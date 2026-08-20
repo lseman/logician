@@ -218,8 +218,6 @@ export interface ExtensionDefinition {
 	path: string;
 	name: string;
 	source: "user" | "project" | "path";
-	/** Explicit runtime contract when discovered from a compatibility-specific directory. */
-	compatibility?: "native" | "pi";
 }
 
 export interface LoadExtensionsResult {

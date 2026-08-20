@@ -26,7 +26,7 @@ export interface HarnessModule {
 	observers?: HarnessObserver[];
 }
 
-export interface HarnessCompatibilityHookContext {
+export interface HarnessPluginHookContext {
 	enabled: boolean;
 	sessionId: string;
 	transcriptPath: string;
@@ -34,26 +34,23 @@ export interface HarnessCompatibilityHookContext {
 	tools: Tool[];
 }
 
-export interface HarnessCompatibilityHookLayer {
+export interface HarnessPluginHookLayer {
 	hooks?: AgentHooks;
 	userPromptMessages(prompt: string): Promise<Message[]>;
 }
 
-export type HarnessCompatibilityHookFactory = (
-	context: HarnessCompatibilityHookContext,
-) => HarnessCompatibilityHookLayer;
+export type HarnessPluginHookFactory = (
+	context: HarnessPluginHookContext,
+) => HarnessPluginHookLayer;
 
-export interface HarnessCompatibilityLifecycle {
+export interface HarnessPluginLifecycle {
 	sessionStart(
-		context: HarnessCompatibilityHookContext,
+		context: HarnessPluginHookContext,
 		source: string,
 	): Promise<void>;
-	sessionEnd(
-		context: HarnessCompatibilityHookContext,
-		reason: string,
-	): Promise<void>;
-	preCompact(context: HarnessCompatibilityHookContext): Promise<void>;
-	postCompact(context: HarnessCompatibilityHookContext): Promise<void>;
+	sessionEnd(context: HarnessPluginHookContext, reason: string): Promise<void>;
+	preCompact(context: HarnessPluginHookContext): Promise<void>;
+	postCompact(context: HarnessPluginHookContext): Promise<void>;
 }
 
 export function defineHarnessModule(module: HarnessModule): HarnessModule {
@@ -67,8 +64,8 @@ export interface AgentHarnessOptions {
 	maxIterations?: number;
 	extensionRunner?: ExtensionRunner;
 	modules?: HarnessModule[];
-	compatibilityHookFactory?: HarnessCompatibilityHookFactory;
-	compatibilityLifecycle?: HarnessCompatibilityLifecycle;
+	pluginHookFactory?: HarnessPluginHookFactory;
+	pluginLifecycle?: HarnessPluginLifecycle;
 }
 
 export interface HarnessTurnSnapshot {

@@ -34,6 +34,7 @@ export interface ToolBatchResult {
 	messages: Message[];
 	terminated: boolean;
 	executedToolCallIds: string[];
+	permissionDenials: number;
 }
 
 const CANCELLED_TOOL_RESULT =
@@ -156,7 +157,12 @@ export async function executeToolBatch(
 			});
 			messages.push(createToolResultMessage(call.id, call.name, text, true));
 		}
-		return { messages, terminated: false, executedToolCallIds: [] };
+		return {
+			messages,
+			terminated: false,
+			executedToolCallIds: [],
+			permissionDenials: 0,
+		};
 	}
 
 	type Plan = {
@@ -164,6 +170,7 @@ export async function executeToolBatch(
 		args: Record<string, unknown>;
 		immediateContent?: string;
 		immediateError: boolean;
+		permissionDenied: boolean;
 	};
 	const plans: Plan[] = [];
 	for (const toolCall of toolCalls) {
@@ -210,6 +217,7 @@ export async function executeToolBatch(
 				prepared.error !== undefined ||
 				permissionDenial !== undefined ||
 				immediateContent === CANCELLED_TOOL_RESULT,
+			permissionDenied: permissionDenial !== undefined,
 		});
 	}
 
@@ -333,5 +341,6 @@ export async function executeToolBatch(
 		executedToolCallIds: outcomes
 			.filter(outcome => outcome.executed)
 			.map(outcome => outcome.toolCallId),
+		permissionDenials: plans.filter(plan => plan.permissionDenied).length,
 	};
 }

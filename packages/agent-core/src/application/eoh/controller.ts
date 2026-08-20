@@ -1,9 +1,9 @@
 /** Owns the Evolution of Heuristics command lifecycle for one target file. */
 
 import path from "node:path";
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import { EohEngine, type EohProgressEvent } from "@logician/eoh/engine";
 import { populationStats } from "@logician/eoh/population";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 import {
 	applyEohCandidate,
 	type EohFileTarget,

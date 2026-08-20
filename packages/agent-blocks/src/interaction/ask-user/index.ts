@@ -45,30 +45,8 @@ export const ask_user: Tool = {
 					required: ["id", "question", "choices"],
 				},
 			},
-			question: {
-				type: "string",
-				description: "The question to ask the user. Keep it concise and clear.",
-			},
-			choices: {
-				type: "array",
-				description:
-					"List of selectable options. Each option has a 'value' (sent back to the agent) and a 'label' (shown to the user).",
-				items: {
-					type: "object",
-					properties: {
-						value: {
-							type: "string",
-							description: "The value returned when this option is selected.",
-						},
-						label: {
-							type: "string",
-							description: "Display text for this option.",
-						},
-					},
-					required: ["value", "label"],
-				},
-			},
 		},
+		required: ["questions"],
 	},
 	prepareArguments: (raw): Record<string, unknown> => {
 		if (typeof raw === "string") {
@@ -80,11 +58,7 @@ export const ask_user: Tool = {
 		}
 		if (!raw || typeof raw !== "object") return {};
 		const args = raw as Record<string, unknown>;
-		return {
-			questions: args.questions,
-			question: String(args.question || ""),
-			choices: args.choices ?? args.options ?? args.answers,
-		};
+		return { questions: args.questions };
 	},
 	execute: async (
 		args: Record<string, unknown>,
@@ -102,8 +76,8 @@ export const ask_user: Tool = {
 			for (const item of rawChoices) {
 				if (!item || typeof item !== "object") continue;
 				const obj = item as Record<string, unknown>;
-				const value = String(obj.value || String(obj.label || "")).trim();
-				const label = String(obj.label || value).trim();
+				const value = String(obj.value || "").trim();
+				const label = String(obj.label || "").trim();
 				if (value && label) {
 					const description = String(obj.description || "").trim();
 					choices.push({
@@ -117,7 +91,7 @@ export const ask_user: Tool = {
 		};
 
 		const questions = Array.isArray(args.questions)
-			? args.questions.flatMap((item, index) => {
+			? args.questions.flatMap(item => {
 					if (!item || typeof item !== "object") return [];
 					const obj = item as Record<string, unknown>;
 					const question = String(obj.question || "").trim();
@@ -125,24 +99,18 @@ export const ask_user: Tool = {
 					if (!question || !choices.length) return [];
 					return [
 						{
-							id: String(obj.id || `question_${index + 1}`),
+							id: String(obj.id || "").trim(),
 							header: String(obj.header || "").trim() || undefined,
 							question,
 							choices,
 						},
 					];
 				})
-			: [
-					{
-						id: "answer",
-						question: String(args.question || "Please answer:"),
-						choices: normalizeChoices(args.choices),
-					},
-				];
+			: [];
 
 		if (
 			questions.length === 0 ||
-			questions.some(item => !item.choices.length)
+			questions.some(item => !item.id || !item.choices.length)
 		) {
 			return "Error: ask_user requires at least one choice with 'value' and 'label'.";
 		}

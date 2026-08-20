@@ -1,15 +1,22 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
-import { onTodosChanged } from "@logician/agent-blocks/tasks/todo.ts";
+import { getTasks, onTodosChanged } from "@logician/agent-blocks/tasks/todo.ts";
+import {
+	createNotification,
+	type RuntimeEvent,
+} from "@logician/agent-protocol";
 import {
 	claudeToolMatcherName,
 	createClaudeCodeHookLayer,
 } from "../../adapters/claude-code/hook-layer.ts";
 import type { PluginCommandResult } from "../../adapters/claude-code/plugin-runtime.ts";
-import type {
-	McpSnapshotResult,
-	McpToggleResult,
-} from "../../capabilities/mcp/manager.ts";
+import {
+	configurePluginRuntimeEnv,
+	runHookEvent,
+	runPluginBackend,
+	runSessionStartHooks,
+	splitPluginArgs,
+} from "../../adapters/claude-code/plugin-runtime.ts";
 import {
 	findPromptByName,
 	type Prompt,
@@ -24,7 +31,6 @@ import {
 	formatSkillInvocation,
 	type Skill,
 } from "../../capabilities/skills/loader.ts";
-import { resolveAgentSettings } from "../../core/configuration/agent-settings.ts";
 import { AgentHarness } from "../../core/harness/agent-harness.ts";
 import type { AbortResult } from "../../core/harness/types.ts";
 import { OpenAIBackend } from "../../core/provider/backend.ts";
@@ -33,15 +39,15 @@ import {
 	estimateTokens,
 } from "../../core/provider/messages.ts";
 import type { Session } from "../../core/session/session.ts";
+import type { PermissionMode } from "../../core/tools/permissions.ts";
+import { ToolRegistry } from "../../core/tools/registry.ts";
 import type {
 	AgentConfig,
 	AgentModelConfig,
 	QueueMode,
 } from "../../core/types/types-config.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 import type {
 	AgentEvent,
-	AskUserContext,
 	Message,
 	Tool,
 } from "../../core/types/types-messages.ts";
@@ -49,31 +55,28 @@ import { buildDefaultSystemPrompt } from "../../infrastructure/context/system-pr
 import { LspManager } from "../../infrastructure/developer-tools/lsp-manager.ts";
 import { createPostEditDiagnosticHooks } from "../../infrastructure/developer-tools/post-edit-diagnostics.ts";
 import {
-	configurePluginRuntimeEnv,
-	runHookEvent,
-	runPluginBackend,
-	runSessionStartHooks,
-	splitPluginArgs,
-} from "../../adapters/claude-code/plugin-runtime.ts";
-import {
-	PermissionManager,
-	type PermissionMode,
-} from "../../core/tools/permissions.ts";
-import { ToolRegistry } from "../../core/tools/registry.ts";
-import {
 	createMemoryGetTool,
 	createMemorySearchTool,
 } from "../../infrastructure/tools/memory-tools.ts";
 import type { SandboxProfile } from "../../infrastructure/tools/sandbox.ts";
 import { killAllTrackedChildren } from "../../infrastructure/tools/utils/shell.ts";
-import { envNumber } from "../../tui-utils.ts";
+import type {
+	McpSnapshotResult,
+	McpToggleResult,
+} from "../capabilities/mcp-manager.ts";
 import { mapAgentEvent } from "../events/event-mapping.ts";
 import { RepositoryMap } from "../repository-map.ts";
+import { InteractionManager } from "../runtime/interaction-manager.ts";
+import {
+	RuntimeSettingsManager,
+	type RuntimeToggleKey,
+} from "../runtime/runtime-settings.ts";
 import { ToolRouter } from "../tool-router.ts";
 import { AgentCoordinator } from "./agent-coordinator.ts";
 import {
 	buildPluginRuntimeEnv,
 	createHookTranscriptPath,
+	envNumber,
 	eventLogPathFor,
 	resolveWebSearchConfig,
 } from "./environment.ts";
@@ -87,14 +90,14 @@ export { findJbPrompt } from "./project-prompt.ts";
 export type {
 	AgentBridgeOptions,
 	ErrorCallback,
-	EventCallback,
+	ProtocolCallback,
 	RuntimeSettingsPatch,
 } from "./types.ts";
 
 import type {
 	AgentBridgeOptions,
 	ErrorCallback,
-	EventCallback,
+	ProtocolCallback,
 	RuntimeSettingsPatch,
 } from "./types.ts";
 
@@ -105,7 +108,8 @@ export class AgentCoreBridge {
 	private backend: OpenAIBackend;
 	private harness: AgentHarness | null = null;
 	private durableSession: Session | undefined;
-	private callbacks: EventCallback[] = [];
+	private protocolCallbacks: ProtocolCallback[] = [];
+	private protocolSequence = 0;
 	private errorCb: ErrorCallback | null = null;
 	private running = false;
 	private sendTail: Promise<void> = Promise.resolve();
@@ -207,16 +211,8 @@ export class AgentCoreBridge {
 	private postEditDiagnosticsEnabled: boolean;
 	private lspManager: LspManager;
 	private readonly projectTrusted: boolean;
-	// Permission/question resolvers (inlined from InteractionCoordinator)
-	private readonly permissionResolvers = new Map<
-		string,
-		(d: "allow" | "deny" | "always") => void
-	>();
-	private readonly questionResolvers = new Map<
-		string,
-		{ allow: (a: string) => void; deny: () => void }
-	>();
-	private permissionManager!: PermissionManager;
+	private readonly interactions: InteractionManager;
+	private readonly settings: RuntimeSettingsManager;
 	private memoryManager: MemoryManager | null = null;
 	private agentCoordinator: AgentCoordinator | null = null;
 
@@ -323,52 +319,13 @@ export class AgentCoreBridge {
 			cwd: this.cwd,
 			extensionDirs: opts.extensionDirs,
 			projectTrusted: this.projectTrusted,
-			piRuntime: {
-				isIdle: () => !this.running,
-				hasPendingMessages: () => {
-					const queues = this.harness?.getQueues();
-					return (
-						!!queues &&
-						queues.steering.length +
-							queues.followUp.length +
-							queues.nextTurn.length >
-							0
-					);
-				},
-				abort: () => void this.cancel(),
-				shutdown: () => void this.stop(),
-				compact: () => void this.compact(),
-				getSystemPrompt: () =>
-					this.config.systemPrompt ?? this.baseSystemPrompt,
-				sendUserMessage: content => void this.sendMessage(content),
-				getActiveTools: () =>
-					this.harness?.tools?.list().map((tool: Tool) => tool.name) ??
-					this._defaultTools.map(tool => tool.name),
-				getAllTools: () =>
-					(this.harness?.tools?.list() ?? this._defaultTools).map(tool => ({
-						name: tool.name,
-						description: tool.description,
-					})),
-				setModel: async model => {
-					const id =
-						typeof model === "string"
-							? model
-							: typeof model === "object" && model !== null && "id" in model
-								? String((model as { id: unknown }).id)
-								: "";
-					if (!id) return false;
-					this.setModel(id);
-					return true;
-				},
-				getThinkingLevel: () => this.config.thinkingLevel,
-				setThinkingLevel: level => this.setThinkingLevel(String(level)),
-			},
 		});
 		void this.extensionManager.initialize();
 
-		this.permissionManager = new PermissionManager({
+		this.interactions = new InteractionManager({
 			mode: opts.permissionMode ?? "acceptEdits",
 			rules: opts.permissionRules,
+			emit: event => this.emit(event),
 		});
 
 		// Initialize memory manager
@@ -415,13 +372,13 @@ export class AgentCoreBridge {
 			eventLogPath: eventLogPathFor(this.transcriptPath),
 			steeringInterrupt: opts.steeringInterrupt,
 			maxTotalTokens: opts.maxTotalTokens,
-			permissions: this.permissionManager,
+			permissions: this.interactions.permissions,
 			guardsEnabled: opts.guardsEnabled,
 			duplicateGuardEnabled: opts.duplicateGuardEnabled,
 			failureGuardEnabled: opts.failureGuardEnabled,
 			duplicateToolThreshold: opts.duplicateToolThreshold,
 			toolFailureLoopThreshold: opts.toolFailureLoopThreshold,
-			budgetStopEnabled: opts.budgetStopEnabled,
+			progressStopEnabled: opts.progressStopEnabled,
 			proactiveCompactionEnabled: opts.proactiveCompactionEnabled,
 			continuationEnabled: opts.continuationEnabled,
 			rtkProxyEnabled: opts.rtkProxyEnabled,
@@ -437,30 +394,9 @@ export class AgentCoreBridge {
 			allowedPaths: opts.allowedPaths,
 			allowAllPaths: opts.allowAllPaths,
 			truncation: opts.truncation,
-			// Permission & question callbacks (inlined from InteractionCoordinator)
-			onPermissionRequest: ctx =>
-				new Promise(resolve => {
-					this.permissionResolvers.set(ctx.toolCallId, resolve);
-					this.emit({
-						type: "permission_request",
-						toolName: ctx.toolName,
-						toolCallId: ctx.toolCallId,
-						args: ctx.args,
-					});
-				}),
-			onQuestionRequest: (ctx: AskUserContext) =>
-				new Promise<string>(resolve => {
-					const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-					this.questionResolvers.set(qid, {
-						allow: resolve,
-						deny: () => resolve("__dismissed__"),
-					});
-					this.emit({
-						type: "question_request",
-						questionId: qid,
-						questions: ctx.questions,
-					});
-				}),
+			onPermissionRequest: context =>
+				this.interactions.requestPermission(context),
+			onQuestionRequest: context => this.interactions.requestQuestion(context),
 			hooks: this.buildMemoryHooks(
 				createPostEditDiagnosticHooks(
 					this.cwd,
@@ -500,6 +436,23 @@ export class AgentCoreBridge {
 				this.emitRuntimeStatus();
 			},
 		};
+		this.settings = new RuntimeSettingsManager({
+			config: () => this.config,
+			patchCore: patch => {
+				Object.assign(this.config, patch);
+				this.harness?.configure(patch);
+			},
+			setThinkingLevel: level => {
+				if (level !== undefined) this.setThinkingLevel(level);
+			},
+			setTemperature: value => this.setTemperature(value),
+			setReasoner: id => this.setReasonerId(id),
+			setSteeringInterrupt: enabled => this.setSteeringInterrupt(enabled),
+			setToggle: (key, enabled) => this.applyRuntimeToggle(key, enabled),
+			permissionMode: () => this.getPermissionMode(),
+			postEditDiagnostics: () => this.postEditDiagnosticsEnabled,
+			memoryEnabled: () => Boolean(this.memoryManager?.getStore()),
+		});
 
 		onTodosChanged(todos => {
 			this.emit({ type: "todos", todos });
@@ -561,10 +514,13 @@ export class AgentCoreBridge {
 	/** Propagate a tool the router just registered into live config/harness/system prompt. */
 	// ── Event registration ─────────────────────────────────────────────────
 
-	on(callback: EventCallback): () => void {
-		this.callbacks.push(callback);
+	/** Subscribe to ordered, versioned notifications. */
+	onNotification(callback: ProtocolCallback): () => void {
+		this.protocolCallbacks.push(callback);
 		return () => {
-			this.callbacks = this.callbacks.filter(cb => cb !== callback);
+			this.protocolCallbacks = this.protocolCallbacks.filter(
+				candidate => candidate !== callback,
+			);
 		};
 	}
 
@@ -586,11 +542,12 @@ export class AgentCoreBridge {
 	}
 
 	private emit(event: RuntimeEvent): void {
-		for (const cb of this.callbacks) {
+		const notification = createNotification(event, ++this.protocolSequence);
+		for (const callback of this.protocolCallbacks) {
 			try {
-				cb(event);
-			} catch (_e: unknown) {
-				// Don't let a bad handler kill the bridge
+				callback(notification);
+			} catch {
+				// Client failures cannot interrupt the runtime.
 			}
 		}
 	}
@@ -599,24 +556,6 @@ export class AgentCoreBridge {
 
 	async sendMessage(message: string): Promise<void> {
 		await this.extensionManager?.getLoadPromise();
-		// Emit Pi input event for Pi extension interception.
-		// If a Pi extension handles the input (returns 'handled'), skip processing.
-		// If it transforms, use the transformed text.
-		const inputResult = await this.extensionManager?.emitInputEvent(
-			message,
-			[],
-			"interactive",
-		);
-		if (inputResult) {
-			if (inputResult.action === "handled") return;
-			if (
-				inputResult.action === "transform" &&
-				inputResult.text !== undefined
-			) {
-				message = inputResult.text;
-			}
-		}
-
 		// A message submitted while a turn is in flight steers the running
 		// turn instead of starting a second concurrent run. Route through
 		// steer() so the queue update reaches the UI.
@@ -726,12 +665,15 @@ export class AgentCoreBridge {
 	private ensureHarness(): AgentHarness {
 		if (!this.harness) {
 			this.harness = new AgentHarness({
-				config: this.config,
+				config: {
+					...this.config,
+					taskLedger: { snapshot: getTasks },
+				},
 				backend: this.backend,
 				cwd: this.config.cwd,
 				maxIterations: this.config.maxIterations,
 				extensionRunner: this.extensionManager?.runner ?? undefined,
-				compatibilityHookFactory: context =>
+				pluginHookFactory: context =>
 					createClaudeCodeHookLayer({
 						enabled: context.enabled,
 						sessionId: context.sessionId,
@@ -744,7 +686,7 @@ export class AgentCoreBridge {
 							);
 						},
 					}),
-				compatibilityLifecycle: {
+				pluginLifecycle: {
 					sessionStart: async (context, source) => {
 						await runSessionStartHooks({
 							source,
@@ -1041,11 +983,7 @@ export class AgentCoreBridge {
 		toolCallId: string,
 		decision: "allow" | "deny" | "always",
 	): boolean {
-		const r = this.permissionResolvers.get(toolCallId);
-		if (!r) return false;
-		this.permissionResolvers.delete(toolCallId);
-		r(decision);
-		return true;
+		return this.interactions.respondToPermission(toolCallId, decision);
 	}
 
 	/**
@@ -1053,37 +991,20 @@ export class AgentCoreBridge {
 	 * resolver. Returns false if the question id is unknown.
 	 */
 	respondToQuestion(questionId: string, answer: string): boolean {
-		const r = this.questionResolvers.get(questionId);
-		if (!r) return false;
-		this.questionResolvers.delete(questionId);
-		r.allow(answer);
-		return true;
+		return this.interactions.respondToQuestion(questionId, answer);
 	}
 
 	/** Deny every pending permission request (abort / shutdown). */
 	private denyPendingPermissions(): void {
-		const ids = [...this.permissionResolvers.keys()];
-		for (const id of ids) {
-			const r = this.permissionResolvers.get(id);
-			if (r) {
-				r("deny");
-				this.permissionResolvers.delete(id);
-			}
-		}
+		this.interactions.denyPending();
 	}
 
 	setPermissionMode(mode: PermissionMode): void {
-		this.permissionManager.setMode(mode);
-		this.emit({
-			type: "notice",
-			level: "info",
-			label: "Permissions",
-			text: `mode: ${mode}`,
-		});
+		this.interactions.setMode(mode);
 	}
 
 	getPermissionMode(): PermissionMode {
-		return this.permissionManager.getMode();
+		return this.interactions.mode;
 	}
 
 	// ── Sandbox mode (see tool-router.ts) ───────────────────────────────
@@ -1318,44 +1239,7 @@ export class AgentCoreBridge {
 		return this.toolRouter.isMcpLoading();
 	}
 
-	private setInferenceMode(mode: string): void {
-		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
-		this.harness?.configure({
-			inferenceMode: mode as AgentConfig["inferenceMode"],
-		});
-	}
-
-	private setMaxTokens(maxTokens: number): void {
-		this.config.maxTokens = maxTokens;
-		this.harness?.configure({ maxTokens });
-	}
-
-	private setMaxIterations(maxIterations: number): void {
-		this.config.maxIterations = maxIterations;
-		this.harness?.configure({ maxIterations });
-	}
-
-	private setExecutionProfile(profile: "autonomous" | "minimal"): void {
-		this.config.executionProfile = profile;
-		this.harness?.configure({ executionProfile: profile });
-	}
-
-	private setRuntimeToggle(
-		key:
-			| "guardsEnabled"
-			| "duplicateGuardEnabled"
-			| "failureGuardEnabled"
-			| "budgetStopEnabled"
-			| "continuationEnabled"
-			| "autoRetryEnabled"
-			| "proactiveCompactionEnabled"
-			| "postEditDiagnostics"
-			| "rtkProxyEnabled"
-			| "ariadneEnabled"
-			| "fffgrepEnabled"
-			| "memoryEnabled",
-		enabled: boolean,
-	): void {
+	private applyRuntimeToggle(key: RuntimeToggleKey, enabled: boolean): void {
 		if (key === "memoryEnabled") {
 			this.memoryManager?.setEnabled(enabled, this.sessionId);
 			this.emit({
@@ -1389,7 +1273,7 @@ export class AgentCoreBridge {
 			key === "guardsEnabled" ||
 			key === "duplicateGuardEnabled" ||
 			key === "failureGuardEnabled" ||
-			key === "budgetStopEnabled" ||
+			key === "progressStopEnabled" ||
 			key === "continuationEnabled" ||
 			key === "autoRetryEnabled"
 		) {
@@ -1400,50 +1284,8 @@ export class AgentCoreBridge {
 		}
 	}
 
-	private setGuardMode(mode: "auto" | "on" | "off"): void {
-		this.config.guardsEnabled = mode === "auto" ? undefined : mode === "on";
-		this.harness?.configure({
-			guardsEnabled: this.config.guardsEnabled,
-		});
-	}
-
 	updateSettings(patch: RuntimeSettingsPatch): void {
-		if ("thinkingLevel" in patch && patch.thinkingLevel !== undefined)
-			this.setThinkingLevel(patch.thinkingLevel);
-		if ("temperature" in patch && patch.temperature !== undefined)
-			this.setTemperature(patch.temperature);
-		if ("reasonerId" in patch && patch.reasonerId !== undefined)
-			this.setReasonerId(patch.reasonerId);
-		if ("inferenceMode" in patch && patch.inferenceMode !== undefined)
-			this.setInferenceMode(patch.inferenceMode);
-		if ("maxTokens" in patch && patch.maxTokens !== undefined)
-			this.setMaxTokens(patch.maxTokens);
-		if ("maxIterations" in patch && patch.maxIterations !== undefined)
-			this.setMaxIterations(patch.maxIterations);
-		if ("executionProfile" in patch && patch.executionProfile !== undefined)
-			this.setExecutionProfile(patch.executionProfile);
-		if ("steeringInterrupt" in patch && patch.steeringInterrupt !== undefined)
-			this.setSteeringInterrupt(patch.steeringInterrupt);
-		if ("guardMode" in patch && patch.guardMode !== undefined)
-			this.setGuardMode(patch.guardMode);
-
-		for (const key of [
-			"guardsEnabled",
-			"duplicateGuardEnabled",
-			"failureGuardEnabled",
-			"budgetStopEnabled",
-			"continuationEnabled",
-			"autoRetryEnabled",
-			"proactiveCompactionEnabled",
-			"postEditDiagnostics",
-			"rtkProxyEnabled",
-			"ariadneEnabled",
-			"fffgrepEnabled",
-			"memoryEnabled",
-		] as const) {
-			const enabled = patch[key];
-			if (enabled !== undefined) this.setRuntimeToggle(key, enabled);
-		}
+		this.settings.update(patch);
 	}
 
 	/** Return structured settings data for the overlay UI. */
@@ -1467,39 +1309,10 @@ export class AgentCoreBridge {
 		failureGuardEnabled: boolean;
 		continuationEnabled: boolean;
 		autoRetryEnabled: boolean;
-		budgetStopEnabled: boolean;
+		progressStopEnabled: boolean;
 		guardMode: "auto" | "on" | "off";
 	} {
-		const settings = resolveAgentSettings(this.config);
-		return {
-			model: this.config.model,
-			temperature: this.config.temperature ?? 0.5,
-			maxTokens: this.config.maxTokens ?? 4096,
-			maxIterations: settings.maxIterations,
-			thinkingLevel: settings.thinkingLevel,
-			inferenceMode: settings.inferenceMode,
-			permissionMode: this.getPermissionMode(),
-			executionProfile: settings.executionProfile,
-			guardsEnabled: this.config.guardsEnabled ?? false,
-			proactiveCompactionEnabled:
-				this.config.proactiveCompactionEnabled ?? true,
-			postEditDiagnostics: this.postEditDiagnosticsEnabled,
-			rtkProxyEnabled: this.config.rtkProxyEnabled ?? false,
-			ariadneEnabled: this.config.ariadneEnabled ?? true,
-			fffgrepEnabled: this.config.fffgrepEnabled ?? true,
-			memoryEnabled: !!this.memoryManager?.getStore(),
-			duplicateGuardEnabled: this.config.duplicateGuardEnabled ?? true,
-			failureGuardEnabled: this.config.failureGuardEnabled ?? false,
-			continuationEnabled: this.config.continuationEnabled ?? true,
-			autoRetryEnabled: this.config.autoRetryEnabled ?? true,
-			budgetStopEnabled: this.config.budgetStopEnabled ?? false,
-			guardMode:
-				this.config.guardsEnabled === undefined
-					? "auto"
-					: this.config.guardsEnabled
-						? "on"
-						: "off",
-		};
+		return this.settings.read();
 	}
 
 	getMemoryStore(): ReturnType<
@@ -1966,37 +1779,6 @@ export class AgentCoreBridge {
 		} catch (_e: unknown) {
 			// SessionEnd hooks are best-effort during shutdown/reset.
 		}
-	}
-
-	/**
-	 * Emit a Pi user_bash event for Pi extension interception.
-	 * Call from bash execution before running the command.
-	 * @returns {action: 'continue'|'intercept'|'replace', result?, operations?} from the first non-null handler.
-	 */
-	async emitUserBashEvent(
-		command: string,
-		excludeFromContext: boolean = false,
-	): Promise<{
-		action: "continue" | "intercept" | "replace";
-		result?: { output: string; exitCode: number; cancelled: boolean };
-		operations?: unknown;
-	} | null> {
-		return (
-			this.extensionManager?.emitUserBashEvent(command, excludeFromContext) ??
-			null
-		);
-	}
-
-	/**
-	 * Emit a Pi project_trust event for Pi extension interception.
-	 * Call before making a trust decision.
-	 * @returns {trusted: 'yes'|'no'|'undecided', remember?} from the first non-null handler.
-	 */
-	async emitProjectTrustEvent(cwd: string): Promise<{
-		trusted: "yes" | "no" | "undecided";
-		remember?: boolean;
-	} | null> {
-		return this.extensionManager?.emitProjectTrustEvent(cwd) ?? null;
 	}
 
 	/**

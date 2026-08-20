@@ -36,6 +36,7 @@
       "dependencies": {
         "@logician/agent-blocks": "0.2.0",
         "@logician/agent-core": "0.2.0",
+        "@logician/agent-protocol": "0.1.0",
         "@logician/autoresearch": "0.2.0",
         "@logician/memory": "0.1.0",
         "string-width": "^8.2.2",
@@ -66,6 +67,7 @@
       "name": "@logician/agent-core",
       "version": "0.2.0",
       "dependencies": {
+        "@logician/agent-protocol": "0.1.0",
         "emphasize": "^7.0.0",
         "ignore": "^7.0.5",
         "yaml": "^2.9.0",
@@ -86,6 +88,16 @@
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^22.0.0",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/agent-protocol": {
+      "name": "@logician/agent-protocol",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^22.0.0",
+        "bun-types": "^1.3.14",
         "typescript": "^7.0.2",
       },
     },
@@ -296,6 +308,8 @@
     "@logician/agent-core": ["@logician/agent-core@workspace:packages/agent-core"],
 
     "@logician/agent-eval": ["@logician/agent-eval@workspace:packages/agent-eval"],
+
+    "@logician/agent-protocol": ["@logician/agent-protocol@workspace:packages/agent-protocol"],
 
     "@logician/autoresearch": ["@logician/autoresearch@workspace:packages/autoresearch"],
 

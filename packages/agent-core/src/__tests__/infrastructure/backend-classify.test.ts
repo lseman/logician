@@ -74,12 +74,3 @@ void test("missing provider cache telemetry remains unknown", () => {
 		totalTokens: undefined,
 	});
 });
-
-void test("llama.cpp timings cache_n is accepted as a legacy fallback", () => {
-	assert.deepEqual(parseProviderUsage(undefined, { cache_n: 236 }), {
-		promptTokens: undefined,
-		completionTokens: undefined,
-		totalTokens: undefined,
-		cachedTokens: 236,
-	});
-});

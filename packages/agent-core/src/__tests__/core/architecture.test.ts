@@ -43,8 +43,6 @@ void test("core does not depend on application, adapters, capabilities, or infra
 void test("implementation modules import defining files instead of internal facades", () => {
 	const violations: string[] = [];
 	const importPattern = /(?:from\s+|import\s*)["']([^"']+\/index\.ts)["']/g;
-	const piAdapter = path.join(sourceRoot, "adapters", "pi", "index.ts");
-
 	for (const file of sourceFiles(sourceRoot)) {
 		if (file.includes(`${path.sep}__tests__${path.sep}`)) continue;
 		if (path.basename(file) === "index.ts") continue;
@@ -53,8 +51,6 @@ void test("implementation modules import defining files instead of internal faca
 			const specifier = match[1];
 			if (!specifier.startsWith(".")) continue;
 			const target = path.resolve(path.dirname(file), specifier);
-			// The Pi adapter is currently implemented in its facade file.
-			if (target === piAdapter) continue;
 			violations.push(
 				`${path.relative(sourceRoot, file)} -> ${path.relative(sourceRoot, target)}`,
 			);

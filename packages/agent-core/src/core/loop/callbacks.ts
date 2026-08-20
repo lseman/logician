@@ -27,6 +27,12 @@ export function assistantText(message: Message | undefined): string {
 		: "";
 }
 
+export function lastAssistantContent(messages: readonly Message[]): string {
+	return assistantText(
+		[...messages].reverse().find(message => message.role === "assistant"),
+	);
+}
+
 export function stopReasonFor(
 	responseStopReason: "stop" | "length" | "error",
 	toolCalls: ToolCall[],

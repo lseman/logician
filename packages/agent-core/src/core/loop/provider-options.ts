@@ -8,8 +8,7 @@
 
 import type { AgentSettings } from "../configuration/agent-settings.ts";
 import type { GenerateOptions } from "../provider/backend.ts";
-import type { ThinkingLevel } from "../types/types-config.ts";
-import type { InferenceModeDef } from "../types/types-config.ts";
+import type { InferenceModeDef, ThinkingLevel } from "../types/types-config.ts";
 import type { AgentHooks } from "../types/types-messages.ts";
 import type { AgentLoopConfig } from "./config.ts";
 

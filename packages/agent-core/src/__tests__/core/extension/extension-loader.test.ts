@@ -5,26 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadExtensions } from "../../../core/extension/loader.ts";
 
-test("discovers Pi-compatible global and project extension locations", () => {
+test("discovers native global and project extension locations", () => {
 	const root = mkdtempSync(join(tmpdir(), "logician-extension-loader-"));
-	const globalDir = join(root, "home", ".pi", "agent", "extensions");
+	const globalDir = join(root, "home", ".logician", "extensions");
 	const projectDir = join(root, "project");
-	const projectPiDir = join(projectDir, ".pi", "extensions");
+	const projectExtensionDir = join(projectDir, ".logician", "extensions");
 	mkdirSync(globalDir, { recursive: true });
-	mkdirSync(projectPiDir, { recursive: true });
+	mkdirSync(projectExtensionDir, { recursive: true });
 	writeFileSync(join(globalDir, "global.ts"), "export default () => {};");
-	writeFileSync(join(projectPiDir, "project.ts"), "export default () => {};");
+	writeFileSync(
+		join(projectExtensionDir, "project.ts"),
+		"export default () => {};",
+	);
 
-	const result = loadExtensions({ piUserDir: globalDir, projectDir });
+	const result = loadExtensions({ userDir: globalDir, projectDir });
 	assert.deepEqual(
-		result.extensions.map(extension => [
-			extension.name,
-			extension.compatibility,
-		]),
-		[
-			["global", "pi"],
-			["project", "pi"],
-		],
+		result.extensions.map(extension => extension.name),
+		["global", "project"],
 	);
 });
 

@@ -133,18 +133,45 @@ function readAgentDeclaration(
 
 function outputMetrics(
 	output: string,
-): Pick<EvalTrial["metrics"], "toolCalls" | "contextTokens" | "model"> {
+): Pick<
+	EvalTrial["metrics"],
+	| "toolCalls"
+	| "contextTokens"
+	| "model"
+	| "permissionRequests"
+	| "compactions"
+	| "retries"
+	| "timeToFirstToolMs"
+> {
 	let toolCalls = 0;
+	let permissionRequests = 0;
+	let compactions = 0;
+	let retries = 0;
 	let contextTokens: number | undefined;
 	let model: string | undefined;
+	let firstTimestamp: number | undefined;
+	let firstToolTimestamp: number | undefined;
 	for (const line of output.split("\n")) {
 		try {
 			const entry = JSON.parse(line) as {
 				type?: string;
+				ts?: number;
+				timestamp?: number;
+				event?: { type?: string; ts?: number };
 				meta?: { context_tokens?: number; model?: string };
 			};
-			if (entry.type === "tool_use") toolCalls++;
-			if (entry.type === "metadata") {
+			const type = entry.event?.type ?? entry.type;
+			const timestamp = entry.event?.ts ?? entry.ts ?? entry.timestamp;
+			if (timestamp !== undefined && firstTimestamp === undefined)
+				firstTimestamp = timestamp;
+			if (type === "tool_use" || type === "tool_execution_start") {
+				toolCalls++;
+				if (firstToolTimestamp === undefined) firstToolTimestamp = timestamp;
+			}
+			if (type === "permission_request") permissionRequests++;
+			if (type === "compaction") compactions++;
+			if (type === "agent_retry_start") retries++;
+			if (type === "metadata") {
 				contextTokens = entry.meta?.context_tokens;
 				model = entry.meta?.model;
 			}
@@ -152,7 +179,48 @@ function outputMetrics(
 			// Non-JSON diagnostics are retained in the artifact but not projected.
 		}
 	}
-	return { toolCalls, contextTokens, model };
+	return {
+		toolCalls,
+		contextTokens,
+		model,
+		permissionRequests,
+		compactions,
+		retries,
+		timeToFirstToolMs:
+			firstTimestamp !== undefined && firstToolTimestamp !== undefined
+				? Math.max(0, firstToolTimestamp - firstTimestamp)
+				: undefined,
+	};
+}
+
+/** Re-grade a recorded trajectory against the current deterministic graders. */
+export async function replayTrial(
+	task: EvalTask,
+	workspace: string,
+	trajectory: string,
+): Promise<EvalTrial> {
+	await verifyFixture(task, workspace);
+	const started = performance.now();
+	const graders = [];
+	for (const spec of task.graders) graders.push(await grade(spec, workspace));
+	return {
+		schemaVersion: EVAL_SCHEMA_VERSION,
+		taskId: task.id,
+		trialId: randomUUID(),
+		startedAt: new Date().toISOString(),
+		workspace: path.resolve(workspace),
+		agentDeclaredComplete: readAgentDeclaration(undefined, trajectory),
+		environmentGradedPass: graders.every(result => result.passed),
+		graders,
+		metrics: {
+			durationMs: Math.round(performance.now() - started),
+			exitCode: null,
+			timedOut: false,
+			changedFiles: await changedFileCount(workspace),
+			...outputMetrics(trajectory),
+		},
+		agentOutput: trajectory.slice(-200_000),
+	};
 }
 
 export async function runTrial(

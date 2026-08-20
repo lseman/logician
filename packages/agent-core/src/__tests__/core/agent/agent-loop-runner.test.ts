@@ -1,5 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	createSteeringInterruptReason,
 	type RunAgentLoopConfig,
@@ -9,6 +12,7 @@ import {
 import { OutputGuard } from "../../../core/guards/output-guard.ts";
 import { resolveExecutionPolicy } from "../../../core/policy/execution-policy.ts";
 import { BackendError } from "../../../core/provider/backend.ts";
+import { PermissionManager } from "../../../core/tools/permissions.ts";
 import type { AgentConfig } from "../../../core/types/types-config.ts";
 import type {
 	AgentEvent,
@@ -59,6 +63,110 @@ void test("minimal profile disables embedded policies", () => {
 		profile: "minimal",
 		embeddedPoliciesEnabled: false,
 	});
+});
+
+void test("failed deterministic verification gets one bounded repair turn", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-verification-repair-"));
+	const marker = join(cwd, "fixed");
+	const fix: Tool = {
+		name: "fix",
+		description: "fix the fixture",
+		parameters: { type: "object", properties: {} },
+		execute: async () => {
+			writeFileSync(marker, "ok");
+			return "fixed";
+		},
+	};
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => textResponse("I think it is done."),
+		messages => {
+			assert.match(String(messages.at(-1)?.content), /verification-repair/);
+			return {
+				content: "Applying the repair.",
+				toolCalls: [{ id: "fix-1", name: "fix", arguments: "{}" }],
+				stopReason: "stop" as const,
+			};
+		},
+		() =>
+			textResponse(
+				'```acceptance-report\n{"criteriaSatisfied":[],"commandsRun":[],"residualRisks":[]}\n```',
+			),
+	]);
+	try {
+		await runAgentLoop(
+			{ systemPrompt: "test", messages: [], tools: [fix], cwd },
+			[user("fix it")],
+			{
+				...makeConfig({
+					cwd,
+					tools: [fix],
+					maxIterations: 4,
+					acceptance: {
+						verify: [{ id: "marker", command: "test -f fixed" }],
+					},
+				}),
+				backend,
+			},
+			event => {
+				events.push(event);
+			},
+		);
+		assert.equal(existsSync(marker), true);
+		assert.equal(backend.calls, 3);
+		assert.ok(
+			events.some(
+				event =>
+					event.type === "harness_intervention" &&
+					event.kind === "verification",
+			),
+		);
+		assert.ok(
+			events.some(
+				event =>
+					event.type === "acceptance_complete" && event.status === "passed",
+			),
+		);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+void test("three consecutive permission denials pause autonomous execution", async () => {
+	const bash: Tool = {
+		name: "bash",
+		description: "run",
+		parameters: { type: "object", properties: {} },
+		execute: async () => "should not execute",
+	};
+	const denied = () => ({
+		content: "trying",
+		toolCalls: [{ id: crypto.randomUUID(), name: "bash", arguments: "{}" }],
+		stopReason: "stop" as const,
+	});
+	const backend = new FakeBackend([denied, denied, denied]);
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [bash] },
+		[user("run it")],
+		{
+			...makeConfig({
+				tools: [bash],
+				permissions: new PermissionManager({ mode: "plan" }),
+				maxIterations: 5,
+			}),
+			backend,
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	assert.equal(backend.calls, 3);
+	assert.ok(
+		events.some(
+			event => event.type === "agent_end" && event.status === "needs_input",
+		),
+	);
 });
 
 function user(content: string): Message {
@@ -1034,11 +1142,7 @@ void test("minimal profile stops naturally when no embedded features enabled", a
 		),
 	);
 	assert.equal(
-		events.some(
-			event =>
-				event.type === "reflection_start" ||
-				event.type === "acceptance_complete",
-		),
+		events.some(event => event.type === "acceptance_complete"),
 		false,
 	);
 });

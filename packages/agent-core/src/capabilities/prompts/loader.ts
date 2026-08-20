@@ -7,7 +7,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseFrontmatter } from "../../infrastructure/tools/utils/frontmatter.ts";
+import { parseFrontmatter } from "../../core/configuration/frontmatter.ts";
 
 export interface Prompt {
 	/** Stable invocation id, derived from the filename (without extension). */

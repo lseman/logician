@@ -8,8 +8,8 @@ import {
 	inferSessionTitle,
 	isGeneratedSessionTitle,
 	type Transcript,
-	type Turn,
 	type TuiSessionService,
+	type Turn,
 } from "@logician/agent-core/sessions";
 import type { SessionBrowserOverlay } from "../../overlays/session-manager.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
@@ -131,7 +131,8 @@ export function handleSessionAction(
 					restoreSession(ctx, turns);
 					ctx.statusPanel.update({ sessionTitle: remaining[0].name });
 				} else {
-					ctx.currentSessionId = ctx.sessionService.createSession("New Session");
+					ctx.currentSessionId =
+						ctx.sessionService.createSession("New Session");
 					restoreSession(ctx, []);
 				}
 			}

@@ -7,6 +7,7 @@ import { resolveAgentSettings } from "../configuration/agent-settings.ts";
 import {
 	evaluateAcceptanceReport,
 	formatAcceptancePrompt,
+	formatVerificationRepair,
 	type ResolvedAcceptance,
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
@@ -19,6 +20,7 @@ import {
 import {
 	assistantText,
 	emitMessagePair,
+	lastAssistantContent,
 	stopReasonFor,
 	withSystemPrompt,
 } from "../loop/callbacks.ts";
@@ -28,10 +30,6 @@ import {
 	createProviderTurnState,
 	requestAssistantTurn,
 } from "../loop/provider-turn.ts";
-import {
-	emitConclusion,
-	lastAssistantContent,
-} from "../policy/conclusion-policy.ts";
 import {
 	type RunOutcomeStatus,
 	resolveExecutionPolicy,
@@ -45,6 +43,7 @@ import {
 	RunBudgetController,
 	type RunBudgetDecision,
 } from "../policy/run-budget.ts";
+import { AgentRunController } from "../policy/run-controller.ts";
 import {
 	createSystemMessage,
 	convertToLlm as defaultConvertToLlm,
@@ -132,6 +131,7 @@ async function runAgentLoopInternal(
 	const executionPolicy = resolveExecutionPolicy(settings.executionProfile);
 	const interventionController =
 		config.interventionController ?? new HarnessInterventionController();
+	const runController = config.runController ?? new AgentRunController();
 	const intervene = (input: InterventionInput): Promise<void> | void =>
 		emit({
 			type: "harness_intervention",
@@ -168,6 +168,9 @@ async function runAgentLoopInternal(
 	let contextWasCompacted = false;
 	let acceptanceReported = false;
 	let acceptanceFailed = false;
+	let cachedVerificationResults:
+		| Awaited<ReturnType<typeof verifyAcceptanceCommands>>
+		| undefined;
 	const providerTurnState = createProviderTurnState();
 	const runBudget = new RunBudgetController(
 		{
@@ -425,6 +428,10 @@ async function runAgentLoopInternal(
 			});
 			const toolResults = batch.messages;
 			const toolTerminated = batch.terminated;
+			const permissionEscalation = runController.recordPermissionBatch({
+				denials: batch.permissionDenials,
+				executed: batch.executedToolCallIds.length,
+			});
 			for (const toolResult of toolResults) {
 				if (isToolFailureResult(String(toolResult.content ?? ""))) {
 					toolFailures++;
@@ -433,6 +440,28 @@ async function runAgentLoopInternal(
 				newMessages.push(toolResult);
 				await emitMessagePair(emit, turnId, toolResult);
 				hasMoreToolCalls = true;
+			}
+			if (permissionEscalation) {
+				await intervene({
+					kind: "loop",
+					cause: "permission_denials",
+					detector: "permission_escalation",
+					message:
+						"Autonomous execution paused after repeated permission denials. User authorization or a different task scope is required.",
+					iteration,
+					action: "pause",
+					counters: {
+						consecutive: permissionEscalation.consecutive,
+						total: permissionEscalation.total,
+					},
+					limits: { consecutive: 3, total: 20 },
+				});
+				return finish({
+					status: "needs_input",
+					summary:
+						"Repeated permission denials require user authorization or a safer scope.",
+					source: "runtime",
+				});
 			}
 
 			// The final usage-only SSE chunk is optional and many local providers
@@ -574,14 +603,59 @@ async function runAgentLoopInternal(
 				acceptanceStop = checkStopRules(resolved);
 			}
 			if (stop || acceptanceStop) {
-				return finish({ status: "completed", source: "runtime" });
+				if (stop) return finish({ status: "completed", source: "runtime" });
+				runController.requestAcceptanceStop();
+				break;
 			}
 
 			pendingMessages = await drainSteering();
 		}
 
-		pendingMessages = await drainFollowUps();
+		pendingMessages = runController.acceptanceStopRequested
+			? []
+			: await drainFollowUps();
 		if (pendingMessages.length > 0) continue;
+
+		// Deterministic verification gets one bounded repair turn. This happens
+		// only after the ordinary autonomous policy considers the work finished.
+		if (resolved.verify.length > 0) {
+			await emit({
+				type: "acceptance_start",
+				level: resolved.level,
+				criteriaCount: resolved.criteria.length,
+			});
+			cachedVerificationResults = await verifyAcceptanceCommands(resolved, {
+				cwd: config.cwd,
+				signal: config.signal,
+			});
+			for (const result of cachedVerificationResults) {
+				await emit({
+					type: "acceptance_verify",
+					command: result.command,
+					result: result.result,
+					summary: result.summary,
+				});
+			}
+			if (
+				runController.requestVerificationRepair(
+					cachedVerificationResults,
+					iteration < maxIterations,
+				)
+			) {
+				const content = formatVerificationRepair(cachedVerificationResults);
+				await intervene({
+					kind: "verification",
+					cause: "verification_failed",
+					detector: "acceptance_verifier",
+					message: content,
+					iteration,
+					action: "recover",
+					limits: { repairAttempts: 1 },
+				});
+				pendingMessages = [{ role: "user", content, timestamp: Date.now() }];
+				continue;
+			}
+		}
 		break;
 	}
 
@@ -595,27 +669,17 @@ async function runAgentLoopInternal(
 		});
 	}
 
-	// Emit conclusion / task_failed before agent_end
-	if (executionPolicy.embeddedPoliciesEnabled && iteration < maxIterations) {
-		const hadFollowUps = iteration < maxIterations;
-		await emitConclusion(
-			emit,
-			finalMessagesForConclusion,
-			iteration,
-			maxIterations,
-			hadFollowUps,
-		);
-	}
-
 	// ── Acceptance finalization ────────────────────────────────────────
 	if (shouldRunAcceptanceFinalization(resolved) && !acceptanceReported) {
 		const finalText = lastAssistantContent(finalMessagesForConclusion);
 
 		// Run verification commands
-		const verificationResults = await verifyAcceptanceCommands(resolved, {
-			cwd: config.cwd,
-			signal: config.signal,
-		});
+		const verificationResults =
+			cachedVerificationResults ??
+			(await verifyAcceptanceCommands(resolved, {
+				cwd: config.cwd,
+				signal: config.signal,
+			}));
 
 		// Validate criteria and build ledger
 		const report = evaluateAcceptanceReport(
@@ -623,6 +687,17 @@ async function runAgentLoopInternal(
 			resolved,
 			verificationResults,
 		);
+		for (const criterion of resolved.criteria) {
+			const result = report.ledger.report?.criteriaSatisfied.find(
+				item => item.id === criterion.id,
+			);
+			await emit({
+				type: "acceptance_check",
+				criterionId: criterion.id,
+				status: result?.status ?? "failed",
+				severity: criterion.severity ?? "required",
+			});
+		}
 
 		acceptanceReported = true;
 		await emit({
@@ -657,7 +732,7 @@ async function runAgentLoopInternal(
 		});
 	}
 
-	// Replace newMessages with reflection-enriched messages so finish() returns them
+	// Preserve the finalized transcript returned by the loop.
 	newMessages.splice(0, newMessages.length, ...finalMessagesForConclusion);
 
 	const finalText = lastAssistantContent(finalMessagesForConclusion);

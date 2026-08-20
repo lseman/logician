@@ -1,11 +1,9 @@
-// ── todo tool — full task tracking (pi-compatible) ────────────────────────────
+// ── todo tool — full task tracking ────────────────────────────────────────────
 // Actions: create, update, list, get, delete, clear
 // State machine: pending → in_progress → completed, plus deleted tombstone
 // Dependencies: blockedBy with cycle detection and auto-resolve
 
-import {
-	type Tool,
-} from "@logician/agent-core";
+import type { Tool } from "@logician/agent-core";
 import {
 	allocateTaskId,
 	getTasksMutable,

@@ -4,7 +4,10 @@
 // AgentCoreBridge.
 
 import type { PluginCommandResult } from "../../adapters/claude-code/plugin-manager.ts";
-import { tableRow } from "../../tui-utils.ts";
+
+function tableRow(values: string[]): string {
+	return `| ${values.join(" | ")} |`;
+}
 
 export function formatPluginResult(
 	action: string,

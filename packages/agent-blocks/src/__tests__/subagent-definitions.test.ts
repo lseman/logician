@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-	type AgentConfig,
-	type AgentEvent,
-	type GenerateOptions,
-	type LLMBackend,
-	type LLMResponse,
-	type Tool,
+import type {
+	AgentConfig,
+	AgentEvent,
+	GenerateOptions,
+	LLMBackend,
+	LLMResponse,
+	Tool,
 } from "@logician/agent-core";
 import { PermissionManager } from "@logician/agent-core/permissions";
 import {

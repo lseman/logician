@@ -2,8 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { ask_user } from "../interaction/ask-user/index.ts";
 
-void test("ask_user forwards a tabbed questionnaire and returns structured answers", async () => {
-	let received: unknown;
+void test("ask_user sends canonical multi-question requests", async () => {
 	const result = await ask_user.execute(
 		{
 			questions: [
@@ -11,13 +10,7 @@ void test("ask_user forwards a tabbed questionnaire and returns structured answe
 					id: "scope",
 					header: "Scope",
 					question: "Choose a scope",
-					choices: [
-						{
-							value: "small",
-							label: "Focused",
-							description: "Keep the change narrow.",
-						},
-					],
+					choices: [{ value: "small", label: "Small" }],
 				},
 				{
 					id: "tests",
@@ -28,48 +21,47 @@ void test("ask_user forwards a tabbed questionnaire and returns structured answe
 			],
 		},
 		{
-			onQuestionRequest: async questionnaire => {
-				received = questionnaire;
-				return JSON.stringify({ scope: "small", tests: "full" });
+			onQuestionRequest: async ({ questions }) => {
+				assert.deepEqual(
+					questions.map(question => question.id),
+					["scope", "tests"],
+				);
+				return '{"scope":"small","tests":"full"}';
 			},
 		},
 	);
-
-	assert.deepEqual(received, {
-		questions: [
-			{
-				id: "scope",
-				header: "Scope",
-				question: "Choose a scope",
-				choices: [
-					{
-						value: "small",
-						label: "Focused",
-						description: "Keep the change narrow.",
-					},
-				],
-			},
-			{
-				id: "tests",
-				header: "Tests",
-				question: "Choose validation",
-				choices: [{ value: "full", label: "Full suite" }],
-			},
-		],
-	});
 	assert.equal(result, 'User responded: {"scope":"small","tests":"full"}');
 });
 
-void test("ask_user preserves the legacy single-question shape", async () => {
+void test("ask_user rejects removed single-question arguments", async () => {
 	const prepared = ask_user.prepareArguments?.({
 		question: "Continue?",
 		choices: [{ value: "yes", label: "Yes" }],
 	});
-	const result = await ask_user.execute(prepared ?? {}, {
-		onQuestionRequest: async ({ questions }) => {
-			assert.equal(questions[0]?.id, "answer");
-			return "yes";
+	assert.deepEqual(prepared, { questions: undefined });
+	assert.match(
+		String(await ask_user.execute(prepared ?? {}, {})),
+		/requires at least one choice/,
+	);
+});
+
+void test("ask_user requires stable unique question ids", async () => {
+	const result = await ask_user.execute(
+		{
+			questions: [
+				{
+					id: "same",
+					question: "First?",
+					choices: [{ value: "a", label: "A" }],
+				},
+				{
+					id: "same",
+					question: "Second?",
+					choices: [{ value: "b", label: "B" }],
+				},
+			],
 		},
-	});
-	assert.equal(result, "User responded: yes");
+		{},
+	);
+	assert.match(String(result), /ids must be unique/);
 });

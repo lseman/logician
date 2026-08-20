@@ -6,12 +6,14 @@
 // the harness's single live instance.
 
 import { spawnSync } from "node:child_process";
-import { getTasks } from "@logician/agent-blocks/tasks/todo.ts";
 import { compactToFit } from "../../compaction/engine.ts";
+import { resetToRunCheckpoint } from "../../compaction/run-checkpoint.ts";
 import type { LoopDetector } from "../../guards/loop-detector.ts";
-import { awaitsUserInput } from "../../guards/response-patterns.ts";
+import { decideAutonomousContinuation } from "../../policy/autonomy-policy.ts";
 import { resolveExecutionPolicy } from "../../policy/execution-policy.ts";
 import { HarnessInterventionController } from "../../policy/intervention-controller.ts";
+import { ProgressTracker } from "../../policy/progress-tracker.ts";
+import { EMPTY_TASK_LEDGER } from "../../policy/task-ledger.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
@@ -28,7 +30,6 @@ import type {
 	CompactableMessage,
 	Message,
 } from "../../types/types-messages.ts";
-import { BudgetTracker } from "./budget.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
 // context window (higher than the post-compaction target so it fires before the
@@ -74,22 +75,23 @@ export interface BuiltinHookDeps {
 	// (attempt counts) and `recordProgress()`'s incident-clearing only work
 	// across repeated detections if this outlives a single hook build.
 	interventions?: HarnessInterventionController;
-	// Diminishing-returns budget-stop tracker, reused across rebuilds for the
-	// same reason as `interventions` — BudgetTracker compares consecutive
-	// turns, so a fresh instance every rebuild can never trigger. Only
-	// consulted while the feature is actually enabled (config + execution
-	// policy); a fresh instance is created locally when omitted.
-	budget?: BudgetTracker;
+	// Evidence-based progress tracker. Shared because autonomous hooks are
+	// rebuilt between turns while progress belongs to the whole run.
+	progress?: ProgressTracker;
 	// Proactive-compaction cooldown, in loop iterations since the last
 	// compaction. Boxed in an object (not a bare number) so callers that
 	// rebuild hooks mid-run can share and mutate it across rebuilds.
-	compactionCooldown?: { lastTurn: number };
+	compactionCooldown?: {
+		lastTurn: number;
+		consecutiveCompactions?: number;
+	};
 }
 
 // Build the default safeguard hooks. Returns undefined per-event when a
 // safeguard is disabled so composition can skip it cleanly.
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const { config, loopDetector } = deps;
+	const taskLedger = config.taskLedger ?? EMPTY_TASK_LEDGER;
 	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	const interventions =
 		deps.interventions ?? new HarnessInterventionController();
@@ -127,14 +129,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			: undefined;
 	// Budget-based early stop is opt-in: it can cut off a legitimate multi-step
 	// run (e.g. one following a todo list) when per-turn token growth is small.
-	const budgetEnabled =
+	const progressStopEnabled =
 		executionPolicy.embeddedPoliciesEnabled &&
-		config.budgetStopEnabled === true;
+		config.progressStopEnabled === true;
 	// Proactive compaction: default ON but aggressive (80% window). Can lose
 	// context mid-task. Consider disabling for long-running tasks.
 	const compactionEnabled = config.proactiveCompactionEnabled !== false;
 
-	const budget = budgetEnabled ? (deps.budget ?? new BudgetTracker()) : null;
+	const progress = progressStopEnabled
+		? (deps.progress ?? new ProgressTracker())
+		: null;
 
 	const fraction =
 		config.proactiveCompactionFraction ?? DEFAULT_COMPACTION_FRACTION;
@@ -209,6 +213,13 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			loopDetector.recordSuccess(toolCall.name, toolCall.arguments);
 			interventions.recordProgress();
 		}
+		if (!isError && progress) {
+			progress.recordToolResult(
+				toolCall.name,
+				toolCall.arguments,
+				String(result),
+			);
+		}
 		return undefined;
 	};
 
@@ -229,12 +240,39 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			});
 			compactionCooldown.lastTurn = iteration;
 			if (result.changed) {
+				compactionCooldown.consecutiveCompactions =
+					(compactionCooldown.consecutiveCompactions ?? 0) + 1;
 				deps.emitEvent?.({
 					type: "compaction",
 					reason: "threshold",
 					tokensBefore: estimateChatPayloadTokens(messages, deps.toolDefs()),
 					tokensAfter: result.tokensAfter,
 				});
+				const tasks = taskLedger.snapshot();
+				const unfinished = tasks.some(
+					task => task.status !== "completed" && task.status !== "deleted",
+				);
+				if (
+					executionPolicy.embeddedPoliciesEnabled &&
+					unfinished &&
+					(compactionCooldown.consecutiveCompactions ?? 0) >= 2
+				) {
+					const checkpointed = resetToRunCheckpoint(
+						result.messages as Message[],
+						tasks,
+					);
+					compactionCooldown.consecutiveCompactions = 0;
+					emitIntervention({
+						kind: "compaction",
+						cause: "structured_context_reset",
+						detector: "compaction_checkpoint",
+						message:
+							"Repeated compaction replaced the transcript with a structured run checkpoint.",
+						iteration,
+						action: "recover",
+					});
+					return { messages: checkpointed };
+				}
 			}
 			return result.changed
 				? { messages: result.messages as Message[] }
@@ -242,17 +280,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		};
 	}
 
-	if (budget) {
-		hooks.shouldStopAfterTurn = ({ messages, iteration }) => {
-			const tokens = estimateChatPayloadTokens(messages, deps.toolDefs());
-			const stopped = budget.shouldStop(tokens);
+	if (progress) {
+		hooks.shouldStopAfterTurn = ({ iteration }) => {
+			const stopped = progress.shouldStop(taskLedger.snapshot());
 			if (stopped) {
 				const message =
-					"Continuation stopped because token growth stayed below the progress threshold for two turns.";
+					"Continuation stopped after repeated turns produced no new tool or task-state evidence.";
 				emitIntervention({
-					kind: "budget",
-					cause: "low_progress",
-					detector: "token_budget",
+					kind: "loop",
+					cause: "no_progress",
+					detector: "progress_tracker",
 					message,
 					iteration,
 					action: "stop",
@@ -274,54 +311,21 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		config.continuationEnabled === true;
 	if (continuationEnabled) {
 		hooks.getFollowUpMessages = ({ assistantText, stopReason, iteration }) => {
-			// A final question is an explicit transfer of control to the user.
-			// Pending todos do not authorize the harness to answer it itself.
-			if (awaitsUserInput(assistantText)) return undefined;
-
-			// Length-stop = provider truncated the response mid-output. The model
-			// did not choose to stop; always continue so it can finish its thought.
-			if (stopReason === "length") {
-				const message =
-					"[continuation-nudge:length] Your previous response was cut off because it reached the output limit. " +
-					"Please continue exactly where you left off — do not repeat what you already wrote.";
-				emitIntervention({
-					kind: "continuation",
-					cause: "length_truncation",
-					detector: "builtin_continuation",
-					message,
-					iteration,
-				});
-				return [{ role: "user", content: message }];
-			}
-
-			const tasks = getTasks();
-			const remaining = tasks.filter(
-				t => t.status !== "completed" && t.status !== "deleted",
-			);
-			// Nudge whenever tasks remain. The model owns completion by keeping the
-			// todo list accurate and producing a final response.
-			if (!remaining.length) return undefined;
-
-			// Build nudge text. Circling detection (regex-based) has been
-			// removed — trust the model's reasoning instead.
-			const next =
-				remaining.find(t => t.status === "in_progress") ?? remaining[0];
-
-			const content =
-				`[continuation-nudge:todo] You still have ${remaining.length} unfinished task(s). ` +
-				`Continue working — next: #${next.id} ${next.subject}. ` +
-				"Use the todo tool to track progress: create tasks, mark them in_progress before working, and completed when done. " +
-				"Do not skip calling the todo tool — the system only knows you finished via that tool call. " +
-				"If you are truly blocked or done, say so explicitly and stop.";
+			const decision = decideAutonomousContinuation({
+				assistantText,
+				stopReason,
+				tasks: taskLedger.snapshot(),
+			});
+			if (!decision) return undefined;
 
 			emitIntervention({
 				kind: "continuation",
-				cause: "unfinished_todos",
+				cause: decision.reason,
 				detector: "builtin_continuation",
-				message: content,
+				message: decision.message,
 				iteration,
 			});
-			return [{ role: "user", content }];
+			return [{ role: "user", content: decision.message }];
 		};
 	}
 

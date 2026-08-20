@@ -1,6 +1,7 @@
 import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
 import type { OutputGuard } from "../guards/output-guard.ts";
 import type { HarnessInterventionController } from "../policy/intervention-controller.ts";
+import type { AgentRunController } from "../policy/run-controller.ts";
 import type { LLMBackend } from "../provider/backend.ts";
 import type { AgentConfig } from "../types/types-config.ts";
 import type { Message } from "../types/types-messages.ts";
@@ -31,6 +32,7 @@ export type AgentLoopOptions = Pick<
 	| "runBudget"
 	| "streamOptions"
 	| "systemPrompt"
+	| "taskLedger"
 	| "temperature"
 	| "thinkingLevel"
 	| "toolExecution"
@@ -49,6 +51,7 @@ export interface AgentLoopConfig extends AgentLoopOptions {
 	outputGuard?: OutputGuard | null;
 	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
 	interventionController?: HarnessInterventionController;
+	runController?: AgentRunController;
 	durableBudgetState?: {
 		providerCalls: number;
 		toolCalls: number;

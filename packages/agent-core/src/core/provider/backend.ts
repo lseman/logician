@@ -179,10 +179,6 @@ interface ProviderUsage {
 	input_tokens_details?: { cached_tokens?: unknown };
 }
 
-interface ProviderTimings {
-	cache_n?: unknown;
-}
-
 function tokenCount(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0
 		? Math.floor(value)
@@ -190,26 +186,16 @@ function tokenCount(value: unknown): number | undefined {
 }
 
 /** Normalize OpenAI-compatible (including llama.cpp) usage telemetry. */
-export function parseProviderUsage(
-	raw: unknown,
-	rawTimings?: unknown,
-): LLMResponse["usage"] {
-	if (
-		(!raw || typeof raw !== "object") &&
-		(!rawTimings || typeof rawTimings !== "object")
-	) {
+export function parseProviderUsage(raw: unknown): LLMResponse["usage"] {
+	if (!raw || typeof raw !== "object") {
 		return undefined;
 	}
 	const usage = (raw && typeof raw === "object" ? raw : {}) as ProviderUsage;
-	const timings = (
-		rawTimings && typeof rawTimings === "object" ? rawTimings : {}
-	) as ProviderTimings;
 	const cachedTokens = tokenCount(
 		usage.prompt_tokens_details?.cached_tokens ??
 			usage.input_tokens_details?.cached_tokens ??
 			usage.cache_read_input_tokens ??
-			usage.cached_tokens ??
-			timings.cache_n,
+			usage.cached_tokens,
 	);
 	return {
 		promptTokens: tokenCount(usage.prompt_tokens),
@@ -517,8 +503,8 @@ export class OpenAIBackend implements LLMBackend {
 					// (notably the trailing usage-only chunk), so read them first.
 					const chunkFinish = chunk.choices?.[0]?.finish_reason;
 					if (chunkFinish) finishReason = chunkFinish;
-					if (chunk.usage || chunk.timings) {
-						const parsed = parseProviderUsage(chunk.usage, chunk.timings);
+					if (chunk.usage) {
+						const parsed = parseProviderUsage(chunk.usage);
 						usage = {
 							promptTokens: parsed?.promptTokens ?? usage?.promptTokens,
 							completionTokens:

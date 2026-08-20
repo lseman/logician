@@ -13,7 +13,7 @@ import type {
 	ToolUpdateEvent,
 	TranscriptEvent,
 	TurnEndEvent,
-} from "../../core/types/runtime-events.ts";
+} from "@logician/agent-protocol";
 
 export type ThinkingDisplayStyle = "collapsed" | "summary" | "expanded";
 

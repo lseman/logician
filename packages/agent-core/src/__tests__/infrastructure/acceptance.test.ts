@@ -50,12 +50,6 @@ void test("resolve with verify returns verified", () => {
 	assert.equal(resolved.level, "verified");
 });
 
-void test("resolve with review returns reviewed", () => {
-	const config: AcceptanceConfig = { review: { agent: "reviewer" } };
-	const resolved = resolveEffectiveAcceptance({ explicit: config });
-	assert.equal(resolved.level, "reviewed");
-});
-
 void test("normalize string criteria with global evidence", () => {
 	const config: AcceptanceConfig = {
 		criteria: ["fix bug"],

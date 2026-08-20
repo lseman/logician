@@ -49,7 +49,7 @@ void describe("StatusBar", () => {
 		assert.ok(lines[0].includes("3"));
 	});
 
-	it("shows runtime phase, recovery, and active children", () => {
+	it("hides the internal turn phase but shows recovery and active children", () => {
 		setupTheme();
 		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
@@ -58,9 +58,17 @@ void describe("StatusBar", () => {
 			activeSubagents: 2,
 		});
 		const line = bar.render(220)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-		assert.match(line, /verify/);
+		assert.doesNotMatch(line, /verify/);
 		assert.match(line, /repair acceptance/);
 		assert.match(line, /agents 2/);
+	});
+
+	it("does not show the redundant runtime turn indicator", () => {
+		setupTheme();
+		const bar = new StatusBar(createDefaultConfig());
+		bar.update({ runPhase: "turn" });
+		const line = bar.render(120)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		assert.doesNotMatch(line, /◈ turn/);
 	});
 
 	it("shows the active Python virtual environment", () => {
