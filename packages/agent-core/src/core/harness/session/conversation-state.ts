@@ -24,7 +24,6 @@ import {
 	type Branch,
 	forkBranch,
 	listBranches as listBranchesHelper,
-	renderBranchTree,
 } from "./branching.ts";
 
 // Bounded ring (newest last) so rewind has a bounded number of prior turns
@@ -124,10 +123,6 @@ export class ConversationState {
 	/** Pop the active branch without restoring history (caller sets the merged result). */
 	popBranch(): Branch | undefined {
 		return this.branches.pop();
-	}
-
-	branchTree(): string {
-		return renderBranchTree(this.branches);
 	}
 
 	listBranches(): BranchInfo[] {

@@ -7,11 +7,9 @@ import {
 	runHookEvent,
 	runSessionStartHooks,
 } from "../../../infrastructure/tools/utils/plugins.ts";
-import { Session, SessionManager } from "../../session/session.ts";
 import type {
 	BeforeCompactContext,
 	BeforeCompactResult,
-	Message,
 } from "../../types/index.ts";
 
 export interface HookContext {
@@ -109,63 +107,5 @@ export async function emitPostCompact(
 	} catch (_e: unknown) {
 		// must not block compaction
 		console.error("[harness-session] emitPostCompact failed:", _e);
-	}
-}
-
-export interface ResumedSession {
-	session: Session;
-	messages: Message[];
-}
-
-/** Load a persisted session's messages, or null if load failed/empty. */
-export function loadSessionMessages(
-	sessionId: string,
-	baseDir: string | undefined,
-): ResumedSession | null {
-	try {
-		const session = new Session(sessionId, { baseDir, enabled: true });
-		const persisted = session.load();
-		if (persisted.length === 0) return { session, messages: [] };
-		const messages: Message[] = persisted.map(m => ({
-			role: m.role as Message["role"],
-			content: m.content,
-			tool_call_id: m.tool_call_id,
-			tool_calls: m.tool_calls,
-			name: m.name,
-			timestamp: m.timestamp,
-		}));
-		return { session, messages };
-	} catch (_e: unknown) {
-		console.error("[harness-session] loadSessionMessages failed:", _e);
-		return null;
-	}
-}
-
-export function listSessions(baseDir: string | undefined): Array<{
-	id: string;
-	name?: string;
-	messageCount: number;
-	lastActivity: number;
-}> {
-	try {
-		const manager = new SessionManager({ baseDir });
-		return manager
-			.listSessions()
-			.map(
-				(m: {
-					id: string;
-					name?: string;
-					messageCount: number;
-					lastActivity: number;
-				}) => ({
-					id: m.id,
-					name: m.name,
-					messageCount: m.messageCount,
-					lastActivity: m.lastActivity,
-				}),
-			);
-	} catch (_e: unknown) {
-		console.error("[harness-session] listSessions failed:", _e);
-		return [];
 	}
 }

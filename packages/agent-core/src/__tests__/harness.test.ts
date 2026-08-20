@@ -4,7 +4,10 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BackendError } from "../core/provider/backend.ts";
-import { AgentHarness, HarnessBusyError } from "../core/harness/agent-harness.ts";
+import {
+	AgentHarness,
+	HarnessBusyError,
+} from "../core/harness/agent-harness.ts";
 import { Session } from "../core/session/session.ts";
 import type { AgentConfig } from "../core/types/index.ts";
 import { PermissionManager } from "../infrastructure/tools/permissions.ts";
@@ -262,7 +265,6 @@ void test("runtimeState is canonical across streaming, tools, and settlement", a
 	assert.deepEqual(settled.outcome, {
 		status: "completed",
 		summary: "done",
-		source: "runtime",
 	});
 	assert.ok((settled.lastEventSeq ?? 0) > 0);
 	assert.ok((settled.lastTurnDurationMs ?? -1) >= 0);
@@ -477,19 +479,23 @@ void test("fork/branchSummary/discardBranch keep an attached session's leaf poin
 
 void test("enabled session persists real turn messages without placeholders", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-session-"));
+	const session = new Session("persistence-test", {
+		baseDir: dir,
+		enabled: true,
+	});
 	const harness = makeHarness(
 		new FakeBackend([() => textResponse("answer")]),
 		dir,
 	);
-	await harness.enableSession(dir);
+	harness.attachSession(session);
 	await harness.prompt("question");
 
-	const persisted = harness.listSessions();
-	assert.equal(persisted.length, 1);
-	const resumed = makeHarness(new FakeBackend([]));
-	assert.equal(await resumed.resumeSession(persisted[0].id, dir), true);
+	const persisted = new Session("persistence-test", {
+		baseDir: dir,
+		enabled: true,
+	});
 	assert.deepEqual(
-		resumed.messages.map(m => `${m.role}:${m.content ?? ""}`),
+		persisted.load().map(m => `${m.role}:${m.content ?? ""}`),
 		["user:question", "assistant:answer"],
 	);
 });
@@ -566,6 +572,10 @@ void test("token usage over budget stops the run", async () => {
 
 void test("enabled sessions persist tool results across a resume", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-checkpoint-"));
+	const session = new Session("tool-result-test", {
+		baseDir: dir,
+		enabled: true,
+	});
 	const harness = makeHarness(
 		new FakeBackend([
 			() => ({
@@ -577,16 +587,17 @@ void test("enabled sessions persist tool results across a resume", async () => {
 		]),
 		dir,
 	);
-	await harness.enableSession(dir);
+	harness.attachSession(session);
 	await harness.prompt("run the tool");
 
-	const sessionInfo = harness.listSessions()[0];
-	const resumed = makeHarness(new FakeBackend([]));
-	assert.equal(await resumed.resumeSession(sessionInfo.id, dir), true);
+	const persisted = new Session("tool-result-test", {
+		baseDir: dir,
+		enabled: true,
+	});
 	assert.ok(
-		resumed.messages.some(
-			m => m.role === "tool" && m.tool_call_id === "call_1",
-		),
+		persisted
+			.load()
+			.some(m => m.role === "tool" && m.tool_call_id === "call_1"),
 	);
 });
 
