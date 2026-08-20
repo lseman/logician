@@ -2,7 +2,7 @@
 // Picks a concrete sampling preset for `inferenceMode: "auto"` from cheap,
 // already-tracked loop signals — no durable task ledger required.
 
-import type { InferenceMode } from "../../core/types/types-config.ts";
+import type { InferenceMode } from "../types/types-config.ts";
 
 export interface AdaptiveModeDecision {
 	mode: Exclude<InferenceMode, "auto">;
@@ -12,7 +12,7 @@ export interface AdaptiveModeDecision {
 export interface AdaptiveModeSignals {
 	/** The user's objective for this run (last meaningful prompt). */
 	objective: string;
-	/** Whether a non-task_status tool has been called yet this run. */
+	/** Whether a tool has been called yet this run. */
 	performedToolWork: boolean;
 	/** Tool calls whose result matched a failure pattern, this run. */
 	toolFailures: number;

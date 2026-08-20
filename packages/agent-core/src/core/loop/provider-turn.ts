@@ -16,7 +16,7 @@ import type { RunOutcomeStatus } from "../policy/execution-policy.ts";
 import type { InterventionInput } from "../policy/intervention-controller.ts";
 import { convertToChatFormat } from "../provider/messages.ts";
 import type { OutputGuard } from "../../infrastructure/guards/output-guard.ts";
-import { selectAdaptiveMode } from "../../runtime/tasks/adaptive-mode.ts";
+import { selectAdaptiveMode } from "./adaptive-mode.ts";
 import type {
 	AgentConfig,
 	AgentEvent,

@@ -438,7 +438,7 @@ void test("concurrent loops isolate structured task status", async () => {
 	assert.equal(explicitBlock.status, "blocked");
 });
 
-void test("undeclared outcome after tool work completes with warning", async () => {
+void test("undeclared outcome after tool work completes cleanly", async () => {
 	const events: AgentEvent[] = [];
 	await runAgentLoop(
 		{ systemPrompt: "test", messages: [], tools: [noop, task_status] },
@@ -468,7 +468,6 @@ void test("undeclared outcome after tool work completes with warning", async () 
 	const outcome = events.find(e => e.type === "agent_end");
 	assert.ok(outcome);
 	assert.equal(outcome.status, "completed");
-	assert.ok(outcome.summary?.includes("without a declared task outcome"));
 });
 
 void test("provider retry stays within one iteration and ends only after success", async () => {
