@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { Turn } from "@logician/coding-agent/sessions";
+import type { Turn } from "@logician/agent-core/sessions";
 import { createDefaultConfig } from "../footer/types.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { renderLayoutFrame } from "../rendering/layout.ts";

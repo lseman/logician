@@ -5,7 +5,7 @@
 import {
 	type PluginCommandResult,
 	TsPluginManager,
-} from "../../../engine/extension/adapters/claude-code/plugin-manager.ts";
+} from "../../../core/extension/adapters/claude-code/plugin-manager.ts";
 
 // ── CLI functions ─────────────────────────────────────────────────────────────
 
@@ -190,7 +190,7 @@ export type {
 	HookEventType,
 	HookExecutionResult,
 	LoadedHook,
-} from "../../../engine/extension/adapters/claude-code/plugin-executor.ts";
+} from "../../../core/extension/adapters/claude-code/plugin-executor.ts";
 export {
 	buildHookInput,
 	executeCommand,
@@ -199,10 +199,10 @@ export {
 	matcherMatches,
 	parseHookEventType,
 	parseHookResponse,
-} from "../../../engine/extension/adapters/claude-code/plugin-executor.ts";
+} from "../../../core/extension/adapters/claude-code/plugin-executor.ts";
 export type {
 	PluginCommandResult,
 	PluginInstall,
-} from "../../../engine/extension/adapters/claude-code/plugin-manager.ts";
+} from "../../../core/extension/adapters/claude-code/plugin-manager.ts";
 // Manager exports
-export { TsPluginManager } from "../../../engine/extension/adapters/claude-code/plugin-manager.ts";
+export { TsPluginManager } from "../../../core/extension/adapters/claude-code/plugin-manager.ts";

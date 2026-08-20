@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
 	awaitsUserInput,
 	looksComplete,
-} from "../guards/response-patterns.ts";
+} from "../infrastructure/guards/response-patterns.ts";
 
 // ── looksComplete ──────────────────────────────────────────────────────────
 

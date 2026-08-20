@@ -6,22 +6,22 @@ import {
 	STEERING_INTERRUPT_SUMMARY,
 	resolveOutcomeDefault,
 	type RunAgentLoopConfig,
-} from "../core/agent-loop-runner.ts";
-import { BackendError } from "../core/backend.ts";
-import { resolveExecutionPolicy } from "../core/execution-policy.ts";
-import { OutputGuard } from "../guards/output-guard.ts";
-import { runWithTaskState } from "../tasks/run-task-state.ts";
+} from "../core/execution/agent-loop-runner.ts";
+import { BackendError } from "../core/provider/backend.ts";
+import { resolveExecutionPolicy } from "../core/policy/execution-policy.ts";
+import { OutputGuard } from "../infrastructure/guards/output-guard.ts";
+import { runWithTaskState } from "../runtime/tasks/run-task-state.ts";
 import {
 	recordTaskStatus,
 	getTaskStatus as _getTaskStatus,
 	resetTaskStatus as _resetTaskStatus,
-} from "../tasks/task-status-state.ts";
+} from "../runtime/tasks/task-status-state.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
 	Message,
 	Tool,
-} from "../types/index.ts";
+} from "../core/types/index.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 
 const noop: Tool = {

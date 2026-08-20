@@ -4,17 +4,17 @@
 // permission/question requests.
 
 import type { AutoresearchSession } from "@logician/autoresearch";
-import { formatContextSize } from "@logician/coding-agent";
+import { formatContextSize } from "@logician/agent-core";
 import type {
 	AgentCoreBridge,
 	GoalManager,
 	GoalState,
-} from "@logician/coding-agent/application";
+} from "@logician/agent-core/application";
 import {
 	isTranscriptEvent,
 	type RuntimeEvent,
-} from "@logician/coding-agent/runtime";
-import type { Transcript } from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/runtime";
+import type { Transcript } from "@logician/agent-core/sessions";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";
 import type { PermissionPopup } from "../overlays/permission-popup.ts";
 import type { SlashPopup } from "../overlays/slash-popup.ts";

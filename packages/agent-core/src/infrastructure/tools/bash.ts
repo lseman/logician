@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { constants, access as fsAccess } from "node:fs/promises";
 
-import type { Tool, ToolResult } from "../../engine/core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/index.ts";
 import {
 	getShellConfig,
 	getShellEnv,

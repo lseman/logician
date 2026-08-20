@@ -3,7 +3,7 @@
 import {
 	filterSlashCommands,
 	type SlashCommandDef,
-} from "@logician/coding-agent/commands";
+} from "@logician/agent-core/commands";
 import type { LogicianTUI } from "./tui.ts";
 
 export function setupInputHandler(ctx: LogicianTUI): void {

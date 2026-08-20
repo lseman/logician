@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { EventBus } from "../extension/event-bus.ts";
-import { PiAdapter } from "../extension/adapters/pi/index.ts";
+import type { EventBus } from "../core/extension/event-bus.ts";
+import { PiAdapter } from "../core/extension/adapters/pi/index.ts";
 import type {
 	ExtensionAPI as LApi,
 	RegisteredCommand as LCommand,
@@ -9,7 +9,7 @@ import type {
 	ExtensionEventType as LEventType,
 	ExtensionEventHandler as LHandler,
 	RegisteredTool as LTool,
-} from "../extension/types.ts";
+} from "../core/extension/types.ts";
 
 // Create mock logician API
 function createMockLogicianApi(): LApi {

@@ -1,0 +1,59 @@
+import { test } from "bun:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+	buildDoctorReport,
+	formatDoctorReport,
+} from "../infrastructure/developer-tools/doctor.ts";
+
+void test("doctor reports configuration without modifying it", async () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-"));
+	const home = path.join(cwd, "home");
+	mkdirSync(home);
+	const configPath = path.join(cwd, ".logician.json");
+	const original = JSON.stringify({
+		baseUrl: "http://localhost:9000",
+		model: "test-model",
+		permissionMode: "ask",
+		mcpServers: { docs: { url: "http://localhost:3000" } },
+	});
+	writeFileSync(configPath, original, "utf8");
+
+	const report = await buildDoctorReport(cwd, { HOME: home });
+
+	assert.equal(report.config.valid, true);
+	assert.equal(report.config.path, configPath);
+	assert.equal(report.backend.baseUrl, "http://localhost:9000");
+	assert.equal(report.backend.model, "test-model");
+	assert.equal(report.permissions.mode, "ask");
+	assert.equal(report.mcp.configured, 1);
+	assert.equal(report.mcp.liveHealthChecked, false);
+	assert.equal(report.sandbox.enforced, false);
+	assert.equal(readFileSync(configPath, "utf8"), original);
+});
+
+void test("doctor returns structured invalid-config evidence", async () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-invalid-"));
+	const home = path.join(cwd, "home");
+	mkdirSync(home);
+	writeFileSync(path.join(cwd, ".logician.json"), "{invalid", "utf8");
+
+	const report = await buildDoctorReport(cwd, { HOME: home });
+
+	assert.equal(report.config.valid, false);
+	assert.match(report.config.error ?? "", /Failed to read/);
+	assert.doesNotThrow(() => JSON.stringify(report));
+});
+
+void test("doctor text states that backend and sandbox are not verified", async () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-text-"));
+	const home = path.join(cwd, "home");
+	mkdirSync(home);
+	const text = formatDoctorReport(await buildDoctorReport(cwd, { HOME: home }));
+
+	assert.match(text, /not probed/);
+	// sandbox line shows either "none" or "bubblewrap" depending on platform
+	assert.match(text, /sandbox:\s*(none|bubblewrap)/);
+});

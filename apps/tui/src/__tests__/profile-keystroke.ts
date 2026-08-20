@@ -9,7 +9,7 @@ import type {
 	AssistantMessage,
 	Turn,
 	UserMessage,
-} from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/sessions";
 import { InputBar } from "../input/input-bar.ts";
 import { Flex } from "../rendering/flex.ts";
 import { renderLayoutFrame } from "../rendering/layout.ts";

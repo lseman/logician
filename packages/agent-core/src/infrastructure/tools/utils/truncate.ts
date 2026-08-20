@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_TRUNCATION } from "../../../engine/core/types/types-config.ts";
+import { DEFAULT_TRUNCATION } from "../../../core/types/types-config.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

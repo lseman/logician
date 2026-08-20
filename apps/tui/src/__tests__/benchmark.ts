@@ -98,7 +98,7 @@ import type {
 	ToolExecution,
 	Turn,
 	UserMessage,
-} from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/sessions";
 import type { InputBar } from "../input/input-bar.ts";
 import { renderLayoutFrame } from "../rendering/layout.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";

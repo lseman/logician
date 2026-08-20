@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "@logician/coding-agent/runtime";
+import type { RuntimeEvent } from "@logician/agent-core/runtime";
 
 export type TurnPhase =
 	| "idle"

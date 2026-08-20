@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { HarnessInterventionController } from "../core/intervention-controller.ts";
-import { LoopDetector } from "../guards/loop-detector.ts";
-import { awaitsUserInput } from "../guards/response-patterns.ts";
-import { BudgetTracker } from "../hooks/builtin/budget.ts";
+import { HarnessInterventionController } from "../core/policy/intervention-controller.ts";
+import { LoopDetector } from "../infrastructure/guards/loop-detector.ts";
+import { awaitsUserInput } from "../infrastructure/guards/response-patterns.ts";
+import { BudgetTracker } from "../core/hooks/builtin/budget.ts";
 import {
 	buildBuiltinHooks,
 	COMPACTION_COOLDOWN_TURNS,
 	rewriteCommandWithRtk,
-} from "../hooks/builtin/builtin-hooks.ts";
+} from "../core/hooks/builtin/builtin-hooks.ts";
 
 // Capture the real PATH once at module load so cleanup always restores the
 // true original value, even when other tests mutate process.env.PATH.

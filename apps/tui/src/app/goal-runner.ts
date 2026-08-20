@@ -7,8 +7,8 @@ import {
 	type AgentCoreBridge,
 	GoalManager,
 	type GoalState,
-} from "@logician/coding-agent/application";
-import type { Transcript } from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/application";
+import type { Transcript } from "@logician/agent-core/sessions";
 import type { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 

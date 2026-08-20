@@ -36,19 +36,19 @@ import { join } from "node:path";
 	}
 })();
 
-import { AgentCoreBridge } from "@logician/coding-agent/application";
+import { AgentCoreBridge } from "@logician/agent-core/application";
 import {
 	buildDoctorReport,
 	formatDoctorReport,
-} from "@logician/coding-agent/developer-tools";
-import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
-import { activateProjectVirtualEnv } from "@logician/coding-agent/tools";
+} from "@logician/agent-core/developer-tools";
+import { resolveRuntimeConfig } from "@logician/agent-core/runtime";
+import { activateProjectVirtualEnv } from "@logician/agent-core/tools";
 import {
 	applyTrustChoice,
 	resolveTrust,
 	resolveTrustInfo,
 	TrustStore,
-} from "@logician/coding-agent/trust";
+} from "@logician/agent-core/trust";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
 import { LogicianTUI } from "./app/tui.ts";
 import {

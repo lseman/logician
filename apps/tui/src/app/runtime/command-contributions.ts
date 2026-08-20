@@ -1,6 +1,6 @@
-import type { AgentCoreBridge } from "@logician/coding-agent/application";
-import type { SlashCommandDef } from "@logician/coding-agent/commands";
-import type { Transcript } from "@logician/coding-agent/sessions";
+import type { AgentCoreBridge } from "@logician/agent-core/application";
+import type { SlashCommandDef } from "@logician/agent-core/commands";
+import type { Transcript } from "@logician/agent-core/sessions";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { TuiHandle } from "../../terminal/core.ts";

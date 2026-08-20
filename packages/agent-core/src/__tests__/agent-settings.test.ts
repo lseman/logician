@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { resolveAgentSettings } from "../core/agent-settings.ts";
-import type { AgentConfig } from "../types/index.ts";
+import { resolveAgentSettings } from "../core/configuration/agent-settings.ts";
+import type { AgentConfig } from "../core/types/index.ts";
 
 const baseConfig: AgentConfig = {
     baseUrl: "http://fake",

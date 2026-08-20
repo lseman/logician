@@ -1,10 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
-	throwOnValidationErrors,
-	validateConfig,
-} from "../config/config-validator.ts";
-import type { AgentConfig } from "../types/index.ts";
+	throwOnAgentConfigErrors as throwOnValidationErrors,
+	validateAgentConfig as validateConfig,
+} from "../core/configuration/config-validator.ts";
+import type { AgentConfig } from "../core/types/index.ts";
 
 function describe(_name: string, fn: () => void) {
 	fn();

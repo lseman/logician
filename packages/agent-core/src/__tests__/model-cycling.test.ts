@@ -1,9 +1,9 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import type { LLMBackend } from "../core/backend.ts";
-import { AgentHarness } from "../harness/harness.ts";
-import { clampThinkingLevel } from "../harness/model.ts";
-import type { AgentEvent } from "../types/index.ts";
+import type { LLMBackend } from "../core/provider/backend.ts";
+import { AgentHarness } from "../core/harness/agent-harness.ts";
+import { clampThinkingLevel } from "../core/harness/runtime/model.ts";
+import type { AgentEvent } from "../core/types/index.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake-model";

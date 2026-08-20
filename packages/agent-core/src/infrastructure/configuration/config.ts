@@ -15,7 +15,7 @@ import {
 	type AgentModelConfig,
 	type ThinkingLevel,
 	type TruncationConfig,
-} from "../../engine/core/types/types-config.ts";
+} from "../../core/types/types-config.ts";
 import { stripJsonComments } from "../tools/utils/json-utils.ts";
 
 /** Validated configuration with warnings collected during load. */
