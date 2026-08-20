@@ -7,6 +7,12 @@ export {
 	splitPluginArgs,
 } from "../../adapters/claude-code/plugin-runtime.ts";
 export { stripTextToolCalls } from "../../core/provider/text-tool-calls.ts";
+export {
+	PermissionManager,
+	type PermissionMode,
+	type PermissionRules,
+} from "../../core/tools/permissions.ts";
+export { ToolRegistry } from "../../core/tools/registry.ts";
 export { ariadne } from "./ariadne.ts";
 export { createAutoresearchTools } from "./autoresearch.ts";
 export { type BashDetails, bash } from "./bash.ts";
@@ -26,14 +32,8 @@ export { file_diff } from "./file-diff.ts";
 export { find } from "./find.ts";
 export { git } from "./git.ts";
 export { type ListFilesDetails, list_files } from "./list-files.ts";
-export {
-	PermissionManager,
-	type PermissionMode,
-	type PermissionRules,
-} from "./permissions.ts";
 export { read_file } from "./read-file.ts";
 export { createReadSkillTool } from "./read-skill.ts";
-export { ToolRegistry } from "./registry.ts";
 export {
 	getDefaultSandboxProfile,
 	type SandboxDetails,

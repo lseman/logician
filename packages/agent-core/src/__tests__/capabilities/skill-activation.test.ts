@@ -6,7 +6,7 @@ import {
 	SkillActivationSession,
 	selectSkillsForPrompt,
 } from "../../capabilities/skills/activation.ts";
-import type { Skill } from "../../capabilities/skills/index.ts";
+import type { Skill } from "../../capabilities/skills/loader.ts";
 
 function skill(
 	name: string,

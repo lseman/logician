@@ -28,7 +28,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { markPathIgnoredByCloudSync } from "../../infrastructure/tools/utils/path-utils.ts";
+import { markPathIgnoredByCloudSync } from "./cloud-sync.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────
 

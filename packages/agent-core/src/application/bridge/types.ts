@@ -1,16 +1,16 @@
 import type { ReasonerConfig } from "@logician/agent-blocks/reasoning";
 import type {
-	AgentConfig,
-	AgentModelConfig,
-	Tool,
-	TruncationConfig,
-} from "../../core/types/index.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
-import type { WebSearchConfig } from "../../core/types/types-config.ts";
-import type {
 	PermissionMode,
 	PermissionRules,
-} from "../../infrastructure/tools/permissions.ts";
+} from "../../core/tools/permissions.ts";
+import type {
+	AgentConfig,
+	AgentModelConfig,
+	TruncationConfig,
+} from "../../core/types/types-config.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
+import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
+import type { WebSearchConfig } from "../../core/types/types-config.ts";
 
 export type EventCallback = (event: RuntimeEvent) => void;
 export type ErrorCallback = (error: Error) => void;

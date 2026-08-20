@@ -6,7 +6,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Tool, ToolResult } from "../../core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/types-messages.ts";
 import { withFileMutationQueue } from "../filesystem/mutation-queue.ts";
 import {
 	hasBeenRead,

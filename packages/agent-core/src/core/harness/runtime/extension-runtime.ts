@@ -5,13 +5,9 @@
 // caller-supplied hooks (in that override order). Mirrors queue-ops.ts's
 // Deps pattern — the harness owns the mutable fields and supplies them here.
 
-import {
-	type ClaudeCodeHookLayer,
-	claudeToolMatcherName,
-	createClaudeCodeHookLayer,
-} from "../../../adapters/claude-code/hook-layer.ts";
+import type { ExtensionRunner } from "../../extension/runner.ts";
+import type { RegisteredTool } from "../../extension/types.ts";
 import type { LoopDetector } from "../../guards/loop-detector.ts";
-import type { ExtensionRunner, RegisteredTool } from "../../extension/index.ts";
 import { BudgetTracker } from "../../hooks/builtin/budget.ts";
 import {
 	buildBuiltinHooks,
@@ -19,13 +15,13 @@ import {
 } from "../../hooks/builtin/builtin-hooks.ts";
 import { HookBus } from "../../hooks/hook-bus.ts";
 import type { HarnessInterventionController } from "../../policy/intervention-controller.ts";
+import type { AgentConfig } from "../../types/types-config.ts";
 import type {
-	AgentConfig,
 	AgentEvent,
 	AgentHooks,
 	Message,
 	Tool,
-} from "../../types/index.ts";
+} from "../../types/types-messages.ts";
 
 export interface ExtensionRuntimeDeps {
 	getExtensionRunner: () => ExtensionRunner | undefined;
@@ -62,23 +58,6 @@ export function createExtensionRuntimeState() {
 export type ExtensionRuntimeState = ReturnType<
 	typeof createExtensionRuntimeState
 >;
-
-export function createClaudeCodeHookLayerFor(
-	deps: ExtensionRuntimeDeps,
-): ClaudeCodeHookLayer {
-	return createClaudeCodeHookLayer({
-		enabled: deps.getHooksEnabled(),
-		sessionId: deps.getSessionId(),
-		transcriptPath: deps.getTranscriptPath(),
-		cwd: deps.getCwd(),
-		getMatcherValue: toolName => {
-			const tool = deps
-				.getConfigTools()
-				?.find(candidate => candidate.name === toolName);
-			return tool?.hookAliases?.join("|") || claudeToolMatcherName(toolName);
-		},
-	});
-}
 
 function wrapExtensionTool(
 	deps: ExtensionRuntimeDeps,
@@ -155,7 +134,7 @@ export function withExtensionRuntime(
 	deps: ExtensionRuntimeDeps,
 	state: ExtensionRuntimeState,
 	config: AgentConfig,
-	pluginHookLayer?: ClaudeCodeHookLayer,
+	compatibilityHookLayer?: { hooks?: AgentHooks },
 ): AgentConfig {
 	const runner = deps.getExtensionRunner();
 	const extensionTools = runner
@@ -190,10 +169,8 @@ export function withExtensionRuntime(
 		hookBus.register(extensionHooks, { source: "extensions" });
 	}
 
-	const claudeHooks = (pluginHookLayer ?? createClaudeCodeHookLayerFor(deps))
-		.hooks;
-	if (claudeHooks) {
-		hookBus.register(claudeHooks, { source: "claude-code-compat" });
+	if (compatibilityHookLayer?.hooks) {
+		hookBus.register(compatibilityHookLayer.hooks, { source: "compatibility" });
 	}
 
 	if (config.hooks) {

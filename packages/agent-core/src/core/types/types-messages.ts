@@ -1,6 +1,4 @@
-// ── Message, Tool, Event, and Hook types ──────────────────────────────────
-// The barrel (index.ts) re-exports everything so external import sites are
-// unaffected by this file's internal organization.
+/** Messages, tools, hooks, and execution events shared by the core runtime. */
 
 import type { RunOutcomeStatus } from "../policy/execution-policy.ts";
 

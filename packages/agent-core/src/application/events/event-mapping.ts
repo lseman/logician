@@ -1,7 +1,7 @@
 // ── Agent event → bridge event shape mapping ──────────────────────────────────
 
 import { STEERING_INTERRUPT_SUMMARY } from "../../core/execution/agent-loop-runner.ts";
-import type { AgentEvent } from "../../core/types/index.ts";
+import type { AgentEvent } from "../../core/types/types-messages.ts";
 import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 
 // Translates core AgentEvent variants to their RuntimeEvent equivalent.

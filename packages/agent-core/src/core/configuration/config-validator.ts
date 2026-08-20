@@ -1,11 +1,11 @@
-import type { AgentConfig } from "../types/index.ts";
+import type { AgentConfig } from "../types/types-config.ts";
 import {
 	INFERENCE_MODE_ORDER,
 	isValidInferenceMode,
 	QUEUE_MODES,
 	THINKING_LEVELS,
 	VALID_TOOL_EXECUTION,
-} from "../types/index.ts";
+} from "../types/types-config.ts";
 
 export interface AgentConfigValidationError {
 	field: string;

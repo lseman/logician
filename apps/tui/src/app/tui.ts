@@ -8,7 +8,7 @@ import {
 	LoopManager,
 } from "@logician/agent-core/application";
 import { createSlashCommands } from "@logician/agent-core/commands";
-import { resolveRuntimeConfig } from "@logician/agent-core/runtime";
+import { resolveRuntimeConfig } from "@logician/agent-core/configuration/runtime";
 import {
 	Transcript,
 	TuiSessionService,

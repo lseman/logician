@@ -7,14 +7,14 @@ void test("thinking-level transition synchronizes runtime, local state, and stat
 	let statusLevel = "";
 	const instance = Object.create(LogicianTUI.prototype) as {
 		thinkingLevel: string;
-		bridge: { setThinkingLevel(level: string): void };
+		bridge: { updateSettings(patch: { thinkingLevel?: string }): void };
 		statusPanel: { update(info: { thinkingLevel: string }): void };
 		applyThinkingLevel(level: string): void;
 	};
 	instance.thinkingLevel = "off";
 	instance.bridge = {
-		setThinkingLevel: level => {
-			bridgeLevel = level;
+		updateSettings: patch => {
+			bridgeLevel = patch.thinkingLevel ?? "";
 		},
 	};
 	instance.statusPanel = {

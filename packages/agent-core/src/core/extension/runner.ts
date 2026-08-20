@@ -4,9 +4,11 @@
 // Exposes both an untyped EventBus for cross-extension messaging and a
 // structured typed event bus for agent lifecycle events.
 
-import type { PiRuntimePort } from "../../adapters/pi/index.ts";
-import { PiAdapter } from "../../adapters/pi/index.ts";
-import type { AgentHooks } from "../types/index.ts";
+import type { AgentHooks } from "../types/types-messages.ts";
+import type {
+	CompatibilityAdapter,
+	CompatibilityAdapterFactory,
+} from "./compatibility.ts";
 import { createExtensionContext } from "./context.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import { createExtensionState } from "./state.ts";
@@ -71,7 +73,8 @@ function createStateWrapper(extId: string): ExtensionState {
 export interface ExtensionRunnerOptions {
 	sessionId: string;
 	cwd: string;
-	piRuntime?: PiRuntimePort;
+	compatibilityAdapters?: CompatibilityAdapterFactory[];
+	compatibilityRuntime?: unknown;
 }
 
 interface HandlerEntry {
@@ -86,7 +89,7 @@ export class ExtensionRunner {
 	private commands: Array<{ command: RegisteredCommand; source: string }> = [];
 	private extensions: Array<{ def: ExtensionDefinition; unload?: () => void }> =
 		[];
-	private piAdapters: PiAdapter[] = [];
+	private compatibilityAdapters: CompatibilityAdapter[] = [];
 	private eventBus: EventBus;
 	/** Shared context for extension event handlers */
 	private extContext: ReturnType<typeof createExtensionContext>;
@@ -109,18 +112,6 @@ export class ExtensionRunner {
 	 * Detect if an extension is a Pi-style extension by inspecting its source.
 	 * Checks for TypeBox imports and @earendil-works/pi-coding-agent imports.
 	 */
-	private isPiExtension(content: string): boolean {
-		return (
-			content.includes("@earendil-works/pi-coding-agent") ||
-			content.includes("typebox") ||
-			content.includes("Type.Object") ||
-			content.includes("Type.String") ||
-			content.includes("Type.Number") ||
-			content.includes("Type.Boolean") ||
-			content.includes("Type.Array")
-		);
-	}
-
 	/**
 	 * Extract file content from a path, handling file:// URLs.
 	 */
@@ -150,14 +141,11 @@ export class ExtensionRunner {
 				// Read file content to detect Pi extensions (best-effort)
 				const content = await this.readExtensionSource(def.path);
 
-				if (
-					def.compatibility === "pi" ||
-					(def.compatibility !== "native" &&
-						content &&
-						this.isPiExtension(content))
-				) {
-					// Load as Pi extension through the adapter
-					await this.loadPiExtension(def, content);
+				const factory = this.options.compatibilityAdapters?.find(candidate =>
+					candidate.matches(def, content),
+				);
+				if (factory) {
+					await this.loadCompatibilityExtension(def, factory);
 				} else {
 					// Load as native Logician extension
 					await this.loadNativeExtension(def);
@@ -174,33 +162,20 @@ export class ExtensionRunner {
 	/**
 	 * Load a Pi extension through the PiAdapter.
 	 */
-	private async loadPiExtension(
+	private async loadCompatibilityExtension(
 		def: ExtensionDefinition,
-		_content: string | null,
+		factory: CompatibilityAdapterFactory,
 	): Promise<void> {
 		// Give the adapter the same live registration interface native extensions
 		// use. Pi contributions then enter the actual tool/command registries at
 		// factory time instead of being stranded in adapter-local bookkeeping.
 		const logicianApi = this.createAPI(def);
-		const adapter = new PiAdapter(
-			logicianApi,
-			{
-				ui: noopUI,
-				state: {
-					get: async () => undefined,
-					set: async () => {},
-					delete: async () => {},
-					keys: async () => [],
-				},
-				cwd: this.adapterCwd,
-				sessionId: this.adapterSessionId,
-			},
-			{
-				sessionId: this.adapterSessionId,
-				cwd: this.adapterCwd,
-				runtime: this.options.piRuntime,
-			},
-		);
+		const adapter = factory.create({
+			api: logicianApi,
+			cwd: this.adapterCwd,
+			sessionId: this.adapterSessionId,
+			runtime: this.options.compatibilityRuntime,
+		});
 
 		try {
 			const mod = await import(
@@ -217,7 +192,7 @@ export class ExtensionRunner {
 			const piApi = adapter.getApi();
 			factory(piApi);
 
-			this.piAdapters.push(adapter);
+			this.compatibilityAdapters.push(adapter);
 			this.extensions.push({ def, unload: logicianApi.unload });
 			console.log(
 				`[logician] loaded Pi extension "${def.name}" with ${adapter.getRegisteredTools().length} tool(s) and ${adapter.getRegisteredCommands().length} command(s)`,
@@ -254,7 +229,7 @@ export class ExtensionRunner {
 	 */
 	setLogicianApi(_api: ExtensionAPI): void {
 		// Update all Pi adapters with the real API
-		for (const _adapter of this.piAdapters) {
+		for (const _adapter of this.compatibilityAdapters) {
 			// Re-create with real API (adapters store reference, not value)
 			// For now, just log — full re-binding requires a more sophisticated approach
 			console.debug(
@@ -362,7 +337,7 @@ export class ExtensionRunner {
 	hasHandlers(event: ExtensionEventType): boolean {
 		return (
 			(this.handlers.get(event)?.length ?? 0) > 0 ||
-			this.piAdapters.some(adapter => adapter.hasHandlers(event))
+			this.compatibilityAdapters.some(adapter => adapter.hasHandlers(event))
 		);
 	}
 
@@ -397,7 +372,7 @@ export class ExtensionRunner {
 
 	/** Get hooks to wire into the agent runner. */
 	getHooks(): AgentHooks | undefined {
-		if (this.handlers.size === 0 && this.piAdapters.length === 0)
+		if (this.handlers.size === 0 && this.compatibilityAdapters.length === 0)
 			return undefined;
 
 		const hooks: AgentHooks = {};
@@ -435,7 +410,7 @@ export class ExtensionRunner {
 			} as unknown as ExtensionEvent;
 			const result = await this.emit(event);
 			let piArgs = args;
-			for (const adapter of this.piAdapters) {
+			for (const adapter of this.compatibilityAdapters) {
 				const piResult = await adapter.emitToolCall({
 					toolCallId: toolCall.id,
 					toolName: toolCall.name,
@@ -521,7 +496,7 @@ export class ExtensionRunner {
 				content: [{ type: "text", text: result }],
 				isError,
 			};
-			for (const adapter of this.piAdapters) {
+			for (const adapter of this.compatibilityAdapters) {
 				piResult = await adapter.emitToolResult(piResult);
 			}
 			const content = piResult.content.map(part => part.text).join("\n");
@@ -552,7 +527,7 @@ export class ExtensionRunner {
 		this.commands.length = 0;
 		this.eventBus.clear();
 		this.extContext = createExtensionContext();
-		this.piAdapters.length = 0;
+		this.compatibilityAdapters.length = 0;
 	}
 
 	/**
@@ -564,7 +539,7 @@ export class ExtensionRunner {
 		let combinedResult = nativeResult;
 
 		// Also emit to all Pi adapters
-		for (const adapter of this.piAdapters) {
+		for (const adapter of this.compatibilityAdapters) {
 			const result = await adapter.emitFromLogician(event);
 			if (result.messages || result.systemPrompt) {
 				combinedResult = {
@@ -581,13 +556,13 @@ export class ExtensionRunner {
 
 	/** Get the number of loaded Pi extensions. */
 	getPiExtensionCount(): number {
-		return this.piAdapters.length;
+		return this.compatibilityAdapters.length;
 	}
 
 	/** Get all Pi-registered tools from adapters. */
 	getPiTools(): Array<{ name: string; description: string }> {
 		const tools: Array<{ name: string; description: string }> = [];
-		for (const adapter of this.piAdapters) {
+		for (const adapter of this.compatibilityAdapters) {
 			for (const tool of adapter.getRegisteredTools()) {
 				tools.push({ name: tool.name, description: tool.description });
 			}
@@ -598,7 +573,7 @@ export class ExtensionRunner {
 	/** Get all Pi-registered commands from adapters. */
 	getPiCommands(): Array<{ name: string; description?: string }> {
 		const commands: Array<{ name: string; description?: string }> = [];
-		for (const adapter of this.piAdapters) {
+		for (const adapter of this.compatibilityAdapters) {
 			for (const cmd of adapter.getRegisteredCommands()) {
 				commands.push({ name: cmd.name, description: cmd.description });
 			}
@@ -615,7 +590,7 @@ export class ExtensionRunner {
 		eventType: ExtensionEventType,
 		context: ExtensionEventContext,
 	): Promise<{ messages?: unknown[]; systemPrompt?: string } | undefined> {
-		if (this.piAdapters.length === 0) return undefined;
+		if (this.compatibilityAdapters.length === 0) return undefined;
 
 		const event: ExtensionEvent = {
 			type: eventType,
@@ -626,7 +601,7 @@ export class ExtensionRunner {
 		let mergedMessages: unknown[] | undefined;
 		let mergedSystemPrompt: string | undefined;
 
-		for (const adapter of this.piAdapters) {
+		for (const adapter of this.compatibilityAdapters) {
 			const result = await adapter.emitFromLogician(event as any);
 			if (result?.messages) mergedMessages = result.messages;
 			if (result?.systemPrompt) mergedSystemPrompt = result.systemPrompt;
@@ -652,7 +627,7 @@ export class ExtensionRunner {
 		text?: string;
 		images?: unknown[];
 	} | null> {
-		for (const adapter of this.piAdapters) {
+		for (const adapter of this.compatibilityAdapters) {
 			const result = await adapter.emitInputEvent(text, images, source);
 			if (result) return result;
 		}
@@ -672,7 +647,7 @@ export class ExtensionRunner {
 		result?: { output: string; exitCode: number; cancelled: boolean };
 		operations?: unknown;
 	} | null> {
-		for (const adapter of this.piAdapters) {
+		for (const adapter of this.compatibilityAdapters) {
 			const result = await adapter.emitUserBashEvent(
 				command,
 				excludeFromContext,
@@ -691,7 +666,7 @@ export class ExtensionRunner {
 		trusted: "yes" | "no" | "undecided";
 		remember?: boolean;
 	} | null> {
-		for (const adapter of this.piAdapters) {
+		for (const adapter of this.compatibilityAdapters) {
 			const result = await adapter.emitProjectTrustEvent(cwd);
 			if (result) return result;
 		}

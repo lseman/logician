@@ -4,7 +4,8 @@
 
 import type { LLMBackend } from "../../provider/backend.ts";
 import { convertToChatFormat } from "../../provider/messages.ts";
-import type { Message, ThinkingLevel } from "../../types/index.ts";
+import type { ThinkingLevel } from "../../types/types-config.ts";
+import type { Message } from "../../types/types-messages.ts";
 import {
 	computeFileLists,
 	extractFileOpsFromMessages,

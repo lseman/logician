@@ -19,7 +19,7 @@ import type {
 	BranchInfo,
 	BranchSummaryData,
 } from "../../session/summaries/types.ts";
-import type { Message } from "../../types/index.ts";
+import type { Message } from "../../types/types-messages.ts";
 import {
 	type Branch,
 	forkBranch,

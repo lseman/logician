@@ -39,7 +39,7 @@ import type {
 	ShouldStopAfterTurnContext,
 	TransformContext,
 	TransformContextResult,
-} from "../types/index.ts";
+} from "../types/types-messages.ts";
 
 export type HookEventName = keyof AgentHooks;
 
@@ -503,7 +503,7 @@ export class HookBus {
 		fn: (signal: AbortSignal) => T | Promise<T>,
 		event: HookEventName,
 		source: string | undefined,
-		id: string,
+		_id: string,
 		parentSignal?: AbortSignal,
 	): Promise<T | undefined> {
 		const controller = new AbortController();

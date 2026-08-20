@@ -8,7 +8,7 @@ import { constants, access as fsAccess, rm as fsRm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { Tool, ToolResult } from "../../core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/types-messages.ts";
 import { getShellConfig, getShellEnv, killProcessTree } from "./utils/shell.ts";
 import {
 	DEFAULT_MAX_BYTES,

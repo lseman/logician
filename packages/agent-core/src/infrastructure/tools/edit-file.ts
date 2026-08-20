@@ -5,7 +5,7 @@
 // untouched regions are never rewritten) → line-trimmed with indentation re-application.
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
-import type { Tool, ToolResult } from "../../core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/types-messages.ts";
 import { withFileMutationQueue } from "../filesystem/mutation-queue.ts";
 import {
 	hasBeenRead,

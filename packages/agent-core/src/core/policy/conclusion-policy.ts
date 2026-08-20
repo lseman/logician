@@ -1,8 +1,5 @@
-import {
-	awaitsUserInput,
-	looksComplete,
-} from "../guards/response-patterns.ts";
-import type { AgentEventSink, Message } from "../types/index.ts";
+import { awaitsUserInput, looksComplete } from "../guards/response-patterns.ts";
+import type { AgentEventSink, Message } from "../types/types-messages.ts";
 
 export function lastAssistantContent(messages: Message[]): string {
 	const assistant = [...messages]
@@ -23,7 +20,7 @@ export async function emitConclusion(
 	messages: Message[],
 	iteration: number,
 	maxIterations: number,
-	hadFollowUps: boolean,
+	_hadFollowUps: boolean,
 ): Promise<void> {
 	const text = lastAssistantContent(messages);
 	const hadTools = lastHadToolCalls(messages);

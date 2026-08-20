@@ -4,7 +4,7 @@ import {
 	throwOnAgentConfigErrors as throwOnValidationErrors,
 	validateAgentConfig as validateConfig,
 } from "../../core/configuration/config-validator.ts";
-import type { AgentConfig } from "../../core/types/index.ts";
+import type { AgentConfig } from "../../core/types/types-config.ts";
 
 function describe(_name: string, fn: () => void) {
 	fn();

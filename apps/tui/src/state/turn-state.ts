@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "@logician/agent-core/runtime";
+import type { RuntimeEvent } from "@logician/agent-core/events";
 
 export type TurnPhase =
 	| "idle"
@@ -25,6 +25,22 @@ export const INITIAL_TURN_STATE: TurnState = {
 	runningTools: 0,
 	runningToolIds: [],
 };
+
+/** Mark an accepted submission busy before the bridge assigns its turn id. */
+export function beginPendingTurn(
+	state: TurnState,
+	now = Date.now(),
+): TurnState {
+	return {
+		...state,
+		phase: "thinking",
+		turnId: undefined,
+		runningTools: 0,
+		runningToolIds: [],
+		startedAt: now,
+		settledAt: undefined,
+	};
+}
 
 function toolCallId(event: RuntimeEvent): string | undefined {
 	if (
@@ -139,20 +155,9 @@ export function reduceTurnState(
 			};
 		case "phase":
 			if (event.state === "ready") {
-				return state.startedAt
-					? {
-							...state,
-							phase: "complete",
-							runningTools: 0,
-							runningToolIds: [],
-							settledAt: now,
-						}
-					: {
-							...state,
-							phase: "idle",
-							runningTools: 0,
-							runningToolIds: [],
-						};
+				// `ready` also describes bridge initialization and harness-idle
+				// transitions. Only turn_end is authoritative for turn completion.
+				return state;
 			}
 			if (event.state === "error") {
 				return {

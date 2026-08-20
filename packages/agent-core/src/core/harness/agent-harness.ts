@@ -4,10 +4,6 @@
 // nextTurn queues drained at save points.
 //
 
-import type { ClaudeCodeHookLayer } from "../../adapters/claude-code/hook-layer.ts";
-import { LoopDetector } from "../guards/loop-detector.ts";
-import { OutputGuard } from "../guards/output-guard.ts";
-import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
 import type { CompactionSettings } from "../compaction/engine.ts";
 import {
 	runCompaction,
@@ -19,7 +15,9 @@ import {
 	type RunAgentLoopConfig,
 	runAgentLoop,
 } from "../execution/agent-loop-runner.ts";
-import type { ExtensionRunner } from "../extension/index.ts";
+import type { ExtensionRunner } from "../extension/runner.ts";
+import { LoopDetector } from "../guards/loop-detector.ts";
+import { OutputGuard } from "../guards/output-guard.ts";
 import { HarnessInterventionController } from "../policy/intervention-controller.ts";
 import type { LLMBackend } from "../provider/backend.ts";
 import {
@@ -37,27 +35,30 @@ import {
 	type HarnessPhase,
 	reduceRuntimeState,
 } from "../state/runtime-state.ts";
+import { ToolRegistry } from "../tools/registry.ts";
 import type {
 	AgentConfig,
+	AgentModelConfig,
+	QueueMode,
+	ThinkingLevel,
+} from "../types/types-config.ts";
+import type {
 	AgentEvent,
 	AgentHooks,
-	AgentModelConfig,
 	BeforeCompactContext,
 	BeforeCompactResult,
 	Message,
-	QueueMode,
-	ThinkingLevel,
 	Tool,
-} from "../types/index.ts";
+} from "../types/types-messages.ts";
 import {
 	composeHarnessConfig,
 	HarnessConfigurationError,
 } from "./internal/configuration.ts";
 import { HarnessObservation } from "./internal/observation.ts";
-import { type DeliveryMode, MessageQueue } from "./queue/message-queue.ts";
+import { HarnessQueueController } from "./internal/queue-controller.ts";
+import { HarnessTurnController } from "./internal/turn-controller.ts";
 import type { ExtensionRuntimeDeps } from "./runtime/extension-runtime.ts";
 import {
-	createClaudeCodeHookLayerFor,
 	createExtensionRuntimeState,
 	runExtensionBeforeAgentStart as runExtensionBeforeAgentStartHelper,
 	withExtensionRuntime as withExtensionRuntimeHelper,
@@ -82,7 +83,9 @@ import {
 import type {
 	AbortResult,
 	AgentHarnessOptions,
-	HarnessModule,
+	HarnessCompatibilityHookFactory,
+	HarnessCompatibilityHookLayer,
+	HarnessCompatibilityLifecycle,
 	HarnessObserver,
 	HarnessQueues,
 	HarnessTurnSnapshot,
@@ -119,10 +122,10 @@ export class AgentHarness {
 	private _phase: HarnessPhase = "idle";
 	private runtime: AgentRuntimeState = createRuntimeState();
 	private idleTools: ToolRegistry;
-	private abortController: AbortController | null = null;
+	private readonly turn = new HarnessTurnController();
 	private loopConfig: AgentConfig | null = null;
 	private conversation = new ConversationState();
-	private queue: MessageQueue;
+	private queue: HarnessQueueController;
 	private loopDetector: LoopDetector;
 	// Escalation/cooldown state for the built-in safeguard hooks. Owned here
 	// (not inside buildBuiltinHooks) because withExtensionRuntime() rebuilds
@@ -154,9 +157,9 @@ export class AgentHarness {
 		tokens: 0,
 		startedAt: undefined as number | undefined,
 	};
-	private _runPromise?: Promise<void>;
-	private _runResolve?: () => void;
 	private _extensionRunner?: ExtensionRunner;
+	private readonly compatibilityHookFactory?: HarnessCompatibilityHookFactory;
+	private readonly compatibilityLifecycle?: HarnessCompatibilityLifecycle;
 	private _beforeAgentStart?: (
 		promptText: string,
 	) =>
@@ -185,6 +188,8 @@ export class AgentHarness {
 		this.cwd = options.cwd;
 		this.maxIterations = options.maxIterations;
 		this._extensionRunner = options.extensionRunner;
+		this.compatibilityHookFactory = options.compatibilityHookFactory;
+		this.compatibilityLifecycle = options.compatibilityLifecycle;
 		this.loopDetector = new LoopDetector({
 			duplicateThreshold: options.config.duplicateToolThreshold,
 			failureThreshold: options.config.toolFailureLoopThreshold,
@@ -206,12 +211,13 @@ export class AgentHarness {
 			},
 		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
-		this.queue = new MessageQueue({
-			steeringMode: (options.config.steeringQueueMode ??
-				"one-at-a-time") as DeliveryMode,
-			followUpMode: (options.config.followUpQueueMode ??
-				"one-at-a-time") as DeliveryMode,
-		});
+		this.queue = new HarnessQueueController(
+			{
+				steeringMode: options.config.steeringQueueMode ?? "one-at-a-time",
+				followUpMode: options.config.followUpQueueMode ?? "one-at-a-time",
+			},
+			queues => this.emitQueueChange(queues),
+		);
 		this.observation = new HarnessObservation(
 			(options.modules ?? []).flatMap(module => module.observers ?? []),
 		);
@@ -256,7 +262,7 @@ export class AgentHarness {
 
 	async waitForIdle(): Promise<void> {
 		if (this._phase === "idle") return;
-		await this._runPromise;
+		await this.turn.wait();
 	}
 
 	setBeforeAgentStart(
@@ -300,13 +306,8 @@ export class AgentHarness {
 	}
 
 	private endTurn(): void {
-		this.abortController = null;
 		this.queue.clearCurrentTurn();
-		this.emitQueueChange();
-		this._runResolve?.();
-		this._runPromise = undefined;
-		this._runResolve = undefined;
-		const nextTurnCount = this.queue.getNextTurn().length;
+		const nextTurnCount = this.queue.snapshot().nextTurn.length;
 		this.observation.settled(nextTurnCount);
 		this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 	}
@@ -372,34 +373,32 @@ export class AgentHarness {
 	 * and history reconstruction — is identical, so it lives here once.
 	 */
 	private async runTurn(request: TurnRequest): Promise<Message[]> {
-		this._runPromise = new Promise<void>(resolve => {
-			this._runResolve = resolve;
-		});
-
-		return this.runInPhase("turn", request.kind, async () => {
-			try {
-				const signal = await this.beginTurn(request);
-				const snapshot = await this.createSnapshot(request, signal);
-				let compactedContext: Message[] | undefined;
-				const newMessages = await this.runLoop(request, snapshot, messages => {
-					compactedContext = messages;
-				});
-				return this.commitResult(snapshot, newMessages, compactedContext);
-			} finally {
-				this.endTurn();
-			}
-		});
+		return this.turn.run(
+			signal =>
+				this.runInPhase("turn", request.kind, async () => {
+					await this.beginTurn(request);
+					const snapshot = await this.createSnapshot(request, signal);
+					let compactedContext: Message[] | undefined;
+					const newMessages = await this.runLoop(
+						request,
+						snapshot,
+						messages => {
+							compactedContext = messages;
+						},
+					);
+					return this.commitResult(snapshot, newMessages, compactedContext);
+				}),
+			() => this.endTurn(),
+		);
 	}
 
 	/** Task/checkpoint setup that must happen before a snapshot is created. */
-	private async beginTurn(_request: TurnRequest): Promise<AbortSignal> {
-		this.abortController = new AbortController();
+	private async beginTurn(_request: TurnRequest): Promise<void> {
 		this.conversation.checkpoint();
 
 		if (!this._hasStartedSession) {
 			await this.emitSessionStart("startup");
 		}
-		return this.abortController.signal;
 	}
 
 	/** Run the loop against the prepared snapshot. */
@@ -473,10 +472,10 @@ export class AgentHarness {
 	): Promise<HarnessTurnSnapshot> {
 		let initialMessages: Message[] = [...this.conversation.history];
 		let systemPrompt: string | undefined;
-		let pluginHookLayer: ClaudeCodeHookLayer | undefined;
+		let pluginHookLayer: HarnessCompatibilityHookLayer | undefined;
 
 		if (request.kind === "prompt") {
-			pluginHookLayer = this.createClaudeCodeHookLayer();
+			pluginHookLayer = this.createCompatibilityHookLayer();
 			const pluginPromptMessages = await pluginHookLayer.userPromptMessages(
 				request.text,
 			);
@@ -566,13 +565,23 @@ export class AgentHarness {
 		);
 	}
 
-	private createClaudeCodeHookLayer(): ClaudeCodeHookLayer {
-		return createClaudeCodeHookLayerFor(this.extensionRuntimeDeps);
+	private createCompatibilityHookLayer(): HarnessCompatibilityHookLayer {
+		return (
+			this.compatibilityHookFactory?.({
+				enabled: this._hooksEnabled,
+				sessionId: this._sessionId ?? "",
+				transcriptPath: this._transcriptPath ?? "",
+				cwd: this.cwd ?? process.cwd(),
+				tools: this.config.tools ?? [],
+			}) ?? {
+				userPromptMessages: async () => [],
+			}
+		);
 	}
 
 	private withExtensionRuntime(
 		config: AgentConfig,
-		pluginHookLayer?: ClaudeCodeHookLayer,
+		pluginHookLayer?: HarnessCompatibilityHookLayer,
 	): AgentConfig {
 		return withExtensionRuntimeHelper(
 			this.extensionRuntimeDeps,
@@ -696,14 +705,9 @@ export class AgentHarness {
 		if (this._phase !== "turn") {
 			throw new HarnessBusyError("steer", this._phase, "turn");
 		}
-		if (this.config.steeringInterrupt) {
-			this.queue.nextTurn(text);
-			this.emitQueueChange();
-			this.abortController?.abort(createSteeringInterruptReason());
-			return;
-		}
-		this.queue.steering(text);
-		this.emitQueueChange();
+		this.queue.steer(text, !!this.config.steeringInterrupt, () =>
+			this.turn.abort(createSteeringInterruptReason()),
+		);
 	}
 
 	/** Promote queued steering into the immediate next turn and interrupt the current step. */
@@ -711,48 +715,27 @@ export class AgentHarness {
 		if (this._phase !== "turn") {
 			throw new HarnessBusyError("flush steering", this._phase, "turn");
 		}
-		const queued = this.queue.dequeueSteering();
-		if (queued.length === 0) return 0;
-		for (const message of queued) {
-			this.queue.nextTurn(message.content);
-		}
-		this.emitQueueChange();
-		this.abortController?.abort(createSteeringInterruptReason());
-		return queued.length;
+		return this.queue.flushSteering(() =>
+			this.turn.abort(createSteeringInterruptReason()),
+		);
 	}
 
 	dropQueuedMessage(displayIndex: number): string | undefined {
-		const queue = this.queue;
-		const target = [...queue.getSteering(), ...queue.getFollowUp()][
-			displayIndex
-		];
-		if (!target) return undefined;
-		const removed = queue.remove(target.id);
-		if (removed) this.emitQueueChange();
-		return removed?.content;
+		return this.queue.drop(displayIndex);
 	}
 
 	followUp(text: string): void {
 		this.queue.followUp(text);
-		this.emitQueueChange();
 	}
 
 	nextTurn(text: string): void {
 		this.queue.nextTurn(text);
-		this.emitQueueChange();
 	}
 
 	async abort(): Promise<AbortResult> {
-		const queue = this.queue;
-		const result: AbortResult = {
-			clearedSteering: queue.getSteering().map(message => message.content),
-			clearedFollowUp: queue.getFollowUp().map(message => message.content),
-			clearedNextTurn: [],
-		};
+		const result = this.queue.abortSnapshot();
 		this.runtime = { ...this.runtime, abortRequested: true };
-		this.abortController?.abort();
-		queue.clearCurrentTurn();
-		this.emitQueueChange();
+		this.turn.abort();
 		await this.waitForIdle();
 		this.emitToSubscribers({ type: "abort", ...result });
 		await this.emitSessionEnd("abort");
@@ -762,23 +745,14 @@ export class AgentHarness {
 	// ── Queue state ────────────────────────────────────────────────────────
 
 	getQueues(): HarnessQueues {
-		const queue = this.queue;
-		return {
-			steering: queue.getSteering().map(message => message.content),
-			followUp: queue.getFollowUp().map(message => message.content),
-			nextTurn: queue.getNextTurn().map(message => message.content),
-		};
+		return this.queue.snapshot();
 	}
 
 	clearQueues(): HarnessQueues {
-		const cleared = this.getQueues();
-		this.queue.clear();
-		this.emitQueueChange();
-		return cleared;
+		return this.queue.clear();
 	}
 
-	private emitQueueChange(): void {
-		const queues = this.getQueues();
+	private emitQueueChange(queues: HarnessQueues = this.getQueues()): void {
 		this.observation.queue(queues);
 		this.emitToSubscribers({
 			type: "queue_update",
@@ -797,19 +771,19 @@ export class AgentHarness {
 	}
 
 	setSteeringMode(mode: QueueMode): void {
-		this.queue.setMode("steering", mode as DeliveryMode);
+		this.queue.setMode("steering", mode);
 	}
 
 	getSteeringMode(): QueueMode {
-		return this.queue.getMode("steering") as QueueMode;
+		return this.queue.getMode("steering");
 	}
 
 	setFollowUpMode(mode: QueueMode): void {
-		this.queue.setMode("followUp", mode as DeliveryMode);
+		this.queue.setMode("followUp", mode);
 	}
 
 	getFollowUpMode(): QueueMode {
-		return this.queue.getMode("followUp") as QueueMode;
+		return this.queue.getMode("followUp");
 	}
 
 	// ── Plugin lifecycle hooks ─────────────────────────────────────────────
@@ -836,12 +810,18 @@ export class AgentHarness {
 			this._hooksEnabled,
 			this.hookContext(),
 			source,
+			this.compatibilityLifecycle,
 		);
 		if (started) this._hasStartedSession = true;
 	}
 
 	private async emitSessionEnd(reason: string = "other"): Promise<void> {
-		await emitSessionEndHelper(this._hooksEnabled, this.hookContext(), reason);
+		await emitSessionEndHelper(
+			this._hooksEnabled,
+			this.hookContext(),
+			reason,
+			this.compatibilityLifecycle,
+		);
 	}
 
 	private async emitPreCompact(
@@ -852,11 +832,16 @@ export class AgentHarness {
 			this.hookContext(),
 			this.config.hooks?.beforeCompact,
 			ctx,
+			this.compatibilityLifecycle,
 		);
 	}
 
 	private async emitPostCompact(): Promise<void> {
-		await emitPostCompactHelper(this._hooksEnabled, this.hookContext());
+		await emitPostCompactHelper(
+			this._hooksEnabled,
+			this.hookContext(),
+			this.compatibilityLifecycle,
+		);
 	}
 
 	// ── Auto-compaction ────────────────────────────────────────────────────

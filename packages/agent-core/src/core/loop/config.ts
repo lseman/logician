@@ -2,7 +2,8 @@ import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
 import type { OutputGuard } from "../guards/output-guard.ts";
 import type { HarnessInterventionController } from "../policy/intervention-controller.ts";
 import type { LLMBackend } from "../provider/backend.ts";
-import type { AgentConfig, Message } from "../types/index.ts";
+import type { AgentConfig } from "../types/types-config.ts";
+import type { Message } from "../types/types-messages.ts";
 
 /** Configuration understood by the agent execution mechanism. */
 export type AgentLoopOptions = Pick<

@@ -1,7 +1,7 @@
 // ── web_fetch tool ───────────────────────────────────────────────────────────────
 // Fetch and extract readable content from a web page.
 
-import type { Tool, ToolContext } from "../../core/types/index.ts";
+import type { Tool, ToolContext } from "../../core/types/types-messages.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./utils/truncate.ts";
 
 export const web_fetch: Tool = {

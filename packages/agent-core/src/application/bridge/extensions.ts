@@ -1,20 +1,18 @@
-// ── ExtensionManager ─────────────────────────────────────────────────────────
-// Owns extension lifecycle: loading, discovery, reloading, Pi event emission,
-// and plugin command loading. Extracted from AgentCoreBridge.
+/** Owns extension discovery, lifecycle, compatibility, and contributed commands. */
 
 import {
 	readdir as readdirAsync,
 	readFile as readFileAsync,
 } from "node:fs/promises";
 import path from "node:path";
-import type { Skill } from "../../capabilities/skills/index.ts";
 import {
-	type ExtensionDefinition,
-	ExtensionRunner,
-	type ExtensionRunnerOptions,
-	loadExtensions,
-} from "../../core/extension/index.ts";
-import { parseFrontmatter } from "../../infrastructure/tools/index.ts";
+	type PiRuntimePort,
+	piCompatibilityAdapter,
+} from "../../adapters/pi/index.ts";
+import type { Skill } from "../../capabilities/skills/loader.ts";
+import { loadExtensions } from "../../core/extension/loader.ts";
+import { ExtensionRunner } from "../../core/extension/runner.ts";
+import { parseFrontmatter } from "../../infrastructure/tools/utils/frontmatter.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────
 
@@ -24,7 +22,7 @@ export interface ExtensionManagerOptions {
 	extensionDirs?: { user?: string; paths?: string[] };
 	projectTrusted: boolean;
 	/** Pi runtime callbacks the runner needs at call time. */
-	piRuntime: ExtensionRunnerOptions["piRuntime"];
+	piRuntime: PiRuntimePort;
 }
 
 // ── ExtensionManager class ─────────────────────────────────────────────────────
@@ -33,7 +31,6 @@ export class ExtensionManager {
 	private _runner: ExtensionRunner | null = null;
 	private extensionDirs?: { user?: string; paths?: string[] };
 	private loadPromise: Promise<void> = Promise.resolve();
-	private loadedExtensions: ExtensionDefinition[] = [];
 
 	constructor(private readonly opts: ExtensionManagerOptions) {}
 
@@ -54,7 +51,8 @@ export class ExtensionManager {
 		this._runner = new ExtensionRunner({
 			sessionId: this.opts.sessionId,
 			cwd: this.opts.cwd,
-			piRuntime: this.opts.piRuntime,
+			compatibilityAdapters: [piCompatibilityAdapter],
+			compatibilityRuntime: this.opts.piRuntime,
 		});
 
 		const extResult = loadExtensions({
@@ -66,7 +64,6 @@ export class ExtensionManager {
 		this.extensionDirs = this.opts.extensionDirs;
 
 		if (extResult.extensions.length > 0) {
-			this.loadedExtensions = extResult.extensions;
 			this.loadPromise = this._runner
 				.load(extResult.extensions)
 				.catch(err => console.error("[logician] extension load error:", err));
@@ -80,8 +77,6 @@ export class ExtensionManager {
 		// Destroy old runner
 		this._runner.destroy();
 		this._runner = null;
-		this.loadedExtensions = [];
-
 		// Re-initialize
 		await this.initialize();
 	}

@@ -9,7 +9,7 @@ import type {
 	CompactionSummaryMessage,
 	CustomMessage,
 	Message,
-} from "../types/index.ts";
+} from "../types/types-messages.ts";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 

@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import type { Tool, ToolResult } from "../../core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/types-messages.ts";
 import { ensureTool } from "./external-tools.ts";
 import { ensureInsideCwd, resolvePath } from "./utils/path-utils.ts";
 import { formatSize, truncateHead, truncateLine } from "./utils/truncate.ts";

@@ -3,12 +3,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { Tool } from "../../core/types/index.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
 import { updateConfigFile } from "../../infrastructure/configuration/config.ts";
-import {
-	parseJsonWithComments,
-	runPluginBackend,
-} from "../../infrastructure/tools/index.ts";
+import { runPluginBackend } from "../../adapters/claude-code/plugin-runtime.ts";
+import { parseJsonWithComments } from "../../infrastructure/tools/utils/json-utils.ts";
 import {
 	allocateMcpToolName,
 	createMcpClient,

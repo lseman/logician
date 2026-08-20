@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { STEERING_INTERRUPT_SUMMARY } from "@logician/agent-core";
+import { STEERING_INTERRUPT_SUMMARY } from "../../core/execution/agent-loop-runner.ts";
 import { mapAgentEvent } from "../../application/events/event-mapping.ts";
 
 void test("context updates preserve unavailable provider telemetry", () => {

@@ -17,7 +17,7 @@
 //   ask         — read-only tools allowed; everything else asks
 //   plan        — read-only tools allowed; everything else denied
 
-import type { Tool, ToolCall } from "../../core/types/index.ts";
+import type { Tool, ToolCall } from "../types/types-messages.ts";
 
 export type PermissionMode = "acceptAll" | "acceptEdits" | "ask" | "plan";
 

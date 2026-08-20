@@ -190,7 +190,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.mcpManager = {
+	internal.toolRouter.mcpManager = {
 		load: async () => ({
 			tools: [],
 			servers: 0,
@@ -219,9 +219,9 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal._skillsContext =
+	internal.toolRouter.skillsContext =
 		"<available-skills>skill catalog</available-skills>";
-	internal.mcpManager = {
+	internal.toolRouter.mcpManager = {
 		load: async () => ({
 			tools: [],
 			servers: 0,
@@ -422,7 +422,7 @@ void test("loaded skills are exposed as a persistent catalog, not scored per tur
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal._skillsContext =
+	internal.toolRouter.skillsContext =
 		"<available-skills>\n" +
 		'  <skill name="typescript-code-review" slash_command="/typescript-code-review" />\n' +
 		"</available-skills>";

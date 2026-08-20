@@ -7,9 +7,9 @@
 
 import { spawnSync } from "node:child_process";
 import { getTasks } from "@logician/agent-blocks/tasks/todo.ts";
+import { compactToFit } from "../../compaction/engine.ts";
 import type { LoopDetector } from "../../guards/loop-detector.ts";
 import { awaitsUserInput } from "../../guards/response-patterns.ts";
-import { compactToFit } from "../../compaction/engine.ts";
 import { resolveExecutionPolicy } from "../../policy/execution-policy.ts";
 import { HarnessInterventionController } from "../../policy/intervention-controller.ts";
 import {
@@ -22,12 +22,12 @@ import {
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
 } from "../../session/file-checkpoints.ts";
+import type { AgentConfig } from "../../types/types-config.ts";
 import type {
-	AgentConfig,
 	AgentHooks,
 	CompactableMessage,
 	Message,
-} from "../../types/index.ts";
+} from "../../types/types-messages.ts";
 import { BudgetTracker } from "./budget.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the

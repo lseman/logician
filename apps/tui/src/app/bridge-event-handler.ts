@@ -3,7 +3,7 @@
 // bridge-event handling with overlay-opening side effects for
 // permission/question requests.
 
-import { formatContextSize } from "@logician/agent-core";
+import { formatContextSize } from "@logician/agent-core/formatting";
 import type {
 	AgentCoreBridge,
 	GoalManager,
@@ -12,7 +12,7 @@ import type {
 import {
 	isTranscriptEvent,
 	type RuntimeEvent,
-} from "@logician/agent-core/runtime";
+} from "@logician/agent-core/events";
 import type { Transcript } from "@logician/agent-core/sessions";
 import type { AutoresearchSession } from "@logician/autoresearch";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";

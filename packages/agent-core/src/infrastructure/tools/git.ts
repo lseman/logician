@@ -3,7 +3,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Tool } from "../../core/types/index.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
 
 const execFileAsync = promisify(execFile);
 

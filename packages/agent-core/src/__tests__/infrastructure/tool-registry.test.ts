@@ -1,8 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { microCompactCompactableMessages } from "../../core/compaction/engine.ts";
-import type { Tool } from "../../core/types/index.ts";
-import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
+import { ToolRegistry } from "../../core/tools/registry.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
 
 function makeTool(overrides: Partial<Tool> & { name: string }): Tool {
 	return {
@@ -198,4 +198,41 @@ void test("micro-compaction spares recent messages and user prompts", () => {
 	for (let i = 2; i < result.messages.length; i++) {
 		assert.equal(String(result.messages[i].content).length, 10_002);
 	}
+});
+
+void test("provider tool definitions normalize external JSON Schema dialects", () => {
+	const registry = new ToolRegistry();
+	registry.register({
+		name: "external_tool",
+		description: "External tool",
+		parameters: {
+			$schema: "https://json-schema.org/draft/2020-12/schema",
+			$defs: { value: { type: ["string", "null"], format: "uri" } },
+			type: "object",
+			properties: {
+				url: {
+					$ref: "#/$defs/value",
+					pattern:
+						"^(?:(?:\\d\\d[2468][048])-02-29|\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01]))$",
+					propertyNames: { pattern: "^[a-z]+$" },
+				},
+				mode: { const: "safe" },
+			},
+			unevaluatedProperties: false,
+			required: ["url", "missing"],
+		},
+		execute: async () => ({ content: "ok" }),
+	});
+
+	const definition = registry.toToolDefinitions()[0] as {
+		function: { parameters: Record<string, unknown> };
+	};
+	assert.deepEqual(definition.function.parameters, {
+		type: "object",
+		properties: {
+			url: { type: "string" },
+			mode: { enum: ["safe"] },
+		},
+		required: ["url"],
+	});
 });

@@ -19,7 +19,7 @@ import {
 	BackendError,
 	type BackendErrorCategory,
 } from "../provider/backend.ts";
-import type { EventHandler } from "../types/index.ts";
+import type { EventHandler } from "../types/types-messages.ts";
 import type { LoopDetector } from "./loop-detector.ts";
 
 export interface OutputGuardConfig {
@@ -80,7 +80,6 @@ export class OutputGuard {
 	// loopDetector field kept for type compatibility but no longer used for turn detection.
 	private retryCount = 0;
 	private consecutiveEmptyResponses = 0;
-	private consecutiveNonCommittalResponses = 0;
 	private consecutiveCompactions = 0;
 	// Set by processResponse when context usage crossed budgetThreshold on the
 	// last successful response. A subsequent rate_limit/quota error is often
@@ -379,7 +378,6 @@ export class OutputGuard {
 	reset(): void {
 		this.retryCount = 0;
 		this.consecutiveEmptyResponses = 0;
-		this.consecutiveNonCommittalResponses = 0;
 		this.consecutiveCompactions = 0;
 		this.contextWasNearFull = false;
 	}

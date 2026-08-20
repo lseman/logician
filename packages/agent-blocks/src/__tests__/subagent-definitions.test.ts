@@ -9,9 +9,9 @@ import {
 	type GenerateOptions,
 	type LLMBackend,
 	type LLMResponse,
-	PermissionManager,
 	type Tool,
 } from "@logician/agent-core";
+import { PermissionManager } from "@logician/agent-core/permissions";
 import {
 	BUILTIN_AGENTS,
 	createSpawnAgentsTool,

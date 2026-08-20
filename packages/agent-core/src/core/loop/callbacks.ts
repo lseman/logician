@@ -1,9 +1,12 @@
 import { createSystemMessage } from "../provider/messages.ts";
-import type { Message, StopReason, ToolCall } from "../types/index.ts";
+import type {
+	AgentEvent,
+	Message,
+	StopReason,
+	ToolCall,
+} from "../types/types-messages.ts";
 
-export type EventSink = (
-	event: import("../types/index.ts").AgentEvent,
-) => Promise<void> | void;
+export type EventSink = (event: AgentEvent) => Promise<void> | void;
 
 export function withSystemPrompt(
 	systemPrompt: string | undefined,

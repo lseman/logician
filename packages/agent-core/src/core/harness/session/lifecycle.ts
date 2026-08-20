@@ -3,14 +3,11 @@
 // session list/resume helpers. Failures here must never break a turn, so
 // every call swallows its own errors — matches prior harness behavior.
 
-import {
-	runHookEvent,
-	runSessionStartHooks,
-} from "../../../adapters/claude-code/plugin-runtime.ts";
 import type {
 	BeforeCompactContext,
 	BeforeCompactResult,
-} from "../../types/index.ts";
+} from "../../types/types-messages.ts";
+import type { HarnessCompatibilityLifecycle } from "../types.ts";
 
 export interface HookContext {
 	sessionId: string;
@@ -22,15 +19,14 @@ export async function emitSessionStart(
 	hooksEnabled: boolean,
 	ctx: HookContext,
 	source: string = "startup",
+	compatibility?: HarnessCompatibilityLifecycle,
 ): Promise<boolean> {
-	if (!hooksEnabled) return false;
+	if (!hooksEnabled || !compatibility) return false;
 	try {
-		await runSessionStartHooks({
+		await compatibility.sessionStart(
+			{ ...ctx, enabled: true, tools: [] },
 			source,
-			session_id: ctx.sessionId,
-			transcript_path: ctx.transcriptPath,
-			cwd: ctx.cwd,
-		});
+		);
 		return true;
 	} catch (_e: unknown) {
 		console.error("[harness-session] emitSessionStart failed:", _e);
@@ -42,15 +38,14 @@ export async function emitSessionEnd(
 	hooksEnabled: boolean,
 	ctx: HookContext,
 	reason: string = "other",
+	compatibility?: HarnessCompatibilityLifecycle,
 ): Promise<void> {
-	if (!hooksEnabled) return;
+	if (!hooksEnabled || !compatibility) return;
 	try {
-		await runHookEvent("SessionEnd", {
-			session_id: ctx.sessionId,
-			transcript_path: ctx.transcriptPath,
-			cwd: ctx.cwd,
+		await compatibility.sessionEnd(
+			{ ...ctx, enabled: true, tools: [] },
 			reason,
-		});
+		);
 	} catch (_e: unknown) {
 		// must not block cleanup
 		console.error("[harness-session] emitSessionEnd failed:", _e);
@@ -69,6 +64,7 @@ export async function emitPreCompact(
 				| undefined)
 		| undefined,
 	compactCtx?: BeforeCompactContext,
+	compatibility?: HarnessCompatibilityLifecycle,
 ): Promise<BeforeCompactResult | undefined> {
 	let hookResult: BeforeCompactResult | undefined;
 	if (compactCtx) {
@@ -79,13 +75,9 @@ export async function emitPreCompact(
 			console.error("[harness-session] emitPreCompact hook failed:", _e);
 		}
 	}
-	if (!hooksEnabled) return hookResult;
+	if (!hooksEnabled || !compatibility) return hookResult;
 	try {
-		await runHookEvent("PreCompact", {
-			session_id: ctx.sessionId,
-			transcript_path: ctx.transcriptPath,
-			cwd: ctx.cwd,
-		});
+		await compatibility.preCompact({ ...ctx, enabled: true, tools: [] });
 	} catch (_e: unknown) {
 		// must not block compaction
 		console.error("[harness-session] emitPreCompact hookEvent failed:", _e);
@@ -96,14 +88,11 @@ export async function emitPreCompact(
 export async function emitPostCompact(
 	hooksEnabled: boolean,
 	ctx: HookContext,
+	compatibility?: HarnessCompatibilityLifecycle,
 ): Promise<void> {
-	if (!hooksEnabled) return;
+	if (!hooksEnabled || !compatibility) return;
 	try {
-		await runHookEvent("PostCompact", {
-			session_id: ctx.sessionId,
-			transcript_path: ctx.transcriptPath,
-			cwd: ctx.cwd,
-		});
+		await compatibility.postCompact({ ...ctx, enabled: true, tools: [] });
 	} catch (_e: unknown) {
 		// must not block compaction
 		console.error("[harness-session] emitPostCompact failed:", _e);

@@ -11,7 +11,11 @@ function createContext() {
 	const applied: string[] = [];
 	const savedNotifications: string[] = [];
 	const ctx = {
-		bridge: { setInferenceMode: (mode: string) => applied.push(mode) },
+		bridge: {
+			updateSettings: (patch: { inferenceMode?: string }) => {
+				if (patch.inferenceMode) applied.push(patch.inferenceMode);
+			},
+		},
 		statusPanel: { update: () => {} },
 		tui: { requestRender: () => {} },
 		inferenceMode: "instruct-general" as InferenceMode,

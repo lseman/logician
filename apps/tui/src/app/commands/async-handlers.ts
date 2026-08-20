@@ -1,7 +1,7 @@
 // ── Async slash-command helpers ────────────────────────────────────────────
 
 import { getReasonerMeta } from "@logician/agent-blocks/reasoning";
-import { formatContextSize } from "@logician/agent-core";
+import { formatContextSize } from "@logician/agent-core/formatting";
 import { saveConfigField } from "@logician/agent-core/configuration";
 import {
 	getAvailableThemes,

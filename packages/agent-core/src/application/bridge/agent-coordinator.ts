@@ -1,8 +1,5 @@
-// ── AgentCoordinator ─────────────────────────────────────────────────────────
-// Owns the agent's reasoning engine (pre-turn reasoners), subagent coordination,
-// and Evolution of Heuristics (EoH). Extracted from AgentCoreBridge.
+/** Coordinates optional reasoners, subagents, and heuristic evolution. */
 
-import path from "node:path";
 import {
 	get_reasoner,
 	getReasonerMeta,
@@ -11,7 +8,7 @@ import {
 import type { AgentHarness } from "../../core/harness/agent-harness.ts";
 import type { LLMBackend } from "../../core/provider/backend.ts";
 import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
-import type { Message, Tool } from "../../core/types/types-messages.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
 import { EohController } from "../eoh/controller.ts";
 import { SubagentCoordinator } from "../subagent-coordinator.ts";
 

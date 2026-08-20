@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { WebSearchConfig } from "../../core/types/index.ts";
+import type { WebSearchConfig } from "../../core/types/types-config.ts";
 import { DEFAULT_SEARXNG_URL } from "../../infrastructure/tools/default-tools.ts";
 import { envNumber } from "../../tui-utils.ts";
 
