@@ -14,6 +14,7 @@ import {
 	getBuiltInSubagentTools,
 	type SubagentToolDeps,
 } from "@logician/agent-blocks/tools";
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import type { AgentHarness } from "../core/harness/agent-harness.ts";
 import type { LLMBackend } from "../core/provider/backend.ts";
 import {
@@ -21,7 +22,6 @@ import {
 	createToolResultMessage,
 	createUserMessage,
 } from "../core/provider/messages.ts";
-import type { RuntimeEvent } from "../core/types/runtime-events.ts";
 import type { AgentConfig } from "../core/types/types-config.ts";
 import type {
 	Message,

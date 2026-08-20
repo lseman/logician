@@ -1,5 +1,5 @@
-import type { InferenceMode, ThinkingLevel } from "../types/types-config.ts";
 import type { ExecutionProfile } from "../policy/execution-policy.ts";
+import type { InferenceMode, ThinkingLevel } from "../types/types-config.ts";
 
 export const DEFAULT_MAX_ITERATIONS = 30;
 

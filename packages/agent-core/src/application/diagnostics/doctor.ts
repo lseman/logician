@@ -2,9 +2,9 @@ import { constants, existsSync } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { resolveRuntimeConfig } from "../../application/configuration/runtime-config.ts";
 import { loadSkills } from "../../capabilities/skills/loader.ts";
-import { getToolPath } from "../tools/external-tools.ts";
+import { getToolPath } from "../../infrastructure/tools/external-tools.ts";
+import { resolveRuntimeConfig } from "../configuration/runtime-config.ts";
 
 export interface DoctorReport {
 	version: string;

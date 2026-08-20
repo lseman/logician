@@ -4,7 +4,6 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Skill } from "../../capabilities/skills/loader.ts";
 import type { Tool } from "../../core/types/types-messages.ts";
 import { loadContextFiles } from "./files/loader.ts";
 
@@ -30,14 +29,20 @@ export interface BuildSystemPromptOptions {
 	/** Whether trusted project-local `.logician` context may be loaded. */
 	loadProjectContext?: boolean;
 	/** Pre-loaded skills. */
-	skills?: Skill[];
+	skills?: PromptSkill[];
+}
+
+export interface PromptSkill {
+	name: string;
+	description?: string;
+	content: string;
 }
 
 // ============================================================================
 // Skills formatting
 // ============================================================================
 
-function formatSkillsForPrompt(skills: Skill[]): string {
+function formatSkillsForPrompt(skills: PromptSkill[]): string {
 	if (skills.length === 0) return "";
 	const lines: string[] = [
 		"",

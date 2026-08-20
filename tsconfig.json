@@ -1,12 +1,15 @@
 {
 	"files": [],
 	"references": [
+		{ "path": "packages/agent-protocol" },
 		{ "path": "packages/agent-core" },
-		{ "path": "packages/agent-capabilities" },
-		{ "path": "packages/coding-agent" },
-		{ "path": "apps/tui" },
+		{ "path": "packages/agent-blocks" },
+		{ "path": "packages/agent-eval" },
+		{ "path": "packages/autoresearch" },
+		{ "path": "packages/eoh" },
 		{ "path": "packages/rag" },
 		{ "path": "packages/memory" },
-		{ "path": "apps/memory-mcp" }
+		{ "path": "apps/memory-mcp" },
+		{ "path": "apps/tui" }
 	]
 }

@@ -133,7 +133,7 @@ bun start -- doctor --json
 - Add focused instructions and workflows with [`SKILL.md`](docs/guides/skills.md) files.
 - Package skills, hooks, commands, and integrations as [plugins](docs/guides/plugins.md).
 - Connect external tools through [MCP](docs/guides/mcp.md).
-- Use Pi-compatible extension events and lifecycle hooks to customize runtime behavior.
+- Use native extension events and lifecycle hooks to customize runtime behavior.
 
 ## Keyboard shortcuts
 
@@ -163,6 +163,8 @@ Logician is a TypeScript monorepo organized as a layered agent runtime:
 flowchart LR
     User([User or automation]) --> TUI[Terminal UI / JSONL]
     TUI --> Core[Agent core]
+    Core --> Protocol[Versioned client protocol]
+    Protocol --> TUI
     Core --> Model[OpenAI-compatible model]
     Core --> Tools[Built-in and MCP tools]
     Core --> Memory[Memory and RAG]
@@ -173,8 +175,9 @@ flowchart LR
 | Package | Responsibility |
 |---|---|
 | `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
-| `@logician/agent-core` | Provider loop, harness, event lifecycle, hooks, queues, guards, compaction, tools, config, sessions, commands, skills, MCP, trust, and orchestration |
-| `@logician/agent-capabilities` | Delegation, reasoning strategies, tasks, user interaction, and agent primitives |
+| `@logician/agent-protocol` | Dependency-free, versioned client notifications shared by the runtime and presentation layers |
+| `@logician/agent-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, config, sessions, and application orchestration |
+| `@logician/agent-blocks` | Delegation, reasoning strategies, tasks, user interaction, and optional agent features |
 | `@logician/memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
 | `@logician/memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |
 | `@logician/rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |

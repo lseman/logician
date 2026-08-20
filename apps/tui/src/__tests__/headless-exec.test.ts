@@ -1,6 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { RuntimeEvent } from "@logician/agent-core/events";
+import {
+	type AgentProtocolNotification,
+	createNotification,
+	type RuntimeEvent,
+} from "@logician/agent-protocol";
 import {
 	EXEC_STREAM_SCHEMA,
 	type ExecBridge,
@@ -17,10 +21,14 @@ class MemoryWriter {
 }
 
 class FakeBridge implements ExecBridge {
-	private callback: ((event: RuntimeEvent) => void) | undefined;
+	private callback:
+		| ((notification: AgentProtocolNotification) => void)
+		| undefined;
 	stopped = false;
 	constructor(private readonly events: RuntimeEvent[]) {}
-	on(callback: (event: RuntimeEvent) => void): () => void {
+	onNotification(
+		callback: (notification: AgentProtocolNotification) => void,
+	): () => void {
 		this.callback = callback;
 		return () => {
 			this.callback = undefined;
@@ -31,7 +39,9 @@ class FakeBridge implements ExecBridge {
 		return {};
 	}
 	async sendMessage(_message: string): Promise<void> {
-		for (const event of this.events) this.callback?.(event);
+		for (const [index, event] of this.events.entries()) {
+			this.callback?.(createNotification(event, index + 1));
+		}
 	}
 	async stop(): Promise<void> {
 		this.stopped = true;

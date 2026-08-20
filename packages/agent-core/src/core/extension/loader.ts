@@ -56,16 +56,13 @@ function discoverFiles(
 	rootDir: string,
 	matcher: ReturnType<typeof ignore>,
 	source: "user" | "project" | "path",
-	compatibility?: "native" | "pi",
 ): Array<{
 	path: string;
 	source: "user" | "project" | "path";
-	compatibility?: "native" | "pi";
 }> {
 	const results: Array<{
 		path: string;
 		source: "user" | "project" | "path";
-		compatibility?: "native" | "pi";
 	}> = [];
 
 	if (!existsSync(dir) || !statSync(dir).isDirectory()) {
@@ -93,11 +90,9 @@ function discoverFiles(
 		}
 
 		if (isDir) {
-			results.push(
-				...discoverFiles(fullPath, rootDir, matcher, source, compatibility),
-			);
+			results.push(...discoverFiles(fullPath, rootDir, matcher, source));
 		} else if (isFile && /\.(ts|js|mjs)$/.test(entry.name)) {
-			results.push({ path: fullPath, source, compatibility });
+			results.push({ path: fullPath, source });
 		}
 	}
 
@@ -107,7 +102,6 @@ function discoverFiles(
 export function loadExtensionsFromDir(
 	dir: string,
 	source: "user" | "project" | "path" = "path",
-	compatibility?: "native" | "pi",
 ): LoadExtensionsResult {
 	const definitions: ExtensionDefinition[] = [];
 	const diagnostics: Diagnostic[] = [];
@@ -120,7 +114,7 @@ export function loadExtensionsFromDir(
 	const matcher = createIgnore();
 	addIgnoreRules(dir, matcher, dir);
 
-	const files = discoverFiles(dir, dir, matcher, source, compatibility);
+	const files = discoverFiles(dir, dir, matcher, source);
 
 	for (const file of files) {
 		const realPath = resolve(file.path);
@@ -132,7 +126,6 @@ export function loadExtensionsFromDir(
 			path: file.path,
 			name,
 			source: file.source,
-			compatibility,
 		});
 	}
 
@@ -150,38 +143,24 @@ function createIgnore(): ReturnType<typeof ignore> {
 
 export function loadExtensions(options: {
 	userDir?: string;
-	piUserDir?: string;
 	projectDir?: string;
-	agentDir?: string;
 	explicitPaths?: string[];
 }): LoadExtensionsResult {
-	const { userDir, piUserDir, projectDir, explicitPaths } = options;
+	const { userDir, projectDir, explicitPaths } = options;
 	const allDefinitions: ExtensionDefinition[] = [];
 	const allDiagnostics: Diagnostic[] = [];
 
 	// Load from user (global) extensions directory
 	if (userDir) {
-		const result = loadExtensionsFromDir(userDir, "user", "native");
+		const result = loadExtensionsFromDir(userDir, "user");
 		allDefinitions.push(...result.extensions);
 		allDiagnostics.push(...result.diagnostics);
 	}
-	if (piUserDir) {
-		const result = loadExtensionsFromDir(piUserDir, "user", "pi");
-		allDefinitions.push(...result.extensions);
-		allDiagnostics.push(...result.diagnostics);
-	}
-
 	// Load from project extensions directory
 	if (projectDir) {
 		const projectExtDir = join(projectDir, ".logician", "extensions");
 		if (existsSync(projectExtDir)) {
-			const result = loadExtensionsFromDir(projectExtDir, "project", "native");
-			allDefinitions.push(...result.extensions);
-			allDiagnostics.push(...result.diagnostics);
-		}
-		const piProjectExtDir = join(projectDir, ".pi", "extensions");
-		if (existsSync(piProjectExtDir)) {
-			const result = loadExtensionsFromDir(piProjectExtDir, "project", "pi");
+			const result = loadExtensionsFromDir(projectExtDir, "project");
 			allDefinitions.push(...result.extensions);
 			allDiagnostics.push(...result.diagnostics);
 		}
@@ -199,18 +178,14 @@ export function loadExtensions(options: {
 				});
 				continue;
 			}
-			const compatibility = resolved.includes(`${join(".pi", "extensions")}`)
-				? "pi"
-				: undefined;
 			if (statSync(resolved).isFile()) {
 				allDefinitions.push({
 					path: resolved,
 					name: basename(resolved, extname(resolved)),
 					source: "path",
-					compatibility,
 				});
 			} else {
-				const result = loadExtensionsFromDir(resolved, "path", compatibility);
+				const result = loadExtensionsFromDir(resolved, "path");
 				allDefinitions.push(...result.extensions);
 				allDiagnostics.push(...result.diagnostics);
 			}

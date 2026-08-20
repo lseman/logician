@@ -19,6 +19,10 @@ import type {
 	BranchInfo,
 	BranchSummaryData,
 } from "../../session/summaries/types.ts";
+import {
+	ThreadLedger,
+	type ThreadReplacementReason,
+} from "../../session/thread-ledger.ts";
 import type { Message } from "../../types/types-messages.ts";
 import {
 	type Branch,
@@ -31,22 +35,33 @@ import {
 const MAX_CHECKPOINTS = 20;
 
 export class ConversationState {
-	private _history: Message[] = [];
+	private readonly ledger = new ThreadLedger();
 	private checkpoints: Message[][] = [];
 	private branches: Branch[] = [];
 	private branchSeq = 0;
 
 	get history(): Message[] {
-		return this._history;
+		return this.ledger.messages;
 	}
 
 	set history(messages: Message[]) {
-		this._history = messages;
+		this.ledger.replace(messages, "run-commit");
+	}
+
+	get items() {
+		return this.ledger.items();
+	}
+
+	private replaceHistory(
+		messages: readonly Message[],
+		reason: ThreadReplacementReason,
+	): void {
+		this.ledger.replace(messages, reason);
 	}
 
 	/** Push a checkpoint (conversation + file frame) before a turn begins. */
 	checkpoint(): void {
-		this.checkpoints.push([...this._history]);
+		this.checkpoints.push(this.history);
 		if (this.checkpoints.length > MAX_CHECKPOINTS) {
 			this.checkpoints.shift();
 		}
@@ -58,7 +73,7 @@ export class ConversationState {
 		const snapshot = this.checkpoints.pop();
 		if (!snapshot) return null;
 		this.branches = [];
-		this._history = snapshot;
+		this.replaceHistory(snapshot, "rewind");
 		const filesRestored = restoreFileFrame() ?? 0;
 		return { messages: snapshot.length, filesRestored };
 	}
@@ -68,7 +83,7 @@ export class ConversationState {
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
-		this._history = [];
+		this.replaceHistory([], "clear");
 	}
 
 	/** Replace history wholesale (resume/switch), dropping branches/checkpoints/frames. */
@@ -76,24 +91,27 @@ export class ConversationState {
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
-		this._history = messages.filter(
-			(m): m is Message => m != null && m.role !== "system",
+		this.replaceHistory(
+			messages.filter((message): message is Message =>
+				Boolean(message && message.role !== "system"),
+			),
+			"restore",
 		);
 	}
 
 	/** Append messages without touching checkpoints/branches. */
 	append(messages: Message[]): Message[] {
-		const toAdd = messages.filter(
-			(m): m is Message => m != null && m.role !== "system",
+		return this.ledger.append(
+			messages.filter((message): message is Message =>
+				Boolean(message && message.role !== "system"),
+			),
 		);
-		if (toAdd.length) this._history = [...this._history, ...toAdd];
-		return toAdd;
 	}
 
 	// ── Branching ────────────────────────────────────────────────────────
 
 	fork(customSummary?: BranchSummaryData, sessionLeafId?: string): string {
-		const current = this._history;
+		const current = this.history;
 		const { branch, nextBranchSeq } = forkBranch(
 			this.branches,
 			this.branchSeq,
@@ -103,7 +121,6 @@ export class ConversationState {
 		);
 		this.branchSeq = nextBranchSeq;
 		this.branches.push(branch);
-		this._history = [...current];
 		return branch.id;
 	}
 
@@ -116,7 +133,7 @@ export class ConversationState {
 	discardBranch(): Branch | undefined {
 		const branch = this.branches.pop();
 		if (!branch) return undefined;
-		this._history = branch.parent;
+		this.replaceHistory(branch.parent, "branch-discard");
 		return branch;
 	}
 

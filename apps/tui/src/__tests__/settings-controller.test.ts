@@ -28,7 +28,7 @@ void test("settings exposes tri-state guards and every inference provider mode",
 				failureGuardEnabled: false,
 				continuationEnabled: true,
 				autoRetryEnabled: true,
-				budgetStopEnabled: false,
+				progressStopEnabled: false,
 			}),
 		},
 		settingsSelector: {

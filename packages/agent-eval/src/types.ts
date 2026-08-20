@@ -70,6 +70,10 @@ export interface TrialMetrics {
 	toolCalls?: number;
 	contextTokens?: number;
 	model?: string;
+	permissionRequests?: number;
+	compactions?: number;
+	retries?: number;
+	timeToFirstToolMs?: number;
 }
 
 export interface EvalTrial {

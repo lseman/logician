@@ -331,9 +331,7 @@ export function renderSubagentDetails(
 		typeof details.streamTranscript === "string"
 			? details.streamTranscript
 			: "";
-	const liveOutput = tool.isComplete
-		? storedTranscript
-		: (tool.streamOutput ?? "");
+	const liveOutput = tool.isComplete ? storedTranscript : "";
 	const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
 	const orderedContent = childChunks
 		.filter(chunk => chunk.type === "content")
@@ -423,9 +421,7 @@ export function renderSubagentActivity(
  * still running. Called from the collapsed path so the user can follow
  * progress without manually expanding.
  *
- * Prefers `childChunks` (ordered, chronological thinking/content/tool flow)
- * when available, falling back to the legacy `streamOutput` path for older
- * agents that never populated structured chunks.
+ * Uses `childChunks`, the canonical ordered thinking/content/tool stream.
  */
 export function renderSubagentLiveOutput(
 	ctx: RenderCtx,
@@ -445,29 +441,7 @@ export function renderSubagentLiveOutput(
 		return flowLines;
 	}
 
-	// Legacy fallback: use streamOutput for older agents.
-	const lines: string[] = [];
-	const storedTranscript =
-		typeof tool.details?.streamTranscript === "string"
-			? tool.details.streamTranscript
-			: "";
-	const liveOutput = tool.isComplete
-		? storedTranscript
-		: (tool.streamOutput ?? "");
-	const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
-	const outputs = distinctSubagentOutputs(liveOutput, finalOutput);
-	for (const output of outputs) {
-		for (const line of renderSubagentText(
-			output,
-			Math.max(16, width - 4),
-			!tool.isComplete,
-			ctx,
-			false,
-		)) {
-			lines.push(`  ${line}`);
-		}
-	}
-	return lines;
+	return [];
 }
 
 /**

@@ -37,11 +37,11 @@ import { join } from "node:path";
 })();
 
 import { AgentCoreBridge } from "@logician/agent-core/application";
+import { resolveRuntimeConfig } from "@logician/agent-core/configuration/runtime";
 import {
 	buildDoctorReport,
 	formatDoctorReport,
 } from "@logician/agent-core/developer-tools";
-import { resolveRuntimeConfig } from "@logician/agent-core/configuration/runtime";
 import { activateProjectVirtualEnv } from "@logician/agent-core/tools";
 import {
 	applyTrustChoice,
@@ -173,18 +173,6 @@ async function main(): Promise<void> {
 	const hasUI = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
 	// ── Resolve trust ─────────────────────────────────────────────────────
-	// Create a minimal bridge first to get the extension runner for Pi extensions.
-	// This happens before the trust decision so Pi extensions can participate.
-	const minimalBridge = new AgentCoreBridge({
-		baseUrl: "http://localhost:8080",
-		model: "test",
-		cwd,
-		// This bridge exists only so Pi extensions can participate in the trust
-		// decision. It must not create a second memory session or viewer server.
-		memoryEnabled: false,
-		memoryViewerEnabled: false,
-	});
-
 	let loadProjectConfig = false;
 
 	if (hasUI) {
@@ -194,61 +182,27 @@ async function main(): Promise<void> {
 		if (trustInfo.preDecided) {
 			loadProjectConfig = trustInfo.preDecidedResult?.trusted ?? false;
 		} else {
-			// Emit Pi project_trust event for Pi extension interception
-			const piResult = await minimalBridge.emitProjectTrustEvent(cwd);
-			if (piResult) {
-				if (piResult.trusted === "yes") {
-					loadProjectConfig = true;
-					if (piResult.remember) {
-						const store = new TrustStore();
-						store.set(cwd, true);
-					}
-				} else if (piResult.trusted === "no") {
-					process.exit(1);
-				}
-				// If undecided, fall through to normal trust flow
+			const choice = await showTrustOverlay(cwd, trustInfo.paths);
+			const store = new TrustStore();
+			const result = applyTrustChoice(store, choice, cwd);
+			if (!result.trusted) {
+				process.exit(1);
 			}
-			if (!loadProjectConfig && piResult?.trusted !== "yes") {
-				// Show trust overlay via readline (visually formatted)
-				const choice = await showTrustOverlay(cwd, trustInfo.paths);
-				const store = new TrustStore();
-				const result = applyTrustChoice(store, choice, cwd);
-				if (!result.trusted) {
-					process.exit(1);
-				}
-				loadProjectConfig = true;
-			}
+			loadProjectConfig = true;
 		}
 	} else {
 		// ── CLI mode: resolve trust silently or with readline ────────────
-		// Emit Pi project_trust event for Pi extension interception
-		const piResult = await minimalBridge.emitProjectTrustEvent(cwd);
-		if (piResult) {
-			if (piResult.trusted === "yes") {
-				loadProjectConfig = true;
-				if (piResult.remember) {
-					const store = new TrustStore();
-					store.set(cwd, true);
-				}
-			} else if (piResult.trusted === "no") {
-				process.exit(1);
-			}
-			// If undecided, fall through to normal trust flow
-		}
-		if (!loadProjectConfig) {
-			const trust = await resolveTrust({
-				cwd,
-				hasUI: false,
-				defaultProjectTrust: defaultProjectTrust(),
-			});
-			loadProjectConfig = trust.trusted;
-		}
+		const trust = await resolveTrust({
+			cwd,
+			hasUI: false,
+			defaultProjectTrust: defaultProjectTrust(),
+		});
+		loadProjectConfig = trust.trusted;
 	}
 
 	// Release the trust-only extension runtime before the real bridge starts.
 	// In particular, do not leave its MCP clients or other lifecycle resources
 	// alive alongside the application bridge.
-	await minimalBridge.stop();
 
 	const runtimeConfig = resolveRuntimeConfig(cwd, process.env, {
 		loadProjectConfig,

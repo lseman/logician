@@ -1,4 +1,5 @@
 import type { ReasonerConfig } from "@logician/agent-blocks/reasoning";
+import type { AgentProtocolNotification } from "@logician/agent-protocol";
 import type {
 	PermissionMode,
 	PermissionRules,
@@ -7,12 +8,13 @@ import type {
 	AgentConfig,
 	AgentModelConfig,
 	TruncationConfig,
+	WebSearchConfig,
 } from "../../core/types/types-config.ts";
 import type { Tool } from "../../core/types/types-messages.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
-import type { WebSearchConfig } from "../../core/types/types-config.ts";
 
-export type EventCallback = (event: RuntimeEvent) => void;
+export type ProtocolCallback = (
+	notification: AgentProtocolNotification,
+) => void;
 export type ErrorCallback = (error: Error) => void;
 
 export type RuntimeSettingsPatch = Partial<
@@ -27,7 +29,7 @@ export type RuntimeSettingsPatch = Partial<
 		| "guardsEnabled"
 		| "duplicateGuardEnabled"
 		| "failureGuardEnabled"
-		| "budgetStopEnabled"
+		| "progressStopEnabled"
 		| "continuationEnabled"
 		| "autoRetryEnabled"
 		| "proactiveCompactionEnabled"
@@ -73,7 +75,7 @@ export interface AgentBridgeOptions {
 	failureGuardEnabled?: boolean;
 	duplicateToolThreshold?: number;
 	toolFailureLoopThreshold?: number;
-	budgetStopEnabled?: boolean;
+	progressStopEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
 	compaction?: {
 		enabled?: boolean;

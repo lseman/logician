@@ -53,8 +53,6 @@ function report(status: "satisfied" | "failed", answer: string): LLMResponse {
 	};
 }
 
-
-
 void test("delegated tool-call budgets are shared across the whole run", async () => {
 	let executions = 0;
 	const tool: Tool = {

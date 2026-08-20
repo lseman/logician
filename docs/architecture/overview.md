@@ -14,24 +14,25 @@ graph LR
   subgraph Presentation
     A["@logician/tui"]
   end
-  subgraph Orchestration
-    B["@logician/coding-agent"]
+  subgraph Protocol
+    P["@logician/agent-protocol"]
   end
   subgraph Runtime
     C["@logician/agent-core"]
-    D["@logician/agent-capabilities"]
+    D["@logician/agent-blocks"]
   end
   subgraph DataAndEvaluation["Data and evaluation"]
-    F["memory + rag"]
-    G["autoresearch + agent-eval"]
+    M["memory + rag"]
+    E["autoresearch + agent-eval"]
   end
-  A --> B
-  B --> C
-  B --> D
-  B --> F
-  D --> G
-  C --> E[LLM Backend]
+  A --> P
+  A --> C
+  C --> P
+  D --> C
+  A --> D
+  C --> M
   D --> E
+  C --> L[LLM Backend]
 ```
 
 ## Package details
@@ -47,6 +48,20 @@ The foundation layer. Handles:
 - Hook system
 - Tool registry and execution
 
+Inside the package, dependency direction is strict:
+
+```text
+protocol <- core
+core <- capabilities
+core <- infrastructure
+core + infrastructure <- adapters
+core + capabilities + infrastructure + adapters <- application
+```
+
+`core/` cannot import product feature packages. Product composition lives at
+the application edge. The harness uses immutable configuration revisions, an
+append-only thread ledger, a run-scoped policy controller, and a context engine.
+
 Execution durability is owned by the [Run Kernel](/architecture/run-kernel), a
 versioned event ledger used for replay, task-spanning budgets, fencing, and tool
 effect recovery.
@@ -54,19 +69,15 @@ effect recovery.
 The evidence and invariants behind the current runtime boundaries are recorded
 in [Runtime Design Decisions](/architecture/modernization).
 
-### coding-agent
+### agent-protocol
 
-The orchestration layer. Handles:
-- System prompt construction
-- Skills loading and activation
-- Session management (bookmarks, branching)
-- Trust model (permission modes)
-- MCP server integration
-- Prompt guidelines and context files
+The dependency-free client protocol. It owns versioned UI-ready notifications.
+Internal provider, hook, and tool events are translated before crossing this
+seam. TUI and future clients depend on this package rather than core internals.
 
-### agent-capabilities
+### agent-blocks
 
-The intelligence layer. Handles:
+Optional product feature modules:
 - Reasoners (ToT, SSR, Reflexion, etc.)
 - Subagent delegation
 - Todo/task management
@@ -99,9 +110,9 @@ agent's own completion claim is retained only as diagnostic evidence.
 
 ```mermaid
 flowchart LR
-    User --> TUI --> Coding["Coding agent"] --> Core["Agent core"] --> Provider
+    User --> TUI --> Core["Agent core"] --> Provider
     Provider --> Core
     Core --> Tools
     Tools --> Core
-    Core --> Coding --> TUI --> User
+    Core --> Protocol["Agent protocol"] --> TUI --> User
 ```

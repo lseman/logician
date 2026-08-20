@@ -65,12 +65,12 @@ void test("validateConfig rejects an invalid baseUrl", () => {
 	);
 });
 
-void test("validateConfig parses legacy string entries and object entries in models", () => {
+void test("validateConfig accepts only named model entries", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig(
 		{
 			models: [
-				"legacy-model",
+				"unnamed-model",
 				{ name: "Named", model: "named-model", url: " http://x " },
 				{ name: "", model: "" },
 				42,
@@ -79,13 +79,12 @@ void test("validateConfig parses legacy string entries and object entries in mod
 		warnings,
 	);
 	assert.deepEqual(cfg.models, [
-		{ name: "legacy-model", model: "legacy-model" },
 		{ name: "Named", model: "named-model", url: "http://x" },
 	]);
 	assert.ok(warnings.some(w => w.includes('"models" entry invalid')));
 });
 
-void test("validateConfig parses named-object models format", () => {
+void test("validateConfig rejects the removed named-object models format", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig(
 		{
@@ -97,13 +96,8 @@ void test("validateConfig parses named-object models format", () => {
 		},
 		warnings,
 	);
-	assert.deepEqual(cfg.models, [
-		{ name: "default", model: "default-model", url: "http://127.0.0.1:8080" },
-		{ name: "headroom", model: "headroom", url: "http://127.0.0.1:8787" },
-	]);
-	assert.ok(
-		warnings.some(w => w.includes('"models" entry for "broken" invalid')),
-	);
+	assert.equal(cfg.models, undefined);
+	assert.ok(warnings.some(w => w.includes('"models" must be an array')));
 });
 
 void test("validateConfig clamps out-of-range temperature and warns", () => {
@@ -260,7 +254,7 @@ void test("validateConfig parses flat guard settings", () => {
 			duplicateToolThreshold: 5,
 			failureGuardEnabled: true,
 			toolFailureLoopThreshold: 7,
-			budgetStopEnabled: true,
+			progressStopEnabled: true,
 		},
 		warnings,
 	);
@@ -269,7 +263,7 @@ void test("validateConfig parses flat guard settings", () => {
 	assert.equal(cfg.duplicateToolThreshold, 5);
 	assert.equal(cfg.failureGuardEnabled, true);
 	assert.equal(cfg.toolFailureLoopThreshold, 7);
-	assert.equal(cfg.budgetStopEnabled, true);
+	assert.equal(cfg.progressStopEnabled, true);
 	assert.deepEqual(warnings, []);
 });
 

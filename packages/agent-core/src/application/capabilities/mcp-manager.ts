@@ -3,17 +3,17 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { Tool } from "../../core/types/types-messages.ts";
-import { updateConfigFile } from "../../infrastructure/configuration/config.ts";
 import { runPluginBackend } from "../../adapters/claude-code/plugin-runtime.ts";
-import { parseJsonWithComments } from "../../infrastructure/tools/utils/json-utils.ts";
 import {
 	allocateMcpToolName,
 	createMcpClient,
 	createMcpTool,
 	type McpClient,
 	type McpServerConfig,
-} from "./client.ts";
+} from "../../capabilities/mcp/client.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
+import { updateConfigFile } from "../../infrastructure/configuration/config.ts";
+import { parseJsonWithComments } from "../../infrastructure/tools/utils/json-utils.ts";
 
 export interface McpLoadResult {
 	tools: Tool[];

@@ -7,7 +7,7 @@ import type {
 	BeforeCompactContext,
 	BeforeCompactResult,
 } from "../../types/types-messages.ts";
-import type { HarnessCompatibilityLifecycle } from "../types.ts";
+import type { HarnessPluginLifecycle } from "../types.ts";
 
 export interface HookContext {
 	sessionId: string;
@@ -19,11 +19,11 @@ export async function emitSessionStart(
 	hooksEnabled: boolean,
 	ctx: HookContext,
 	source: string = "startup",
-	compatibility?: HarnessCompatibilityLifecycle,
+	pluginLifecycle?: HarnessPluginLifecycle,
 ): Promise<boolean> {
-	if (!hooksEnabled || !compatibility) return false;
+	if (!hooksEnabled || !pluginLifecycle) return false;
 	try {
-		await compatibility.sessionStart(
+		await pluginLifecycle.sessionStart(
 			{ ...ctx, enabled: true, tools: [] },
 			source,
 		);
@@ -38,11 +38,11 @@ export async function emitSessionEnd(
 	hooksEnabled: boolean,
 	ctx: HookContext,
 	reason: string = "other",
-	compatibility?: HarnessCompatibilityLifecycle,
+	pluginLifecycle?: HarnessPluginLifecycle,
 ): Promise<void> {
-	if (!hooksEnabled || !compatibility) return;
+	if (!hooksEnabled || !pluginLifecycle) return;
 	try {
-		await compatibility.sessionEnd(
+		await pluginLifecycle.sessionEnd(
 			{ ...ctx, enabled: true, tools: [] },
 			reason,
 		);
@@ -64,7 +64,7 @@ export async function emitPreCompact(
 				| undefined)
 		| undefined,
 	compactCtx?: BeforeCompactContext,
-	compatibility?: HarnessCompatibilityLifecycle,
+	pluginLifecycle?: HarnessPluginLifecycle,
 ): Promise<BeforeCompactResult | undefined> {
 	let hookResult: BeforeCompactResult | undefined;
 	if (compactCtx) {
@@ -75,9 +75,9 @@ export async function emitPreCompact(
 			console.error("[harness-session] emitPreCompact hook failed:", _e);
 		}
 	}
-	if (!hooksEnabled || !compatibility) return hookResult;
+	if (!hooksEnabled || !pluginLifecycle) return hookResult;
 	try {
-		await compatibility.preCompact({ ...ctx, enabled: true, tools: [] });
+		await pluginLifecycle.preCompact({ ...ctx, enabled: true, tools: [] });
 	} catch (_e: unknown) {
 		// must not block compaction
 		console.error("[harness-session] emitPreCompact hookEvent failed:", _e);
@@ -88,11 +88,11 @@ export async function emitPreCompact(
 export async function emitPostCompact(
 	hooksEnabled: boolean,
 	ctx: HookContext,
-	compatibility?: HarnessCompatibilityLifecycle,
+	pluginLifecycle?: HarnessPluginLifecycle,
 ): Promise<void> {
-	if (!hooksEnabled || !compatibility) return;
+	if (!hooksEnabled || !pluginLifecycle) return;
 	try {
-		await compatibility.postCompact({ ...ctx, enabled: true, tools: [] });
+		await pluginLifecycle.postCompact({ ...ctx, enabled: true, tools: [] });
 	} catch (_e: unknown) {
 		// must not block compaction
 		console.error("[harness-session] emitPostCompact failed:", _e);

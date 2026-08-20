@@ -16,6 +16,7 @@ import type { RunOutcomeStatus } from "../policy/execution-policy.ts";
 import type { InterventionInput } from "../policy/intervention-controller.ts";
 import type { LLMBackend } from "../provider/backend.ts";
 import { convertToChatFormat } from "../provider/messages.ts";
+import { getInferenceMode } from "../types/types-config.ts";
 import type {
 	AgentEvent,
 	AgentEventSink,
@@ -23,7 +24,6 @@ import type {
 	CompactableMessage,
 	Message,
 } from "../types/types-messages.ts";
-import { getInferenceMode } from "../types/types-config.ts";
 import { selectAdaptiveMode } from "./adaptive-mode.ts";
 import { applyHeaderPatch } from "./callbacks.ts";
 import type { AgentLoopConfig } from "./config.ts";

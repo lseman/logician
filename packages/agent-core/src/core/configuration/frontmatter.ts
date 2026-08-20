@@ -1,4 +1,4 @@
-// ── YAML frontmatter parsing ─────────────────────────────────────────────────
+// ── YAML frontmatter configuration parsing ───────────────────────────────────
 // Shared by skills and agent-definition loaders: splits a `---`-delimited
 // YAML header from a markdown body, with a lenient fallback parser for
 // frontmatter that isn't strictly valid YAML.

@@ -304,7 +304,7 @@ export async function openSettingsSelector(
 				],
 				[
 					"Budget early-stop",
-					data.budgetStopEnabled,
+					data.progressStopEnabled,
 					"Stop when useful token growth flattens",
 				],
 				[
@@ -506,7 +506,7 @@ export function handleSettingsSelectorAction(
 		case "failure-loop guard":
 		case "continuation":
 		case "auto-compact on full context":
-		case "budget early-stop":
+		case "progress early-stop":
 		case "memory": {
 			const on = value === "true";
 			const runtimeKeys = {
@@ -514,7 +514,7 @@ export function handleSettingsSelectorAction(
 				"failure-loop guard": "failureGuardEnabled",
 				continuation: "continuationEnabled",
 				"auto-compact on full context": "autoRetryEnabled",
-				"budget early-stop": "budgetStopEnabled",
+				"progress early-stop": "progressStopEnabled",
 				memory: "memoryEnabled",
 			} as const;
 			const configKey =

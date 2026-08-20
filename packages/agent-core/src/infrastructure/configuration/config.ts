@@ -62,7 +62,7 @@ const KNOWN_KEYS = new Set([
 	"failureGuardEnabled",
 	"duplicateToolThreshold",
 	"toolFailureLoopThreshold",
-	"budgetStopEnabled",
+	"progressStopEnabled",
 	"continuationEnabled",
 	"postEditDiagnostics",
 	"lsp",
@@ -215,16 +215,12 @@ export function validateConfig(
 		}
 	}
 
-	// models: array of model objects for cycling (Ctrl+L model selector).
-	// Also accepts an object with named keys: { "default": { baseUrl, model }, ... }
+	// models: array of named model objects for cycling (Ctrl+L model selector).
 	if (obj.models !== undefined) {
 		const parsed: AgentModelConfig[] = [];
 		if (Array.isArray(obj.models)) {
 			for (const item of obj.models) {
-				if (typeof item === "string" && item.trim()) {
-					// Legacy string entry: convert to object
-					parsed.push({ name: item.trim(), model: item.trim() });
-				} else if (
+				if (
 					typeof item === "object" &&
 					item !== null &&
 					"model" in item &&
@@ -247,38 +243,8 @@ export function validateConfig(
 					);
 				}
 			}
-		} else if (
-			typeof obj.models === "object" &&
-			obj.models !== null &&
-			!Array.isArray(obj.models)
-		) {
-			// Named-object format: { "myModel": { baseUrl, model }, ... }
-			const modelsObj = obj.models as Record<string, unknown>;
-			for (const [name, value] of Object.entries(modelsObj)) {
-				if (
-					typeof value === "object" &&
-					value !== null &&
-					"model" in value &&
-					typeof (value as Record<string, unknown>).model === "string"
-				) {
-					const m = value as Record<string, unknown>;
-					const modelName = (m.model as string).trim();
-					if (modelName) {
-						parsed.push({
-							name: name.trim(),
-							model: modelName,
-							url: typeof m.baseUrl === "string" ? m.baseUrl.trim() : undefined,
-						});
-					}
-				} else {
-					warn(
-						warnings,
-						`"models" entry for "${name}" invalid, got: ${JSON.stringify(value)}.`,
-					);
-				}
-			}
 		} else {
-			warn(warnings, '"models" must be an array or object.');
+			warn(warnings, '"models" must be an array of { name, model, url? }.');
 		}
 		if (parsed.length > 0) {
 			cfg.models = parsed as LogicianTuiConfig["models"];
@@ -379,7 +345,7 @@ export function validateConfig(
 		guardsEnabled: undefined,
 		duplicateGuardEnabled: true,
 		failureGuardEnabled: undefined,
-		budgetStopEnabled: undefined,
+		progressStopEnabled: undefined,
 		continuationEnabled: true,
 		postEditDiagnostics: true,
 		autoRetryEnabled: true,
@@ -831,7 +797,7 @@ export interface LogicianTuiConfig {
 	failureGuardEnabled?: boolean; // OFF by default
 	duplicateToolThreshold?: number; // consecutive identical calls before the duplicate guard blocks (default 3)
 	toolFailureLoopThreshold?: number; // repeated failures (same call/path/category) before the failure guard blocks (default 3)
-	budgetStopEnabled?: boolean; // OFF by default — stops the run early once per-turn token growth flattens
+	progressStopEnabled?: boolean; // OFF by default — stops after repeated turns produce no new tool/task evidence
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
 	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
 	autoRetryEnabled?: boolean;

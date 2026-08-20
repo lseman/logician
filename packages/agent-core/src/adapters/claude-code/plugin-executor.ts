@@ -499,21 +499,9 @@ export function matcherMatches(
 		if (regex.test(sourceClean)) return true;
 		if (sourceParts.some(part => regex.test(part))) return true;
 	} catch (_e: unknown) {
-		// Fall back to legacy substring matching.
+		return false;
 	}
-	const lowerSource = sourceClean.toLowerCase();
-	return clean
-		.split("|")
-		.map(p => p.trim())
-		.some(
-			p =>
-				p === "*" ||
-				lowerSource
-					.split("|")
-					.map(s => s.trim())
-					.includes(p.toLowerCase()) ||
-				lowerSource.includes(p.toLowerCase()),
-		);
+	return false;
 }
 
 // ── Shell execution ──────────────────────────────────────────────────────────

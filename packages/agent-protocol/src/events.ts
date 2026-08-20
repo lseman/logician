@@ -1,4 +1,4 @@
-// ── Canonical coding-agent → UI runtime events ─────────────────────────────────
+// ── Stable coding-agent → client protocol events ───────────────────────────────
 
 export interface MemoryUpdateEvent {
 	type: "memory_update";

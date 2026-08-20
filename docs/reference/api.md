@@ -22,12 +22,13 @@ tsx apps/tui/src/index.ts
 
 ### Headless (programmatic)
 
-The headless entry point is `AgentCoreBridge` from `@logician/coding-agent`'s
-`application` export — the same bridge the TUI itself drives. It's
-event-driven: subscribe with `on()`/`onError()`, then call `sendMessage()`.
+The headless entry point is `AgentCoreBridge` from `@logician/agent-core`'s
+`application` export—the same bridge the TUI itself drives. It is
+event-driven: subscribe with `onNotification()`/`onError()`, then call
+`sendMessage()`.
 
 ```typescript
-import { AgentCoreBridge } from '@logician/coding-agent/application'
+import { AgentCoreBridge } from '@logician/agent-core/application'
 
 const bridge = new AgentCoreBridge({
   baseUrl: 'http://127.0.0.1:8080',
@@ -36,8 +37,8 @@ const bridge = new AgentCoreBridge({
   permissionMode: 'acceptEdits',
 })
 
-const unsubscribe = bridge.on(event => {
-  if (event.type === 'agent_end') console.log('done')
+const unsubscribe = bridge.onNotification(notification => {
+  if (notification.event.type === 'agent_end') console.log('done')
 })
 bridge.onError(err => console.error(err))
 
@@ -52,12 +53,14 @@ Other notable `AgentCoreBridge` methods: `steer()`, `followUp()`,
 ## Event stream
 
 ```typescript
-type EventCallback = (event: RuntimeEvent) => void
+type ProtocolCallback = (notification: AgentProtocolNotification) => void
 type ErrorCallback = (err: Error) => void
 ```
 
-`RuntimeEvent` is a discriminated union keyed on `type`, exported from
-`@logician/coding-agent/runtime`. Its event families are:
+`RuntimeEvent` is a discriminated union keyed on `type`, exported from the
+dependency-free `@logician/agent-protocol` package. Subscribe with
+`onNotification()` to receive an ordered envelope containing `protocolVersion`,
+`sequence`, `timestamp`, and `event`. Event families include:
 
 ```typescript
 type RuntimeEventType =
@@ -75,7 +78,7 @@ type RuntimeEventType =
 ```
 
 Each variant has its own payload shape (see
-`packages/coding-agent/src/runtime/events.ts` for the full interfaces).
+`packages/agent-protocol/src/events.ts` for the full interfaces).
 Most core events pass through `mapAgentEvent()`; bridge-owned features also
 emit UI-facing events such as `todos`, `steered`, `notice`, and
 `memory_update`. The [headless JSONL stream](/tutorials/headless) is a separate,

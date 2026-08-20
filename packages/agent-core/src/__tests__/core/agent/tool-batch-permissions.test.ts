@@ -63,6 +63,7 @@ void test("denied tool call short-circuits without executing", async () => {
 	const content = batch.messages[0].content as string;
 	assert.match(content, /Tool call denied/);
 	assert.match(content, /denied by rule/);
+	assert.equal(batch.permissionDenials, 1);
 });
 
 void test("plan mode denies write tools with the plan-mode reason", async () => {
@@ -94,6 +95,7 @@ void test("ask verdict resolved 'allow' by the handler executes the tool", async
 	);
 	const content = batch.messages[0].content as string;
 	assert.equal(content, "ran: make build");
+	assert.equal(batch.permissionDenials, 0);
 });
 
 void test("ask verdict resolved 'deny' by the handler blocks the tool", async () => {

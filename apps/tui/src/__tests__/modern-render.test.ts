@@ -1102,7 +1102,14 @@ void test("expanded agent tools separate task arguments from live output", () =>
 								agent: "explorer",
 							},
 							partialResult: '{"task":"Inspect architecture and tests"}',
-							streamOutput: "I am inspecting the core files now.",
+							details: {
+								childChunks: [
+									{
+										type: "content",
+										contentText: "I am inspecting the core files now.",
+									},
+								],
+							},
 							isError: false,
 							isComplete: false,
 						},
@@ -1139,8 +1146,15 @@ void test("expanded subagent streams render fenced code with syntax highlighting
 						tool: {
 							tool_name: "spawn_agent",
 							args: { task: "Inspect code", agent: "explorer" },
-							streamOutput:
-								"Found this:\n```typescript\nconst answer = 42;\n```",
+							details: {
+								childChunks: [
+									{
+										type: "content",
+										contentText:
+											"Found this:\n```typescript\nconst answer = 42;\n```",
+									},
+								],
+							},
 							isError: false,
 							isComplete: false,
 						},
@@ -1176,7 +1190,9 @@ void test("expanded agent progress is never character-truncated", () => {
 						tool: {
 							tool_name: "spawn_agent",
 							args: { task: "Audit everything", agent: "explorer" },
-							streamOutput: longProgress,
+							details: {
+								childChunks: [{ type: "content", contentText: longProgress }],
+							},
 							isError: false,
 							isComplete: false,
 						},
@@ -1214,7 +1230,9 @@ void test("collapsed agent card shows only the header while running", () => {
 						tool: {
 							tool_name: "spawn_agent",
 							args: { task: "Audit everything", agent: "explorer" },
-							streamOutput: longProgress,
+							details: {
+								childChunks: [{ type: "content", contentText: longProgress }],
+							},
 							isError: false,
 							isComplete: false,
 						},

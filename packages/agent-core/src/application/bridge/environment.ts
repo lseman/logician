@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import type { WebSearchConfig } from "../../core/types/types-config.ts";
 import { DEFAULT_SEARXNG_URL } from "../../infrastructure/tools/default-tools.ts";
-import { envNumber } from "../../tui-utils.ts";
+
+/** Parse a numeric environment setting, returning undefined when absent/invalid. */
+export function envNumber(name: string): number | undefined {
+	const raw = process.env[name];
+	if (!raw) return undefined;
+	const value = Number(raw);
+	return Number.isFinite(value) ? value : undefined;
+}
 
 export interface BridgeEndpoint {
 	baseUrl: string;

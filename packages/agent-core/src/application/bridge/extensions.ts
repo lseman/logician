@@ -1,18 +1,14 @@
-/** Owns extension discovery, lifecycle, compatibility, and contributed commands. */
+/** Owns native extension discovery, lifecycle, and contributed commands. */
 
 import {
 	readdir as readdirAsync,
 	readFile as readFileAsync,
 } from "node:fs/promises";
 import path from "node:path";
-import {
-	type PiRuntimePort,
-	piCompatibilityAdapter,
-} from "../../adapters/pi/index.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
+import { parseFrontmatter } from "../../core/configuration/frontmatter.ts";
 import { loadExtensions } from "../../core/extension/loader.ts";
 import { ExtensionRunner } from "../../core/extension/runner.ts";
-import { parseFrontmatter } from "../../infrastructure/tools/utils/frontmatter.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────
 
@@ -21,8 +17,6 @@ export interface ExtensionManagerOptions {
 	cwd: string;
 	extensionDirs?: { user?: string; paths?: string[] };
 	projectTrusted: boolean;
-	/** Pi runtime callbacks the runner needs at call time. */
-	piRuntime: PiRuntimePort;
 }
 
 // ── ExtensionManager class ─────────────────────────────────────────────────────
@@ -51,8 +45,6 @@ export class ExtensionManager {
 		this._runner = new ExtensionRunner({
 			sessionId: this.opts.sessionId,
 			cwd: this.opts.cwd,
-			compatibilityAdapters: [piCompatibilityAdapter],
-			compatibilityRuntime: this.opts.piRuntime,
 		});
 
 		const extResult = loadExtensions({
@@ -111,53 +103,6 @@ export class ExtensionManager {
 		return (
 			this._runner?.executeCommand(name, args) ?? Promise.resolve(undefined)
 		);
-	}
-
-	// ── Pi event emission ───────────────────────────────────────────────────
-
-	/**
-	 * Emit a Pi input event to all loaded Pi adapters.
-	 * @returns action result or null (default: continue).
-	 */
-	async emitInputEvent(
-		text: string,
-		images: unknown[] = [],
-		source: "interactive" | "rpc" | "extension" = "interactive",
-	): Promise<{
-		action: "continue" | "transform" | "handled";
-		text?: string;
-		images?: unknown[];
-	} | null> {
-		if (!this._runner) return null;
-		return this._runner.emitInputEvent(text, images, source);
-	}
-
-	/**
-	 * Emit a Pi user_bash event to all loaded Pi adapters.
-	 * @returns action result or null (default: continue).
-	 */
-	async emitUserBashEvent(
-		command: string,
-		excludeFromContext: boolean = false,
-	): Promise<{
-		action: "continue" | "intercept" | "replace";
-		result?: { output: string; exitCode: number; cancelled: boolean };
-		operations?: unknown;
-	} | null> {
-		if (!this._runner) return null;
-		return this._runner.emitUserBashEvent(command, excludeFromContext);
-	}
-
-	/**
-	 * Emit a Pi project_trust event to all loaded Pi adapters.
-	 * @returns trust result or null (default: continue).
-	 */
-	async emitProjectTrustEvent(cwd: string): Promise<{
-		trusted: "yes" | "no" | "undecided";
-		remember?: boolean;
-	} | null> {
-		if (!this._runner) return null;
-		return this._runner.emitProjectTrustEvent(cwd);
 	}
 }
 

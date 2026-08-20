@@ -1,8 +1,8 @@
 // ── Agent event → bridge event shape mapping ──────────────────────────────────
 
+import type { RuntimeEvent } from "@logician/agent-protocol";
 import { STEERING_INTERRUPT_SUMMARY } from "../../core/execution/agent-loop-runner.ts";
 import type { AgentEvent } from "../../core/types/types-messages.ts";
-import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 
 // Translates core AgentEvent variants to their RuntimeEvent equivalent.
 // Not the sole producer of RuntimeEvent: AgentCoreBridge also emits
@@ -360,7 +360,7 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				label: `${event.kind}: ${event.action}`,
 				text: `${event.evidence.summary} (attempt ${event.attempt}, incident ${event.id})${event.nextAction ? ` Next: ${event.nextAction}` : ""}`,
 			};
-		// ── Acceptance / reflection observability ────────────────────────
+		// ── Acceptance observability ─────────────────────────────────────
 		case "acceptance_start":
 			return {
 				type: "notice",
@@ -393,22 +393,6 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 							: "warn",
 				label: "Acceptance",
 				text: `Status: ${event.status}`,
-			};
-		case "reflection_start":
-			return {
-				type: "notice",
-				level: "info",
-				label: "Reflection",
-				text: "Starting reflection on this turn",
-			};
-		case "reflection_end":
-			return {
-				type: "notice",
-				level: event.assessment === "complete" ? "info" : "warn",
-				label: "Reflection",
-				text: event.needsMoreWork
-					? `Incomplete — ${event.issues.length} issue(s) need work`
-					: "Complete",
 			};
 		// ── Loop detection ───────────────────────────────────────────────
 		case "loop_detected":
@@ -481,13 +465,6 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				level: "info",
 				label: "Aborted",
 				text: `Cleared ${event.clearedSteering.length} steering, ${event.clearedFollowUp.length} follow-up, ${event.clearedNextTurn.length} next-turn messages`,
-			};
-		case "task_failed":
-			return {
-				type: "notice",
-				level: "error",
-				label: "Task failed",
-				text: `${event.reason} (iteration ${event.iteration})${event.lastContent ? ` — ${event.lastContent.slice(0, 100)}` : ""}`,
 			};
 		default:
 			return null;

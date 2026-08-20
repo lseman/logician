@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import ignore from "ignore";
-import { parseFrontmatter } from "../../infrastructure/tools/utils/frontmatter.ts";
+import { parseFrontmatter } from "../../core/configuration/frontmatter.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

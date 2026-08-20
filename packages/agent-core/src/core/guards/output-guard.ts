@@ -4,8 +4,7 @@
 // Detects:
 // 1. Context-full errors from backend → auto-compact + retry
 // 2. Model returning empty/no-content responses repeatedly → abort turn
-// 3. Excessive tool calls without progress (delegated to LoopDetector)
-// 4. Provider errors that are retryable (rate_limit, transient) → backoff retry
+// 3. Provider errors that are retryable (rate_limit, transient) → backoff retry
 //
 // Unlike LoopDetector (which watches turn-level patterns), OutputGuard
 // operates at the response boundary and can trigger structural actions:
@@ -20,7 +19,6 @@ import {
 	type BackendErrorCategory,
 } from "../provider/backend.ts";
 import type { EventHandler } from "../types/types-messages.ts";
-import type { LoopDetector } from "./loop-detector.ts";
 
 export interface OutputGuardConfig {
 	/** Max retry attempts for transient/provider errors (default 3). */
@@ -41,8 +39,6 @@ export interface OutputGuardConfig {
 	maxConsecutiveCompactions?: number;
 	/** Emit events to the UI/event bus. */
 	onEvent?: EventHandler;
-	/** The loop detector for turn-level patterns (optional). */
-	loopDetector?: LoopDetector;
 }
 
 export interface OutputGuardResult {
@@ -61,9 +57,7 @@ export interface OutputGuardResult {
 }
 
 /** Default config values. */
-const DEFAULT_CONFIG: Required<
-	Omit<OutputGuardConfig, "onEvent" | "loopDetector">
-> = {
+const DEFAULT_CONFIG: Required<Omit<OutputGuardConfig, "onEvent">> = {
 	maxRetries: 3,
 	retryBaseDelayMs: 500,
 	maxRetryDelayMs: 15000,
@@ -75,9 +69,8 @@ const DEFAULT_CONFIG: Required<
 };
 
 export class OutputGuard {
-	private config: Required<Omit<OutputGuardConfig, "onEvent" | "loopDetector">>;
+	private config: Required<Omit<OutputGuardConfig, "onEvent">>;
 	private readonly onEvent: OutputGuardConfig["onEvent"];
-	// loopDetector field kept for type compatibility but no longer used for turn detection.
 	private retryCount = 0;
 	private consecutiveEmptyResponses = 0;
 	private consecutiveCompactions = 0;
