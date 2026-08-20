@@ -1,7 +1,7 @@
 import {
 	awaitsUserInput,
 	looksComplete,
-} from "../../infrastructure/guards/response-patterns.ts";
+} from "../guards/response-patterns.ts";
 import type { AgentEventSink, Message } from "../types/index.ts";
 
 export function lastAssistantContent(messages: Message[]): string {

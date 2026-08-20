@@ -4,12 +4,12 @@
 
 // ── Config types ──────────────────────────────────────────────────────────
 
+import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
 import type { PermissionManager } from "../../infrastructure/tools/permissions.ts";
 import type {
 	AgentStopPolicy,
 	ExecutionProfile,
 } from "../policy/execution-policy.ts";
-import type { AcceptanceConfig } from "../../infrastructure/guards/acceptance-contract.ts";
 import type { RunBudgetLimits } from "../policy/run-budget.ts";
 import type { AgentHooks, EventHandler, Tool } from "./types-messages.ts";
 
@@ -387,7 +387,7 @@ export type {
 	CriterionSeverity,
 	EvidenceKind,
 	ResolvedAcceptance,
-} from "../../infrastructure/guards/acceptance-contract.ts";
+} from "../guards/acceptance-contract.ts";
 
 // ── Error types ───────────────────────────────────────────────────────────
 

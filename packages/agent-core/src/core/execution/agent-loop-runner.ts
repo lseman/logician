@@ -2,17 +2,6 @@
 // Pi-style loop contract for Logician's current backend/tool adapter:
 // context + prompts + config + emit => new messages.
 
-import { compactToFit } from "../compaction/engine.ts";
-import {
-	emitConclusion,
-	lastAssistantContent,
-} from "../policy/conclusion-policy.ts";
-import { executeToolBatch } from "./tool-batch-controller.ts";
-import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
-import {
-	parseTextToolCalls,
-	stripTextToolCalls,
-} from "../../infrastructure/tools/utils/text-to-tool-calls.ts";
 import {
 	type AcceptanceConfig,
 	evaluateAcceptanceReport,
@@ -21,35 +10,31 @@ import {
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
 	verifyAcceptanceCommands,
-} from "../../infrastructure/guards/acceptance-contract.ts";
-import type { OutputGuard } from "../../infrastructure/guards/output-guard.ts";
+} from "../guards/acceptance-contract.ts";
+import type { OutputGuard } from "../guards/output-guard.ts";
+import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
+import { compactToFit } from "../compaction/engine.ts";
+import { resolveAgentSettings } from "../configuration/agent-settings.ts";
+import {
+	isToolFailureResult,
+	taskObjectiveFromMessages,
+} from "../loop/adaptive-mode.ts";
 import {
 	assistantText,
 	emitMessagePair,
 	stopReasonFor,
 	withSystemPrompt,
 } from "../loop/callbacks.ts";
+import type { AgentLoopConfig } from "../loop/config.ts";
 import { processProviderResponse } from "../loop/provider-response.ts";
 import {
 	createProviderTurnState,
 	requestAssistantTurn,
 } from "../loop/provider-turn.ts";
 import {
-	isToolFailureResult,
-	taskObjectiveFromMessages,
-} from "../loop/adaptive-mode.ts";
-import type { AgentLoopConfig } from "../loop/config.ts";
-import type {
-	AgentConfig,
-	AgentEventSink,
-	AgentMessage,
-	CompactableMessage,
-	Message,
-	Tool,
-	ToolCall,
-} from "../types/index.ts";
-import { resolveAgentSettings } from "../configuration/agent-settings.ts";
-import type { LLMBackend } from "../provider/backend.ts";
+	emitConclusion,
+	lastAssistantContent,
+} from "../policy/conclusion-policy.ts";
 import {
 	type RunOutcomeStatus,
 	resolveExecutionPolicy,
@@ -60,15 +45,30 @@ import {
 	type InterventionInput,
 } from "../policy/intervention-controller.ts";
 import {
+	RunBudgetController,
+	type RunBudgetDecision,
+} from "../policy/run-budget.ts";
+import type { LLMBackend } from "../provider/backend.ts";
+import {
 	createSystemMessage,
 	convertToLlm as defaultConvertToLlm,
 	estimateChatPayloadTokens,
 } from "../provider/messages.ts";
 import {
-	RunBudgetController,
-	type RunBudgetDecision,
-} from "../policy/run-budget.ts";
+	parseTextToolCalls,
+	stripTextToolCalls,
+} from "../provider/text-tool-calls.ts";
 import { ToolResultCache } from "../state/tool-cache.ts";
+import type {
+	AgentConfig,
+	AgentEventSink,
+	AgentMessage,
+	CompactableMessage,
+	Message,
+	Tool,
+	ToolCall,
+} from "../types/index.ts";
+import { executeToolBatch } from "./tool-batch-controller.ts";
 
 // A steering interrupt cancels the in-flight provider call to redirect the
 // run, not to stop it — the harness auto-continues with the queued steering
@@ -616,10 +616,7 @@ async function runAgentLoopInternal(
 	}
 
 	// ── Acceptance finalization ────────────────────────────────────────
-	if (
-		shouldRunAcceptanceFinalization(resolved) &&
-		!acceptanceReported
-	) {
+	if (shouldRunAcceptanceFinalization(resolved) && !acceptanceReported) {
 		const finalText = lastAssistantContent(finalMessagesForConclusion);
 
 		// Run verification commands
@@ -673,10 +670,7 @@ async function runAgentLoopInternal(
 
 	const finalText = lastAssistantContent(finalMessagesForConclusion);
 	return finish({
-		status:
-			iteration >= maxIterations
-				? "failed"
-				: "completed",
+		status: iteration >= maxIterations ? "failed" : "completed",
 		summary: finalText || undefined,
 		source:
 			iteration >= maxIterations || !executionPolicy.embeddedPoliciesEnabled

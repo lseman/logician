@@ -6,28 +6,28 @@
 // the harness's single live instance.
 
 import { spawnSync } from "node:child_process";
+import { getTasks } from "@logician/agent-blocks/tasks/todo.ts";
+import type { LoopDetector } from "../../guards/loop-detector.ts";
+import { awaitsUserInput } from "../../guards/response-patterns.ts";
+import { compactToFit } from "../../compaction/engine.ts";
 import { resolveExecutionPolicy } from "../../policy/execution-policy.ts";
+import { HarnessInterventionController } from "../../policy/intervention-controller.ts";
+import {
+	COMPACTION_TARGET_FRACTION,
+	estimateChatPayloadTokens,
+} from "../../provider/messages.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
 } from "../../session/file-checkpoints.ts";
-import { HarnessInterventionController } from "../../policy/intervention-controller.ts";
-import {
-	COMPACTION_TARGET_FRACTION,
-	estimateChatPayloadTokens,
-} from "../../provider/messages.ts";
-import type { LoopDetector } from "../../../infrastructure/guards/loop-detector.ts";
-import { awaitsUserInput } from "../../../infrastructure/guards/response-patterns.ts";
-import { getTasks } from "@logician/agent-blocks/tasks/todo.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
 	CompactableMessage,
 	Message,
 } from "../../types/index.ts";
-import { compactToFit } from "../../compaction/engine.ts";
 import { BudgetTracker } from "./budget.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the

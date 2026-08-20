@@ -1,3 +1,5 @@
+import type { PermissionManager } from "../../infrastructure/tools/permissions.ts";
+import type { ToolRegistry } from "../../infrastructure/tools/registry.ts";
 import { createToolResultMessage } from "../provider/messages.ts";
 import type {
 	AgentEvent,
@@ -5,8 +7,6 @@ import type {
 	Message,
 	ToolCall,
 } from "../types/index.ts";
-import type { PermissionManager } from "../../infrastructure/tools/permissions.ts";
-import type { ToolRegistry } from "../../infrastructure/tools/registry.ts";
 
 type Emit = (event: AgentEvent) => void | Promise<void>;
 type OnPermissionRequest = (ctx: {

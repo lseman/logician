@@ -4,11 +4,11 @@
 // Exposes both an untyped EventBus for cross-extension messaging and a
 // structured typed event bus for agent lifecycle events.
 
+import type { PiRuntimePort } from "../../adapters/pi/index.ts";
+import { PiAdapter } from "../../adapters/pi/index.ts";
 import type { AgentHooks } from "../types/index.ts";
 import { createExtensionContext } from "./context.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
-import type { PiRuntimePort } from "../../adapters/pi/index.ts";
-import { PiAdapter } from "../../adapters/pi/index.ts";
 import { createExtensionState } from "./state.ts";
 import type {
 	ExtensionAPI,

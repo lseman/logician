@@ -7,14 +7,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Tool, ToolResult } from "../../core/types/index.ts";
-import { ensureInsideCwd, readUtf8IfExists, resolvePath } from "./utils/path-utils.ts";
+import { withFileMutationQueue } from "../filesystem/mutation-queue.ts";
 import {
 	hasBeenRead,
 	isStaleSinceRead,
 	refreshAfterWrite,
-} from "./utils/read-tracker.ts";
+} from "../filesystem/read-tracker.ts";
 import { appendToFile } from "./utils/atomic-write.ts";
-import { withFileMutationQueue } from "./utils/file-mutation-queue.ts";
+import {
+	ensureInsideCwd,
+	readUtf8IfExists,
+	resolvePath,
+} from "./utils/path-utils.ts";
 
 export const write_file_append: Tool = {
 	name: "write_file_append",

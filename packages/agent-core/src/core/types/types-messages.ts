@@ -176,8 +176,8 @@ export interface ToolContext {
 
 // ── Event types ───────────────────────────────────────────────────────────
 
-import type { AgentConfig, AgentHarnessStreamOptions } from "./types-config.ts";
 import type { HarnessIntervention } from "../policy/intervention-controller.ts";
+import type { AgentConfig, AgentHarnessStreamOptions } from "./types-config.ts";
 
 /**
  * Envelope metadata stamped onto every event at the emit boundary: a
@@ -191,7 +191,12 @@ export interface AgentEventEnvelope {
 export type AgentEventBody =
 	| { type: "agent_start" }
 	| ({ type: "harness_intervention" } & HarnessIntervention)
-	| { type: "agent_end"; messages?: Message[]; status?: RunOutcomeStatus; summary?: string }
+	| {
+			type: "agent_end";
+			messages?: Message[];
+			status?: RunOutcomeStatus;
+			summary?: string;
+	  }
 	| { type: "agent_settled"; nextTurnCount?: number }
 	| {
 			type: "queue_update";

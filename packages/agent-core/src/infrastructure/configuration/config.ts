@@ -9,10 +9,10 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+	type AgentModelConfig,
 	INFERENCE_MODE_ORDER,
 	isValidInferenceMode,
 	THINKING_LEVELS,
-	type AgentModelConfig,
 	type ThinkingLevel,
 	type TruncationConfig,
 } from "../../core/types/types-config.ts";
@@ -53,6 +53,7 @@ const KNOWN_KEYS = new Set([
 	"mcpServers",
 	"webSearch",
 	"permissionMode",
+	"workflowMode",
 	"permissions",
 	"steeringInterrupt",
 	"maxTotalTokens",
@@ -266,10 +267,7 @@ export function validateConfig(
 						parsed.push({
 							name: name.trim(),
 							model: modelName,
-							url:
-								typeof m.baseUrl === "string"
-									? m.baseUrl.trim()
-									: undefined,
+							url: typeof m.baseUrl === "string" ? m.baseUrl.trim() : undefined,
 						});
 					}
 				} else {
@@ -368,6 +366,11 @@ export function validateConfig(
 		} else {
 			cfg.permissionMode = pm as LogicianTuiConfig["permissionMode"];
 		}
+	}
+	if (obj.workflowMode !== undefined) {
+		const mode = configString(obj.workflowMode);
+		if (mode === "act" || mode === "plan") cfg.workflowMode = mode;
+		else warn(warnings, '"workflowMode" must be one of: act, plan.');
 	}
 
 	copyBooleans(obj, cfg, {
@@ -815,6 +818,7 @@ export interface LogicianTuiConfig {
 		maxResults?: number;
 	};
 	permissionMode?: "acceptAll" | "acceptEdits" | "ask" | "plan";
+	workflowMode?: "act" | "plan";
 	permissions?: {
 		allow?: string[];
 		deny?: string[];
@@ -869,16 +873,16 @@ export interface LogicianTuiConfig {
 	};
 	// Inference mode — pre-defined sampling parameter set, cycled via Alt+M.
 	inferenceMode?:
-	| "auto"
-	| "none"
-	| "thinking-general"
-	| "thinking-coding"
-	| "instruct-general"
-	| "instruct-reasoning"
-	| "instruct-coding"
-	| "deterministic"
-	| "creative"
-	| "analytical";
+		| "auto"
+		| "none"
+		| "thinking-general"
+		| "thinking-coding"
+		| "instruct-general"
+		| "instruct-reasoning"
+		| "instruct-coding"
+		| "deterministic"
+		| "creative"
+		| "analytical";
 	// Universal output/result truncation limits.
 	truncation?: TruncationConfig;
 	// Whether to auto-resume the most recent session on startup (default: true).
@@ -1026,8 +1030,8 @@ export function saveConfigNestedField(
 	return updateGlobalConfig(raw => {
 		const current =
 			raw[section] &&
-				typeof raw[section] === "object" &&
-				!Array.isArray(raw[section])
+			typeof raw[section] === "object" &&
+			!Array.isArray(raw[section])
 				? (raw[section] as Record<string, unknown>)
 				: {};
 		if (value === undefined) {
@@ -1049,8 +1053,8 @@ export function updateConfigFile(
 		mkdirSync(directory, { recursive: true });
 		const raw = existsSync(configPath)
 			? (JSON.parse(
-				stripJsonComments(readFileSync(configPath, "utf8")),
-			) as Record<string, unknown>)
+					stripJsonComments(readFileSync(configPath, "utf8")),
+				) as Record<string, unknown>)
 			: {};
 		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
 		mutate(raw);

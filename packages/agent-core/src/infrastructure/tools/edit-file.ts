@@ -6,8 +6,17 @@
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
 import type { Tool, ToolResult } from "../../core/types/index.ts";
-import { ensureInsideCwd, resolveReadPath } from "./utils/path-utils.ts";
-import { generateDiffString, generateUnifiedPatch } from "./utils/diff-utils.ts";
+import { withFileMutationQueue } from "../filesystem/mutation-queue.ts";
+import {
+	hasBeenRead,
+	isStaleSinceRead,
+	refreshAfterWrite,
+} from "../filesystem/read-tracker.ts";
+import { atomicWriteFile } from "./utils/atomic-write.ts";
+import {
+	generateDiffString,
+	generateUnifiedPatch,
+} from "./utils/diff-utils.ts";
 import {
 	defaultEditOperations,
 	detectLineEnding,
@@ -15,13 +24,7 @@ import {
 	restoreLineEndings,
 	stripBom,
 } from "./utils/helpers.ts";
-import {
-	hasBeenRead,
-	isStaleSinceRead,
-	refreshAfterWrite,
-} from "./utils/read-tracker.ts";
-import { atomicWriteFile } from "./utils/atomic-write.ts";
-import { withFileMutationQueue } from "./utils/file-mutation-queue.ts";
+import { ensureInsideCwd, resolveReadPath } from "./utils/path-utils.ts";
 
 // ============================================================================
 // Fuzzy matching

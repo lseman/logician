@@ -5,10 +5,7 @@
 
 import { createUserMessage } from "../../core/provider/messages.ts";
 import type { AgentHooks, Message, ToolCall } from "../../core/types/index.ts";
-import {
-	type PluginCommandResult,
-	runHookEvent,
-} from "../../infrastructure/tools/utils/plugins.ts";
+import { type PluginCommandResult, runHookEvent } from "./plugin-runtime.ts";
 
 export interface ClaudeCodeHookLayerOptions {
 	enabled: boolean;

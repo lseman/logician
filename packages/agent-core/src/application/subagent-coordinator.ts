@@ -21,13 +21,13 @@ import {
 	createToolResultMessage,
 	createUserMessage,
 } from "../core/provider/messages.ts";
+import type { RuntimeEvent } from "../core/types/runtime-events.ts";
 import type { AgentConfig } from "../core/types/types-config.ts";
 import type {
 	Message,
 	Tool,
 	ToolContext,
 } from "../core/types/types-messages.ts";
-import type { RuntimeEvent } from "../runtime/events.ts";
 
 export interface SubagentCoordinatorDeps {
 	config: () => AgentConfig;

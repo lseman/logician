@@ -7,19 +7,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Tool, ToolResult } from "../../core/types/index.ts";
+import { withFileMutationQueue } from "../filesystem/mutation-queue.ts";
+import {
+	hasBeenRead,
+	isStaleSinceRead,
+	refreshAfterWrite,
+} from "../filesystem/read-tracker.ts";
+import { atomicWriteFile } from "./utils/atomic-write.ts";
 import {
 	ensureInsideCwd,
 	readUtf8IfExists,
 	resolvePath,
 } from "./utils/path-utils.ts";
 import { highlightAuto } from "./utils/syntax-highlighter.ts";
-import {
-	hasBeenRead,
-	isStaleSinceRead,
-	refreshAfterWrite,
-} from "./utils/read-tracker.ts";
-import { atomicWriteFile } from "./utils/atomic-write.ts";
-import { withFileMutationQueue } from "./utils/file-mutation-queue.ts";
 
 export const write_file: Tool = {
 	name: "write_file",

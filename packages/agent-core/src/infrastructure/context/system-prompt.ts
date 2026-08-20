@@ -4,8 +4,8 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Skill } from "../../capabilities/skills/index.ts";
 import type { Tool } from "../../core/types/index.ts";
-import type { Skill } from "../../features/skills/index.ts";
 import { loadContextFiles } from "./files/loader.ts";
 
 // ============================================================================

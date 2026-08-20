@@ -147,6 +147,20 @@ void test("validateConfig handles permissions sub-object", () => {
 	assert.equal(w.length, 0);
 });
 
+void test("validateConfig accepts the act/plan workflow mode", () => {
+	const warnings: string[] = [];
+	assert.deepEqual(validateConfig({ workflowMode: "plan" }, warnings), {
+		workflowMode: "plan",
+		duplicateGuardEnabled: true,
+		continuationEnabled: true,
+		postEditDiagnostics: true,
+		autoRetryEnabled: true,
+		ariadneEnabled: true,
+		fffgrepEnabled: true,
+	});
+	assert.deepEqual(warnings, []);
+});
+
 void test("validateConfig filters empty strings from permissions arrays", () => {
 	const w: string[] = [];
 	const cfg = validateConfig(

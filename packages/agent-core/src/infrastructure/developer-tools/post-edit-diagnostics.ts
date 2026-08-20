@@ -58,8 +58,7 @@ function tscBin(): string {
 
 // Matches non-pretty `tsc` diagnostic lines, e.g.:
 //   broken.ts(1,15): error TS1109: Expression expected.
-const TSC_DIAGNOSTIC_LINE =
-	/^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$/;
+const TSC_DIAGNOSTIC_LINE = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$/;
 
 function parseTscOutput(
 	output: string,

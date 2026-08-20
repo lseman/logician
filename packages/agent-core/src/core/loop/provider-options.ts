@@ -6,11 +6,11 @@
  * and hook-mutated request metadata (headers, timeout, retries, etc.).
  */
 
-import type { GenerateOptions } from "../provider/backend.ts";
-import type { AgentHooks } from "../types/types-messages.ts";
 import type { AgentSettings } from "../configuration/agent-settings.ts";
+import type { GenerateOptions } from "../provider/backend.ts";
 import type { ThinkingLevel } from "../types/index.ts";
 import type { InferenceModeDef } from "../types/types-config.ts";
+import type { AgentHooks } from "../types/types-messages.ts";
 import type { AgentLoopConfig } from "./config.ts";
 
 export interface ProviderOptionsContext {

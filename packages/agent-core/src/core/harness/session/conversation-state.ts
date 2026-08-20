@@ -18,7 +18,7 @@ import {
 import type {
 	BranchInfo,
 	BranchSummaryData,
-} from "../../../runtime/summaries/types.ts";
+} from "../../session/summaries/types.ts";
 import type { Message } from "../../types/index.ts";
 import {
 	type Branch,

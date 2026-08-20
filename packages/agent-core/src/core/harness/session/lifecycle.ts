@@ -6,7 +6,7 @@
 import {
 	runHookEvent,
 	runSessionStartHooks,
-} from "../../../infrastructure/tools/utils/plugins.ts";
+} from "../../../adapters/claude-code/plugin-runtime.ts";
 import type {
 	BeforeCompactContext,
 	BeforeCompactResult,

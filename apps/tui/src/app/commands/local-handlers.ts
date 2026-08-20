@@ -187,7 +187,10 @@ export function createLocalHandlers(
 					ctx.bridge.updateSettings({
 						guardMode: value.toLowerCase() as "auto" | "on" | "off",
 					});
-					saveConfigField("guardsEnabled", value.toLowerCase() === "auto" ? undefined : on);
+					saveConfigField(
+						"guardsEnabled",
+						value.toLowerCase() === "auto" ? undefined : on,
+					);
 					return `Guards: ${value.toLowerCase()}`;
 				case "compaction":
 					ctx.bridge.updateSettings({ proactiveCompactionEnabled: on });
@@ -223,6 +226,7 @@ export function createLocalHandlers(
 				}
 				case "execution-policy":
 				case "execution_policy": {
+					const normalized = value === "auto" ? "autonomous" : value;
 					const valid: Array<"autonomous" | "minimal"> = [
 						"autonomous",
 						"minimal",
@@ -230,11 +234,11 @@ export function createLocalHandlers(
 					if (!value) {
 						return `Usage: /settings execution-policy <mode>\n\nValid: ${valid.join(", ")}`;
 					}
-					if (!valid.includes(value.toLowerCase() as (typeof valid)[number])) {
+					if (!valid.includes(normalized as (typeof valid)[number])) {
 						return `Invalid policy "${value}". Valid: ${valid.join(", ")}`;
 					}
-					ctx.setExecutionProfile(value as "autonomous" | "minimal");
-					return `Execution policy: ${value}`;
+					ctx.setExecutionProfile(normalized as "autonomous" | "minimal");
+					return `Execution mode: ${normalized === "autonomous" ? "auto" : "minimal"}`;
 				}
 				default:
 					return `Unknown setting "${key}". Use /settings to list available settings.`;
@@ -302,20 +306,25 @@ export function createLocalHandlers(
 			setStatusPhase("ready");
 		},
 		setPermissionMode: (mode: unknown) => {
-			ctx.bridge.setPermissionMode(
-				String(mode) as "acceptAll" | "acceptEdits" | "ask" | "plan",
-			);
+			const selected = String(mode) as
+				| "acceptAll"
+				| "acceptEdits"
+				| "ask"
+				| "plan";
+			if (selected === "plan") {
+				ctx.setPlanMode(true);
+			} else {
+				ctx.normalPermissionMode = selected;
+				if (ctx.workflowMode === "act") ctx.bridge.setPermissionMode(selected);
+			}
 			setStatusPhase("ready");
 		},
 		getPermissionMode: () => ctx.bridge.getPermissionMode(),
 		togglePlanMode: () => {
-			const next =
-				ctx.bridge.getPermissionMode() === "plan" ? "acceptEdits" : "plan";
-			ctx.bridge.setPermissionMode(next);
-			ctx.statusPanel.update({ permissionMode: next });
+			const next = ctx.togglePlanMode();
 			return next === "plan"
-				? "Plan mode ON — only read-only tools; the agent should present a plan."
-				: "Plan mode OFF — permission mode back to acceptEdits.";
+				? "Plan mode ON — plan read-only, then pause for approval before execution."
+				: "Act mode ON — execute directly without a required planning phase.";
 		},
 		rewind: () => {
 			const restored = ctx.bridge.rewind();
@@ -367,7 +376,7 @@ export function createLocalHandlers(
 		},
 		cycleExecutionProfile: () => {
 			const next = ctx.cycleExecutionProfile();
-			return `Execution policy: ${next}`;
+			return `Execution mode: ${next === "autonomous" ? "auto" : "minimal"}`;
 		},
 		cycleInferenceMode: () => {
 			ctx.cycleInferenceMode();

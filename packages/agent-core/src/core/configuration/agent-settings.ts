@@ -22,7 +22,9 @@ export interface AgentSettingsInput {
 	toolExecution?: "parallel" | "sequential";
 }
 
-export function resolveAgentSettings(config: AgentSettingsInput): AgentSettings {
+export function resolveAgentSettings(
+	config: AgentSettingsInput,
+): AgentSettings {
 	return {
 		executionProfile: config.executionProfile ?? "minimal",
 		inferenceMode: config.inferenceMode ?? "none",

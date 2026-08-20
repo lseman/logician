@@ -4,36 +4,39 @@
 // nextTurn queues drained at save points.
 //
 
-import type { CompactionSettings } from "../compaction/engine.ts";
-import type { ExtensionRunner } from "../extension/index.ts";
 import type { ClaudeCodeHookLayer } from "../../adapters/claude-code/hook-layer.ts";
-import { type DeliveryMode, MessageQueue } from "../../runtime/queue/queue.ts";
+import { LoopDetector } from "../guards/loop-detector.ts";
+import { OutputGuard } from "../guards/output-guard.ts";
 import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
+import type { CompactionSettings } from "../compaction/engine.ts";
+import {
+	runCompaction,
+	shouldAutoCompact,
+} from "../compaction/orchestration.ts";
 import { validateAgentConfig } from "../configuration/config-validator.ts";
 import {
-	type RunAgentLoopConfig,
 	createSteeringInterruptReason,
+	type RunAgentLoopConfig,
 	runAgentLoop,
 } from "../execution/agent-loop-runner.ts";
-import type { LLMBackend } from "../provider/backend.ts";
+import type { ExtensionRunner } from "../extension/index.ts";
 import { HarnessInterventionController } from "../policy/intervention-controller.ts";
+import type { LLMBackend } from "../provider/backend.ts";
 import {
 	createUserMessage,
 	estimateChatPayloadTokens,
 } from "../provider/messages.ts";
+import type { Session } from "../session/session.ts";
+import type {
+	BranchInfo,
+	BranchSummaryData,
+} from "../session/summaries/types.ts";
 import {
 	type AgentRuntimeState,
 	createRuntimeState,
 	type HarnessPhase,
 	reduceRuntimeState,
 } from "../state/runtime-state.ts";
-import { Session } from "../session/session.ts";
-import { LoopDetector } from "../../infrastructure/guards/loop-detector.ts";
-import { OutputGuard } from "../../infrastructure/guards/output-guard.ts";
-import type {
-	BranchInfo,
-	BranchSummaryData,
-} from "../../runtime/summaries/types.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -41,24 +44,17 @@ import type {
 	AgentModelConfig,
 	BeforeCompactContext,
 	BeforeCompactResult,
-	EventHandler,
 	Message,
 	QueueMode,
 	ThinkingLevel,
 	Tool,
 } from "../types/index.ts";
-import { summarizeAndMergeBranch } from "./session/branching.ts";
 import {
-	runCompaction,
-	shouldAutoCompact,
-} from "../compaction/orchestration.ts";
-import type {
-	AbortResult,
-	AgentHarnessOptions,
-	HarnessQueues,
-	HarnessTurnSnapshot,
-} from "./types.ts";
-import { ConversationState } from "./session/conversation-state.ts";
+	composeHarnessConfig,
+	HarnessConfigurationError,
+} from "./internal/configuration.ts";
+import { HarnessObservation } from "./internal/observation.ts";
+import { type DeliveryMode, MessageQueue } from "./queue/message-queue.ts";
 import type { ExtensionRuntimeDeps } from "./runtime/extension-runtime.ts";
 import {
 	createClaudeCodeHookLayerFor,
@@ -75,27 +71,42 @@ import {
 	assertPhaseTransition,
 	HarnessBusyError,
 } from "./runtime/phase.ts";
+import { summarizeAndMergeBranch } from "./session/branching.ts";
+import { ConversationState } from "./session/conversation-state.ts";
 import {
 	emitPostCompact as emitPostCompactHelper,
 	emitPreCompact as emitPreCompactHelper,
 	emitSessionEnd as emitSessionEndHelper,
 	emitSessionStart as emitSessionStartHelper,
 } from "./session/lifecycle.ts";
+import type {
+	AbortResult,
+	AgentHarnessOptions,
+	HarnessModule,
+	HarnessObserver,
+	HarnessQueues,
+	HarnessTurnSnapshot,
+} from "./types.ts";
 
+export type {
+	BranchInfo,
+	BranchSummaryData,
+} from "../session/summaries/types.ts";
 export type {
 	AgentRuntimeState,
 	HarnessPhase,
 } from "../state/runtime-state.ts";
-export type {
-	BranchInfo,
-	BranchSummaryData,
-} from "../../runtime/summaries/types.ts";
+export { HarnessBusyError } from "./runtime/phase.ts";
 export type {
 	AbortResult,
 	AgentHarnessOptions,
+	HarnessModule,
+	HarnessObserver,
 	HarnessQueues,
 } from "./types.ts";
-export { HarnessBusyError } from "./runtime/phase.ts";
+export { defineHarnessModule } from "./types.ts";
+
+export { HarnessConfigurationError };
 
 type TurnRequest = { kind: "prompt"; text: string } | { kind: "continue" };
 
@@ -122,9 +133,7 @@ export class AgentHarness {
 	private interventions: HarnessInterventionController =
 		new HarnessInterventionController();
 	private extensionRuntimeState = createExtensionRuntimeState();
-	private onQueueChange?: (queues: HarnessQueues) => void;
-	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
-	private onSettled?: (nextTurnCount: number) => void;
+	private observation: HarnessObservation;
 	private autoCompactionSettings: CompactionSettings = {
 		enabled: false,
 		reserveTokens: 16_384,
@@ -147,7 +156,6 @@ export class AgentHarness {
 	};
 	private _runPromise?: Promise<void>;
 	private _runResolve?: () => void;
-	private _subscribers: Set<EventHandler> = new Set();
 	private _extensionRunner?: ExtensionRunner;
 	private _beforeAgentStart?: (
 		promptText: string,
@@ -157,13 +165,14 @@ export class AgentHarness {
 		| undefined;
 
 	constructor(options: AgentHarnessOptions) {
-		const errors = validateAgentConfig(options.config);
+		const config = composeHarnessConfig(options.modules ?? [], options.config);
+		const errors = validateAgentConfig(config);
 		if (errors.length > 0)
 			throw new Error(
 				`Invalid config: ${errors.map(e => `${e.field}: ${e.message}`).join("; ")}`,
 			);
 
-		this.config = options.config;
+		this.config = config;
 		this.config.streamOptions = {
 			...options.config.streamOptions,
 			...(options.config.streamOptions?.timeoutMs === undefined &&
@@ -203,6 +212,9 @@ export class AgentHarness {
 			followUpMode: (options.config.followUpQueueMode ??
 				"one-at-a-time") as DeliveryMode,
 		});
+		this.observation = new HarnessObservation(
+			(options.modules ?? []).flatMap(module => module.observers ?? []),
+		);
 	}
 
 	get phase(): HarnessPhase {
@@ -238,19 +250,8 @@ export class AgentHarness {
 		};
 	}
 
-	setOnPhaseChange(
-		cb: (phase: HarnessPhase, prev: HarnessPhase) => void,
-	): void {
-		this.onPhaseChange = cb;
-	}
-
-	setOnSettled(cb: (nextTurnCount: number) => void): void {
-		this.onSettled = cb;
-	}
-
-	subscribe(handler: EventHandler): () => void {
-		this._subscribers.add(handler);
-		return () => this._subscribers.delete(handler);
+	observe(observer: HarnessObserver): () => void {
+		return this.observation.observe(observer);
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -278,7 +279,7 @@ export class AgentHarness {
 		const prev = this._phase;
 		this._phase = to;
 		this.runtime = { ...this.runtime, phase: to };
-		if (prev !== to) this.onPhaseChange?.(to, prev);
+		this.observation.phase(to, prev);
 	}
 
 	private async runInPhase<T>(
@@ -306,7 +307,7 @@ export class AgentHarness {
 		this._runPromise = undefined;
 		this._runResolve = undefined;
 		const nextTurnCount = this.queue.getNextTurn().length;
-		this.onSettled?.(nextTurnCount);
+		this.observation.settled(nextTurnCount);
 		this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 	}
 
@@ -391,7 +392,7 @@ export class AgentHarness {
 	}
 
 	/** Task/checkpoint setup that must happen before a snapshot is created. */
-	private async beginTurn(request: TurnRequest): Promise<AbortSignal> {
+	private async beginTurn(_request: TurnRequest): Promise<AbortSignal> {
 		this.abortController = new AbortController();
 		this.conversation.checkpoint();
 
@@ -661,20 +662,17 @@ export class AgentHarness {
 	}
 
 	// Configuration changes become visible at the next turn snapshot.
-	updateConfig(patch: Partial<AgentConfig>): void {
+	configure(patch: Partial<AgentConfig>): void {
 		Object.assign(this.config, patch);
 		if (patch.maxIterations !== undefined) {
 			this.maxIterations = patch.maxIterations;
 		}
-	}
-
-	setTools(tools: Tool[]): void {
-		this.config.tools = tools;
-		this.idleTools = this.createToolRegistry(tools);
-		this._session?.appendActiveToolsChange(tools.map(t => t.name));
+		if (patch.tools === undefined) return;
+		this.idleTools = this.createToolRegistry(patch.tools);
+		this._session?.appendActiveToolsChange(patch.tools.map(t => t.name));
 		this.emitToSubscribers({
 			type: "tools_update",
-			toolNames: tools.map(t => t.name),
+			toolNames: patch.tools.map(t => t.name),
 		});
 	}
 
@@ -772,10 +770,6 @@ export class AgentHarness {
 		};
 	}
 
-	setOnQueueChange(cb: (queues: HarnessQueues) => void): void {
-		this.onQueueChange = cb;
-	}
-
 	clearQueues(): HarnessQueues {
 		const cleared = this.getQueues();
 		this.queue.clear();
@@ -785,7 +779,7 @@ export class AgentHarness {
 
 	private emitQueueChange(): void {
 		const queues = this.getQueues();
-		this.onQueueChange?.(queues);
+		this.observation.queue(queues);
 		this.emitToSubscribers({
 			type: "queue_update",
 			steering: queues.steering,
@@ -1260,7 +1254,7 @@ export class AgentHarness {
 	// ── Internals ──────────────────────────────────────────────────────────
 
 	private emitToSubscribers(event: AgentEvent): void {
-		for (const handler of this._subscribers) handler(event);
+		this.observation.event(event);
 	}
 
 	// ── Improved token estimation using serialized payload ─────────────────
@@ -1282,7 +1276,7 @@ export class AgentHarness {
 			...config,
 			onEvent: event => {
 				originalOnEvent?.(event);
-				for (const subscriber of this._subscribers) subscriber(event);
+				this.emitToSubscribers(event);
 			},
 		};
 	}

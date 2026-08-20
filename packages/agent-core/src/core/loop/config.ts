@@ -1,5 +1,5 @@
-import type { OutputGuard } from "../../infrastructure/guards/output-guard.ts";
-import type { AcceptanceConfig } from "../../infrastructure/guards/acceptance-contract.ts";
+import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
+import type { OutputGuard } from "../guards/output-guard.ts";
 import type { HarnessInterventionController } from "../policy/intervention-controller.ts";
 import type { LLMBackend } from "../provider/backend.ts";
 import type { AgentConfig, Message } from "../types/index.ts";
@@ -42,7 +42,9 @@ export interface AgentLoopConfig extends AgentLoopOptions {
 	backend: LLMBackend;
 	signal?: AbortSignal;
 	onContextCompacted?: (messages: Message[]) => void;
-	refreshNextTurnConfig?: () => Partial<AgentLoopConfig> | Promise<Partial<AgentLoopConfig>>;
+	refreshNextTurnConfig?: () =>
+		| Partial<AgentLoopConfig>
+		| Promise<Partial<AgentLoopConfig>>;
 	outputGuard?: OutputGuard | null;
 	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
 	interventionController?: HarnessInterventionController;

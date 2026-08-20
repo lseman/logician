@@ -11,6 +11,28 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 	const handleChoicePopupSubmit = (): void => {
 		const qid = ctx.choicePopup.getQuestionId();
 		const answers = ctx.choicePopup.getAnswers();
+		if (qid === "__plan_approval__") {
+			ctx.choicePopup.hide();
+			if (ctx.choicePopup.getResponseValue() === "approve") {
+				ctx.planPhase = "executing";
+				ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
+				ctx.transcript.addSystemMessage("Plan approved — executing now.");
+				ctx.statusPanel.update({ phase: "streaming" });
+				void ctx.bridge
+					.sendMessage(
+						"The user approved the plan. Execute the approved plan now. Do not create another plan or ask for approval again.",
+					)
+					.catch(err => ctx.bridge.reportError(err));
+			} else {
+				ctx.planPhase = "idle";
+				ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
+				ctx.transcript.addSystemMessage(
+					"Plan rejected — nothing was executed.",
+				);
+			}
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			return;
+		}
 		if (ctx.choicePopupPreview) {
 			ctx.choicePopupPreview = false;
 			ctx.transcript.addSystemMessage(
@@ -39,6 +61,16 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			return;
 		}
 		const qid = ctx.choicePopup.getQuestionId();
+		if (qid === "__plan_approval__") {
+			ctx.choicePopup.hide();
+			ctx.planPhase = "idle";
+			ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
+			ctx.transcript.addSystemMessage(
+				"Plan approval dismissed — nothing was executed.",
+			);
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			return;
+		}
 		if (qid) {
 			ctx.bridge.respondToQuestion(qid, "__dismissed__");
 			ctx.transcript.addSystemMessage("Question dismissed.");
@@ -334,10 +366,8 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 
 		// Ctrl+P — toggle plan mode (plan ↔ act)
 		if (data === "\x10") {
-			const next =
-				ctx.bridge.getPermissionMode() === "plan" ? "acceptEdits" : "plan";
-			ctx.bridge.setPermissionMode(next);
-			ctx.statusPanel.update({ permissionMode: next });
+			const next = ctx.togglePlanMode();
+			ctx.notify(next === "plan" ? "Mode: plan" : "Mode: act", "success");
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
@@ -376,10 +406,13 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			return { consume: true };
 		}
 
-		// Ctrl+I — cycle execution policy (autonomous ↔ minimal)
+		// Ctrl+I — cycle execution mode (auto ↔ minimal)
 		if (data === "\x1b[105;5u" || data === "\x1b[105;6u") {
 			const next = ctx.cycleExecutionProfile();
-			ctx.notify(`Execution policy: ${next}`, "success");
+			ctx.notify(
+				`Execution mode: ${next === "autonomous" ? "auto" : "minimal"}`,
+				"success",
+			);
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
@@ -580,9 +613,17 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		// requestRender uses nextTick, so this frame still precedes the setImmediate
 		// bridge work while allowing the input callback to return promptly.
 		ctx.tui.requestRender(false, true);
+		const prompt =
+			ctx.workflowMode === "plan"
+				? `[PLAN MODE]\nFirst investigate using read-only tools and produce a concrete implementation plan. Do not modify files or execute mutating commands. End after presenting the plan and wait for explicit user approval.\n\nUser request:\n${text}`
+				: text;
+		if (ctx.workflowMode === "plan") {
+			ctx.planPhase = "planning";
+			ctx.bridge.setPermissionMode("plan");
+		}
 		setImmediate(() => {
 			void ctx.bridge
-				.sendMessage(text)
+				.sendMessage(prompt)
 				.catch(err => ctx.bridge.reportError(err));
 		});
 	};

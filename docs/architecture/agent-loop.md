@@ -7,6 +7,42 @@ description: The core cycle of the Logician agent — from input to output.
 
 The agent loop is the core execution cycle that drives all agent behavior.
 
+## Harness composition
+
+`AgentHarness` is available from `@logician/agent-core/harness`. Applications can assemble reusable capability bundles with `defineHarnessModule()` instead of wrapping or subclassing the harness:
+
+```ts
+import { AgentHarness, defineHarnessModule } from "@logician/agent-core/harness";
+
+const diagnostics = defineHarnessModule({
+  name: "diagnostics",
+  config: {
+    tools: [diagnosticsTool],
+    maxRetries: 2,
+  },
+  observers: [{ event: event => telemetry.record(event) }],
+});
+
+const harness = new AgentHarness({
+  backend,
+  config: { baseUrl, model },
+  modules: [diagnostics],
+});
+```
+
+Modules are inert: construction composes their configuration, tools, and observers before any run begins. Direct harness configuration wins over module defaults. Tool and module names must be unique, so ambiguous installations fail immediately with `HarnessConfigurationError`.
+
+Runtime configuration goes through `harness.configure(patch)`. Tool patches rebuild the live registry and emit the same durable/session notifications as other tool changes. Observation uses one multi-listener seam:
+
+```ts
+const unsubscribe = harness.observe({
+  phaseChange: (phase, previous) => {},
+  queueChange: queues => {},
+  settled: nextTurnCount => {},
+  event: event => {},
+});
+```
+
 ## Loop diagram
 
 ```mermaid
