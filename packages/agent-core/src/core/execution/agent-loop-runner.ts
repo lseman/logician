@@ -34,6 +34,10 @@ import {
 	createProviderTurnState,
 	requestAssistantTurn,
 } from "../loop/provider-turn.ts";
+import {
+	isToolFailureResult,
+	taskObjectiveFromMessages,
+} from "../loop/adaptive-mode.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 // Task-aware callbacks — injected by the harness when @logician/agent-blocks is loaded.
 // When omitted, the loop runs in "pure" mode: no task nudges, no structured
@@ -54,7 +58,6 @@ export interface TaskAwareCallbacks {
 			| { status: string; summary: string; ts: number }
 			| null
 			| undefined;
-		structuredOutcomeRequired: boolean;
 		fallbackStatus?: string;
 		fallbackSummary?: string;
 	}) => {
@@ -91,41 +94,11 @@ export interface ContinuationDecision {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Inline utilities — previously imported from tasks/adaptive-mode.ts
-// ═══════════════════════════════════════════════════════════════════════════
-
-/** Extract the last meaningful user prompt from messages. */
-function taskObjectiveFromMessages(
-	messages: Array<{ role: string; content: unknown }>,
-): string {
-	const prompts = messages
-		.filter(
-			message => message.role === "user" && typeof message.content === "string",
-		)
-		.map(message =>
-			String(message.content).replace(/\s+/g, " ").trim().slice(0, 1000),
-		)
-		.filter(Boolean);
-	const lastMeaningful = prompts.find(
-		p =>
-			!/^(?:continue|resume|go on|keep going)[.! ]*$/i.test(p) &&
-			!/^\[continuation-nudge:/i.test(p),
-	);
-	return lastMeaningful ?? prompts.at(-1) ?? "";
-}
-
-const FAILURE_PATTERN = /(?:error|failure|exception|unsuccessful|could not)/i;
-function isToolFailureResult(result: string): boolean {
-	return FAILURE_PATTERN.test(result);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Inline outcome resolver — previously imported from tasks/outcome-resolution.ts
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function resolveOutcomeDefault(ctx: {
 	declared: { status: string; summary: string; ts: number } | null | undefined;
-	structuredOutcomeRequired: boolean;
 	fallbackStatus?: string;
 	fallbackSummary?: string;
 }): {
@@ -140,14 +113,6 @@ export function resolveOutcomeDefault(ctx: {
 				: ctx.declared.status) as RunOutcomeStatus,
 			summary: ctx.declared.summary,
 			source: "structured",
-		};
-	}
-	if (ctx.structuredOutcomeRequired) {
-		return {
-			status: "completed",
-			summary:
-				"Run completed without a declared task outcome. Tool work was performed but no structured outcome was recorded. Review the final text for correctness.",
-			source: "runtime",
 		};
 	}
 	return {
@@ -724,8 +689,6 @@ async function runAgentLoopInternal(
 				return finish(
 					(config.callbacks?.resolveOutcome ?? resolveOutcomeDefault)({
 						declared: config.callbacks?.getTaskStatus?.(),
-						structuredOutcomeRequired:
-							performedToolWork && registry.has("task_status"),
 					}),
 				);
 			}
@@ -751,8 +714,6 @@ async function runAgentLoopInternal(
 				return finish(
 					(config.callbacks?.resolveOutcome ?? resolveOutcomeDefault)({
 						declared: config.callbacks?.getTaskStatus?.(),
-						structuredOutcomeRequired:
-							performedToolWork && registry.has("task_status"),
 					}),
 				);
 			}
@@ -851,8 +812,6 @@ async function runAgentLoopInternal(
 		return finish(
 			(config.callbacks?.resolveOutcome ?? resolveOutcomeDefault)({
 				declared,
-				structuredOutcomeRequired:
-					performedToolWork && registry.has("task_status"),
 			}),
 		);
 	}
