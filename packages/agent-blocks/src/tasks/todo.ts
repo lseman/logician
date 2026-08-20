@@ -4,17 +4,19 @@
 // Dependencies: blockedBy with cycle detection and auto-resolve
 
 import {
+	type Tool,
+} from "@logician/agent-core";
+import {
 	allocateTaskId,
 	getTasksMutable,
 	notifyTodosChanged,
 	replaceTasks,
 	type Task,
 	type TaskStatus,
-	type Tool,
-} from "@logician/agent-core";
+} from "./state.ts";
 
-export type { Task, TaskStatus } from "@logician/agent-core";
-export { getTasks, onTodosChanged } from "@logician/agent-core";
+export type { Task, TaskStatus } from "./state.ts";
+export { getTasks, onTodosChanged } from "./state.ts";
 
 export type TaskAction =
 	| "create"

@@ -1,7 +1,7 @@
 // ── Typed hook bus ─────────────────────────────────────────────────────────
 // Unifies the single-handler contract hooks into one multi-handler bus with
 // per-event reducer semantics, mirroring pi's hook design
-// (packages/agent/docs/hooks.md). Multiple extensions register handlers for the
+// Multiple extensions register handlers for the
 // same event and compose deterministically:
 //
 //   beforeToolCall   → early-block: first {content} short-circuits; {args}

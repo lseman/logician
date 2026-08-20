@@ -34,7 +34,7 @@ import { OpenAIBackend, type LLMBackend } from "../core/provider/backend.ts";
 import type { PluginCommandResult } from "../infrastructure/tools/utils/plugins.ts";
 import type { Session } from "../core/session/session.ts";
 import { resolveAgentSettings } from "../core/configuration/agent-settings.ts";
-import { onTodosChanged } from "../runtime/index.ts";
+import { onTodosChanged } from "@logician/agent-blocks/tasks/todo.ts";
 import {
 	configurePluginRuntimeEnv,
 	PermissionManager,
@@ -108,6 +108,34 @@ import {
 } from "./resource-directories.ts";
 export type EventCallback = (event: RuntimeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
+
+export type RuntimeSettingsPatch = Partial<
+	Pick<
+		AgentConfig,
+		| "thinkingLevel"
+		| "temperature"
+		| "inferenceMode"
+		| "maxTokens"
+		| "maxIterations"
+		| "executionProfile"
+		| "guardsEnabled"
+		| "duplicateGuardEnabled"
+		| "failureGuardEnabled"
+		| "budgetStopEnabled"
+		| "continuationEnabled"
+		| "autoRetryEnabled"
+		| "proactiveCompactionEnabled"
+		| "rtkProxyEnabled"
+		| "ariadneEnabled"
+		| "fffgrepEnabled"
+	>
+> & {
+	reasonerId?: string;
+	steeringInterrupt?: boolean;
+	postEditDiagnostics?: boolean;
+	memoryEnabled?: boolean;
+	guardMode?: "auto" | "on" | "off";
+};
 
 export function findJbPrompt(cwd: string): string | null {
 	for (const candidate of [
@@ -1121,7 +1149,7 @@ export class AgentCoreBridge {
 		this.sessionManager?.setSteeringMode(mode);
 	}
 
-	setSteeringInterrupt(enabled: boolean): void {
+	private setSteeringInterrupt(enabled: boolean): void {
 		this.sessionManager?.setSteeringInterrupt(enabled);
 	}
 
@@ -1571,7 +1599,7 @@ export class AgentCoreBridge {
 		return formatPluginResult(backendAction, result);
 	}
 
-	setThinkingLevel(level: string): void {
+	private setThinkingLevel(level: string): void {
 		this.config.thinkingLevel = level as
 			| "off"
 			| "minimal"
@@ -1586,12 +1614,12 @@ export class AgentCoreBridge {
 		);
 	}
 
-	setTemperature(temperature: number): void {
+	private setTemperature(temperature: number): void {
 		this.config.temperature = temperature;
 		this.harness?.updateConfig({ temperature });
 	}
 
-	setReasonerId(reasonerId: string): void {
+	private setReasonerId(reasonerId: string): void {
 		this.agentCoordinator?.setReasonerId(reasonerId);
 	}
 
@@ -1610,29 +1638,29 @@ export class AgentCoreBridge {
 		return this._mcpLoadPromise !== null && !this._mcpLoaded;
 	}
 
-	setInferenceMode(mode: string): void {
+	private setInferenceMode(mode: string): void {
 		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
 		this.harness?.updateConfig({
 			inferenceMode: mode as AgentConfig["inferenceMode"],
 		});
 	}
 
-	setMaxTokens(maxTokens: number): void {
+	private setMaxTokens(maxTokens: number): void {
 		this.config.maxTokens = maxTokens;
 		this.harness?.updateConfig({ maxTokens });
 	}
 
-	setMaxIterations(maxIterations: number): void {
+	private setMaxIterations(maxIterations: number): void {
 		this.config.maxIterations = maxIterations;
 		this.harness?.updateConfig({ maxIterations });
 	}
 
-	setExecutionProfile(profile: "autonomous" | "minimal"): void {
+	private setExecutionProfile(profile: "autonomous" | "minimal"): void {
 		this.config.executionProfile = profile;
 		this.harness?.updateConfig({ executionProfile: profile });
 	}
 
-	setRuntimeToggle(
+	private setRuntimeToggle(
 		key:
 			| "guardsEnabled"
 			| "duplicateGuardEnabled"
@@ -1702,11 +1730,50 @@ export class AgentCoreBridge {
 		}
 	}
 
-	setGuardMode(mode: "auto" | "on" | "off"): void {
+	private setGuardMode(mode: "auto" | "on" | "off"): void {
 		this.config.guardsEnabled = mode === "auto" ? undefined : mode === "on";
 		this.harness?.updateConfig({
 			guardsEnabled: this.config.guardsEnabled,
 		});
+	}
+
+	updateSettings(patch: RuntimeSettingsPatch): void {
+		if ("thinkingLevel" in patch && patch.thinkingLevel !== undefined)
+			this.setThinkingLevel(patch.thinkingLevel);
+		if ("temperature" in patch && patch.temperature !== undefined)
+			this.setTemperature(patch.temperature);
+		if ("reasonerId" in patch && patch.reasonerId !== undefined)
+			this.setReasonerId(patch.reasonerId);
+		if ("inferenceMode" in patch && patch.inferenceMode !== undefined)
+			this.setInferenceMode(patch.inferenceMode);
+		if ("maxTokens" in patch && patch.maxTokens !== undefined)
+			this.setMaxTokens(patch.maxTokens);
+		if ("maxIterations" in patch && patch.maxIterations !== undefined)
+			this.setMaxIterations(patch.maxIterations);
+		if ("executionProfile" in patch && patch.executionProfile !== undefined)
+			this.setExecutionProfile(patch.executionProfile);
+		if ("steeringInterrupt" in patch && patch.steeringInterrupt !== undefined)
+			this.setSteeringInterrupt(patch.steeringInterrupt);
+		if ("guardMode" in patch && patch.guardMode !== undefined)
+			this.setGuardMode(patch.guardMode);
+
+		for (const key of [
+			"guardsEnabled",
+			"duplicateGuardEnabled",
+			"failureGuardEnabled",
+			"budgetStopEnabled",
+			"continuationEnabled",
+			"autoRetryEnabled",
+			"proactiveCompactionEnabled",
+			"postEditDiagnostics",
+			"rtkProxyEnabled",
+			"ariadneEnabled",
+			"fffgrepEnabled",
+			"memoryEnabled",
+		] as const) {
+			const enabled = patch[key];
+			if (enabled !== undefined) this.setRuntimeToggle(key, enabled);
+		}
 	}
 
 	/** Return structured settings data for the overlay UI. */

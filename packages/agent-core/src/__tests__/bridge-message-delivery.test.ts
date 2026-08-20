@@ -14,9 +14,9 @@ void test("runtime settings update the live harness and preserve guard auto mode
 		updateConfig: (patch: Record<string, unknown>) => patches.push(patch),
 	};
 
-	bridge.setGuardMode("off");
-	bridge.setRuntimeToggle("continuationEnabled", false);
-	bridge.setGuardMode("auto");
+	bridge.updateSettings({ guardMode: "off" });
+	bridge.updateSettings({ continuationEnabled: false });
+	bridge.updateSettings({ guardMode: "auto" });
 
 	const settings = bridge.getSettingsData();
 	assert.equal(settings.thinkingLevel, "off");
@@ -41,7 +41,7 @@ void test("setThinkingLevel propagates to the live harness", () => {
 		setThinkingLevel: (level: string) => harnessLevels.push(level),
 	};
 
-	bridge.setThinkingLevel("high");
+	bridge.updateSettings({ thinkingLevel: "high" });
 
 	assert.deepEqual(harnessLevels, ["high"]);
 });
@@ -57,7 +57,7 @@ void test("setSteeringInterrupt propagates to the live harness", () => {
 		setSteeringInterrupt: (enabled: boolean) => harnessValues.push(enabled),
 	};
 
-	bridge.setSteeringInterrupt(true);
+	bridge.updateSettings({ steeringInterrupt: true });
 
 	assert.deepEqual(harnessValues, [true]);
 });
