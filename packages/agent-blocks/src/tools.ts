@@ -15,7 +15,6 @@ import {
 } from "./delegation/definitions.ts";
 import { ask_user } from "./interaction/ask-user/index.ts";
 import { rag_tools } from "./rag/index.ts";
-import { task_status } from "./tasks/task-status.ts";
 import { todo_tool } from "./tasks/todo.ts";
 
 export interface SubagentToolDeps {
@@ -30,7 +29,7 @@ export interface SubagentToolDeps {
 
 /** Get all built-in tools as an array. */
 export function getBuiltInTools(): Tool[] {
-	return [todo_tool, ask_user, task_status, ...rag_tools];
+	return [todo_tool, ask_user, ...rag_tools];
 }
 
 /** Get subagent tools with dependencies. */

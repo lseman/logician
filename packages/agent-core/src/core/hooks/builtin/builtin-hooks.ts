@@ -20,11 +20,7 @@ import {
 } from "../../provider/messages.ts";
 import type { LoopDetector } from "../../../infrastructure/guards/loop-detector.ts";
 import { awaitsUserInput } from "../../../infrastructure/guards/response-patterns.ts";
-import {
-	getTaskStatus,
-	recordTaskStatus,
-} from "../../../runtime/task-state/status.ts";
-import { getTasks } from "../../../runtime/task-state/todo.ts";
+import { getTasks } from "../../../runtime/todo-state.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
@@ -194,20 +190,12 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					message: decision.message ?? "",
 					iteration,
 				});
-				recordTaskStatus({
-					status: "blocked",
-					summary: decision.message ?? "Blocked by guard.",
-					ts: Date.now(),
-				});
 				return { content: decision.message, isError: true };
 			}
 		}
 		return undefined;
 	};
 
-	// A task_status call is a structured stop request: terminate after its
-	// batch (the loop applies the all-tools-in-batch gate, and task_status is
-	// documented as a final, standalone call).
 	hooks.afterToolCall = ({ toolCall, result, isError }) => {
 		if (toolCall.name === "bash" && bashSnapshots.has(toolCall.id)) {
 			recordBashMutations(bashSnapshots.get(toolCall.id) ?? null);
@@ -220,13 +208,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		} else if (!isError && guardThresholds && loopDetector) {
 			loopDetector.recordSuccess(toolCall.name, toolCall.arguments);
 			interventions.recordProgress();
-		}
-		if (
-			executionPolicy.embeddedPoliciesEnabled &&
-			toolCall.name === "task_status" &&
-			!isError
-		) {
-			return { terminate: true };
 		}
 		return undefined;
 	};
@@ -268,11 +249,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			if (stopped) {
 				const message =
 					"Continuation stopped because token growth stayed below the progress threshold for two turns.";
-				recordTaskStatus({
-					status: "blocked",
-					summary: message,
-					ts: Date.now(),
-				});
 				emitIntervention({
 					kind: "budget",
 					cause: "low_progress",
@@ -298,10 +274,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		config.continuationEnabled === true;
 	if (continuationEnabled) {
 		hooks.getFollowUpMessages = ({ assistantText, stopReason, iteration }) => {
-			// Structured stop beats everything: a task_status call this run is
-			// an explicit done/blocked declaration — never nudge past it.
-			if (getTaskStatus()) return undefined;
-
 			// A final question is an explicit transfer of control to the user.
 			// Pending todos do not authorize the harness to answer it itself.
 			if (awaitsUserInput(assistantText)) return undefined;
@@ -326,8 +298,8 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			const remaining = tasks.filter(
 				t => t.status !== "completed" && t.status !== "deleted",
 			);
-			// Nudge whenever tasks remain — the only clean exits are: no remaining
-			// tasks (model used the todo tool correctly) or task_status (checked above).
+			// Nudge whenever tasks remain. The model owns completion by keeping the
+			// todo list accurate and producing a final response.
 			if (!remaining.length) return undefined;
 
 			// Build nudge text. Circling detection (regex-based) has been

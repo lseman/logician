@@ -38,89 +38,6 @@ import {
 	isToolFailureResult,
 	taskObjectiveFromMessages,
 } from "../loop/adaptive-mode.ts";
-// ═══════════════════════════════════════════════════════════════════════════
-// Task-aware callbacks — injected by the harness when @logician/agent-blocks is loaded.
-// When omitted, the loop runs in "pure" mode: no task nudges, no structured
-// outcome resolution, no continuation.  This keeps agent-core minimal like pi.
-// ═══════════════════════════════════════════════════════════════════════════
-
-export interface TaskAwareCallbacks {
-	/** Current structured task status, or null if none declared. */
-	getTaskStatus: () =>
-		| { status: string; summary: string; ts: number }
-		| null
-		| undefined;
-	/** Reset the task status at each run start. */
-	resetTaskStatus: () => void;
-	/** Resolve tool-termination outcome using declared task status. */
-	resolveOutcome?: (ctx: {
-		declared:
-			| { status: string; summary: string; ts: number }
-			| null
-			| undefined;
-		fallbackStatus?: string;
-		fallbackSummary?: string;
-	}) => {
-		status: RunOutcomeStatus;
-		summary?: string;
-		source: "structured" | "heuristic" | "runtime";
-	};
-}
-
-// Continuation callback — injected by the harness when @logician/agent-blocks is loaded.
-// When omitted, the loop finishes immediately when no more tool calls are produced.
-export interface ContinuationCallback {
-	(state: ContinuationState): Promise<ContinuationDecision>;
-}
-
-export interface ContinuationState {
-	consecutiveRunnerNudges: number;
-	lastRunnerNudgeIteration: number;
-	acceptanceReported: boolean;
-	acceptanceFailed: boolean;
-	acceptanceFinalizationTurns: number;
-	reflectionCount: number;
-	reflectionFailed: boolean;
-}
-
-export interface ContinuationDecision {
-	action: "continue" | "finish";
-	pendingMessages?: Message[];
-	outcome?: {
-		status: RunOutcomeStatus;
-		summary?: string;
-		source: "structured" | "heuristic" | "runtime";
-	};
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Inline outcome resolver — previously imported from tasks/outcome-resolution.ts
-// ═══════════════════════════════════════════════════════════════════════════
-
-export function resolveOutcomeDefault(ctx: {
-	declared: { status: string; summary: string; ts: number } | null | undefined;
-	fallbackStatus?: string;
-	fallbackSummary?: string;
-}): {
-	status: RunOutcomeStatus;
-	summary?: string;
-	source: "structured" | "heuristic" | "runtime";
-} {
-	if (ctx.declared) {
-		return {
-			status: (ctx.declared.status === "done"
-				? "completed"
-				: ctx.declared.status) as RunOutcomeStatus,
-			summary: ctx.declared.summary,
-			source: "structured",
-		};
-	}
-	return {
-		status: (ctx.fallbackStatus ?? "completed") as RunOutcomeStatus,
-		summary: ctx.fallbackSummary,
-		source: "heuristic",
-	};
-}
 import type {
 	AgentConfig,
 	AgentEventSink,
@@ -212,15 +129,6 @@ export interface RunAgentLoopConfig extends AgentConfig {
 		amount: number,
 	) => void;
 
-	// ── Task-aware callbacks (from @logician/agent-blocks) ────────────────────────
-	/** Injected by the harness when blocks are loaded. Provides task status, reset,
-	 * and outcome resolution. When omitted, the loop runs in pure mode. */
-	callbacks?: TaskAwareCallbacks;
-
-	// ── Continuation callback (from @logician/agent-blocks) ────────────────────────
-	/** Custom continuation decision. When omitted, the loop finishes when no more
-	 * tool calls are produced (no nudges, no reflection, no acceptance retry). */
-	decideContinuation?: ContinuationCallback;
 }
 
 async function runAgentLoopInternal(
@@ -242,7 +150,6 @@ async function runAgentLoopInternal(
 		...prompts,
 	];
 	const newMessages: Message[] = [...prompts];
-	config.callbacks?.resetTaskStatus?.();
 	const finish = async (outcome: {
 		status: RunOutcomeStatus;
 		summary?: string;
@@ -288,7 +195,6 @@ async function runAgentLoopInternal(
 
 	const outputGuard = config.outputGuard;
 	let iteration = 0;
-	let lastToolWorkIteration = -1;
 	let performedToolWork = false;
 	let toolFailures = 0;
 	const adaptiveObjective = taskObjectiveFromMessages([
@@ -296,15 +202,8 @@ async function runAgentLoopInternal(
 		...prompts,
 	]);
 	let contextWasCompacted = false;
-	const continuationState: ContinuationState = {
-		consecutiveRunnerNudges: 0,
-		lastRunnerNudgeIteration: -1,
-		acceptanceReported: false,
-		acceptanceFailed: false,
-		acceptanceFinalizationTurns: 0,
-		reflectionCount: 0,
-		reflectionFailed: false,
-	};
+	let acceptanceReported = false;
+	let acceptanceFailed = false;
 	const providerTurnState = createProviderTurnState();
 	const runBudget = new RunBudgetController(
 		{
@@ -528,9 +427,8 @@ async function runAgentLoopInternal(
 				toolCalls = processResult.toolCalls;
 				assistantContent = processResult.assistantContent;
 				assistant = processResult.assistant;
-				if (toolCalls.some(call => call.name !== "task_status")) {
+				if (toolCalls.length > 0) {
 					performedToolWork = true;
-					lastToolWorkIteration = iteration;
 				}
 			} else {
 				return finish({
@@ -691,11 +589,7 @@ async function runAgentLoopInternal(
 					// Re-enter inner loop with follow-up messages
 					continue;
 				}
-				return finish(
-					(config.callbacks?.resolveOutcome ?? resolveOutcomeDefault)({
-						declared: config.callbacks?.getTaskStatus?.(),
-					}),
-				);
+				return finish({ status: "completed", source: "runtime" });
 			}
 
 			// Fix #5: only invoke shouldStopAfterTurn when no tool calls ran.
@@ -716,31 +610,12 @@ async function runAgentLoopInternal(
 				acceptanceStop = checkStopRules(resolved);
 			}
 			if (stop || acceptanceStop) {
-				return finish(
-					(config.callbacks?.resolveOutcome ?? resolveOutcomeDefault)({
-						declared: config.callbacks?.getTaskStatus?.(),
-					}),
-				);
+				return finish({ status: "completed", source: "runtime" });
 			}
 
 			pendingMessages = await drainSteering();
 		}
 
-		// Agent would stop here. Decide whether it actually should (pi-style
-		// outer loop). When @logician/agent-blocks is loaded (decideContinuation provided),
-		// the callback handles: follow-up draining, nudges, structured outcome
-		// resolution, acceptance retry, and reflection. Otherwise the loop finishes.
-		if (config.decideContinuation) {
-			const continuationDecision =
-				await config.decideContinuation(continuationState);
-			if (continuationDecision.action === "continue") {
-				pendingMessages = continuationDecision.pendingMessages ?? [];
-				continue;
-			}
-			if (continuationDecision.outcome) {
-				return finish(continuationDecision.outcome);
-			}
-		}
 		break;
 	}
 
@@ -769,7 +644,7 @@ async function runAgentLoopInternal(
 	// ── Acceptance finalization ────────────────────────────────────────
 	if (
 		shouldRunAcceptanceFinalization(resolved) &&
-		!continuationState.acceptanceReported
+		!acceptanceReported
 	) {
 		const finalText = lastAssistantContent(finalMessagesForConclusion);
 
@@ -786,7 +661,7 @@ async function runAgentLoopInternal(
 			verificationResults,
 		);
 
-		continuationState.acceptanceReported = true;
+		acceptanceReported = true;
 		await emit({
 			type: "acceptance_complete",
 			status: report.status,
@@ -794,31 +669,20 @@ async function runAgentLoopInternal(
 		});
 
 		if (report.status === "failed") {
-			continuationState.acceptanceFailed = true;
+			acceptanceFailed = true;
 		}
 	}
 
 	// Final output guard reset when agent ends
 	outputGuard?.reset();
 	// Acceptance failure must take precedence over a model-declared `done`.
-	if (continuationState.acceptanceFailed) {
+	if (acceptanceFailed) {
 		return finish({
 			status: "failed",
 			summary:
 				"Acceptance contract not satisfied after the configured finalization turns.",
 			source: "runtime",
 		});
-	}
-	const declared = config.callbacks?.getTaskStatus?.();
-	if (
-		(declared || (performedToolWork && registry.has("task_status"))) &&
-		executionPolicy.embeddedPoliciesEnabled
-	) {
-		return finish(
-			(config.callbacks?.resolveOutcome ?? resolveOutcomeDefault)({
-				declared,
-			}),
-		);
 	}
 	if (config.signal?.aborted) {
 		return finish({
@@ -836,7 +700,7 @@ async function runAgentLoopInternal(
 	const finalText = lastAssistantContent(finalMessagesForConclusion);
 	return finish({
 		status:
-			iteration >= maxIterations || continuationState.reflectionFailed
+			iteration >= maxIterations
 				? "failed"
 				: "completed",
 		summary: finalText || undefined,

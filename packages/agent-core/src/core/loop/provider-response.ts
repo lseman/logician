@@ -92,9 +92,7 @@ export function processProviderResponse(
 		}
 	}
 
-	const performedToolWork = toolCalls.some(
-		(call: ToolCall) => call.name !== "task_status",
-	);
+	const performedToolWork = toolCalls.length > 0;
 
 	const rawStopReason =
 		(response?.stopReason as "stop" | "length" | "error") ?? "stop";

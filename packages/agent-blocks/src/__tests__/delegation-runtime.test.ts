@@ -14,7 +14,6 @@ import {
 	createSubagentConcurrencyLimiter,
 } from "../delegation/definitions.ts";
 import { runDelegatedAgent } from "../delegation/runtime.ts";
-import { task_status } from "../tasks/task-status.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake";
@@ -122,50 +121,6 @@ void test.skip("valid acceptance reports do not trigger redundant continuation n
 	assert.equal(result.status, "completed");
 	assert.equal(result.content, "verified result");
 	assert.equal(calls, 2);
-});
-
-void test("a real task_status(done) call ends a delegated run in one turn instead of looping on continuation nudges", async () => {
-	let calls = 0;
-	const backend: LLMBackend = {
-		model: "fake",
-		withModel() {
-			return this;
-		},
-		async generate() {
-			calls++;
-			return {
-				content: "",
-				toolCalls: [
-					{
-						id: "ts-1",
-						name: "task_status",
-						arguments: JSON.stringify({
-							status: "done",
-							summary: "Listed files.",
-						}),
-					},
-				],
-				stopReason: "stop",
-			};
-		},
-	};
-
-	const result = await runDelegatedAgent({
-		task: "List files",
-		config: { ...baseConfig, tools: [task_status], continuationEnabled: true },
-		backend,
-		tools: [task_status],
-		maxIterations: 10,
-		onEvent: () => {},
-	});
-
-	// Without the afterToolCall termination hook, the runner-level nudge
-	// ("call task_status with the accurate status") re-prompts the model,
-	// which just calls task_status(done) again — repeating until
-	// maxIterations and surfacing a spurious "failed" status.
-	assert.equal(calls, 1);
-	assert.equal(result.turns, 1);
-	assert.equal(result.status, "completed");
 });
 
 void test("delegated tool-call budgets are shared across the whole run", async () => {
