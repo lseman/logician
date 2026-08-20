@@ -121,7 +121,7 @@ function readAgentDeclaration(
 				status?: string;
 			};
 			const event = entry.event ?? entry.payload ?? entry;
-			if (event?.type === "run_finished" || event?.type === "run_outcome")
+			if (event?.type === "run_finished" || event?.type === "agent_end")
 				return event.status === "completed";
 			if (event?.type === "done") return entry.status !== "failed";
 		}

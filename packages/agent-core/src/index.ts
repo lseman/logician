@@ -35,7 +35,6 @@ export * from "./core/state/tool-cache.ts";
 export * from "./core/policy/exit-path.ts";
 export * from "./core/policy/run-budget.ts";
 export * from "./core/policy/conclusion-policy.ts";
-export * from "./core/harness/runtime/queue-hooks.ts";
 export * from "./core/execution/tool-batch-controller.ts";
 
 // ── Harness ─────────────────────────────────────────────────────────────────

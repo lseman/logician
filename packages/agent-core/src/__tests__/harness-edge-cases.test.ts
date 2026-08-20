@@ -1,6 +1,9 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { AgentHarness, HarnessBusyError } from "../core/harness/agent-harness.ts";
+import {
+	AgentHarness,
+	HarnessBusyError,
+} from "../core/harness/agent-harness.ts";
 import type { AgentConfig } from "../core/types/index.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 
@@ -46,7 +49,7 @@ void test("setTemperature takes effect on the next turn", async () => {
 	await harness.prompt("q1");
 	assert.equal(responses[0].temp, 0.7);
 
-	harness.setTemperature(1.2);
+	harness.updateConfig({ temperature: 1.2 });
 	await harness.prompt("q2");
 	assert.equal(responses[1].temp, 1.2);
 });
@@ -69,7 +72,7 @@ void test("setSystemPrompt takes effect on the next turn", async () => {
 	await harness.prompt("q1");
 	assert.ok(systemPrompts[0].includes("test"));
 
-	harness.setSystemPrompt("new system prompt");
+	harness.updateConfig({ systemPrompt: "new system prompt" });
 	await harness.prompt("q2");
 	assert.ok(systemPrompts[1].includes("new system prompt"));
 });
@@ -87,8 +90,10 @@ void test("runtime config changes take effect at the next save point", async () 
 					messages.find(message => message.role === "system")?.content ?? "",
 				),
 			);
-			harness.setTemperature(1.25);
-			harness.setSystemPrompt("refreshed prompt");
+			harness.updateConfig({
+				temperature: 1.25,
+				systemPrompt: "refreshed prompt",
+			});
 			return {
 				content: "",
 				toolCalls: [{ id: "call_1", name: "noop", arguments: "{}" }],
@@ -182,12 +187,6 @@ void test("setTools with empty list removes all tools", async () => {
 	assert.equal(harness.tools.list().length, 0);
 });
 
-void test("setHooksEnabled toggles hooks", async () => {
-	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));
-	harness.setHooksEnabled(false);
-	harness.setHooksEnabled(true);
-});
-
 void test("setOnPhaseChange fires on turn transitions", async () => {
 	const phases: Array<[string, string]> = [];
 	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));
@@ -222,11 +221,6 @@ void test("setSessionId is callable", async () => {
 	// Just verify it doesn't throw.
 });
 
-void test("setTranscriptPath accepts a path", async () => {
-	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));
-	harness.setTranscriptPath("/tmp/test-transcript.jsonl");
-});
-
 void test("setAutoCompactionSettings stores settings", async () => {
 	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));
 	harness.setAutoCompactionSettings({
@@ -244,12 +238,12 @@ void test("enableAutoCompaction toggles auto-compaction", async () => {
 void test("config changes persist across prompt turns", async () => {
 	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));
 	await harness.prompt("q1");
-	harness.setTemperature(1.5);
+	harness.updateConfig({ temperature: 1.5 });
 	await harness.prompt("q2");
-	assert.equal(harness.getTemperature(), 1.5);
+	assert.equal(harness.currentConfig.temperature, 1.5);
 	// Config should still be set after a subsequent prompt.
 	await harness.prompt("q3");
-	assert.equal(harness.getTemperature(), 1.5);
+	assert.equal(harness.currentConfig.temperature, 1.5);
 });
 
 void test("listBranches returns empty when no branches", async () => {

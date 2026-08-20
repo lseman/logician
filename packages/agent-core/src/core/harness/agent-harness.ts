@@ -7,15 +7,12 @@
 import type { CompactionSettings } from "../compaction/engine.ts";
 import type { ExtensionRunner } from "../extension/index.ts";
 import type { ClaudeCodeHookLayer } from "../extension/adapters/claude-code/hook-layer.ts";
-import {
-	type DeliveryMode,
-	MessageDeliveryManager,
-} from "../../runtime/queue/manager.ts";
-import { withQueueEventForwarding } from "./runtime/queue-hooks.ts";
+import { type DeliveryMode, MessageQueue } from "../../runtime/queue/queue.ts";
 import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
 import { validateAgentConfig } from "../configuration/config-validator.ts";
 import {
 	type RunAgentLoopConfig,
+	createSteeringInterruptReason,
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
 } from "../execution/agent-loop-runner.ts";
@@ -54,6 +51,7 @@ import type {
 	EventHandler,
 	Message,
 	QueueMode,
+	ThinkingLevel,
 	Tool,
 } from "../types/index.ts";
 import { summarizeAndMergeBranch } from "./session/branching.ts";
@@ -75,11 +73,15 @@ import {
 	runExtensionBeforeAgentStart as runExtensionBeforeAgentStartHelper,
 	withExtensionRuntime as withExtensionRuntimeHelper,
 } from "./runtime/extension-runtime.ts";
-import type { ModelOpsDeps } from "./runtime/model-ops.ts";
-import * as modelOps from "./runtime/model-ops.ts";
-import { assertIdlePhase, assertPhaseTransition } from "./runtime/phase.ts";
-import type { QueueOpsDeps } from "./runtime/queue-ops.ts";
-import * as queueOps from "./runtime/queue-ops.ts";
+import {
+	cycleModel as calculateNextModel,
+	resolveModelUrl,
+} from "./runtime/model.ts";
+import {
+	assertIdlePhase,
+	assertPhaseTransition,
+	HarnessBusyError,
+} from "./runtime/phase.ts";
 import {
 	emitPostCompact as emitPostCompactHelper,
 	emitPreCompact as emitPreCompactHelper,
@@ -118,7 +120,7 @@ export class AgentHarness {
 	private abortController: AbortController | null = null;
 	private loopConfig: AgentConfig | null = null;
 	private conversation = new ConversationState();
-	private msgManager: MessageDeliveryManager;
+	private queue: MessageQueue;
 	private loopDetector: LoopDetector;
 	// Escalation/cooldown state for the built-in safeguard hooks. Owned here
 	// (not inside buildBuiltinHooks) because withExtensionRuntime() rebuilds
@@ -209,7 +211,7 @@ export class AgentHarness {
 			},
 		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
-		this.msgManager = new MessageDeliveryManager({
+		this.queue = new MessageQueue({
 			steeringMode: (options.config.steeringQueueMode ??
 				"one-at-a-time") as DeliveryMode,
 			followUpMode: (options.config.followUpQueueMode ??
@@ -353,12 +355,12 @@ export class AgentHarness {
 
 	private endTurn(): void {
 		this.abortController = null;
-		this.msgManager.queue.clearCurrentTurn();
+		this.queue.clearCurrentTurn();
 		this.emitQueueChange();
 		this._runResolve?.();
 		this._runPromise = undefined;
 		this._runResolve = undefined;
-		const nextTurnCount = this.msgManager.queue.getNextTurn().length;
+		const nextTurnCount = this.queue.getNextTurn().length;
 		// A steering interrupt should resume as a plain next turn, not go through
 		// the autonomous continuation budget/task-restart policy meant for the
 		// model queueing its own follow-up work.
@@ -411,7 +413,7 @@ export class AgentHarness {
 	 */
 	async continueWithNextTurn(): Promise<Message[]> {
 		this.assertIdle("continue with next-turn guidance");
-		const guidance = this.msgManager.queue
+		const guidance = this.queue
 			.dequeueNextTurn()
 			.map(message => createUserMessage(message.content));
 		if (guidance.length === 0) {
@@ -562,7 +564,7 @@ export class AgentHarness {
 
 			// nextTurn guidance belongs to the next user-initiated prompt. Consume it
 			// exactly once here, never from an iteration of the currently active run.
-			const nextTurnMessages = this.msgManager.queue
+			const nextTurnMessages = this.queue
 				.dequeueNextTurn()
 				.map(message => createUserMessage(message.content));
 			if (nextTurnMessages.length > 0) {
@@ -654,9 +656,9 @@ export class AgentHarness {
 		};
 		return {
 			getSteeringMessages: async () =>
-				inject(this.msgManager.afterTurn().map(message => message.content)),
+				inject(this.queue.afterTurn().map(message => message.content)),
 			getFollowUpMessages: async () =>
-				inject(this.msgManager.onIdle().map(message => message.content)),
+				inject(this.queue.onIdle().map(message => message.content)),
 		};
 	}
 
@@ -683,7 +685,7 @@ export class AgentHarness {
 		this.reduceRuntimeEvent(event);
 		if (event.type === "compaction")
 			this.continuationTracker.recordCompaction();
-		if (event.type === "run_outcome") {
+		if (event.type === "agent_end" && event.status) {
 			this.continuationTracker.finish(event.status, event.summary);
 		}
 		// The primary application event path is synchronous and latency-sensitive;
@@ -729,78 +731,12 @@ export class AgentHarness {
 		}
 	}
 
-	getOutputGuard(): OutputGuard | null {
-		return this.outputGuard;
-	}
-
-	getLoopDetector(): LoopDetector {
-		return this.loopDetector;
-	}
-
-	// ── Runtime config setters ─────────────────────────────────────────────
-
-	setSystemPrompt(systemPrompt: string): void {
-		this.config.systemPrompt = systemPrompt;
-	}
-
-	setTemperature(temperature: number): void {
-		this.config.temperature = temperature;
-	}
-
-	setSteeringInterrupt(enabled: boolean): void {
-		this.config.steeringInterrupt = enabled;
-	}
-
-	setInferenceMode(mode: string): void {
-		// Validate mode name before accepting it.
-		const valid = [
-			"auto",
-			"none",
-			"thinking-general",
-			"thinking-coding",
-			"instruct-general",
-			"instruct-reasoning",
-			"instruct-coding",
-			"deterministic",
-			"creative",
-			"analytical",
-		];
-		if (!valid.includes(mode)) {
-			// Silently ignore invalid mode — the caller (TUI) should handle this.
-			return;
+	// Configuration changes become visible at the next turn snapshot.
+	updateConfig(patch: Partial<AgentConfig>): void {
+		Object.assign(this.config, patch);
+		if (patch.maxIterations !== undefined) {
+			this.maxIterations = patch.maxIterations;
 		}
-		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
-	}
-
-	setMaxTokens(maxTokens: number): void {
-		this.config.maxTokens = maxTokens;
-	}
-
-	setMaxIterations(maxIterations: number): void {
-		this.maxIterations = maxIterations;
-	}
-
-	setExecutionProfile(
-		profile: NonNullable<AgentConfig["executionProfile"]>,
-	): void {
-		this.config.executionProfile = profile;
-	}
-
-	setRuntimeOptions(
-		options: Partial<
-			Pick<
-				AgentConfig,
-				| "guardsEnabled"
-				| "duplicateGuardEnabled"
-				| "failureGuardEnabled"
-				| "budgetStopEnabled"
-				| "continuationEnabled"
-				| "autoRetryEnabled"
-				| "reflectionConfig"
-			>
-		>,
-	): void {
-		Object.assign(this.config, options);
 	}
 
 	setTools(tools: Tool[]): void {
@@ -827,60 +763,84 @@ export class AgentHarness {
 		return registry;
 	}
 
-	// ── Queue operations (see runtime/queue-ops.ts) ─────────────────────────
-
-	private get queueOpsDeps(): QueueOpsDeps {
-		return {
-			msgManager: this.msgManager,
-			getPhase: () => this._phase,
-			emitQueueChange: () => this.emitQueueChange(),
-		};
-	}
+	// ── Queue operations ──────────────────────────────────────────────────
 
 	steer(text: string): void {
-		queueOps.steer(
-			this.queueOpsDeps,
-			text,
-			this.config.steeringInterrupt,
-			this.abortController,
-		);
+		if (this._phase !== "turn") {
+			throw new HarnessBusyError("steer", this._phase, "turn");
+		}
+		if (this.config.steeringInterrupt) {
+			this.queue.nextTurn(text);
+			this.emitQueueChange();
+			this.abortController?.abort(createSteeringInterruptReason());
+			return;
+		}
+		this.queue.steering(text);
+		this.emitQueueChange();
 	}
 
 	/** Promote queued steering into the immediate next turn and interrupt the current step. */
 	flushSteeringNow(): number {
-		return queueOps.flushSteeringNow(this.queueOpsDeps, this.abortController);
+		if (this._phase !== "turn") {
+			throw new HarnessBusyError("flush steering", this._phase, "turn");
+		}
+		const queued = this.queue.dequeueSteering();
+		if (queued.length === 0) return 0;
+		for (const message of queued) {
+			this.queue.nextTurn(message.content);
+		}
+		this.emitQueueChange();
+		this.abortController?.abort(createSteeringInterruptReason());
+		return queued.length;
 	}
 
 	dropQueuedMessage(displayIndex: number): string | undefined {
-		return queueOps.dropQueuedMessage(this.queueOpsDeps, displayIndex);
+		const queue = this.queue;
+		const target = [...queue.getSteering(), ...queue.getFollowUp()][
+			displayIndex
+		];
+		if (!target) return undefined;
+		const removed = queue.remove(target.id);
+		if (removed) this.emitQueueChange();
+		return removed?.content;
 	}
 
 	followUp(text: string): void {
-		queueOps.followUp(this.queueOpsDeps, text);
+		this.queue.followUp(text);
+		this.emitQueueChange();
 	}
 
 	nextTurn(text: string): void {
-		queueOps.nextTurn(this.queueOpsDeps, text);
+		this.queue.nextTurn(text);
+		this.emitQueueChange();
 	}
 
 	async abort(): Promise<AbortResult> {
-		return queueOps.abort({
-			...this.queueOpsDeps,
-			abortController: this.abortController,
-			setAbortRequested: () => {
-				this.runtime = { ...this.runtime, abortRequested: true };
-			},
-			waitForIdle: () => this.waitForIdle(),
-			emitAbortEvent: result =>
-				this.emitToSubscribers({ type: "abort", ...result }),
-			emitSessionEnd: reason => this.emitSessionEnd(reason),
-		});
+		const queue = this.queue;
+		const result: AbortResult = {
+			clearedSteering: queue.getSteering().map(message => message.content),
+			clearedFollowUp: queue.getFollowUp().map(message => message.content),
+			clearedNextTurn: [],
+		};
+		this.runtime = { ...this.runtime, abortRequested: true };
+		this.abortController?.abort();
+		queue.clearCurrentTurn();
+		this.emitQueueChange();
+		await this.waitForIdle();
+		this.emitToSubscribers({ type: "abort", ...result });
+		await this.emitSessionEnd("abort");
+		return result;
 	}
 
 	// ── Queue state ────────────────────────────────────────────────────────
 
 	getQueues(): HarnessQueues {
-		return queueOps.getQueues(this.queueOpsDeps);
+		const queue = this.queue;
+		return {
+			steering: queue.getSteering().map(message => message.content),
+			followUp: queue.getFollowUp().map(message => message.content),
+			nextTurn: queue.getNextTurn().map(message => message.content),
+		};
 	}
 
 	setOnQueueChange(cb: (queues: HarnessQueues) => void): void {
@@ -888,11 +848,14 @@ export class AgentHarness {
 	}
 
 	clearQueues(): HarnessQueues {
-		return queueOps.clearQueues(this.queueOpsDeps);
+		const cleared = this.getQueues();
+		this.queue.clear();
+		this.emitQueueChange();
+		return cleared;
 	}
 
 	private emitQueueChange(): void {
-		const queues = queueOps.getQueues(this.queueOpsDeps);
+		const queues = this.getQueues();
 		this.onQueueChange?.(queues);
 		this.emitToSubscribers({
 			type: "queue_update",
@@ -911,36 +874,26 @@ export class AgentHarness {
 	}
 
 	setSteeringMode(mode: QueueMode): void {
-		queueOps.setSteeringMode(this.queueOpsDeps, mode);
+		this.queue.setMode("steering", mode as DeliveryMode);
 	}
 
 	getSteeringMode(): QueueMode {
-		return queueOps.getSteeringMode(this.queueOpsDeps);
+		return this.queue.getMode("steering") as QueueMode;
 	}
 
 	setFollowUpMode(mode: QueueMode): void {
-		queueOps.setFollowUpMode(this.queueOpsDeps, mode);
+		this.queue.setMode("followUp", mode as DeliveryMode);
 	}
 
 	getFollowUpMode(): QueueMode {
-		return queueOps.getFollowUpMode(this.queueOpsDeps);
+		return this.queue.getMode("followUp") as QueueMode;
 	}
 
 	// ── Plugin lifecycle hooks ─────────────────────────────────────────────
 
-	setHooksEnabled(enabled: boolean): void {
-		this._hooksEnabled = enabled;
-		this.config.runtimeHooksEnabled = enabled;
-	}
-
 	setSessionId(id: string): void {
 		this._sessionId = id;
 		this.config.hookSessionId = id;
-	}
-
-	setTranscriptPath(path: string): void {
-		this._transcriptPath = path;
-		this.config.hookTranscriptPath = path;
 	}
 
 	private hookContext(): {
@@ -1157,14 +1110,6 @@ export class AgentHarness {
 		return true;
 	}
 
-	/**
-	 * Visualize the branch tree as an ASCII art string.
-	 * Shows parent/child relationships with depth indicators.
-	 */
-	branchTree(): string {
-		return this.conversation.branchTree();
-	}
-
 	listBranches(): BranchInfo[] {
 		return this.conversation.listBranches();
 	}
@@ -1316,92 +1261,112 @@ export class AgentHarness {
 		return this.idleTools;
 	}
 
-	// ── Config getters ─────────────────────────────────────────────────────
-
-	/** Immutable snapshot of current config. Prefer to individual getters. */
-	getCurrentConfig(): Readonly<AgentConfig> {
+	/** Immutable snapshot of the configuration used for the next turn. */
+	get currentConfig(): Readonly<AgentConfig> {
 		return Object.freeze({ ...this.config });
 	}
 
-	getTemperature(): number {
-		return this.config.temperature ?? 0.7;
-	}
-
-	getToolCount(): number {
-		return this.config.tools?.length ?? 0;
-	}
-
-	// ── Model / thinking-level operations (see runtime/model-ops.ts) ───────
-
-	private get modelOpsDeps(): ModelOpsDeps {
-		return {
-			getConfig: () => this.config,
-			setModel: model => {
-				this.config.model = model;
-			},
-			setBaseUrl: baseUrl => {
-				this.config.baseUrl = baseUrl;
-			},
-			setModels: models => {
-				this.config.models = models;
-			},
-			setThinkingLevel: level => {
-				this.config.thinkingLevel = level;
-			},
-			getBackend: () => this.backend,
-			setBackend: backend => {
-				this.backend = backend;
-			},
-			appendModelChange: model => this._session?.appendModelChange(model),
-			appendThinkingLevelChange: level =>
-				this._session?.appendThinkingLevelChange(level),
-			emit: event => this.emitToSubscribers(event),
-		};
-	}
+	// ── Model / thinking-level operations ─────────────────────────────────
 
 	getModel(): string {
-		return modelOps.getModel(this.modelOpsDeps);
+		return this.config.model;
 	}
 
 	getBaseUrl(): string {
-		return modelOps.getBaseUrl(this.modelOpsDeps);
+		return this.config.baseUrl;
 	}
 
 	getModels(): string[] {
-		return modelOps.getModels(this.modelOpsDeps);
+		const configured = this.config.models ?? [];
+		return [
+			...(configured.some(option => option.model === this.config.model)
+				? []
+				: [this.config.model]),
+			...configured.map(option => option.model),
+		];
 	}
 
 	setModelEndpoint(model: string, baseUrl: string): void {
-		modelOps.setModelEndpoint(this.modelOpsDeps, model, baseUrl);
+		this.config.model = model;
+		this.config.baseUrl = baseUrl;
+		this.backend =
+			this.backend.withEndpoint?.(model, baseUrl) ??
+			this.backend.withModel(model);
 	}
 
 	/** Set the models array for cycling. */
 	setModels(models: AgentModelConfig[]): void {
-		modelOps.setModels(this.modelOpsDeps, models);
+		this.config.models = models;
 	}
 
 	cycleModel(direction: "forward" | "backward" = "forward"): string {
-		return modelOps.cycleHarnessModel(this.modelOpsDeps, direction);
+		const currentLevel = this.config.thinkingLevel ?? "off";
+		const result = calculateNextModel(
+			this.config.model,
+			this.config.baseUrl,
+			this.config.thinkingLevel,
+			this.config.models ?? [],
+			direction,
+		);
+		if (!result.didCycle) return result.model;
+		this.config.baseUrl = result.baseUrl;
+		if (result.thinkingLevelClamped) {
+			this.config.thinkingLevel = result.thinkingLevel;
+			this.emitToSubscribers({
+				type: "thinking_level_clamped",
+				level: result.thinkingLevel,
+				reason: `Model ${result.model} does not support ${currentLevel} thinking level`,
+			});
+		}
+		this.config.model = result.model;
+		this._session?.appendModelChange(result.model);
+		this.emitToSubscribers({
+			type: "model_cycle",
+			model: result.model,
+			fromModel: result.fromModel,
+			thinkingLevel: result.thinkingLevel,
+		});
+		return result.model;
 	}
 
 	// ── Thinking level ─────────────────────────────────────────────────────
 
 	getThinkingLevel(): string {
-		return modelOps.getThinkingLevel(this.modelOpsDeps);
+		return this.config.thinkingLevel ?? "off";
 	}
 
 	setThinkingLevel(level: string): void {
-		modelOps.setThinkingLevel(this.modelOpsDeps, level);
+		const previous = this.config.thinkingLevel;
+		this.config.thinkingLevel = level as ThinkingLevel;
+		this._session?.appendThinkingLevelChange(level as ThinkingLevel);
+		this.emitToSubscribers({ type: "thinking_level_changed", level });
+		if (level !== previous) {
+			this.emitToSubscribers({
+				type: "model_cycle",
+				model: this.config.model,
+				fromModel: this.config.model,
+				thinkingLevel: level,
+			});
+		}
 	}
 
 	// ── Model & provider ──────────────────────────────────────────────────
 
 	setModel(model: string): void {
-		modelOps.setModel(this.modelOpsDeps, model);
-	}
-
-	setBackend(backend: LLMBackend): void {
-		this.backend = backend;
+		const oldModel = this.config.model;
+		this.config.baseUrl = resolveModelUrl(
+			this.config.models,
+			model,
+			this.config.baseUrl,
+		);
+		this.config.model = model;
+		this._session?.appendModelChange(model);
+		this.emitToSubscribers({
+			type: "model_cycle",
+			model,
+			fromModel: oldModel,
+			thinkingLevel: this.config.thinkingLevel,
+		});
 	}
 
 	// ── Internals ──────────────────────────────────────────────────────────
@@ -1424,8 +1389,13 @@ export class AgentHarness {
 	}
 
 	private forwardQueueEvents(config: AgentConfig): AgentConfig {
-		return withQueueEventForwarding(config, {
-			subscribers: this._subscribers,
-		});
+		const originalOnEvent = config.onEvent;
+		return {
+			...config,
+			onEvent: event => {
+				originalOnEvent?.(event);
+				for (const subscriber of this._subscribers) subscriber(event);
+			},
+		};
 	}
 }

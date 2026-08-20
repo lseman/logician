@@ -2,6 +2,8 @@
 // The barrel (index.ts) re-exports everything so external import sites are
 // unaffected by this file's internal organization.
 
+import type { RunOutcomeStatus } from "../policy/execution-policy.ts";
+
 // ── Message types ─────────────────────────────────────────────────────────
 
 export type MessageRole = "system" | "user" | "assistant" | "tool";
@@ -189,14 +191,8 @@ export interface AgentEventEnvelope {
 export type AgentEventBody =
 	| { type: "agent_start" }
 	| ({ type: "harness_intervention" } & HarnessIntervention)
-	| { type: "agent_end"; messages?: Message[] }
+	| { type: "agent_end"; messages?: Message[]; status?: RunOutcomeStatus; summary?: string }
 	| { type: "agent_settled"; nextTurnCount?: number }
-	| {
-			type: "run_outcome";
-			status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
-			summary?: string;
-			source: "structured" | "heuristic" | "runtime";
-	  }
 	| {
 			type: "queue_update";
 			steering: readonly string[];

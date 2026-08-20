@@ -252,9 +252,9 @@ export async function runDelegatedAgent(params: {
 					: undefined,
 			},
 			event => {
-				if (event.type === "turn_start") turns++;
-				if (event.type === "run_outcome") status = event.status;
-				if (event.type === "acceptance_complete") {
+					if (event.type === "turn_start") turns++;
+					if (event.type === "agent_end" && event.status) status = event.status;
+					if (event.type === "acceptance_complete") {
 					validationAttempts++;
 					acceptancePassed = event.status === "passed";
 					ledger = event.report as AcceptanceLedger | undefined;

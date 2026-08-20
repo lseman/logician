@@ -109,7 +109,6 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 					}
 				: null;
 		case "agent_start":
-		case "agent_end":
 		case "phase":
 			return null; // Handled separately
 		case "inference_mode_selected":
@@ -172,29 +171,32 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				phase: event.phase,
 				recoverable: event.recoverable,
 			};
-		case "run_outcome":
-			if (
-				event.status === "cancelled" &&
-				event.summary === STEERING_INTERRUPT_SUMMARY
-			) {
+		case "agent_end": {
+				const outcome = event.status ?? null;
+				if (
+					outcome === "cancelled" &&
+					event.summary === STEERING_INTERRUPT_SUMMARY
+				) {
+					return {
+						type: "notice",
+						level: "info",
+						label: "Steering",
+						text: STEERING_INTERRUPT_SUMMARY,
+					};
+				}
+				if (!outcome) return null;
 				return {
 					type: "notice",
-					level: "info",
-					label: "Steering",
-					text: STEERING_INTERRUPT_SUMMARY,
+					level:
+						outcome === "completed"
+							? "success"
+							: outcome === "failed"
+								? "error"
+								: "warn",
+					label: `Run ${outcome.replace("_", " ")}`,
+					text: event.summary || `Run ended with status: ${outcome}`,
 				};
 			}
-			return {
-				type: "notice",
-				level:
-					event.status === "completed"
-						? "success"
-						: event.status === "failed"
-							? "error"
-							: "warn",
-				label: `Run ${event.status.replace("_", " ")}`,
-				text: event.summary || `Run ended with status: ${event.status}`,
-			};
 		case "model_select":
 			return {
 				type: "model_select",
