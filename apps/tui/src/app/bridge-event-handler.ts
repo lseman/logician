@@ -3,7 +3,6 @@
 // bridge-event handling with overlay-opening side effects for
 // permission/question requests.
 
-import type { AutoresearchSession } from "@logician/autoresearch";
 import { formatContextSize } from "@logician/agent-core";
 import type {
 	AgentCoreBridge,
@@ -15,6 +14,7 @@ import {
 	type RuntimeEvent,
 } from "@logician/agent-core/runtime";
 import type { Transcript } from "@logician/agent-core/sessions";
+import type { AutoresearchSession } from "@logician/autoresearch";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";
 import type { PermissionPopup } from "../overlays/permission-popup.ts";
 import type { SlashPopup } from "../overlays/slash-popup.ts";
@@ -54,6 +54,9 @@ export interface BridgeEventHandlerCtx {
 	goalActive: boolean;
 	researchManager: AutoresearchSession;
 	configPath?: string;
+	workflowMode: "act" | "plan";
+	planPhase: "idle" | "planning" | "awaiting_approval" | "executing";
+	normalPermissionMode: "acceptAll" | "acceptEdits" | "ask";
 	_autoSaveTurn: () => void;
 	evaluateGoal: (goalState: Readonly<GoalState>) => Promise<void>;
 }
@@ -258,6 +261,37 @@ export function handleEvent(
 				}
 			}
 			ctx.researchManager.onAgentEnd();
+			if (ctx.planPhase === "planning") {
+				ctx.planPhase = "awaiting_approval";
+				ctx.choicePopupPreview = false;
+				ctx.choicePopup.setQuestionId("__plan_approval__");
+				ctx.choicePopup.setQuestions([
+					{
+						id: "decision",
+						header: "Plan approval",
+						question: "Approve this plan and execute it?",
+						choices: [
+							{ value: "approve", label: "Approve and execute" },
+							{
+								value: "reject",
+								label: "Reject",
+								description: "Do not execute the plan",
+							},
+						],
+					},
+				]);
+				ctx.choicePopup.show();
+				ctx.tui
+					.showOverlay(ctx.choicePopup, {
+						anchor: "aboveInput",
+						align: "left",
+						maxHeight: 14,
+					})
+					.focus();
+			} else if (ctx.planPhase === "executing") {
+				ctx.planPhase = "idle";
+				ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
+			}
 			break;
 		case "turn_start":
 			ctx.workSurface.startRun();

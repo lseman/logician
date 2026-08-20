@@ -5,6 +5,12 @@
 // caller-supplied hooks (in that override order). Mirrors queue-ops.ts's
 // Deps pattern — the harness owns the mutable fields and supplies them here.
 
+import {
+	type ClaudeCodeHookLayer,
+	claudeToolMatcherName,
+	createClaudeCodeHookLayer,
+} from "../../../adapters/claude-code/hook-layer.ts";
+import type { LoopDetector } from "../../guards/loop-detector.ts";
 import type { ExtensionRunner, RegisteredTool } from "../../extension/index.ts";
 import { BudgetTracker } from "../../hooks/builtin/budget.ts";
 import {
@@ -12,13 +18,7 @@ import {
 	COMPACTION_COOLDOWN_TURNS,
 } from "../../hooks/builtin/builtin-hooks.ts";
 import { HookBus } from "../../hooks/hook-bus.ts";
-import {
-	type ClaudeCodeHookLayer,
-	claudeToolMatcherName,
-	createClaudeCodeHookLayer,
-} from "../../../adapters/claude-code/hook-layer.ts";
 import type { HarnessInterventionController } from "../../policy/intervention-controller.ts";
-import type { LoopDetector } from "../../../infrastructure/guards/loop-detector.ts";
 import type {
 	AgentConfig,
 	AgentEvent,

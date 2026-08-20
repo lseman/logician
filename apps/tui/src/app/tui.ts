@@ -1,7 +1,6 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
 
-import { AutoresearchSession } from "@logician/autoresearch";
 import {
 	AgentCoreBridge,
 	GoalManager,
@@ -19,6 +18,7 @@ import {
 	createAutoresearchTools,
 	getVirtualEnvPythonVersion,
 } from "@logician/agent-core/tools";
+import { AutoresearchSession } from "@logician/autoresearch";
 import { StatusBar } from "../footer/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";
@@ -90,6 +90,8 @@ import {
 	type InferenceMode,
 	setExecutionProfile as setExecutionProfileImpl,
 	setInferenceMode as setInferenceModeImpl,
+	setPlanMode as setPlanModeImpl,
+	togglePlanMode as togglePlanModeImpl,
 } from "./inference-settings.ts";
 import { setupInputHandler as setupInputHandlerImpl } from "./input-controller.ts";
 import {
@@ -142,6 +144,9 @@ export class LogicianTUI {
 	fileMentionPopup: FileMentionPopup;
 	choicePopup: ChoicePopup;
 	choicePopupPreview = false;
+	workflowMode: "act" | "plan";
+	planPhase: "idle" | "planning" | "awaiting_approval" | "executing" = "idle";
+	normalPermissionMode: "acceptAll" | "acceptEdits" | "ask";
 	permissionPopup: PermissionPopup;
 	pluginManager: PluginManagerOverlay;
 	autoresearchDashboard: AutoresearchDashboardOverlay;
@@ -237,11 +242,27 @@ export class LogicianTUI {
 		return cycleExecutionProfileImpl(this);
 	}
 
+	setPlanMode(planning: boolean): "acceptEdits" | "plan" {
+		return setPlanModeImpl(this, planning);
+	}
+
+	togglePlanMode(): "acceptEdits" | "plan" {
+		return togglePlanModeImpl(this);
+	}
+
 	constructor(
 		runtimeConfig = resolveRuntimeConfig(process.cwd(), process.env, {
 			loadProjectConfig: false,
 		}),
 	) {
+		this.workflowMode =
+			runtimeConfig.source.workflowMode ??
+			(runtimeConfig.bridge.permissionMode === "plan" ? "plan" : "act");
+		this.normalPermissionMode =
+			runtimeConfig.bridge.permissionMode === "acceptAll" ||
+			runtimeConfig.bridge.permissionMode === "ask"
+				? runtimeConfig.bridge.permissionMode
+				: "acceptEdits";
 		this.configPath = runtimeConfig.configPath;
 		this.thinkingLevel = runtimeConfig.bridge.thinkingLevel ?? "off";
 		this.inferenceMode =
@@ -420,6 +441,8 @@ export class LogicianTUI {
 			contextTokens: 0,
 			reasoner: this.bridge.getReasonerStatus(),
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
+			permissionMode: runtimeConfig.bridge.permissionMode ?? "acceptEdits",
+			workflowMode: this.workflowMode,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "minimal",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
 			ariadneEnabled: runtimeConfig.bridge.ariadneEnabled ?? true,

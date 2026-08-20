@@ -6,9 +6,13 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Tool } from "../../core/types/index.ts";
+import { ensureTool } from "./external-tools.ts";
 import { ensureInsideCwd, resolvePath } from "./utils/path-utils.ts";
-import { ensureTool } from "./utils/tools-manager.ts";
-import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./utils/truncate.ts";
+import {
+	DEFAULT_MAX_BYTES,
+	formatSize,
+	truncateHead,
+} from "./utils/truncate.ts";
 
 const DEFAULT_LIMIT = 1000;
 

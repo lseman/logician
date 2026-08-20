@@ -45,6 +45,7 @@ export interface WidgetFactoryStatus {
 	mcpLoading?: boolean;
 	sandboxMode?: "none" | "code" | "file" | "dev" | "full";
 	permissionMode?: string;
+	workflowMode?: "act" | "plan";
 	executionProfile?: "autonomous" | "minimal";
 	promptTokens?: number;
 	completionTokens?: number;
@@ -387,11 +388,10 @@ function sandboxWidget(status: WidgetFactoryStatus): WidgetData {
 }
 
 function permissionWidget(status: WidgetFactoryStatus): WidgetData {
-	const mode = status.permissionMode ?? "acceptEdits";
-	if (mode === "acceptAll") {
-		return withIcon("permission", "", theme.fg("success" as any, "act"));
-	}
-	return withIcon("permission", "", theme.fg("warning" as any, "plan"));
+	const mode = status.workflowMode ?? "act";
+	return mode === "plan"
+		? withIcon("permission", "", theme.fg("warning" as any, "plan"))
+		: withIcon("permission", "", theme.fg("success" as any, "act"));
 }
 
 function mcpWidget(status: WidgetFactoryStatus): WidgetData {

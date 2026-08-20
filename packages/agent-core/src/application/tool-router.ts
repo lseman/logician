@@ -12,29 +12,33 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+	McpManager,
+	type McpSnapshotResult,
+	type McpToggleResult,
+} from "../capabilities/mcp/index.ts";
+import { loadPrompts, type Prompt } from "../capabilities/prompts/index.ts";
+import {
+	formatSkillCatalog,
+	loadSkills,
+	type Skill,
+} from "../capabilities/skills/index.ts";
+import type { RuntimeEvent } from "../core/types/runtime-events.ts";
 import type { Tool } from "../core/types/types-messages.ts";
+import { ariadne } from "../infrastructure/tools/ariadne.ts";
+import { createDefaultTools } from "../infrastructure/tools/default-tools.ts";
 import {
 	parseFrontmatter,
 	runPluginBackend,
 	ToolRegistry,
 } from "../infrastructure/tools/index.ts";
-import {
-	McpManager,
-	type McpSnapshotResult,
-	type McpToggleResult,
-} from "../features/mcp/index.ts";
-import { loadPrompts, type Prompt } from "../features/prompts/index.ts";
-import type { RuntimeEvent } from "../runtime/events.ts";
-import { formatSkillCatalog, loadSkills, type Skill } from "../features/skills/index.ts";
-import { ariadne } from "../infrastructure/tools/ariadne.ts";
-import { createDefaultTools } from "../infrastructure/tools/default-tools.ts";
 import { createReadSkillTool } from "../infrastructure/tools/read-skill.ts";
 import {
 	getDefaultSandboxProfile,
 	type SandboxProfile,
 	setDefaultSandboxProfile,
 } from "../infrastructure/tools/sandbox.ts";
-import { resolveWebSearchConfig } from "./bridge-environment.ts";
+import { resolveWebSearchConfig } from "./bridge/environment.ts";
 import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,
@@ -49,7 +53,7 @@ export interface ToolRouterDeps {
 	ariadneEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	emit: (event: RuntimeEvent) => void;
-	/** Add a tool to the live default set (propagates into config.tools / harness.setTools). */
+	/** Add a tool to the live default set (propagates into the harness configuration). */
 	onToolAdded: (tool: Tool) => void;
 	/** MCP/skills context changed (even with no new tools) — bridge should rebuild the system prompt. */
 	onContextChanged: () => void;

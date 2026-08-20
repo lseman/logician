@@ -12,8 +12,8 @@
 // - Usage metrics: tokensBefore / tokensAfter on compaction results
 
 import { randomUUID } from "node:crypto";
-import { DEFAULT_TRUNCATION } from "../types/types-config.ts";
 import type { AgentMessage, CompactableMessage } from "../types/index.ts";
+import { DEFAULT_TRUNCATION } from "../types/types-config.ts";
 import { serializeConversation } from "./serialization.ts";
 
 // ============================================================================

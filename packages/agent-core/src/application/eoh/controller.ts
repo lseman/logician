@@ -7,7 +7,7 @@
 import path from "node:path";
 import { EohEngine, type EohProgressEvent } from "@logician/eoh/engine";
 import { populationStats } from "@logician/eoh/population";
-import type { RuntimeEvent } from "../../runtime/events.ts";
+import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 import {
 	applyEohCandidate,
 	type EohFileTarget,

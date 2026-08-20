@@ -118,6 +118,23 @@ void describe("StatusBar", () => {
 		assert.ok(plain.includes("exec: minimal"));
 	});
 
+	it("renders the selected act/plan workflow", () => {
+		setupTheme();
+		const bar = new StatusBar(createDefaultConfig());
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+			workflowMode: "act",
+		});
+		const plain = () =>
+			bar.render(160)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		assert.match(plain(), /\bact\b/);
+		bar.update({ workflowMode: "plan" });
+		assert.match(plain(), /\bplan\b/);
+	});
+
 	it("drops optional sections on narrow terminals", () => {
 		setupTheme();
 		const bar = new StatusBar(createDefaultConfig());

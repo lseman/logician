@@ -4,15 +4,15 @@
 // Delegates to the single compaction engine (compactToFit) shared with the
 // loop's context-full retry and the builtin proactive hook.
 
-import { type CompactionSettings, compactToFit } from "./engine.ts";
 import type { LLMBackend } from "../provider/backend.ts";
 import { estimateChatPayloadTokens } from "../provider/messages.ts";
-import { generateCompactionSummary } from "../../runtime/summaries/summary-generation.ts";
+import { generateCompactionSummary } from "../session/summaries/summary-generation.ts";
 import type {
 	CompactableMessage,
 	Message,
 	ThinkingLevel,
 } from "../types/index.ts";
+import { type CompactionSettings, compactToFit } from "./engine.ts";
 
 export interface CompactionOutcome {
 	changed: boolean;

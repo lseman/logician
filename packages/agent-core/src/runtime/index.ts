@@ -1,10 +1,9 @@
-// ── Runtime Layer ────────────────────────────────────────────────────────────
-// Runtime and state management: sessions, tasks, queues, summaries, runtime events.
+/** @deprecated Import from the focused package subpaths instead. */
 
-export * from "./sessions/index.ts";
-export * from "./queue/index.ts";
-export * from "./summaries/index.ts";
-export * from "./runtime-config.ts";
-export * from "./event-mapping.ts";
-export * from "./events.ts";
-export * from "./plugin-result-formatter.ts";
+export * from "../application/configuration/runtime-config.ts";
+export * from "../application/events/event-mapping.ts";
+export * from "../application/session/index.ts";
+export * from "../application/transcript/index.ts";
+export * from "../core/harness/queue/index.ts";
+export * from "../core/session/summaries/index.ts";
+export * from "../core/types/runtime-events.ts";

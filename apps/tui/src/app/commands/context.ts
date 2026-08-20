@@ -4,7 +4,6 @@
 // (status/plugins/mcp/reasoner/theme). Extracted from the constructor's
 // inline slash-command wiring block.
 
-import type { AutoresearchSession } from "@logician/autoresearch";
 import type {
 	AgentCoreBridge,
 	GoalManager,
@@ -14,6 +13,7 @@ import type {
 	Transcript,
 	TuiSessionService,
 } from "@logician/agent-core/sessions";
+import type { AutoresearchSession } from "@logician/autoresearch";
 import type { MemoryStore } from "@logician/memory";
 import type { ChoicePopup } from "../../overlays/choice-popup.ts";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";
@@ -41,10 +41,15 @@ export interface SlashCommandsCtx {
 	goalActive: boolean;
 	researchManager: AutoresearchSession;
 	inferenceMode: string;
+	workflowMode: "act" | "plan";
+	planPhase: "idle" | "planning" | "awaiting_approval" | "executing";
+	normalPermissionMode: "acceptAll" | "acceptEdits" | "ask";
 	applyThinkingLevel: (level: string) => void;
 	setInferenceMode: (mode: string) => void;
 	setExecutionProfile: (profile: "autonomous" | "minimal") => void;
 	cycleExecutionProfile: () => "autonomous" | "minimal";
+	togglePlanMode: () => "acceptEdits" | "plan";
+	setPlanMode: (planning: boolean) => "acceptEdits" | "plan";
 	cycleInferenceMode: () => void;
 	openSettingsSelector: () => Promise<void>;
 	openSessionManager: () => void;

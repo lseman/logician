@@ -7,8 +7,8 @@ export type {
 	ExtensionContextState,
 } from "./context.ts";
 export { createExtensionContext } from "./context.ts";
+export * from "./event-bus.ts";
 export * from "./loader.ts";
 export * from "./runner.ts";
 export * from "./state.ts";
 export * from "./types.ts";
-export * from "./event-bus.ts";

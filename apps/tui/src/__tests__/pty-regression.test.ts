@@ -227,8 +227,43 @@ void test("Ctrl+I changes and persists the execution profile", async () => {
 		readFileSync(path.join(home, ".logician", "settings.json"), "utf8"),
 	) as { executionProfile?: string };
 
-	assert.match(screen, /Execution policy: minimal|exec: minimal/);
-	assert.equal(settings.executionProfile, "minimal");
+	assert.match(screen, /Execution mode: auto|exec: auto/);
+	assert.equal(settings.executionProfile, "autonomous");
+	assert.doesNotMatch(result.output, /TUI render error/);
+});
+
+void test("Ctrl+P changes and persists act/plan mode", async () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
+	const themeDir = path.join(home, ".logician", "themes");
+	mkdirSync(themeDir, { recursive: true });
+	writeFileSync(path.join(themeDir, "dark.json"), DARK_THEME_JSON);
+	const result = await runInPty({
+		command: bun,
+		args: ["run", entry],
+		cwd: repoRoot,
+		env: {
+			HOME: home,
+			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
+			LOGICIAN_MCP: "0",
+			LOGICIAN_HOOKS: "0",
+			LOGICIAN_MODEL: "test-model",
+		},
+		actions: [
+			{ afterMs: 100, send: "s\n" },
+			{ afterMs: 500, send: "\x10" },
+		],
+		timeoutMs: 4_000,
+		columns: 140,
+		rows: 32,
+	});
+	const screen = screenFromPtyResult(result, 140, 32).text();
+	const settings = JSON.parse(
+		readFileSync(path.join(home, ".logician", "settings.json"), "utf8"),
+	) as { workflowMode?: string };
+
+	assert.match(screen, /Mode: plan|\bplan\b/);
+	assert.equal(settings.workflowMode, "plan");
 	assert.doesNotMatch(result.output, /TUI render error/);
 });
 

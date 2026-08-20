@@ -1,6 +1,6 @@
-import type { AutoresearchSession } from "@logician/autoresearch";
 import type { AgentCoreBridge } from "@logician/agent-core/application";
 import type { Transcript } from "@logician/agent-core/sessions";
+import type { AutoresearchSession } from "@logician/autoresearch";
 import type { InputBar } from "../../input/input-bar.ts";
 import type { AutoresearchDashboardOverlay } from "../../overlays/autoresearch-dashboard.ts";
 import type { FileMentionPopup } from "../../overlays/file-mention-popup.ts";
@@ -43,4 +43,7 @@ export interface OverlayHandlersCtx {
 	settingsSelector: SettingsSelectorOverlay;
 	thinkingLevel: string;
 	inferenceMode: InferenceMode;
+	workflowMode: "act" | "plan";
+	planPhase: "idle" | "planning" | "awaiting_approval" | "executing";
+	normalPermissionMode: "acceptAll" | "acceptEdits" | "ask";
 }

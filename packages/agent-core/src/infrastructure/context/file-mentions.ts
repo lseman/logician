@@ -5,7 +5,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ensureTool } from "../tools/utils/tools-manager.ts";
+import { ensureTool } from "../tools/external-tools.ts";
 
 const execFileAsync = promisify(execFile);
 

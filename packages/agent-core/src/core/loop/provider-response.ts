@@ -13,17 +13,17 @@
  * The runner decides how to handle failures (return finish vs continue).
  */
 
+import type { OutputGuard } from "../guards/output-guard.ts";
 import type { ToolRegistry } from "../../infrastructure/tools/registry.ts";
-import {
-	parseTextToolCalls,
-	stripTextToolCalls,
-} from "../../infrastructure/tools/utils/text-to-tool-calls.ts";
 import type { LLMResponse } from "../provider/backend.ts";
 import {
 	createAssistantMessage,
 	sanitizeToolCallArguments,
 } from "../provider/messages.ts";
-import type { OutputGuard } from "../../infrastructure/guards/output-guard.ts";
+import {
+	parseTextToolCalls,
+	stripTextToolCalls,
+} from "../provider/text-tool-calls.ts";
 import type {
 	AgentEventSink,
 	AgentMessage,
@@ -31,8 +31,8 @@ import type {
 	StopReason,
 	ToolCall,
 } from "../types/index.ts";
-import type { AgentLoopConfig } from "./config.ts";
 import { stopReasonFor } from "./callbacks.ts";
+import type { AgentLoopConfig } from "./config.ts";
 
 export interface ProcessResponseResult {
 	success: boolean;

@@ -2,10 +2,7 @@
 // Mixes bridge control + status display + disk config persistence for the
 // inference-mode and execution-profile settings.
 
-import {
-	INFERENCE_MODE_ORDER,
-	type InferenceMode,
-} from "@logician/agent-core";
+import { INFERENCE_MODE_ORDER, type InferenceMode } from "@logician/agent-core";
 import type { AgentCoreBridge } from "@logician/agent-core/application";
 import { saveConfigField } from "@logician/agent-core/configuration";
 import type { StatusBar } from "../footer/layout.ts";
@@ -19,6 +16,9 @@ export interface InferenceSettingsCtx {
 	tui: TuiHandle;
 	inferenceMode: InferenceMode;
 	thinkingLevel: string;
+	workflowMode: "act" | "plan";
+	planPhase: "idle" | "planning" | "awaiting_approval" | "executing";
+	normalPermissionMode: "acceptAll" | "acceptEdits" | "ask";
 	notify: (
 		message: string,
 		level?: "info" | "success" | "warning" | "error",
@@ -72,7 +72,9 @@ export function applyThinkingLevel(
 ): void {
 	ctx.thinkingLevel = level;
 	ctx.bridge.updateSettings({
-		thinkingLevel: level as Parameters<AgentCoreBridge["updateSettings"]>[0]["thinkingLevel"],
+		thinkingLevel: level as Parameters<
+			AgentCoreBridge["updateSettings"]
+		>[0]["thinkingLevel"],
 	});
 	ctx.statusPanel.update({ thinkingLevel: level });
 	if (options.persist === true) saveConfigField("thinkingLevel", level);
@@ -94,4 +96,22 @@ export function cycleExecutionProfile(
 	const next = current === "autonomous" ? "minimal" : "autonomous";
 	setExecutionProfile(ctx, next);
 	return next;
+}
+
+export function setPlanMode(
+	ctx: InferenceSettingsCtx,
+	planning: boolean,
+): "acceptEdits" | "plan" {
+	ctx.workflowMode = planning ? "plan" : "act";
+	ctx.planPhase = "idle";
+	ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
+	ctx.statusPanel.update({ workflowMode: ctx.workflowMode });
+	saveConfigField("workflowMode", ctx.workflowMode);
+	return planning ? "plan" : "acceptEdits";
+}
+
+export function togglePlanMode(
+	ctx: InferenceSettingsCtx,
+): "acceptEdits" | "plan" {
+	return setPlanMode(ctx, ctx.workflowMode !== "plan");
 }

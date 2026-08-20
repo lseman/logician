@@ -167,12 +167,12 @@ export class PermissionManager {
 				return readOnly
 					? { decision: "allow", source: "mode" }
 					: {
-						decision: "deny",
-						source: "mode",
-						reason:
-							"Plan mode is active: present a plan instead of executing. " +
-							"Only read-only tools are available.",
-					};
+							decision: "deny",
+							source: "mode",
+							reason:
+								"Plan mode is active: present a plan instead of executing. " +
+								"Only read-only tools are available.",
+						};
 		}
 	}
 

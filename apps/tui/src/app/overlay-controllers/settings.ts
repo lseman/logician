@@ -12,6 +12,7 @@ import {
 	applyThinkingLevel,
 	setExecutionProfile,
 	setInferenceMode,
+	setPlanMode,
 } from "../inference-settings.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
 import { openModelSelector } from "./selectors.ts";
@@ -24,7 +25,6 @@ export async function openSettingsSelector(
 	try {
 		const data = ctx.bridge.getSettingsData();
 		const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-		const permissionModes = ["acceptAll", "acceptEdits", "ask", "plan"];
 		const settings: SettingDef[] = [
 			{
 				name: "Model",
@@ -73,14 +73,17 @@ export async function openSettingsSelector(
 				})),
 			},
 			{
-				name: "Permission mode",
-				currentValue: data.permissionMode,
-				description: "How the agent handles tool permissions",
-				options: permissionModes.map(v => ({
-					label: v,
-					value: v,
-					current: data.permissionMode === v,
-				})),
+				name: "Workflow mode",
+				currentValue: ctx.workflowMode,
+				description: "Act with tools or produce a read-only plan",
+				options: [
+					{ label: "Act", value: "act", current: ctx.workflowMode === "act" },
+					{
+						label: "Plan",
+						value: "plan",
+						current: ctx.workflowMode === "plan",
+					},
+				],
 			},
 			{
 				name: "Guards",
@@ -264,10 +267,10 @@ export async function openSettingsSelector(
 				name: "Execution policy",
 				currentValue: data.executionProfile,
 				description:
-					"Agent policy ownership — autonomous uses built-in policies, minimal leaves stop policy to the caller",
+					"Auto continues bounded work; minimal performs one direct pass",
 				options: [
 					{
-						label: "autonomous",
+						label: "Auto",
 						value: "autonomous",
 						current: data.executionProfile === "autonomous",
 					},
@@ -407,11 +410,8 @@ export function handleSettingsSelectorAction(
 			applyThinkingLevel(ctx, value, { persist: true });
 			ctx.notify(`Thinking level: ${value}`, "success");
 			break;
-		case "permission mode":
-			ctx.bridge.setPermissionMode(
-				value as "acceptAll" | "acceptEdits" | "ask" | "plan",
-			);
-			saveConfigField("permissionMode", value);
+		case "workflow mode":
+			setPlanMode(ctx, value === "plan");
 			ctx.notify(`Permission mode: ${value}`, "success");
 			break;
 		case "guards": {
@@ -486,15 +486,19 @@ export function handleSettingsSelectorAction(
 			break;
 		}
 		case "execution policy": {
+			const normalized = value === "auto" ? "autonomous" : value;
 			const valid: Array<"autonomous" | "minimal"> = ["autonomous", "minimal"];
-			if (!valid.includes(value as (typeof valid)[number])) {
+			if (!valid.includes(normalized as (typeof valid)[number])) {
 				ctx.notify(
 					`Invalid execution policy: ${value}. Valid: ${valid.join(", ")}`,
 					"error",
 				);
 			} else {
-				setExecutionProfile(ctx, value as "autonomous" | "minimal");
-				ctx.notify(`Execution policy: ${value}`, "success");
+				setExecutionProfile(ctx, normalized as "autonomous" | "minimal");
+				ctx.notify(
+					`Execution mode: ${normalized === "autonomous" ? "auto" : "minimal"}`,
+					"success",
+				);
 			}
 			break;
 		}

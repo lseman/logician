@@ -5,12 +5,12 @@
 // to live directly on the AgentHarness class.
 
 import type { LLMBackend } from "../../provider/backend.ts";
-import { collectMessagesForBranchSummary } from "../../../runtime/summaries/branch-summarization.ts";
-import { generateBranchSummaryText } from "../../../runtime/summaries/summary-generation.ts";
+import { collectMessagesForBranchSummary } from "../../session/summaries/branch-summarization.ts";
+import { generateBranchSummaryText } from "../../session/summaries/summary-generation.ts";
 import type {
 	BranchInfo,
 	BranchSummaryData,
-} from "../../../runtime/summaries/types.ts";
+} from "../../session/summaries/types.ts";
 import type { Message, ThinkingLevel } from "../../types/index.ts";
 
 export interface Branch {
