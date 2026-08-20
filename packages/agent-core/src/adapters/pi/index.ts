@@ -135,14 +135,14 @@
 //   registerMarkdownTransformer → no-op
 //   registerEntryRenderer → no-op
 
-import type { EventBus } from "../../event-bus.ts";
+import type { EventBus } from "../../core/extension/event-bus.ts";
 import type {
 	ExtensionToolResult,
 	ExtensionAPI as LApi,
 	ExtensionContext as LContext,
 	ExtensionEvent as LEvent,
 	ExtensionEventType as LEventType,
-} from "../../types.ts";
+} from "../../core/extension/types.ts";
 
 // ── TypeBox Schema → JSON Schema ─────────────────────────────────────────────
 

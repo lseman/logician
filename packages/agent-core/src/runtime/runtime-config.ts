@@ -145,7 +145,6 @@ export function resolveRuntimeConfig(
 			maxParallelAgents: configNumber(config.maxParallelAgents),
 			lsp: config.lsp,
 			continuationEnabled: configBool(config.continuationEnabled, true),
-			reflectionConfig: config.reflectionConfig,
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),
 			rtkProxyEnabled: configBool(config.rtkProxyEnabled),
 			ariadneEnabled: configBool(config.ariadneEnabled, true),

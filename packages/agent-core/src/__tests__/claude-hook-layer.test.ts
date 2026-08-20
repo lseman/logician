@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
 	claudeToolMatcherName,
 	createClaudeCodeHookLayer,
-} from "../core/extension/adapters/claude-code/hook-layer.ts";
+} from "../adapters/claude-code/hook-layer.ts";
 
 void test("Claude hook matcher names cover Logician-native tools", () => {
 	assert.equal(claudeToolMatcherName("bash"), "Bash");

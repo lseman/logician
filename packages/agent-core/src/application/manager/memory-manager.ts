@@ -5,7 +5,8 @@
 // the bridge's job is just to forward session-id transitions and call
 // createHooks() once at construction.
 
-import type { AgentConfig, OpenAIBackend } from "../../index.ts";
+import type { OpenAIBackend } from "../../core/provider/backend.ts";
+import type { AgentConfig } from "../../core/types/types-config.ts";
 import {
 	createMemoryHooks,
 	createMemoryStore,

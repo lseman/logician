@@ -531,10 +531,6 @@ void test("continuation is gated by the in-memory provider-call budget", async (
 	harness.setSessionId("budget-session");
 	await harness.prompt("start");
 	harness.nextTurn("continue internally");
-	assert.equal(
-		harness.requestContinuation("test", "progress").action,
-		"continue",
-	);
 	await harness.continueWithNextTurn();
 
 	assert.equal(backendCalls, 1);

@@ -7,8 +7,8 @@
 import type { AgentHooks } from "../types/index.ts";
 import { createExtensionContext } from "./context.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
-import type { PiRuntimePort } from "./adapters/pi/index.ts";
-import { PiAdapter } from "./adapters/pi/index.ts";
+import type { PiRuntimePort } from "../../adapters/pi/index.ts";
+import { PiAdapter } from "../../adapters/pi/index.ts";
 import { createExtensionState } from "./state.ts";
 import type {
 	ExtensionAPI,

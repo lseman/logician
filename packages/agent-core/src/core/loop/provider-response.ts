@@ -25,13 +25,13 @@ import {
 } from "../provider/messages.ts";
 import type { OutputGuard } from "../../infrastructure/guards/output-guard.ts";
 import type {
-	AgentConfig,
 	AgentEventSink,
 	AgentMessage,
 	Message,
 	StopReason,
 	ToolCall,
 } from "../types/index.ts";
+import type { AgentLoopConfig } from "./config.ts";
 import { stopReasonFor } from "./callbacks.ts";
 
 export interface ProcessResponseResult {
@@ -53,7 +53,7 @@ export interface ProcessResponseContext {
 	turnId: string;
 	iteration: number;
 	emit: AgentEventSink;
-	config: AgentConfig;
+	config: Pick<AgentLoopConfig, "hooks" | "model">;
 }
 
 /**

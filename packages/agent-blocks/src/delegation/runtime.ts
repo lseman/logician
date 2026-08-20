@@ -126,9 +126,7 @@ function acceptanceFor(
 			: []),
 		...(contract.successCriteria ?? []),
 	];
-	return criteria.length
-		? { criteria, maxFinalizationTurns: contract.maxValidationRetries ?? 2 }
-		: undefined;
+	return criteria.length ? { criteria } : undefined;
 }
 
 function combineSignal(
@@ -220,12 +218,7 @@ export async function runDelegatedAgent(params: {
 				tools,
 				maxIterations: remainingIterations,
 				signal,
-				// Delegation owns its cross-run retry loop so it can keep aggregate
-				// budgets and return only the clean final result. Disable the runner's
-				// in-run corrective turn here to avoid stacking both retry mechanisms.
-				acceptance: acceptance
-					? { ...acceptance, maxFinalizationTurns: 0 }
-					: undefined,
+				acceptance,
 			},
 			event => {
 					if (event.type === "turn_start") turns++;

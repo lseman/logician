@@ -45,7 +45,6 @@ export interface AcceptanceConfig {
 	verify?: AcceptanceVerification[];
 	review?: AcceptanceReview;
 	stopRules?: string[];
-	maxFinalizationTurns?: number;
 }
 
 export interface ResolvedAcceptance {
@@ -56,7 +55,6 @@ export interface ResolvedAcceptance {
 	verify: AcceptanceVerification[];
 	review?: AcceptanceReview;
 	stopRules?: string[];
-	maxFinalizationTurns?: number;
 }
 
 export interface AcceptanceReport {
@@ -124,7 +122,6 @@ export function resolveEffectiveAcceptance(params: {
 			verify: [],
 			review: undefined,
 			stopRules: [],
-			maxFinalizationTurns: 3,
 		};
 	}
 
@@ -145,7 +142,6 @@ export function resolveEffectiveAcceptance(params: {
 		verify,
 		review,
 		stopRules: explicit.stopRules ?? [],
-		maxFinalizationTurns: explicit.maxFinalizationTurns ?? 3,
 	};
 }
 
@@ -407,7 +403,6 @@ export function validateAcceptanceInput(config: AcceptanceConfig): string[] {
 		"verify",
 		"review",
 		"stopRules",
-		"maxFinalizationTurns",
 	]);
 	for (const key of Object.keys(config)) {
 		if (!validKeys.has(key)) {
@@ -427,13 +422,6 @@ export function validateAcceptanceInput(config: AcceptanceConfig): string[] {
 				if (!item.id?.trim()) errors.push(`criteria[${i}]: id is required`);
 				if (!item.must.trim()) errors.push(`criteria[${i}]: must is required`);
 			}
-		}
-	}
-	if (config.maxFinalizationTurns !== undefined) {
-		if (config.maxFinalizationTurns < 1 || config.maxFinalizationTurns > 10) {
-			errors.push(
-				`maxFinalizationTurns must be between 1 and 10, got ${config.maxFinalizationTurns}`,
-			);
 		}
 	}
 	return errors;

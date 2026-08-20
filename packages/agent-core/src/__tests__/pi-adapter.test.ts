@@ -1,6 +1,6 @@
 import { describe, expect, it, type Mock, mock } from "bun:test";
 import type { EventBus } from "../core/extension/event-bus.ts";
-import { PiAdapter } from "../core/extension/adapters/pi/index.ts";
+import { PiAdapter } from "../adapters/pi/index.ts";
 import type {
 	ExtensionToolResult,
 	ExtensionAPI as LApi,

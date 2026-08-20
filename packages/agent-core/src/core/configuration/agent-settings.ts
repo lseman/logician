@@ -1,5 +1,4 @@
 import type {
-	AgentConfig,
 	ExecutionProfile,
 	InferenceMode,
 	ThinkingLevel,
@@ -15,7 +14,15 @@ export interface AgentSettings {
 	toolExecution: "parallel" | "sequential";
 }
 
-export function resolveAgentSettings(config: AgentConfig): AgentSettings {
+export interface AgentSettingsInput {
+	executionProfile?: ExecutionProfile;
+	inferenceMode?: InferenceMode;
+	maxIterations?: number;
+	thinkingLevel?: ThinkingLevel;
+	toolExecution?: "parallel" | "sequential";
+}
+
+export function resolveAgentSettings(config: AgentSettingsInput): AgentSettings {
 	return {
 		executionProfile: config.executionProfile ?? "minimal",
 		inferenceMode: config.inferenceMode ?? "none",

@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Tool } from "../index.ts";
+import type { Tool } from "../core/types/types-messages.ts";
 import {
 	parseFrontmatter,
 	runPluginBackend,

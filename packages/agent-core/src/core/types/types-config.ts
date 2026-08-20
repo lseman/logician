@@ -38,16 +38,6 @@ export const VALID_TOOL_EXECUTION: readonly string[] = [
 	"parallel",
 ];
 
-/** Self-evaluation / reflection config for the agent loop. */
-export interface ReflectionConfig {
-	/** Whether to run a self-evaluation step before final conclusion. */
-	enabled?: boolean;
-	/** Maximum reflection turns allowed. */
-	maxReflections?: number;
-	/** Reflection prompt template. $task is replaced with the original task description. */
-	prompt?: string;
-}
-
 export type InferenceMode =
 	| "auto"
 	| "none"
@@ -367,8 +357,6 @@ export interface AgentConfig {
 	eventLogPath?: string;
 	steeringInterrupt?: boolean;
 	acceptance?: AcceptanceConfig;
-	/** Self-evaluation / reflection config. */
-	reflectionConfig?: ReflectionConfig;
 	// Inference mode (Ctrl+M)
 	inferenceMode?: InferenceMode;
 	/** Absolute paths allowed in addition to CWD for file tools. */

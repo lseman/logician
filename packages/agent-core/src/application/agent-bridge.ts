@@ -180,7 +180,6 @@ export interface AgentBridgeOptions {
 		>;
 	};
 	continuationEnabled?: boolean;
-	reflectionConfig?: AgentConfig["reflectionConfig"];
 	postEditDiagnostics?: boolean;
 	rtkProxyEnabled?: boolean;
 	ariadneEnabled?: boolean;
@@ -732,7 +731,6 @@ export class AgentCoreBridge {
 			budgetStopEnabled: opts.budgetStopEnabled,
 			proactiveCompactionEnabled: opts.proactiveCompactionEnabled,
 			continuationEnabled: opts.continuationEnabled,
-			reflectionConfig: opts.reflectionConfig,
 			rtkProxyEnabled: opts.rtkProxyEnabled,
 			ariadneEnabled: opts.ariadneEnabled ?? true,
 			fffgrepEnabled: opts.fffgrepEnabled ?? true,
@@ -839,9 +837,6 @@ export class AgentCoreBridge {
 			harness: null, // set below via setHarness
 			emit: event => this.emit(event),
 			getSystemPrompt: () => this.config.systemPrompt ?? this.baseSystemPrompt,
-			setSystemPrompt: prompt => {
-				this.config.systemPrompt = prompt;
-			},
 			setConfigSteeringMode: mode => {
 				this.config.steeringQueueMode = mode;
 			},
@@ -850,9 +845,6 @@ export class AgentCoreBridge {
 			},
 			setConfigFollowUpMode: mode => {
 				this.config.followUpQueueMode = mode;
-			},
-			setSteeringInterrupt: enabled => {
-				this.config.steeringInterrupt = enabled;
 			},
 			getSteeringInterrupt: () => this.config.steeringInterrupt === true,
 		});
@@ -1044,11 +1036,6 @@ export class AgentCoreBridge {
 		}
 	}
 
-	private progressFingerprint(): string {
-		// Simplified — task state was removed; rely on text progress.
-		return "";
-	}
-
 	// Lazily build the singleton harness and wire its UI callbacks.
 	private ensureHarness(): AgentHarness {
 		if (!this.harness) {
@@ -1075,13 +1062,9 @@ export class AgentCoreBridge {
 			);
 			// Autonomous continuation: when the harness settles with pending
 			// nextTurn messages, auto-trigger the next prompt.
-			this.harness.setOnSettled((nextTurnCount, reason) => {
+			this.harness.setOnSettled(nextTurnCount => {
 				if (nextTurnCount === 0) return;
-				if (reason === "steering_interrupt") {
-					this.sessionManager?.setPendingSteeringContinue(true);
-					return;
-				}
-				this.sessionManager?.setPendingAutoContinue(true);
+				this.sessionManager?.setPendingContinuation(true);
 				this.emit({
 					type: "notice",
 					level: "info",
@@ -1095,17 +1078,11 @@ export class AgentCoreBridge {
 
 	private emitRuntimeStatus(): void {
 		if (!this.harness) return;
-		const run = this.harness.continuationStatus;
-		const budget = this.harness.continuationBudget;
 		this.emit({
 			type: "runtime_status",
-			runPhase: run?.status ?? "idle",
-			continuationsRemaining: budget?.continuationsRemaining,
-			noProgressRemaining: budget?.noProgressRemaining,
-			timeRemainingMs: budget?.timeRemainingMs,
+			runPhase: this.harness.phase,
 			retry: this.runtimeRetry,
 			repair: this.runtimeRepair,
-			compactionGeneration: run?.compactionGeneration ?? 0,
 			activeSubagents: this.activeRuntimeSubagents.size,
 		});
 	}
@@ -1349,33 +1326,6 @@ export class AgentCoreBridge {
 		return true;
 	}
 
-	/** True while a permission_request awaits a decision. */
-	hasPendingPermission(): boolean {
-		return this.permissionResolvers.size > 0;
-	}
-
-	/**
-	 * Register a pending question and emit it to the UI. Returns the question id
-	 * so the agent can track which question it asked. Call respondToQuestion() to
-	 * resolve it.
-	 */
-	askQuestion(
-		question: string,
-		choices: Array<{ value: string; label: string }>,
-	): string {
-		const qid = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-		this.questionResolvers.set(qid, {
-			allow: () => {},
-			deny: () => {},
-		});
-		this.emit({
-			type: "question_request",
-			questionId: qid,
-			questions: [{ id: "answer", question, choices }],
-		});
-		return qid;
-	}
-
 	/**
 	 * Answer a pending question by id. The answer is forwarded to the agent's
 	 * resolver. Returns false if the question id is unknown.
@@ -1386,11 +1336,6 @@ export class AgentCoreBridge {
 		this.questionResolvers.delete(questionId);
 		r.allow(answer);
 		return true;
-	}
-
-	/** True while a question_request awaits an answer. */
-	hasPendingQuestion(): boolean {
-		return this.questionResolvers.size > 0;
 	}
 
 	/** Deny every pending permission request (abort / shutdown). */
@@ -1452,18 +1397,6 @@ export class AgentCoreBridge {
 
 	/** Get current base URL. */
 	getCurrentBaseUrl(): string {
-		return this.config.baseUrl;
-	}
-
-	/** Resolve the URL for a given model name. */
-	getModelUrl(modelName: string): string {
-		const models = this.config.models;
-		if (models) {
-			const found = models.find(m => m.model === modelName);
-			if (found?.url) {
-				return found.url;
-			}
-		}
 		return this.config.baseUrl;
 	}
 
@@ -1579,11 +1512,6 @@ export class AgentCoreBridge {
 			reasoner: this.agentCoordinator?.getReasonerStatus() ?? "none",
 		};
 		return state;
-	}
-
-	async getPlugins(): Promise<Record<string, unknown>[]> {
-		const result = await runPluginBackend("list", []);
-		return result.plugins || [];
 	}
 
 	async getPluginSnapshot(): Promise<PluginCommandResult> {
@@ -1712,7 +1640,6 @@ export class AgentCoreBridge {
 			| "budgetStopEnabled"
 			| "continuationEnabled"
 			| "autoRetryEnabled"
-			| "reflectionEnabled"
 			| "proactiveCompactionEnabled"
 			| "postEditDiagnostics"
 			| "rtkProxyEnabled"
@@ -1733,16 +1660,6 @@ export class AgentCoreBridge {
 		}
 		if (key === "postEditDiagnostics") {
 			this.postEditDiagnosticsEnabled = enabled;
-			return;
-		}
-		if (key === "reflectionEnabled") {
-			this.config.reflectionConfig = {
-				...this.config.reflectionConfig,
-				enabled,
-			};
-			this.harness?.updateConfig({
-				reflectionConfig: this.config.reflectionConfig,
-			});
 			return;
 		}
 		if (key === "ariadneEnabled") {
@@ -1813,7 +1730,6 @@ export class AgentCoreBridge {
 		failureGuardEnabled: boolean;
 		continuationEnabled: boolean;
 		autoRetryEnabled: boolean;
-		reflectionEnabled: boolean;
 		budgetStopEnabled: boolean;
 		guardMode: "auto" | "on" | "off";
 	} {
@@ -1839,7 +1755,6 @@ export class AgentCoreBridge {
 			failureGuardEnabled: this.config.failureGuardEnabled ?? false,
 			continuationEnabled: this.config.continuationEnabled ?? true,
 			autoRetryEnabled: this.config.autoRetryEnabled ?? true,
-			reflectionEnabled: this.config.reflectionConfig?.enabled ?? false,
 			budgetStopEnabled: this.config.budgetStopEnabled ?? false,
 			guardMode:
 				this.config.guardsEnabled === undefined

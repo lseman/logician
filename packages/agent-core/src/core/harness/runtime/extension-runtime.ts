@@ -16,7 +16,7 @@ import {
 	type ClaudeCodeHookLayer,
 	claudeToolMatcherName,
 	createClaudeCodeHookLayer,
-} from "../../extension/adapters/claude-code/hook-layer.ts";
+} from "../../../adapters/claude-code/hook-layer.ts";
 import type { HarnessInterventionController } from "../../policy/intervention-controller.ts";
 import type { LoopDetector } from "../../../infrastructure/guards/loop-detector.ts";
 import type {

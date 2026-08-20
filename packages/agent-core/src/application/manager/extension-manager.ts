@@ -12,7 +12,7 @@ import {
 	ExtensionRunner,
 	type ExtensionRunnerOptions,
 	loadExtensions,
-} from "../../index.ts";
+} from "../../core/extension/index.ts";
 import { parseFrontmatter } from "../../infrastructure/tools/index.ts";
 import type { Skill } from "../../features/skills/index.ts";
 
