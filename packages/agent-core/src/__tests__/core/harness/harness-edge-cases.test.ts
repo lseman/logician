@@ -4,7 +4,7 @@ import {
 	AgentHarness,
 	HarnessBusyError,
 } from "../../../core/harness/agent-harness.ts";
-import type { AgentConfig } from "../../../core/types/index.ts";
+import type { AgentConfig } from "../../../core/types/types-config.ts";
 import { FakeBackend, textResponse } from "../../fake-backend.ts";
 
 function makeHarness(

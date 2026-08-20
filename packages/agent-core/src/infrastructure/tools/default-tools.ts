@@ -1,5 +1,6 @@
 import { getBuiltInTools } from "@logician/agent-blocks/tools";
-import type { Tool, WebSearchConfig } from "../../core/types/index.ts";
+import type { WebSearchConfig } from "../../core/types/types-config.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
 import { ariadne } from "./ariadne.ts";
 import { bash } from "./bash.ts";
 import { edit_file } from "./edit-file.ts";

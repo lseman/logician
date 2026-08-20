@@ -1,11 +1,8 @@
 // ── web_search tool ──────────────────────────────────────────────────────────────
 // Search the web via SearXNG (self-hosted privacy-respecting metasearch engine).
 
-import type {
-	Tool,
-	ToolContext,
-	WebSearchConfig,
-} from "../../core/types/index.ts";
+import type { WebSearchConfig } from "../../core/types/types-config.ts";
+import type { Tool, ToolContext } from "../../core/types/types-messages.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./utils/truncate.ts";
 
 type FetchLike = (

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ExtensionRunner } from "../../../core/extension/runner.ts";
 import { AgentHarness } from "../../../core/harness/agent-harness.ts";
-import type { AgentConfig } from "../../../core/types/index.ts";
+import type { AgentConfig } from "../../../core/types/types-config.ts";
 import { FakeBackend, textResponse } from "../../fake-backend.ts";
 
 function extensionFile(source: string): string {

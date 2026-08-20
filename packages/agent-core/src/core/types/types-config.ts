@@ -1,16 +1,12 @@
-// ── Config and Error types ─────────────────────────────────────────────────
-// The barrel (types.ts) still re-exports everything so external import
-// sites are unaffected.
-
-// ── Config types ──────────────────────────────────────────────────────────
+/** Configuration, inference, queue, truncation, and agent error contracts. */
 
 import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
-import type { PermissionManager } from "../../infrastructure/tools/permissions.ts";
 import type {
 	AgentStopPolicy,
 	ExecutionProfile,
 } from "../policy/execution-policy.ts";
 import type { RunBudgetLimits } from "../policy/run-budget.ts";
+import type { PermissionManager } from "../tools/permissions.ts";
 import type { AgentHooks, EventHandler, Tool } from "./types-messages.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
@@ -373,21 +369,6 @@ export interface WebSearchConfig {
 	baseUrl: string;
 	maxResults?: number;
 }
-
-// ── Acceptance Contract types ─────────────────────────────────────────────
-// Re-exported so consumers that import from types.ts get everything in one place.
-
-export type {
-	AcceptanceCriterion,
-	AcceptanceLedger,
-	AcceptanceLevel,
-	AcceptanceReport,
-	AcceptanceReview,
-	AcceptanceVerification,
-	CriterionSeverity,
-	EvidenceKind,
-	ResolvedAcceptance,
-} from "../guards/acceptance-contract.ts";
 
 // ── Error types ───────────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@
 
 import type { GenerateCallbacks } from "../provider/backend.ts";
 import { createAssistantMessage } from "../provider/messages.ts";
-import type { AgentEvent } from "../types/index.ts";
+import type { AgentEvent } from "../types/types-messages.ts";
 
 /**
  * Build streaming callbacks that funnel through the per-request event chain.

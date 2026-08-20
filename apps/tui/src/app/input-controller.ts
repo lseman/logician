@@ -4,6 +4,7 @@ import {
 	filterSlashCommands,
 	type SlashCommandDef,
 } from "@logician/agent-core/commands";
+import { beginPendingTurn } from "../state/turn-state.ts";
 import type { LogicianTUI } from "./tui.ts";
 
 export function setupInputHandler(ctx: LogicianTUI): void {
@@ -605,14 +606,15 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 
 		ctx.transcript.addTurn(text);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-		ctx.statusPanel.update({ phase: "streaming" });
+		ctx.turnState = beginPendingTurn(ctx.turnState);
+		ctx.workSurface.setPhase(ctx.turnState.phase);
+		ctx.statusPanel.update({ phase: "thinking" });
 		ctx.statusPanel.startAnimation();
-		// Queue an immediate frame before bridge setup. Rendering synchronously in
-		// the stdin callback made Enter block on full transcript layout and terminal
-		// writes; with a long session that also froze typing and spinner timers.
-		// requestRender uses nextTick, so this frame still precedes the setImmediate
-		// bridge work while allowing the input callback to return promptly.
-		ctx.tui.requestRender(false, true);
+		// Commit the acknowledgement before scheduling bridge work. A queued
+		// zero-delay render is not sufficient here: from an input callback,
+		// setImmediate can run before that timer and synchronous context preparation
+		// would leave the previous READY frame visible.
+		ctx.tui.renderNow();
 		const prompt =
 			ctx.workflowMode === "plan"
 				? `[PLAN MODE]\nFirst investigate using read-only tools and produce a concrete implementation plan. Do not modify files or execute mutating commands. End after presenting the plan and wait for explicit user approval.\n\nUser request:\n${text}`

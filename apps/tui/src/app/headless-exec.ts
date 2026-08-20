@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Writable } from "node:stream";
-import type { RuntimeEvent } from "@logician/agent-core/runtime";
+import type { RuntimeEvent } from "@logician/agent-core/events";
 
 export const EXEC_STREAM_SCHEMA = "logician.exec-stream";
 export const EXEC_STREAM_SCHEMA_VERSION = 1;

@@ -135,6 +135,7 @@
 //   registerMarkdownTransformer → no-op
 //   registerEntryRenderer → no-op
 
+import type { CompatibilityAdapterFactory } from "../../core/extension/compatibility.ts";
 import type { EventBus } from "../../core/extension/event-bus.ts";
 import type {
 	ExtensionToolResult,
@@ -717,6 +718,41 @@ export interface PiRuntimePort {
 	getThinkingLevel?(): unknown;
 	setThinkingLevel?(level: unknown): void;
 }
+
+export const piCompatibilityAdapter: CompatibilityAdapterFactory = {
+	matches(definition, source) {
+		if (definition.compatibility === "native") return false;
+		if (definition.compatibility === "pi") return true;
+		return (
+			!!source &&
+			(source.includes("@earendil-works/pi-coding-agent") ||
+				source.includes("typebox") ||
+				/Type\.(?:Object|String|Number|Boolean|Array)/.test(source))
+		);
+	},
+	create({ api, cwd, sessionId, runtime }) {
+		return new PiAdapter(
+			api,
+			{
+				ui: {
+					notify: () => {},
+					confirm: async () => false,
+					input: async () => undefined,
+					select: async () => undefined,
+				},
+				state: {
+					get: async () => undefined,
+					set: async () => {},
+					delete: async () => {},
+					keys: async () => [],
+				},
+				cwd,
+				sessionId,
+			},
+			{ sessionId, cwd, runtime: runtime as PiRuntimePort | undefined },
+		);
+	},
+};
 
 export class PiAdapter {
 	private logicianApi: LApi;

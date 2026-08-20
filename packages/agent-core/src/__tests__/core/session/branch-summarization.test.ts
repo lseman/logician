@@ -11,7 +11,7 @@ import {
 	parseBranchSummary,
 	serializeMessages,
 } from "../../../core/session/summaries/branch-summarization.ts";
-import type { Message } from "../../../core/types/index.ts";
+import type { Message } from "../../../core/types/types-messages.ts";
 
 describe("createFileOps", () => {
 	it("creates empty ops", () => {

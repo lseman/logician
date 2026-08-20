@@ -16,7 +16,7 @@ import {
 	LOG_EXPERIMENT_PARAMETERS,
 	RUN_EXPERIMENT_PARAMETERS,
 } from "@logician/autoresearch";
-import type { Tool, ToolResult } from "../../core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/types-messages.ts";
 
 export function createAutoresearchTools(session: AutoresearchSession): Tool[] {
 	const init_experiment: Tool = {

@@ -1,12 +1,16 @@
-import type { ExtensionRunner } from "../extension/index.ts";
+import type { ExtensionRunner } from "../extension/runner.ts";
 import type { LLMBackend } from "../provider/backend.ts";
 import type { HarnessPhase } from "../state/runtime-state.ts";
 import type {
 	AgentConfig,
 	AgentHarnessStreamOptions,
+} from "../types/types-config.ts";
+import type {
+	AgentHooks,
 	EventHandler,
 	Message,
-} from "../types/index.ts";
+	Tool,
+} from "../types/types-messages.ts";
 
 export interface HarnessObserver {
 	event?: EventHandler;
@@ -22,6 +26,36 @@ export interface HarnessModule {
 	observers?: HarnessObserver[];
 }
 
+export interface HarnessCompatibilityHookContext {
+	enabled: boolean;
+	sessionId: string;
+	transcriptPath: string;
+	cwd: string;
+	tools: Tool[];
+}
+
+export interface HarnessCompatibilityHookLayer {
+	hooks?: AgentHooks;
+	userPromptMessages(prompt: string): Promise<Message[]>;
+}
+
+export type HarnessCompatibilityHookFactory = (
+	context: HarnessCompatibilityHookContext,
+) => HarnessCompatibilityHookLayer;
+
+export interface HarnessCompatibilityLifecycle {
+	sessionStart(
+		context: HarnessCompatibilityHookContext,
+		source: string,
+	): Promise<void>;
+	sessionEnd(
+		context: HarnessCompatibilityHookContext,
+		reason: string,
+	): Promise<void>;
+	preCompact(context: HarnessCompatibilityHookContext): Promise<void>;
+	postCompact(context: HarnessCompatibilityHookContext): Promise<void>;
+}
+
 export function defineHarnessModule(module: HarnessModule): HarnessModule {
 	return module;
 }
@@ -33,6 +67,8 @@ export interface AgentHarnessOptions {
 	maxIterations?: number;
 	extensionRunner?: ExtensionRunner;
 	modules?: HarnessModule[];
+	compatibilityHookFactory?: HarnessCompatibilityHookFactory;
+	compatibilityLifecycle?: HarnessCompatibilityLifecycle;
 }
 
 export interface HarnessTurnSnapshot {

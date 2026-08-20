@@ -1,8 +1,4 @@
-// ── EoH controller ────────────────────────────────────────────────────────
-// Owns the "Evolution of Heuristics" (arxiv 2401.02051) engine lifecycle for
-// the /eoh command: start/stop/status/best/reset against a target file.
-// Extracted from AgentCoreBridge, which owns none of this state directly —
-// it only supplies cwd/model/emit through EohControllerDeps.
+/** Owns the Evolution of Heuristics command lifecycle for one target file. */
 
 import path from "node:path";
 import { EohEngine, type EohProgressEvent } from "@logician/eoh/engine";

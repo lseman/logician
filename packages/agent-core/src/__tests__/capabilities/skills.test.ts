@@ -8,7 +8,7 @@ import {
 	formatSkillCatalog,
 	formatSkillInvocation,
 	loadSkills,
-} from "../../capabilities/skills/index.ts";
+} from "../../capabilities/skills/loader.ts";
 
 void test("frontmatter extensions are parsed (allowed-tools, argument-hint, model)", async () => {
 	const root = mkdtempSync(join(tmpdir(), "skills-"));

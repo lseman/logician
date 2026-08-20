@@ -6,15 +6,15 @@ import {
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
 } from "../../../core/execution/agent-loop-runner.ts";
+import { OutputGuard } from "../../../core/guards/output-guard.ts";
 import { resolveExecutionPolicy } from "../../../core/policy/execution-policy.ts";
 import { BackendError } from "../../../core/provider/backend.ts";
+import type { AgentConfig } from "../../../core/types/types-config.ts";
 import type {
-	AgentConfig,
 	AgentEvent,
 	Message,
 	Tool,
-} from "../../../core/types/index.ts";
-import { OutputGuard } from "../../../core/guards/output-guard.ts";
+} from "../../../core/types/types-messages.ts";
 import { FakeBackend, textResponse } from "../../fake-backend.ts";
 
 const noop: Tool = {
@@ -26,7 +26,7 @@ const noop: Tool = {
 
 // Legacy fixture retained only by skipped regression cases documenting the
 // removed structured-conclusion protocol.
-const task_status: Tool = {
+const _task_status: Tool = {
 	name: "task_status",
 	description: "legacy test fixture",
 	parameters: { type: "object", properties: {} },

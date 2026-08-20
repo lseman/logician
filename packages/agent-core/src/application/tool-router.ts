@@ -1,10 +1,8 @@
-// ── ToolRouter ────────────────────────────────────────────────────────────────
-// Owns "which tools exist at runtime" and the context they contribute to the
-// system prompt: default tools, MCP loading, sandbox mode, skill/prompt
-// discovery and injection, and the shared default-tools ToolRegistry.
-// Extracted from agent-bridge.ts. System-prompt *assembly* (merging this
-// router's mcpSystemContext/skillsContext with plugin-hook context) stays on
-// the bridge — that merge is cross-cutting, not a tool-management concern.
+/**
+ * Owns the session's tool registry and tool-provided prompt context.
+ * The bridge consumes this state but remains responsible for assembling the
+ * complete system prompt.
+ */
 
 import {
 	readdir as readdirAsync,
@@ -16,22 +14,20 @@ import {
 	McpManager,
 	type McpSnapshotResult,
 	type McpToggleResult,
-} from "../capabilities/mcp/index.ts";
-import { loadPrompts, type Prompt } from "../capabilities/prompts/index.ts";
+} from "../capabilities/mcp/manager.ts";
+import { loadPrompts, type Prompt } from "../capabilities/prompts/loader.ts";
 import {
 	formatSkillCatalog,
 	loadSkills,
 	type Skill,
-} from "../capabilities/skills/index.ts";
+} from "../capabilities/skills/loader.ts";
 import type { RuntimeEvent } from "../core/types/runtime-events.ts";
 import type { Tool } from "../core/types/types-messages.ts";
 import { ariadne } from "../infrastructure/tools/ariadne.ts";
 import { createDefaultTools } from "../infrastructure/tools/default-tools.ts";
-import {
-	parseFrontmatter,
-	runPluginBackend,
-	ToolRegistry,
-} from "../infrastructure/tools/index.ts";
+import { runPluginBackend } from "../adapters/claude-code/plugin-runtime.ts";
+import { ToolRegistry } from "../core/tools/registry.ts";
+import { parseFrontmatter } from "../infrastructure/tools/utils/frontmatter.ts";
 import { createReadSkillTool } from "../infrastructure/tools/read-skill.ts";
 import {
 	getDefaultSandboxProfile,

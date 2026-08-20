@@ -1,6 +1,4 @@
-// ── TUI Utilities ──────────────────────────────────────────────────────────────
-// Shared formatting, parsing, and display helpers used across TUI modules.
-// Extracted from tui.ts and agent-bridge.ts to reduce their size.
+/** Display formatting shared by agent-core consumers. */
 
 /** Format a token count for display (1234 → "1.2k"). */
 export function formatTokenCount(tokens: number): string {

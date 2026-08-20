@@ -1,39 +1,33 @@
-// ── AgentCoreBridge ──────────────────────────────────────────────────────────────
-import { envNumber } from "../../tui-utils.ts";
-// Replaces the Python bridge with direct TypeScript agent-core integration.
-// Translates agent-core events to the same shapes the transcript expects.
+/** Coordinates one interactive agent session and its runtime integrations. */
 
-import os from "node:os";
-import path from "node:path";
 import { onTodosChanged } from "@logician/agent-blocks/tasks/todo.ts";
+import {
+	claudeToolMatcherName,
+	createClaudeCodeHookLayer,
+} from "../../adapters/claude-code/hook-layer.ts";
 import type { PluginCommandResult } from "../../adapters/claude-code/plugin-runtime.ts";
 import type {
 	McpSnapshotResult,
 	McpToggleResult,
 } from "../../capabilities/mcp/manager.ts";
-import { McpManager } from "../../capabilities/mcp/manager.ts";
 import {
 	findPromptByName,
-	loadPrompts,
 	type Prompt,
 } from "../../capabilities/prompts/loader.ts";
 import {
-	findSkillByName,
 	formatActivatedSkills,
 	formatSkillActivationNotice,
-	formatSkillCatalog,
-	formatSkillInvocation,
-	loadSkills,
-	type Skill,
 	type selectSkillsForPrompt,
-} from "../../capabilities/skills/index.ts";
-import { resolveAgentSettings } from "../../core/configuration/agent-settings.ts";
+} from "../../capabilities/skills/activation.ts";
 import {
-	AgentHarness,
-	type HarnessPhase,
-} from "../../core/harness/agent-harness.ts";
+	findSkillByName,
+	formatSkillInvocation,
+	type Skill,
+} from "../../capabilities/skills/loader.ts";
+import { resolveAgentSettings } from "../../core/configuration/agent-settings.ts";
+import { AgentHarness } from "../../core/harness/agent-harness.ts";
 import type { AbortResult } from "../../core/harness/types.ts";
-import { type LLMBackend, OpenAIBackend } from "../../core/provider/backend.ts";
+import { OpenAIBackend } from "../../core/provider/backend.ts";
 import {
 	estimateChatPayloadTokens,
 	estimateTokens,
@@ -43,48 +37,39 @@ import type {
 	AgentConfig,
 	AgentModelConfig,
 	QueueMode,
-	TruncationConfig,
-} from "../../core/types/index.ts";
+} from "../../core/types/types-config.ts";
 import type { RuntimeEvent } from "../../core/types/runtime-events.ts";
 import type {
 	AgentEvent,
 	AskUserContext,
 	Message,
-	StopReason,
 	Tool,
 } from "../../core/types/types-messages.ts";
 import { buildDefaultSystemPrompt } from "../../infrastructure/context/system-prompt.ts";
 import { LspManager } from "../../infrastructure/developer-tools/lsp-manager.ts";
 import { createPostEditDiagnosticHooks } from "../../infrastructure/developer-tools/post-edit-diagnostics.ts";
-import { createDefaultTools } from "../../infrastructure/tools/default-tools.ts";
 import {
 	configurePluginRuntimeEnv,
-	PermissionManager,
-	type PermissionMode,
-	type PermissionRules,
 	runHookEvent,
 	runPluginBackend,
 	runSessionStartHooks,
 	splitPluginArgs,
-	ToolRegistry,
-} from "../../infrastructure/tools/index.ts";
+} from "../../adapters/claude-code/plugin-runtime.ts";
+import {
+	PermissionManager,
+	type PermissionMode,
+} from "../../core/tools/permissions.ts";
+import { ToolRegistry } from "../../core/tools/registry.ts";
 import {
 	createMemoryGetTool,
 	createMemorySearchTool,
 } from "../../infrastructure/tools/memory-tools.ts";
-import { createReadSkillTool } from "../../infrastructure/tools/read-skill.ts";
-import {
-	getDefaultSandboxProfile,
-	type SandboxProfile,
-	setDefaultSandboxProfile,
-} from "../../infrastructure/tools/sandbox.ts";
+import type { SandboxProfile } from "../../infrastructure/tools/sandbox.ts";
 import { killAllTrackedChildren } from "../../infrastructure/tools/utils/shell.ts";
+import { envNumber } from "../../tui-utils.ts";
 import { mapAgentEvent } from "../events/event-mapping.ts";
 import { RepositoryMap } from "../repository-map.ts";
-import {
-	getProjectPromptDirs,
-	getProjectSkillDirs,
-} from "../resource-directories.ts";
+import { ToolRouter } from "../tool-router.ts";
 import { AgentCoordinator } from "./agent-coordinator.ts";
 import {
 	buildPluginRuntimeEnv,
@@ -92,18 +77,12 @@ import {
 	eventLogPathFor,
 	resolveWebSearchConfig,
 } from "./environment.ts";
-import { ExtensionManager, loadPluginCommands } from "./extensions.ts";
-import {
-	MemoryManager,
-	type MemoryManagerOptions,
-	type MemoryManagerRuntime,
-} from "./memory.ts";
+import { ExtensionManager } from "./extensions.ts";
+import { MemoryManager } from "./memory.ts";
 import { formatPluginResult } from "./plugin-result-formatter.ts";
 import { BridgeSessionManager } from "./session.ts";
 
 export { findJbPrompt } from "./project-prompt.ts";
-
-import { findJbPrompt } from "./project-prompt.ts";
 
 export type {
 	AgentBridgeOptions,
@@ -132,213 +111,39 @@ export class AgentCoreBridge {
 	private sendTail: Promise<void> = Promise.resolve();
 	private sessionManager: BridgeSessionManager | null = null;
 	private cwd: string;
-	private _defaultTools: Tool[];
-	private _mcpLoaded = false;
-	private _mcpLoadPromise: Promise<void> | null = null;
-	private _mcpServerCount = 0;
-	private _mcpErrors: string[] = [];
-	private _mcpToolNames = new Set<string>();
-	private _mcpSystemContext = "";
-	private _skillsInjected = false;
-	private _skillsContext: string | null = null;
-	private _loadedSkills: Skill[] = [];
-	private _enabledPluginRoots: Array<{ name: string; installPath: string }> =
-		[];
-	private _promptsInjected = false;
-	private _loadedPrompts: Prompt[] = [];
-	private baseSystemPrompt: string;
-	private static readonly SANDBOX_CYCLE: SandboxProfile[] = [
-		"none",
-		"code",
-		"full",
-	];
-	private readonly mcpManager = new McpManager();
-	// toolRouter facade for backward compatibility with tests
-	private readonly toolRouter = {
-		getDefaultTools: () => this._defaultTools,
-		getLoadedSkills: () => this._loadedSkills,
-		getLoadedPrompts: () => this._loadedPrompts,
-		getEnabledPluginRoots: () => this._enabledPluginRoots,
-		getMcpSnapshot: () => this.mcpManager.getSnapshot(this.cwd),
-		setMcpServerEnabled: (name: string, enabled: boolean) =>
-			this.mcpManager.setServerEnabled(name, enabled, this.cwd),
-		closeMcp: () => this.mcpManager.close(),
-		getMcpServerCount: () => this._mcpServerCount,
-		getMcpToolCount: () => this._mcpToolNames.size,
-		getMcpErrors: () => this._mcpErrors,
-		isMcpLoaded: () => this._mcpLoaded,
-		isMcpLoading: () => this._mcpLoadPromise !== null && !this._mcpLoaded,
-		getMcpSystemContext: () => this._mcpSystemContext,
-		getSkillsContext: () => this._skillsContext,
-		getSandboxMode: () => getDefaultSandboxProfile(),
-		setSandboxMode: (mode: SandboxProfile) => setDefaultSandboxProfile(mode),
-		cycleSandboxMode: () => this.cycleSandboxMode(),
-		injectSkillsFromPlugins: () => this.injectSkillsFromPlugins(),
-		injectPrompts: () => this.injectPrompts(),
-		loadMcpToolsOnce: () => this.loadMcpToolsOnce(),
-		getStatus: () => ({
-			mcpServerCount: this._mcpServerCount,
-			mcpToolCount: this._mcpToolNames.size,
-			mcpErrors: this._mcpErrors,
-			mcpLoaded: this._mcpLoaded,
-			mcpLoading: this._mcpLoadPromise !== null && !this._mcpLoaded,
-			skillsInjected: this._skillsInjected,
-			skillsVisible: !!this._skillsContext,
-			loadedSkills: this._loadedSkills,
-			enabledPluginRoots: this._enabledPluginRoots,
-		}),
-		resetInjectedContext: () => {
-			this._skillsContext = null;
-			this._skillsInjected = false;
-			this._promptsInjected = false;
-		},
-		resetSkillsAndPrompts: () => {
-			this._loadedSkills = [];
-			this._skillsContext = null;
-			this._skillsInjected = false;
-			this._loadedPrompts = [];
-			this._promptsInjected = false;
-		},
-		setAriadneEnabled: (enabled: boolean) => {
-			const hasAriadne = this._defaultTools.some(
-				tool => tool.name === "ariadne",
-			);
-			if (enabled === hasAriadne) return;
-			this._defaultTools = enabled
-				? [
-						{
-							name: "ariadne",
-							description: "Ariadne code graph tool",
-							execute: async () => "",
-							parameters: {},
-						},
-						...this._defaultTools,
-					]
-				: this._defaultTools.filter(tool => tool.name !== "ariadne");
-		},
-		setFffgrepEnabled: (enabled: boolean) => {
-			// fffgrep tools are handled by the tool registry
-		},
-		buildRegistry: (config: any) => {
-			const registry = new ToolRegistry(config);
-			registry.registerMany(this._defaultTools);
-			return registry;
-		},
-	} as const;
-
-	// ── Inline MCP loading ───────────────────────────────────────────────
-
-	async loadMcpToolsOnce(): Promise<void> {
-		if (this._mcpLoaded || process.env.LOGICIAN_MCP === "0") return;
-		if (!this._mcpLoadPromise) {
-			this._mcpLoadPromise = (async () => {
-				const result = await this.mcpManager.load(
-					this.cwd,
-					this._defaultTools.map(tool => tool.name),
-				);
-				this._mcpServerCount = result.servers;
-				this._mcpErrors = result.errors;
-				this._mcpToolNames = new Set(result.tools.map(tool => tool.name));
-				this._mcpSystemContext = result.errors.length
-					? `<mcp-status>\n${result.errors.length} MCP server(s) failed to load:\n${result.errors.map(e => `- ${e}`).join("\n")}\n` +
-						"Tools from these servers are unavailable this session.\n</mcp-status>"
-					: "";
-				if (result.tools.length || this._mcpSystemContext) {
-					const existing = new Set(this._defaultTools.map(tool => tool.name));
-					const newTools = result.tools.filter(
-						tool => !existing.has(tool.name),
-					);
-					for (const tool of newTools) {
-						if (!this._defaultTools.some(t => t.name === tool.name)) {
-							this._defaultTools = [...this._defaultTools, tool];
-						}
-					}
-				}
-				this._mcpLoaded = true;
-				this.applyPluginHookContext(
-					this.startupHookResult || {
-						additional_contexts: [],
-						context_messages: [],
-						initial_user_message: "",
-					},
-				);
-				this.emit({
-					type: "notice",
-					level: result.errors.length ? "warn" : "info",
-					label: "MCP",
-					text: `Loaded ${result.servers} server(s).`,
-				});
-			})();
-		}
-		await this._mcpLoadPromise;
+	private readonly toolRouter: ToolRouter;
+	private baseSystemPrompt = "";
+	private get _defaultTools(): Tool[] {
+		return this.toolRouter.getDefaultTools();
+	}
+	private get _loadedSkills(): Skill[] {
+		return this.toolRouter.getLoadedSkills();
+	}
+	private get _loadedPrompts(): Prompt[] {
+		return this.toolRouter.getLoadedPrompts();
+	}
+	private get _enabledPluginRoots(): Array<{
+		name: string;
+		installPath: string;
+	}> {
+		return this.toolRouter.getEnabledPluginRoots();
 	}
 
-	// ── Inline skills loading ────────────────────────────────────────────
+	async loadMcpToolsOnce(): Promise<void> {
+		await this.toolRouter.loadMcpToolsOnce();
+		this.refreshInjectedContext();
+	}
 
 	async injectSkillsFromPlugins(): Promise<void> {
-		if (this._skillsInjected) return;
-		this._skillsInjected = true;
+		await this.toolRouter.injectSkillsFromPlugins();
+		this.refreshInjectedContext();
+	}
 
-		const registry = await runPluginBackend("list", []);
-		const plugins = registry.plugins || [];
+	async injectPrompts(): Promise<void> {
+		await this.toolRouter.injectPrompts();
+	}
 
-		const skillsDirs: string[] = [];
-		const enabledPlugins: Array<{ name: string; installPath: string }> = [];
-		for (const plugin of plugins) {
-			const enabled = plugin.enabled !== false;
-			const onDisk = plugin.on_disk !== false;
-			const installPath = String(plugin.install_path || "");
-			const pluginName = String(plugin.name || plugin.plugin_id || "");
-			if (!enabled || !onDisk || !installPath) continue;
-			enabledPlugins.push({ name: pluginName, installPath });
-			skillsDirs.push(path.join(installPath, "skills"));
-		}
-		this._enabledPluginRoots = enabledPlugins;
-
-		skillsDirs.push(path.join(os.homedir(), ".agents", "skills"));
-
-		if (this.projectTrusted) {
-			skillsDirs.push(...getProjectSkillDirs(this.cwd));
-		}
-
-		if (!skillsDirs.length) return;
-
-		const { skills: rawSkills, diagnostics } = await loadSkills(skillsDirs);
-
-		const skills = rawSkills.map(skill => {
-			const owner = enabledPlugins.find(p =>
-				skill.filePath.startsWith(p.installPath + path.sep),
-			);
-			if (!owner?.name || skill.name.startsWith(`${owner.name}:`)) {
-				return skill;
-			}
-			return {
-				...skill,
-				name: `${owner.name}:${skill.name}`,
-				slashName: `${owner.name}:${skill.slashName}`,
-				aliases: [...(skill.aliases ?? []), skill.name],
-			};
-		});
-
-		skills.push(...(await loadPluginCommands(enabledPlugins)));
-
-		for (const diag of diagnostics) {
-			this.emit({
-				type: "token",
-				token: `[Skill warning] ${diag.code}: ${diag.message}`,
-			});
-		}
-
-		this._loadedSkills = skills;
-		const visible = skills.filter(s => !s.disableModelInvocation);
-		this._skillsContext = formatSkillCatalog(visible);
-
-		const readSkill = createReadSkillTool(skills);
-		if (readSkill) {
-			if (!this._defaultTools.some(t => t.name === readSkill.name)) {
-				this._defaultTools = [...this._defaultTools, readSkill];
-			}
-		}
+	private refreshInjectedContext(): void {
 		this.applyPluginHookContext(
 			this.startupHookResult || {
 				additional_contexts: [],
@@ -347,20 +152,6 @@ export class AgentCoreBridge {
 			},
 		);
 	}
-
-	// ── Inline prompts loading ───────────────────────────────────────────
-
-	async injectPrompts(): Promise<void> {
-		if (this._promptsInjected) return;
-		this._promptsInjected = true;
-
-		if (!this.projectTrusted) return;
-		const promptDirs = getProjectPromptDirs(this.cwd);
-		if (!promptDirs.length) return;
-		this._loadedPrompts = await loadPrompts(promptDirs);
-	}
-
-	// ── Apply plugin hook context ────────────────────────────────────────
 
 	applyPluginHookContext(result: PluginCommandResult): void {
 		const messageContexts = Array.isArray(result.context_messages)
@@ -392,8 +183,10 @@ export class AgentCoreBridge {
 				`<startup-hook-context>\n${contexts.join("\n\n")}\n</startup-hook-context>`,
 			);
 		}
-		if (this._mcpSystemContext) allContexts.push(this._mcpSystemContext);
-		if (this._skillsContext) allContexts.push(this._skillsContext);
+		const mcpContext = this.toolRouter.getMcpSystemContext();
+		const skillsContext = this.toolRouter.getSkillsContext();
+		if (mcpContext) allContexts.push(mcpContext);
+		if (skillsContext) allContexts.push(skillsContext);
 
 		this.config.systemPrompt = allContexts.length
 			? `${this.baseSystemPrompt}\n\n${allContexts.join("\n\n")}`
@@ -428,7 +221,6 @@ export class AgentCoreBridge {
 	private agentCoordinator: AgentCoordinator | null = null;
 
 	private repositoryMap?: RepositoryMap;
-	private activeRepositoryQuery?: string;
 	private runtimeRetry?: string;
 	private runtimeRepair?: string;
 	private readonly activeRuntimeSubagents = new Set<string>();
@@ -477,23 +269,40 @@ export class AgentCoreBridge {
 			baseUrl: opts.webSearch?.baseUrl || defaultWebSearch.baseUrl,
 			maxResults: opts.webSearch?.maxResults ?? defaultWebSearch.maxResults,
 		};
-		this._defaultTools = opts.tools?.length
-			? opts.tools
-			: createDefaultTools({ webSearch, ariadneEnabled: opts.ariadneEnabled });
-		if (opts.extraTools?.length) {
-			this._defaultTools = [
-				...this._defaultTools,
-				...(opts.memoryEnabled !== false
-					? [
-							createMemorySearchTool(
-								() => this.memoryManager?.getStore() ?? null,
-							),
-							createMemoryGetTool(() => this.memoryManager?.getStore() ?? null),
-						]
-					: []),
-				...(opts.extraTools ?? []),
-			].filter((t, i, arr) => arr.findIndex(x => x.name === t.name) === i);
-		}
+		const extraTools = opts.extraTools?.length
+			? [
+					...(opts.memoryEnabled !== false
+						? [
+								createMemorySearchTool(
+									() => this.memoryManager?.getStore() ?? null,
+								),
+								createMemoryGetTool(
+									() => this.memoryManager?.getStore() ?? null,
+								),
+							]
+						: []),
+					...opts.extraTools,
+				]
+			: undefined;
+		this.toolRouter = new ToolRouter({
+			cwd: this.cwd,
+			projectTrusted: this.projectTrusted,
+			tools: opts.tools,
+			extraTools,
+			webSearch,
+			ariadneEnabled: opts.ariadneEnabled,
+			fffgrepEnabled: opts.fffgrepEnabled,
+			autoStartMcp: false,
+			emit: event => this.emit(event),
+			onToolAdded: _tool => {
+				if (!this.config) return;
+				this.config.tools = this.toolRouter.getDefaultTools();
+				this.harness?.configure({ tools: this.config.tools });
+			},
+			onContextChanged: () => {
+				if (this.baseSystemPrompt) this.refreshInjectedContext();
+			},
+		});
 		this.baseSystemPrompt = buildDefaultSystemPrompt(
 			this.cwd,
 			this._defaultTools,
@@ -842,7 +651,7 @@ export class AgentCoreBridge {
 			// prompt actually goes out is what the model sees; a load still in
 			// flight keeps running and its tools become available on the next
 			// turn once it settles.
-			if (!this._mcpLoaded) {
+			if (!this.toolRouter.isMcpLoaded()) {
 				void this.toolRouter
 					.loadMcpToolsOnce()
 					.catch(error => this.reportError(error));
@@ -850,33 +659,26 @@ export class AgentCoreBridge {
 			// Reuse one harness across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
 			const harness = this.ensureHarness();
-			this.activeRepositoryQuery = undefined;
 			const repositoryContext = this.repositoryMap?.render(message);
 			if (repositoryContext) {
 				persistentSystemPrompt = this.config.systemPrompt;
-				this.activeRepositoryQuery = message;
 				turnSystemPrompt = `${persistentSystemPrompt}\n\n${repositoryContext}`;
 				harness.configure({ systemPrompt: turnSystemPrompt });
 			}
 			if (this.agentCoordinator) {
-				try {
-					const advisory = await this.agentCoordinator.runReasoner(
-						message,
-						this.backend,
-					);
-					if (advisory) {
-						persistentSystemPrompt ??= this.config.systemPrompt;
-						turnSystemPrompt = `${turnSystemPrompt}\n\nA structured reasoner produced the following advisory analysis for this turn. Verify it, use tools as needed, and do not mention this internal advisory unless useful:\n\n${advisory}`;
-						harness.configure({ systemPrompt: turnSystemPrompt });
-					}
-				} catch (error) {
-					// Reasoner errors are already emitted by the coordinator
-					throw error;
+				const advisory = await this.agentCoordinator.runReasoner(
+					message,
+					this.backend,
+				);
+				if (advisory) {
+					persistentSystemPrompt ??= this.config.systemPrompt;
+					turnSystemPrompt = `${turnSystemPrompt}\n\nA structured reasoner produced the following advisory analysis for this turn. Verify it, use tools as needed, and do not mention this internal advisory unless useful:\n\n${advisory}`;
+					harness.configure({ systemPrompt: turnSystemPrompt });
 				}
 			}
 			const activations: ReturnType<typeof selectSkillsForPrompt> = [];
-			// Simplified: no scoring, just use all visible skills
-			// The model will read skills as needed via read_skill
+			// Skills stay discoverable through read_skill; none are injected unless
+			// a caller explicitly activates them for this turn.
 			turnActivations = activations;
 			if (activations.length) {
 				persistentSystemPrompt ??= this.config.systemPrompt;
@@ -929,6 +731,51 @@ export class AgentCoreBridge {
 				cwd: this.config.cwd,
 				maxIterations: this.config.maxIterations,
 				extensionRunner: this.extensionManager?.runner ?? undefined,
+				compatibilityHookFactory: context =>
+					createClaudeCodeHookLayer({
+						enabled: context.enabled,
+						sessionId: context.sessionId,
+						transcriptPath: context.transcriptPath,
+						cwd: context.cwd,
+						getMatcherValue: toolName => {
+							const tool = context.tools.find(item => item.name === toolName);
+							return (
+								tool?.hookAliases?.join("|") || claudeToolMatcherName(toolName)
+							);
+						},
+					}),
+				compatibilityLifecycle: {
+					sessionStart: async (context, source) => {
+						await runSessionStartHooks({
+							source,
+							session_id: context.sessionId,
+							transcript_path: context.transcriptPath,
+							cwd: context.cwd,
+						});
+					},
+					sessionEnd: async (context, reason) => {
+						await runHookEvent("SessionEnd", {
+							session_id: context.sessionId,
+							transcript_path: context.transcriptPath,
+							cwd: context.cwd,
+							reason,
+						});
+					},
+					preCompact: async context => {
+						await runHookEvent("PreCompact", {
+							session_id: context.sessionId,
+							transcript_path: context.transcriptPath,
+							cwd: context.cwd,
+						});
+					},
+					postCompact: async context => {
+						await runHookEvent("PostCompact", {
+							session_id: context.sessionId,
+							transcript_path: context.transcriptPath,
+							cwd: context.cwd,
+						});
+					},
+				},
 			});
 			this.harness.setSessionId(this.sessionId);
 			if (this.durableSession) this.harness.attachSession(this.durableSession);
@@ -1102,11 +949,7 @@ export class AgentCoreBridge {
 		this.memoryManager?.resetSession(this.sessionId);
 
 		// Reset state that is per-session
-		this._loadedSkills = [];
-		this._skillsContext = null;
-		this._skillsInjected = false;
-		this._loadedPrompts = [];
-		this._promptsInjected = false;
+		this.toolRouter.resetSkillsAndPrompts();
 		this.startupHooksRan = false;
 		this.startupHooksPromise = null;
 		this.startupHookResult = null;
@@ -1246,25 +1089,15 @@ export class AgentCoreBridge {
 	// ── Sandbox mode (see tool-router.ts) ───────────────────────────────
 
 	getSandboxMode(): SandboxProfile {
-		return getDefaultSandboxProfile();
+		return this.toolRouter.getSandboxMode();
 	}
 
 	setSandboxMode(mode: SandboxProfile): void {
-		setDefaultSandboxProfile(mode);
+		this.toolRouter.setSandboxMode(mode);
 	}
 
 	cycleSandboxMode(): SandboxProfile {
-		const cycle = AgentCoreBridge.SANDBOX_CYCLE;
-		const currentIndex = cycle.indexOf(getDefaultSandboxProfile());
-		const next = cycle[(currentIndex + 1) % cycle.length];
-		setDefaultSandboxProfile(next);
-		this.emit({
-			type: "notice",
-			level: "info",
-			label: "Sandbox",
-			text: `mode: ${next === "none" ? "off" : next}`,
-		});
-		return next;
+		return this.toolRouter.cycleSandboxMode();
 	}
 
 	// ── Model cycling ──────────────────────────────────────────────────
@@ -1355,11 +1188,7 @@ export class AgentCoreBridge {
 	async getState(): Promise<Record<string, unknown>> {
 		// Status is a snapshot, not a synchronization barrier for external MCP
 		// transports. The manager UI provides explicit awaited refresh operations.
-		if (
-			!this._mcpLoaded &&
-			!this._mcpLoadPromise !== null &&
-			!this._mcpLoaded
-		) {
+		if (!this.toolRouter.isMcpLoaded() && !this.toolRouter.isMcpLoading()) {
 			void this.toolRouter
 				.loadMcpToolsOnce()
 				.catch(error => this.reportError(error));
@@ -1375,9 +1204,9 @@ export class AgentCoreBridge {
 			web_search_url: this.config.webSearch?.baseUrl || "",
 			web_search_enabled: toolNames.includes("web_search"),
 			tools: toolNames,
-			mcp_servers: this._mcpServerCount,
-			mcp_tools: this._mcpToolNames.size,
-			mcp_errors: this._mcpErrors,
+			mcp_servers: this.toolRouter.getMcpServerCount(),
+			mcp_tools: this.toolRouter.getMcpToolCount(),
+			mcp_errors: this.toolRouter.getMcpErrors(),
 			context_tokens: this.contextTokens,
 			context_max_tokens: this.contextMaxTokens,
 			runtime_state: this.harness?.runtimeState ?? {
@@ -1398,14 +1227,14 @@ export class AgentCoreBridge {
 	}
 
 	async getMcpSnapshot(): Promise<McpSnapshotResult> {
-		return this.mcpManager.getSnapshot(this.cwd);
+		return this.toolRouter.getMcpSnapshot();
 	}
 
 	async setMcpServerEnabled(
 		serverName: string,
 		enabled: boolean,
 	): Promise<McpToggleResult> {
-		return this.mcpManager.setServerEnabled(serverName, enabled, this.cwd);
+		return this.toolRouter.setMcpServerEnabled(serverName, enabled);
 	}
 
 	async setPluginEnabled(
@@ -1486,7 +1315,7 @@ export class AgentCoreBridge {
 	/** Whether MCP discovery has started but not finished — lets the TUI show
 	 * a "loading" status while background discovery is in flight. */
 	isMcpLoading(): boolean {
-		return this._mcpLoadPromise !== null && !this._mcpLoaded;
+		return this.toolRouter.isMcpLoading();
 	}
 
 	private setInferenceMode(mode: string): void {
@@ -1543,26 +1372,16 @@ export class AgentCoreBridge {
 		}
 		if (key === "ariadneEnabled") {
 			this.config.ariadneEnabled = enabled;
-			this._defaultTools = enabled
-				? [
-						...this._defaultTools,
-						{
-							name: "ariadne",
-							description: "Ariadne code graph tool",
-							execute: async () => "",
-							parameters: {},
-						},
-					]
-				: this._defaultTools.filter(t => t.name !== "ariadne");
-			// Tool added to _defaultTools directly;
+			this.toolRouter.setAriadneEnabled(enabled);
+			this.config.tools = this._defaultTools;
+			this.harness?.configure({ tools: this.config.tools });
 			return;
 		}
 		if (key === "fffgrepEnabled") {
 			this.config.fffgrepEnabled = enabled;
-			// Tool added to _defaultTools directly;
-			void this.setMcpServerEnabled("fff", enabled).catch(error =>
-				this.reportError(error),
-			);
+			this.toolRouter.setFffgrepEnabled(enabled);
+			this.config.tools = this._defaultTools;
+			this.harness?.configure({ tools: this.config.tools });
 			return;
 		}
 		this.config[key] = enabled;
@@ -1740,9 +1559,7 @@ export class AgentCoreBridge {
 		// Update memory session ID
 		this.memoryManager?.resetSession(this.sessionId);
 		// Reset skill/prompt injection state
-		this._skillsContext = null;
-		this._skillsInjected = false;
-		this._promptsInjected = false;
+		this.toolRouter.resetInjectedContext();
 		this.startupHooksRan = false;
 		this.startupHooksPromise = null;
 		this.applyPluginHookContext(
@@ -1856,17 +1673,7 @@ export class AgentCoreBridge {
 		const toolNames =
 			this.harness?.tools?.list().map((t: Tool) => t.name) ||
 			this._defaultTools.map(t => t.name);
-		const status = {
-			mcpServerCount: this._mcpServerCount,
-			mcpToolCount: this._mcpToolNames.size,
-			mcpErrors: this._mcpErrors,
-			mcpLoaded: this._mcpLoaded,
-			mcpLoading: this._mcpLoadPromise !== null && !this._mcpLoaded,
-			skillsInjected: this._skillsInjected,
-			skillsVisible: !!this._skillsContext,
-			loadedSkills: this._loadedSkills,
-			enabledPluginRoots: this._enabledPluginRoots,
-		};
+		const status = this.toolRouter.getStatus();
 		const info: Record<string, unknown> = {
 			agent_name: "logician",
 			model: this.config.model,
@@ -1942,7 +1749,7 @@ export class AgentCoreBridge {
 		await this.memoryManager?.waitForBackgroundTasks();
 		await this.fireSessionEnd("shutdown");
 		this.lspManager.close();
-		await this.mcpManager.close();
+		await this.toolRouter.closeMcp();
 		killAllTrackedChildren();
 		this.running = false;
 	}

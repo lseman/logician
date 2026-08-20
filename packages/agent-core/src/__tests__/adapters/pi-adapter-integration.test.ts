@@ -4,8 +4,19 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ExtensionRunner } from "../../core/extension/runner.ts";
+import { piCompatibilityAdapter } from "../../adapters/pi/index.ts";
+import {
+	ExtensionRunner,
+	type ExtensionRunnerOptions,
+} from "../../core/extension/runner.ts";
 import type { ExtensionDefinition } from "../../core/extension/types.ts";
+
+function createPiRunner(options: ExtensionRunnerOptions): ExtensionRunner {
+	return new ExtensionRunner({
+		...options,
+		compatibilityAdapters: [piCompatibilityAdapter],
+	});
+}
 
 function piExtensionFile(content: string): string {
 	const dir = mkdtempSync(join(tmpdir(), "logician-pi-ext-"));
@@ -22,7 +33,7 @@ function nativeExtensionFile(content: string): string {
 }
 
 void test("Pi adapter auto-detects Pi-style extensions by TypeBox imports", async () => {
-	const runner = new ExtensionRunner({ sessionId: "pi-test", cwd: "/tmp" });
+	const runner = createPiRunner({ sessionId: "pi-test", cwd: "/tmp" });
 
 	// Use a file that contains TypeBox-like patterns to trigger Pi detection
 	await runner.load([
@@ -53,7 +64,7 @@ void test("Pi adapter auto-detects Pi-style extensions by TypeBox imports", asyn
 });
 
 void test("Pi adapter handles missing registerTool gracefully", async () => {
-	const runner = new ExtensionRunner({ sessionId: "pi-test2", cwd: "/tmp" });
+	const runner = createPiRunner({ sessionId: "pi-test2", cwd: "/tmp" });
 
 	// This Pi extension uses Type.String pattern → detected as Pi
 	// But the placeholder API doesn't have registerTool → should not crash
@@ -95,7 +106,7 @@ void test("Pi adapter handles missing registerTool gracefully", async () => {
 });
 
 void test("Native extensions are not loaded through Pi adapter", async () => {
-	const runner = new ExtensionRunner({ sessionId: "native-test", cwd: "/tmp" });
+	const runner = createPiRunner({ sessionId: "native-test", cwd: "/tmp" });
 
 	await runner.load([
 		{
@@ -122,7 +133,7 @@ void test("Native extensions are not loaded through Pi adapter", async () => {
 });
 
 void test("Pi adapter emits session_start to Pi handlers", async () => {
-	const runner = new ExtensionRunner({ sessionId: "emit-test", cwd: "/tmp" });
+	const runner = createPiRunner({ sessionId: "emit-test", cwd: "/tmp" });
 
 	await runner.load([
 		{
@@ -160,7 +171,7 @@ void test("Pi adapter emits session_start to Pi handlers", async () => {
 });
 
 void test("Pi context handlers chain and run through the runtime hook", async () => {
-	const runner = new ExtensionRunner({
+	const runner = createPiRunner({
 		sessionId: "context-test",
 		cwd: "/tmp",
 	});
@@ -198,7 +209,7 @@ void test("Pi context handlers chain and run through the runtime hook", async ()
 });
 
 void test("Pi tool_call handlers can mutate arguments and block execution", async () => {
-	const runner = new ExtensionRunner({
+	const runner = createPiRunner({
 		sessionId: "tool-gate-test",
 		cwd: "/tmp",
 	});
@@ -238,7 +249,7 @@ void test("Pi tool_call handlers can mutate arguments and block execution", asyn
 });
 
 void test("Pi adapter handles unknown source paths gracefully", async () => {
-	const runner = new ExtensionRunner({ sessionId: "grace-test", cwd: "/tmp" });
+	const runner = createPiRunner({ sessionId: "grace-test", cwd: "/tmp" });
 
 	// Pass a non-existent path — should not throw
 	await runner.load([

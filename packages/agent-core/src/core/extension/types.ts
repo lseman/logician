@@ -6,7 +6,7 @@
 // - Interact with the user via UI primitives
 // - Persist state across turns
 
-import type { ToolCall } from "../types/index.ts";
+import type { ToolCall } from "../types/types-messages.ts";
 import type { EventBus } from "./event-bus.ts";
 
 // ============================================================================

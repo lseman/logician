@@ -1,5 +1,5 @@
 import type { HarnessPhase } from "../../state/runtime-state.ts";
-import type { AgentEvent } from "../../types/index.ts";
+import type { AgentEvent } from "../../types/types-messages.ts";
 import type { HarnessObserver, HarnessQueues } from "../types.ts";
 
 /** Owns harness observation fan-out independently of turn orchestration. */

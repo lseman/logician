@@ -8,7 +8,7 @@ import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Tool, ToolResult } from "../../core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/types-messages.ts";
 import { formatSize, truncateHead } from "./utils/truncate.ts";
 
 const DEFAULT_LIMIT = 50;

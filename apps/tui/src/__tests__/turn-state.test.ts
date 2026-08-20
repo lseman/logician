@@ -1,10 +1,35 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { RuntimeEvent } from "@logician/agent-core/runtime";
-import { INITIAL_TURN_STATE, reduceTurnState } from "../state/turn-state.ts";
+import type { RuntimeEvent } from "@logician/agent-core/events";
+import {
+	beginPendingTurn,
+	INITIAL_TURN_STATE,
+	reduceTurnState,
+} from "../state/turn-state.ts";
 
 const event = (value: Record<string, unknown>): RuntimeEvent =>
 	value as unknown as RuntimeEvent;
+
+void test("an accepted submission stays thinking through pre-turn runtime events", () => {
+	const pending = beginPendingTurn(INITIAL_TURN_STATE, 1);
+	assert.equal(pending.phase, "thinking");
+	assert.equal(pending.startedAt, 1);
+
+	const afterMcpNotice = reduceTurnState(
+		pending,
+		event({ type: "notice", level: "info", label: "MCP", text: "Loaded" }),
+		2,
+	);
+	assert.equal(afterMcpNotice.phase, "thinking");
+
+	const afterLateStartupReady = reduceTurnState(
+		afterMcpNotice,
+		event({ type: "phase", state: "ready" }),
+		3,
+	);
+	assert.equal(afterLateStartupReady.phase, "thinking");
+	assert.equal(afterLateStartupReady.settledAt, undefined);
+});
 
 void test("turn state follows a complete tool lifecycle", () => {
 	let state = reduceTurnState(
@@ -40,9 +65,34 @@ void test("turn state follows a complete tool lifecycle", () => {
 		4,
 	);
 	assert.equal(state.phase, "thinking");
-	state = reduceTurnState(state, event({ type: "phase", state: "ready" }), 5);
+	state = reduceTurnState(
+		state,
+		event({ type: "turn_end", turnId: "turn-1" }),
+		5,
+	);
 	assert.equal(state.phase, "complete");
 	assert.equal(state.settledAt, 5);
+});
+
+void test("generic ready phases never settle an accepted or active turn", () => {
+	const pending = beginPendingTurn(INITIAL_TURN_STATE, 1);
+	assert.equal(
+		reduceTurnState(pending, event({ type: "phase", state: "ready" }), 2).phase,
+		"thinking",
+	);
+
+	const active = reduceTurnState(
+		pending,
+		event({ type: "turn_start", turnId: "turn-1" }),
+		3,
+	);
+	const afterReady = reduceTurnState(
+		active,
+		event({ type: "phase", state: "ready" }),
+		4,
+	);
+	assert.equal(afterReady.phase, "thinking");
+	assert.equal(afterReady.settledAt, undefined);
 });
 
 void test("approval and failures are explicit states", () => {

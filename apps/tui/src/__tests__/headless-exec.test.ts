@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { RuntimeEvent } from "@logician/agent-core/runtime";
+import type { RuntimeEvent } from "@logician/agent-core/events";
 import {
 	EXEC_STREAM_SCHEMA,
 	type ExecBridge,

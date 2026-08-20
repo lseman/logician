@@ -8,8 +8,8 @@ import {
 	formatSkillInvocation,
 	type Skill,
 	skillLookupKeys,
-} from "../../capabilities/skills/index.ts";
-import type { Tool } from "../../core/types/index.ts";
+} from "../../capabilities/skills/loader.ts";
+import type { Tool } from "../../core/types/types-messages.ts";
 
 /**
  * Build a read_skill tool bound to the given skills. Pass the skills loaded at

@@ -11,7 +11,8 @@ import type {
 	BranchInfo,
 	BranchSummaryData,
 } from "../../session/summaries/types.ts";
-import type { Message, ThinkingLevel } from "../../types/index.ts";
+import type { ThinkingLevel } from "../../types/types-config.ts";
+import type { Message } from "../../types/types-messages.ts";
 
 export interface Branch {
 	id: string;

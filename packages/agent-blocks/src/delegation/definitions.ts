@@ -17,10 +17,10 @@ import {
 	type AgentEvent,
 	DEFAULT_TRUNCATION,
 	type LLMBackend,
-	parseFrontmatter,
 	type Tool,
 	type ToolResult,
 } from "@logician/agent-core";
+import { parseFrontmatter } from "@logician/agent-core/frontmatter";
 import {
 	budgetFromArgs,
 	contractFromArgs,

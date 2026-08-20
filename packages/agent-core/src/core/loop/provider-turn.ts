@@ -9,9 +9,9 @@
  * terminal outcome.
  */
 
-import type { OutputGuard } from "../guards/output-guard.ts";
 import { compactToFit } from "../compaction/engine.ts";
 import type { AgentSettings } from "../configuration/agent-settings.ts";
+import type { OutputGuard } from "../guards/output-guard.ts";
 import type { RunOutcomeStatus } from "../policy/execution-policy.ts";
 import type { InterventionInput } from "../policy/intervention-controller.ts";
 import type { LLMBackend } from "../provider/backend.ts";
@@ -22,7 +22,7 @@ import type {
 	AgentMessage,
 	CompactableMessage,
 	Message,
-} from "../types/index.ts";
+} from "../types/types-messages.ts";
 import { getInferenceMode } from "../types/types-config.ts";
 import { selectAdaptiveMode } from "./adaptive-mode.ts";
 import { applyHeaderPatch } from "./callbacks.ts";

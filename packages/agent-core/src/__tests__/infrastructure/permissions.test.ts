@@ -1,10 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { ToolCall } from "../../core/types/index.ts";
 import {
 	PermissionManager,
 	primaryArgString,
-} from "../../infrastructure/tools/permissions.ts";
+} from "../../core/tools/permissions.ts";
+import type { ToolCall } from "../../core/types/types-messages.ts";
 
 function call(name: string, args: Record<string, unknown>): ToolCall {
 	return { id: "t1", name, arguments: JSON.stringify(args) };

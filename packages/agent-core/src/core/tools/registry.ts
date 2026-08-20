@@ -7,17 +7,18 @@
 
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { ToolResultCache } from "../../core/state/tool-cache.ts";
+import { ToolResultCache } from "../state/tool-cache.ts";
 import type {
 	Tool,
 	ToolCall,
 	ToolContext,
 	ToolResult,
-} from "../../core/types/index.ts";
-import { DEFAULT_TRUNCATION } from "../../core/types/types-config.ts";
-import type { AskUserContext } from "../../core/types/types-messages.ts";
-import { withTimeout } from "./utils/async-utils.ts";
-import { parseToolInput } from "./utils/parser.ts";
+} from "../types/types-messages.ts";
+import { DEFAULT_TRUNCATION } from "../types/types-config.ts";
+import type { AskUserContext } from "../types/types-messages.ts";
+import { withTimeout } from "./internal/async.ts";
+import { parseToolInput } from "./internal/parser.ts";
+import { normalizeProviderToolSchema } from "./provider-schema.ts";
 
 /** Default cap on tool execution time. Tools can override via timeoutMs. */
 const DEFAULT_TOOL_TIMEOUT_MS = 600_000;
@@ -284,7 +285,7 @@ export class ToolRegistry {
 			const fn: Record<string, unknown> = {
 				name: tool.name,
 				description: tool.description,
-				parameters: tool.parameters,
+				parameters: normalizeProviderToolSchema(tool.parameters),
 			};
 			if (tool.promptSnippet) fn.promptSnippet = tool.promptSnippet;
 			if (tool.label) fn.label = tool.label;

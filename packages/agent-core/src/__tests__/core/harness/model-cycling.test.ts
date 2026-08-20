@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { AgentHarness } from "../../../core/harness/agent-harness.ts";
 import { clampThinkingLevel } from "../../../core/harness/runtime/model.ts";
 import type { LLMBackend } from "../../../core/provider/backend.ts";
-import type { AgentEvent } from "../../../core/types/index.ts";
+import type { AgentEvent } from "../../../core/types/types-messages.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake-model";

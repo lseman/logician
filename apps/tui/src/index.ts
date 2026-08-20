@@ -41,7 +41,7 @@ import {
 	buildDoctorReport,
 	formatDoctorReport,
 } from "@logician/agent-core/developer-tools";
-import { resolveRuntimeConfig } from "@logician/agent-core/runtime";
+import { resolveRuntimeConfig } from "@logician/agent-core/configuration/runtime";
 import { activateProjectVirtualEnv } from "@logician/agent-core/tools";
 import {
 	applyTrustChoice,

@@ -23,7 +23,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
-import { AgentError, AgentErrorType } from "../../../core/types/index.ts";
+import { AgentError, AgentErrorType } from "../../types/types-config.ts";
 
 /**
  * Run `promise` with a timeout. Rejects with `AgentError(TURN_TIMEOUT)` if the

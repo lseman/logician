@@ -1,6 +1,4 @@
-// ── Plugins barrel ────────────────────────────────────────────────────────────
-// CLI entry points and re-exports. All imports that previously used
-// `plugins.ts` continue to work unchanged.
+/** Process-level runtime functions for Claude Code-compatible plugins. */
 
 import { type PluginCommandResult, TsPluginManager } from "./plugin-manager.ts";
 

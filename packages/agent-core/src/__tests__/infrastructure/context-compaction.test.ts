@@ -8,7 +8,7 @@ import {
 	createUserMessage,
 	estimateChatPayloadTokens,
 } from "../../core/provider/messages.ts";
-import type { CompactableMessage } from "../../core/types/index.ts";
+import type { CompactableMessage } from "../../core/types/types-messages.ts";
 
 void test("conversation serialization tolerates null and malformed content", () => {
 	assert.equal(

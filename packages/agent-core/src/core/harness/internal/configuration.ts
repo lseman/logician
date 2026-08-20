@@ -1,4 +1,5 @@
-import type { AgentConfig, Tool } from "../../types/index.ts";
+import type { AgentConfig } from "../../types/types-config.ts";
+import type { Tool } from "../../types/types-messages.ts";
 import type { HarnessModule } from "../types.ts";
 
 export class HarnessConfigurationError extends Error {

@@ -40,7 +40,7 @@ function makeRouter(
 	return { router, onContextChangedCalls, onToolAddedCalls };
 }
 
-function makeTool(name: string): Tool {
+function _makeTool(name: string): Tool {
 	return {
 		name,
 		label: name,

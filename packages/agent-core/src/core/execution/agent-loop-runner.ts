@@ -2,8 +2,9 @@
 // Pi-style loop contract for Logician's current backend/tool adapter:
 // context + prompts + config + emit => new messages.
 
+import { compactToFit } from "../compaction/engine.ts";
+import { resolveAgentSettings } from "../configuration/agent-settings.ts";
 import {
-	type AcceptanceConfig,
 	evaluateAcceptanceReport,
 	formatAcceptancePrompt,
 	type ResolvedAcceptance,
@@ -11,10 +12,6 @@ import {
 	shouldRunAcceptanceFinalization,
 	verifyAcceptanceCommands,
 } from "../guards/acceptance-contract.ts";
-import type { OutputGuard } from "../guards/output-guard.ts";
-import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
-import { compactToFit } from "../compaction/engine.ts";
-import { resolveAgentSettings } from "../configuration/agent-settings.ts";
 import {
 	isToolFailureResult,
 	taskObjectiveFromMessages,
@@ -48,26 +45,21 @@ import {
 	RunBudgetController,
 	type RunBudgetDecision,
 } from "../policy/run-budget.ts";
-import type { LLMBackend } from "../provider/backend.ts";
 import {
 	createSystemMessage,
 	convertToLlm as defaultConvertToLlm,
 	estimateChatPayloadTokens,
 } from "../provider/messages.ts";
-import {
-	parseTextToolCalls,
-	stripTextToolCalls,
-} from "../provider/text-tool-calls.ts";
 import { ToolResultCache } from "../state/tool-cache.ts";
+import { ToolRegistry } from "../tools/registry.ts";
 import type {
-	AgentConfig,
 	AgentEventSink,
 	AgentMessage,
 	CompactableMessage,
 	Message,
 	Tool,
 	ToolCall,
-} from "../types/index.ts";
+} from "../types/types-messages.ts";
 import { executeToolBatch } from "./tool-batch-controller.ts";
 
 // A steering interrupt cancels the in-flight provider call to redirect the
@@ -394,10 +386,10 @@ async function runAgentLoopInternal(
 
 			let toolCalls: ToolCall[];
 			let assistant: Message;
-			let assistantContent: string;
+			let _assistantContent: string;
 			if (processResult.success) {
 				toolCalls = processResult.toolCalls;
-				assistantContent = processResult.assistantContent;
+				_assistantContent = processResult.assistantContent;
 				assistant = processResult.assistant;
 				if (toolCalls.length > 0) {
 					performedToolWork = true;

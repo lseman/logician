@@ -14,7 +14,6 @@
  */
 
 import type { OutputGuard } from "../guards/output-guard.ts";
-import type { ToolRegistry } from "../../infrastructure/tools/registry.ts";
 import type { LLMResponse } from "../provider/backend.ts";
 import {
 	createAssistantMessage,
@@ -24,13 +23,14 @@ import {
 	parseTextToolCalls,
 	stripTextToolCalls,
 } from "../provider/text-tool-calls.ts";
+import type { ToolRegistry } from "../tools/registry.ts";
 import type {
 	AgentEventSink,
 	AgentMessage,
 	Message,
 	StopReason,
 	ToolCall,
-} from "../types/index.ts";
+} from "../types/types-messages.ts";
 import { stopReasonFor } from "./callbacks.ts";
 import type { AgentLoopConfig } from "./config.ts";
 

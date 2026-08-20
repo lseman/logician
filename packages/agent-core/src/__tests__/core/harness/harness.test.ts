@@ -11,7 +11,7 @@ import {
 } from "../../../core/harness/agent-harness.ts";
 import { BackendError } from "../../../core/provider/backend.ts";
 import { Session } from "../../../core/session/session.ts";
-import type { AgentConfig } from "../../../core/types/index.ts";
+import type { AgentConfig } from "../../../core/types/types-config.ts";
 import { FakeBackend, textResponse } from "../../fake-backend.ts";
 
 function makeHarness(backend: FakeBackend, cwd?: string): AgentHarness {
