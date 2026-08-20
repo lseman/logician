@@ -23,8 +23,8 @@ import { awaitsUserInput } from "../../../infrastructure/guards/response-pattern
 import {
 	getTaskStatus,
 	recordTaskStatus,
-} from "../../../runtime/tasks/task-status-state.ts";
-import { getTasks } from "../../../runtime/tasks/todo-state.ts";
+} from "../../../runtime/task-state/status.ts";
+import { getTasks } from "../../../runtime/task-state/todo.ts";
 import type {
 	AgentConfig,
 	AgentHooks,

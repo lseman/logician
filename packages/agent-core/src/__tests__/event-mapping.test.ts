@@ -49,19 +49,14 @@ void test("harness interventions map to one evidence-rich notice", () => {
 	);
 });
 
-void test("heuristic terminal outcomes remain visible", () => {
-	assert.deepEqual(
+void test("agent_end produces no notice for normal outcomes", () => {
+	assert.equal(
 		mapAgentEvent({
 			type: "agent_end",
 			status: "completed",
 			summary: "No more work remains.",
 		}),
-		{
-			type: "notice",
-			level: "success",
-			label: "Run completed",
-			text: "No more work remains.",
-		},
+		null,
 	);
 });
 

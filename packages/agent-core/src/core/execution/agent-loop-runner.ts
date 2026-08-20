@@ -248,7 +248,12 @@ async function runAgentLoopInternal(
 		summary?: string;
 		source: "structured" | "heuristic" | "runtime";
 	}): Promise<Message[]> => {
-		await emit({ type: "agent_end", messages: newMessages, status: outcome.status, summary: outcome.summary });
+		await emit({
+			type: "agent_end",
+			messages: newMessages,
+			status: outcome.status,
+			summary: outcome.summary,
+		});
 		return newMessages;
 	};
 	let settings = resolveAgentSettings(config);

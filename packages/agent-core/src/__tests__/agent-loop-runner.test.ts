@@ -10,12 +10,12 @@ import {
 import { BackendError } from "../core/provider/backend.ts";
 import { resolveExecutionPolicy } from "../core/policy/execution-policy.ts";
 import { OutputGuard } from "../infrastructure/guards/output-guard.ts";
-import { runWithTaskState } from "../runtime/tasks/run-task-state.ts";
+import { runWithTaskState } from "../runtime/task-state/context.ts";
 import {
 	recordTaskStatus,
 	getTaskStatus as _getTaskStatus,
 	resetTaskStatus as _resetTaskStatus,
-} from "../runtime/tasks/task-status-state.ts";
+} from "../runtime/task-state/status.ts";
 import type {
 	AgentConfig,
 	AgentEvent,

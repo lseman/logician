@@ -172,9 +172,8 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				recoverable: event.recoverable,
 			};
 		case "agent_end": {
-				const outcome = event.status ?? null;
 				if (
-					outcome === "cancelled" &&
+					event.status === "cancelled" &&
 					event.summary === STEERING_INTERRUPT_SUMMARY
 				) {
 					return {
@@ -184,18 +183,7 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 						text: STEERING_INTERRUPT_SUMMARY,
 					};
 				}
-				if (!outcome) return null;
-				return {
-					type: "notice",
-					level:
-						outcome === "completed"
-							? "success"
-							: outcome === "failed"
-								? "error"
-								: "warn",
-					label: `Run ${outcome.replace("_", " ")}`,
-					text: event.summary || `Run ended with status: ${outcome}`,
-				};
+				return null; // suppress "Run completed" / "Run failed" notices
 			}
 		case "model_select":
 			return {
