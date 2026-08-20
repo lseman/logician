@@ -1,8 +1,5 @@
-// ── todo state ────────────────────────────────────────────────────────────
-// Shared task-list store. Core reads it directly (builtin-hooks nudges the
-// model while tasks remain); the todo Tool (defined in @logician/agent-blocks)
-// owns the mutations. Lives in core so both sides can depend on one copy
-// without a circular package dependency.
+// Shared todo state. The todo tool owns mutations; core observes the list to
+// decide whether an optional continuation nudge is useful.
 
 export type TaskStatus = "pending" | "in_progress" | "completed" | "deleted";
 export type TaskState = TaskStatus;
@@ -18,12 +15,12 @@ export interface Task {
 	metadata?: Record<string, unknown>;
 }
 
-import { currentRunTaskState } from "./context.ts";
-
+let tasks: Task[] = [];
+let nextTaskId = 1;
 const listeners = new Set<(tasks: Task[]) => void>();
 
 function snapshotTasks(): Task[] {
-	return currentRunTaskState().tasks.map(task => ({
+	return tasks.map(task => ({
 		...task,
 		blockedBy: task.blockedBy ? [...task.blockedBy] : undefined,
 		metadata: task.metadata ? { ...task.metadata } : undefined,
@@ -39,19 +36,18 @@ export function onTodosChanged(cb: (tasks: Task[]) => void): () => void {
 	return () => listeners.delete(cb);
 }
 
-/** Read the live (mutable) task array. For use by the todo Tool's action handlers only. */
+/** Mutable list reserved for the todo tool's action handlers. */
 export function getTasksMutable(): Task[] {
-	return currentRunTaskState().tasks;
+	return tasks;
 }
 
 export function allocateTaskId(): number {
-	return currentRunTaskState().nextTaskId++;
+	return nextTaskId++;
 }
 
 export function replaceTasks(next: Task[]): void {
-	const state = currentRunTaskState();
-	state.tasks = next;
-	state.nextTaskId = 1;
+	tasks = next;
+	nextTaskId = 1;
 }
 
 export function notifyTodosChanged(): void {

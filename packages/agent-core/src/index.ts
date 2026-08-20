@@ -52,23 +52,16 @@ export { HarnessBusyError } from "./core/harness/runtime/phase.ts";
 
 // ── Guards ──────────────────────────────────────────────────────────────────
 export * from "./infrastructure/guards/index.ts";
-export type { ReflectionConfig } from "./core/loop/reflection.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 export * from "./core/types/index.ts";
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
-export type { TaskStatusRecord } from "./runtime/task-state/status.ts";
-export {
-	getTaskStatus,
-	recordTaskStatus,
-	resetTaskStatus,
-} from "./runtime/task-state/status.ts";
 export type {
 	Task,
 	TaskState,
 	TaskStatus,
-} from "./runtime/task-state/todo.ts";
+} from "./runtime/todo-state.ts";
 export {
 	allocateTaskId,
 	getTasks,
@@ -76,7 +69,7 @@ export {
 	notifyTodosChanged,
 	onTodosChanged,
 	replaceTasks,
-} from "./runtime/task-state/todo.ts";
+} from "./runtime/todo-state.ts";
 
 // ── Compaction ──────────────────────────────────────────────────────────────
 export {

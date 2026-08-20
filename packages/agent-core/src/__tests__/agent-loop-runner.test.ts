@@ -4,18 +4,11 @@ import {
 	createSteeringInterruptReason,
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
-	resolveOutcomeDefault,
 	type RunAgentLoopConfig,
 } from "../core/execution/agent-loop-runner.ts";
 import { BackendError } from "../core/provider/backend.ts";
 import { resolveExecutionPolicy } from "../core/policy/execution-policy.ts";
 import { OutputGuard } from "../infrastructure/guards/output-guard.ts";
-import { runWithTaskState } from "../runtime/task-state/context.ts";
-import {
-	recordTaskStatus,
-	getTaskStatus as _getTaskStatus,
-	resetTaskStatus as _resetTaskStatus,
-} from "../runtime/task-state/status.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -31,41 +24,17 @@ const noop: Tool = {
 	execute: async () => "ok",
 };
 
-// Minimal fixture standing in for the real task_status Tool (defined in
-// @logician/agent-blocks, which depends on this package — importing it here
-// would cycle). The loop only reads getTaskStatus() state, not tool
-// identity, so this is behaviorally equivalent for these tests.
+// Legacy fixture retained only by skipped regression cases documenting the
+// removed structured-conclusion protocol.
 const task_status: Tool = {
 	name: "task_status",
-	description: "test fixture",
+	description: "legacy test fixture",
 	parameters: { type: "object", properties: {} },
-	execute: async args => {
-		const status = args.status as "done" | "blocked" | "needs_input" | "failed";
-		const summary = typeof args.summary === "string" ? args.summary : "";
-		recordTaskStatus({ status, summary, ts: Date.now() });
-		return `Recorded: ${status}`;
-	},
+	execute: async () => "recorded",
 };
-
-// Default task-aware callbacks — keep the loop in pure mode by default.
-const defaultCallbacks: RunAgentLoopConfig["callbacks"] = {
-	getTaskStatus: () => null,
-	resetTaskStatus: () => {},
-	resolveOutcome: resolveOutcomeDefault,
-};
-
-/** Create task-aware callbacks that wire up agent-core's task-status-state. */
-function createTaskCallbacks() {
-	return {
-		getTaskStatus: () => _getTaskStatus?.(),
-		resetTaskStatus: () => _resetTaskStatus?.(),
-		resolveOutcome: resolveOutcomeDefault,
-	};
-}
 
 function makeConfig(
 	overrides: Partial<AgentConfig> = {},
-	taskCallbacks?: RunAgentLoopConfig["callbacks"],
 ): RunAgentLoopConfig {
 	return {
 		baseUrl: "http://fake",
@@ -77,7 +46,6 @@ function makeConfig(
 		continuationEnabled: false,
 		tools: [noop],
 		...overrides,
-		callbacks: taskCallbacks,
 	} as RunAgentLoopConfig;
 }
 
@@ -313,150 +281,22 @@ void test("runAgentLoop propagates provider cache reads through context_update",
 	assert.equal(updates.at(-1)?.completionTokens, 50);
 });
 
-void test("structured run outcomes take precedence and reset between runs", async () => {
-	const structuredEvents: AgentEvent[] = [];
-	const callbacks = createTaskCallbacks();
-	await runAgentLoop(
-		{ systemPrompt: "test", messages: [], tools: [task_status] },
-		[user("prompt")],
-		{
-			...makeConfig({ tools: [task_status] }, callbacks),
-			backend: new FakeBackend([
-				() => ({
-					content: "",
-					toolCalls: [
-						{
-							id: "status",
-							name: "task_status",
-							arguments: JSON.stringify({
-								status: "needs_input",
-								summary: "Choose a target.",
-							}),
-						},
-					],
-					stopReason: "stop",
-				}),
-				() => textResponse("waiting"),
-			]),
-		},
-		event => {
-			structuredEvents.push(event);
-		},
-	);
-	assert.ok(
-		structuredEvents.some(
-			event =>
-				event.type === "agent_end" &&
-				event.status === "needs_input",
-		),
-	);
-
-	const nextEvents: AgentEvent[] = [];
-	await runAgentLoop(
-		{ systemPrompt: "test", messages: [], tools: [noop] },
-		[user("another prompt")],
-		{ ...makeConfig(), backend: new FakeBackend([() => textResponse("done")]) },
-		event => {
-			nextEvents.push(event);
-		},
-	);
-	assert.ok(
-		nextEvents.some(
-			event =>
-				event.type === "agent_end" &&
-				event.status === "completed",
-		),
-	);
-});
-
-void test("concurrent loops isolate structured task status", async () => {
-	let arrivals = 0;
-	let release!: () => void;
-	const bothRecorded = new Promise<void>(resolve => {
-		release = resolve;
-	});
-	const makeStatusTool = (): Tool => ({
-		name: "task_status",
-		description: "concurrent status fixture",
-		parameters: { type: "object", properties: {} },
-		execute: async args => {
-			recordTaskStatus({
-				status: args.status as "done" | "blocked",
-				summary: String(args.summary),
-				ts: Date.now(),
-			});
-			arrivals++;
-			if (arrivals === 2) release();
-			await bothRecorded;
-			return "recorded";
-		},
-	});
-	const callbacks = createTaskCallbacks();
-	const run = async (status: "done" | "blocked") => {
-		const tool = makeStatusTool();
-		const events: AgentEvent[] = [];
-		return runWithTaskState(async () => {
-			await runAgentLoop(
-				{ systemPrompt: "test", messages: [], tools: [tool] },
-				[user(status)],
-				{
-					...makeConfig(
-						{
-							tools: [tool],
-							hooks: {
-								afterToolCall: () => ({ terminate: true }),
-							},
-						},
-						callbacks,
-					),
-				backend: new FakeBackend([
-					() => ({
-						content: "",
-						toolCalls: [
-							{
-								id: `status-${status}`,
-								name: "task_status",
-								arguments: JSON.stringify({ status, summary: status }),
-							},
-						],
-						stopReason: "stop",
-					}),
-				]),
-			},
-			event => {
-				events.push(event);
-			},
-		);
-		return events.find(event => event.type === "agent_end");
-		});
-	};
-
-	const [done, explicitBlock] = await Promise.all([run("done"), run("blocked")]);
-	assert.ok(done?.type === "agent_end");
-	assert.equal(done.status, "completed");
-	assert.ok(explicitBlock?.type === "agent_end");
-	assert.equal(explicitBlock.status, "blocked");
-});
-
 void test("undeclared outcome after tool work completes cleanly", async () => {
 	const events: AgentEvent[] = [];
 	await runAgentLoop(
-		{ systemPrompt: "test", messages: [], tools: [noop, task_status] },
+		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("do work")],
 		{
 			...makeConfig({
-				tools: [noop, task_status],
+				tools: [noop],
 				hooks: {
 					afterToolCall: () => ({ terminate: true }),
 				},
 			}),
-			callbacks: createTaskCallbacks(),
 			backend: new FakeBackend([
 				() => ({
 					content: "",
-					toolCalls: [
-						{ id: "1", name: "noop", arguments: "{}" },
-					],
+					toolCalls: [{ id: "1", name: "noop", arguments: "{}" }],
 					stopReason: "stop",
 				}),
 			]),
@@ -1236,9 +1076,7 @@ void test("minimal profile stops naturally when no embedded features enabled", a
 	);
 	assert.ok(
 		events.some(
-			event =>
-				event.type === "agent_end" &&
-				event.status === "completed",
+			event => event.type === "agent_end" && event.status === "completed",
 		),
 	);
 	assert.equal(
@@ -1393,9 +1231,7 @@ void test.skip("continuation pauses when the agent ends in a question", async ()
 	assert.equal(messages.at(-1)?.role, "assistant");
 	assert.ok(
 		events.some(
-			event =>
-				event.type === "agent_end" &&
-				event.status === "needs_input",
+			event => event.type === "agent_end" && event.status === "needs_input",
 		),
 	);
 });
@@ -1491,9 +1327,7 @@ void test.skip("continuation requires a structured conclusion after tool work", 
 	assert.equal(backend.calls, 3);
 	assert.ok(
 		events.some(
-			event =>
-				event.type === "agent_end" &&
-				event.status === "completed",
+			event => event.type === "agent_end" && event.status === "completed",
 		),
 	);
 });

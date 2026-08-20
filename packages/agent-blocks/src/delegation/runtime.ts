@@ -1,8 +1,6 @@
 import {
 	type AcceptanceConfig,
 	type AcceptanceLedger,
-	type AfterToolCallContext,
-	type AfterToolCallResult,
 	type AgentConfig,
 	type AgentEvent,
 	type LLMBackend,
@@ -200,28 +198,6 @@ export async function runDelegatedAgent(params: {
 	let turns = 0;
 	let validationAttempts = 0;
 
-	// Subagents run runAgentLoop directly, bypassing the harness's
-	// buildBuiltinHooks — so without this, task_status's "done" declaration
-	// never sets `terminate: true` and the child loops on runner nudges
-	// ("call task_status with the accurate status") until maxIterations,
-	// surfacing as a spurious isError result even though the model finished.
-	const priorAfterToolCall = params.config.hooks?.afterToolCall;
-	const afterToolCall = async (
-		ctx: AfterToolCallContext,
-		signal?: AbortSignal,
-	): Promise<AfterToolCallResult | undefined> => {
-		const prior = await priorAfterToolCall?.(ctx, signal);
-		if (prior?.terminate) return prior;
-		if (ctx.toolCall.name === "task_status" && !ctx.isError) {
-			return { ...prior, terminate: true };
-		}
-		return prior;
-	};
-	const configWithTermination: AgentConfig = {
-		...params.config,
-		hooks: { ...params.config.hooks, afterToolCall },
-	};
-
 	let messages: Message[] = [];
 	let prompts: Message[] = [
 		{ role: "user", content: params.task } satisfies Message,
@@ -239,7 +215,7 @@ export async function runDelegatedAgent(params: {
 			},
 			prompts,
 			{
-				...configWithTermination,
+				...params.config,
 				backend: params.backend,
 				tools,
 				maxIterations: remainingIterations,
@@ -265,8 +241,6 @@ export async function runDelegatedAgent(params: {
 		);
 		messages = [...messages, ...produced];
 		// A validated acceptance report is the authoritative delegated outcome.
-		// The generic runner may classify a tool-bearing run without task_status as
-		// blocked, but delegation's explicit contract has already proved completion.
 		if (acceptance && acceptancePassed) status = "completed";
 		if (acceptancePassed || !acceptance || signal?.aborted) break;
 		if (attempt + 1 >= maxAttempts || turns >= params.maxIterations) break;
