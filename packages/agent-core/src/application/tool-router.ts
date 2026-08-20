@@ -79,6 +79,14 @@ export interface ToolRouterStatus {
 	enabledPluginRoots: Array<{ name: string; installPath: string }>;
 }
 
+function isFffGrepTool(tool: Tool): boolean {
+	return (
+		tool.origin?.kind === "mcp" &&
+		tool.origin.server.toLowerCase() === "fff" &&
+		tool.origin.tool.toLowerCase() === "grep"
+	);
+}
+
 export class ToolRouter {
 	private readonly cwd: string;
 	private readonly projectTrusted: boolean;
@@ -92,7 +100,6 @@ export class ToolRouter {
 	private mcpLoadPromise: Promise<void> | null = null;
 	private mcpServerCount = 0;
 	private mcpErrors: string[] = [];
-	private mcpToolNames = new Set<string>();
 	private disabledFffTools: Tool[] = [];
 	private fffgrepEnabled: boolean;
 	private mcpSystemContext = "";
@@ -135,6 +142,12 @@ export class ToolRouter {
 				),
 			];
 		}
+		if (!this.fffgrepEnabled) {
+			this.disabledFffTools = this.defaultTools.filter(isFffGrepTool);
+			this.defaultTools = this.defaultTools.filter(
+				tool => !isFffGrepTool(tool),
+			);
+		}
 
 		// Fire-and-forget: start MCP connections as soon as Logician opens,
 		// without blocking the first turn. Opt out (autoStartMcp: false) to keep construction
@@ -160,15 +173,14 @@ export class ToolRouter {
 	}
 
 	setFffgrepEnabled(enabled: boolean): void {
+		if (enabled === this.fffgrepEnabled) return;
 		this.fffgrepEnabled = enabled;
 		if (enabled) {
 			if (!this.disabledFffTools.length) return;
 			this.defaultTools = [...this.defaultTools, ...this.disabledFffTools];
 			this.disabledFffTools = [];
 		} else {
-			const fffTools = this.defaultTools.filter(tool =>
-				/^fff(?:__|_)grep$/i.test(tool.name),
-			);
+			const fffTools = this.defaultTools.filter(isFffGrepTool);
 			if (!fffTools.length) return;
 			this.disabledFffTools = fffTools;
 			this.defaultTools = this.defaultTools.filter(
@@ -181,7 +193,7 @@ export class ToolRouter {
 	/** Append a tool to the router's own set and notify the bridge to propagate it into config/harness/system prompt. */
 	private addTool(tool: Tool): void {
 		if (this.defaultTools.some(t => t.name === tool.name)) return;
-		if (!this.fffgrepEnabled && /^fff(?:__|_)grep$/i.test(tool.name)) {
+		if (!this.fffgrepEnabled && isFffGrepTool(tool)) {
 			this.disabledFffTools = [...this.disabledFffTools, tool];
 			return;
 		}
@@ -218,7 +230,7 @@ export class ToolRouter {
 	}
 
 	getMcpToolCount(): number {
-		return this.mcpToolNames.size;
+		return this.defaultTools.filter(tool => tool.origin?.kind === "mcp").length;
 	}
 
 	getMcpErrors(): string[] {
@@ -239,7 +251,6 @@ export class ToolRouter {
 				);
 				this.mcpServerCount = result.servers;
 				this.mcpErrors = result.errors;
-				this.mcpToolNames = new Set(result.tools.map(tool => tool.name));
 				// Tool presence alone doesn't tell the model whether a missing
 				// capability was never configured or failed to connect — surface
 				// connection failures in the system prompt so it can explain a gap
@@ -463,7 +474,7 @@ export class ToolRouter {
 	getStatus(): ToolRouterStatus {
 		return {
 			mcpServerCount: this.mcpServerCount,
-			mcpToolCount: this.mcpToolNames.size,
+			mcpToolCount: this.getMcpToolCount(),
 			mcpErrors: this.mcpErrors,
 			mcpLoaded: this.mcpLoaded,
 			mcpLoading: this.isMcpLoading(),

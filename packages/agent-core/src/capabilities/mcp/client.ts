@@ -374,6 +374,7 @@ export function createMcpTool(
 	const qualifiedName = `mcp__${safeToolName(client.name)}__${safeName}`;
 	return {
 		name: exposedName,
+		origin: { kind: "mcp", server: client.name, tool: def.name },
 		label: def.title
 			? `MCP: ${def.title}`
 			: `MCP: ${def.name} (${client.name})`,

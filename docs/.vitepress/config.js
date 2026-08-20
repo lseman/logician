@@ -65,7 +65,7 @@ export default withMermaid(
 						{ text: "Agent Loop", link: "/architecture/agent-loop" },
 						{ text: "Hook System", link: "/architecture/hooks" },
 						{ text: "Session Persistence", link: "/architecture/sessions" },
-						{ text: "Run Kernel", link: "/architecture/run-kernel" },
+						{ text: "Durability & Recovery", link: "/architecture/run-kernel" },
 						{ text: "Evolving Memory", link: "/architecture/evolving-memory" },
 						{ text: "Runtime Decisions", link: "/architecture/modernization" },
 					],

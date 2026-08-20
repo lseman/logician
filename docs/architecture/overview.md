@@ -20,6 +20,7 @@ graph LR
   subgraph Runtime
     C["@logician/agent-core"]
     D["@logician/agent-blocks"]
+    H["@logician/eoh"]
   end
   subgraph DataAndEvaluation["Data and evaluation"]
     M["memory + rag"]
@@ -29,6 +30,8 @@ graph LR
   A --> C
   C --> P
   D --> C
+  D --> H
+  C --> H
   A --> D
   C --> M
   D --> E
@@ -62,9 +65,9 @@ core + capabilities + infrastructure + adapters <- application
 the application edge. The harness uses immutable configuration revisions, an
 append-only thread ledger, a run-scoped policy controller, and a context engine.
 
-Execution durability is owned by the [Run Kernel](/architecture/run-kernel), a
-versioned event ledger used for replay, task-spanning budgets, fencing, and tool
-effect recovery.
+Execution durability is split across the thread ledger, file checkpoints,
+and run-scoped policy state — see
+[Durability & Recovery](/architecture/run-kernel).
 
 The evidence and invariants behind the current runtime boundaries are recorded
 in [Runtime Design Decisions](/architecture/modernization).
@@ -81,8 +84,17 @@ Optional product feature modules:
 - Reasoners (ToT, SSR, Reflexion, etc.)
 - Subagent delegation
 - Todo/task management
-- EOH (Evolution of Hints) engine
 - Tool selection and execution strategies
+- Re-exports `@logician/eoh` (below) as an opt-in reasoning strategy
+
+### eoh
+
+Evolution of Heuristics ([arXiv:2401.02051](https://arxiv.org/abs/2401.02051)):
+an evolutionary optimization engine with its own session logic, population
+management, compaction, and dashboard. It's a standalone workspace package —
+`agent-core`'s application layer wires it in directly, and `agent-blocks`
+re-exports it as one more reasoning strategy. Not on the runtime's critical
+path; opt-in.
 
 ### tui
 

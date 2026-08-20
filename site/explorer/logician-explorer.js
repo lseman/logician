@@ -4,11 +4,21 @@ const NODES = {
 		title: "LOGICIAN",
 		kicker: "guest@logician:~$ ls -la subsystems/",
 		summary:
-			"Click any box in the diagram — or press 1–5 — to enter it and see how it works.",
+			"Click any box in the diagram — or press 1–9 — to enter it and see how it works.",
 		color: "#22d3ee",
 		type: "diagram",
 		path: "~",
-		children: ["tui", "harness", "capabilities", "coding-agent", "external"],
+		children: [
+			"tui",
+			"protocol",
+			"harness",
+			"eoh",
+			"blocks",
+			"autoresearch",
+			"mcp",
+			"data",
+			"external",
+		],
 	},
 
 	tui: {
@@ -220,26 +230,50 @@ const NODES = {
 		],
 	},
 
-	capabilities: {
-		title: "Agent Capabilities",
-		kicker: "drwxr-xr-x  agent-capabilities/",
-		path: "agent-capabilities",
-		color: "#06b6d4",
-		type: "grid",
-		summary:
-			"Higher-level behaviors the harness can call on: task tracking, user prompts, child agents, and structured reasoning.",
-		children: [
-			"cap-todo",
-			"cap-ask-user",
-			"cap-subagents",
-			"cap-reasoners",
-			"cap-eoh",
+	protocol: {
+		title: "Agent Protocol",
+		kicker: "drwxr-xr-x  agent-protocol/",
+		path: "agent-protocol",
+		color: "#34d399",
+		type: "leaf",
+		summary: "The dependency-free client protocol.",
+		bullets: [
+			"Versioned, UI-ready notification envelopes — the wire format between agent-core and any client.",
+			"Internal provider, hook, and tool events are translated before crossing this seam.",
+			"Zero internal @logician/* dependencies — the true foundation package.",
+			"The TUI (and any future client) depends on this, not on agent-core internals directly.",
 		],
 	},
+
+	eoh: {
+		title: "EoH",
+		kicker: "drwxr-xr-x  eoh/",
+		path: "eoh",
+		color: "#fbbf24",
+		type: "leaf",
+		summary: "Evolution of Heuristics — a standalone optimization engine.",
+		bullets: [
+			"Implements arXiv:2401.02051 — population management, evaluator, and compaction across generations.",
+			"Own session logic, persistence, and dashboard.",
+			"Wired directly into agent-core's application layer, and re-exported by agent-blocks as one more opt-in reasoning strategy.",
+			"Not on the critical path of a normal turn.",
+		],
+	},
+
+	blocks: {
+		title: "Agent Blocks",
+		kicker: "drwxr-xr-x  agent-blocks/",
+		path: "agent-blocks",
+		color: "#22d3ee",
+		type: "grid",
+		summary:
+			"Optional feature modules layered on agent-core: task tracking, user prompts, child agents, and structured reasoning.",
+		children: ["cap-todo", "cap-ask-user", "cap-subagents", "cap-reasoners"],
+	},
 	"cap-todo": {
-		title: "todo",
-		kicker: "agent-capabilities/todo",
-		color: "#06b6d4",
+		title: "tasks",
+		kicker: "agent-blocks/tasks",
+		color: "#22d3ee",
 		type: "leaf",
 		summary: "Task tracking with status transitions.",
 		bullets: [
@@ -248,9 +282,9 @@ const NODES = {
 		],
 	},
 	"cap-ask-user": {
-		title: "ask-user",
-		kicker: "agent-capabilities/ask-user",
-		color: "#06b6d4",
+		title: "interaction",
+		kicker: "agent-blocks/interaction",
+		color: "#22d3ee",
 		type: "leaf",
 		summary: "User input prompts.",
 		bullets: [
@@ -259,9 +293,9 @@ const NODES = {
 		],
 	},
 	"cap-subagents": {
-		title: "subagents",
-		kicker: "agent-capabilities/subagents",
-		color: "#06b6d4",
+		title: "delegation",
+		kicker: "agent-blocks/delegation",
+		color: "#22d3ee",
 		type: "leaf",
 		summary: "Child agents, isolated worktrees.",
 		bullets: [
@@ -271,107 +305,89 @@ const NODES = {
 		],
 	},
 	"cap-reasoners": {
-		title: "reasoners",
-		kicker: "agent-capabilities/reasoners",
-		color: "#06b6d4",
+		title: "reasoning",
+		kicker: "agent-blocks/reasoning",
+		color: "#22d3ee",
 		type: "leaf",
 		summary: "Structured reasoning strategies.",
 		bullets: [
-			"SSR, Tree of Thoughts, and Reflexion — alternatives to a single-shot model call.",
+			"SSR, Tree of Thoughts, Graph of Thoughts, Reflexion, Best-of-N, Self-Consistency, Auto-CoT, In-Context CoT.",
 			"Plug into the Model Call stage of the harness loop.",
+			"Depends on packages/rag for retrieval-backed tools — the one place agent-blocks reaches outside agent-core.",
 		],
-	},
-	"cap-eoh": {
-		title: "eoh",
-		kicker: "agent-capabilities/eoh",
-		color: "#06b6d4",
-		type: "leaf",
-		summary: "An additional capability module exported alongside the others.",
-		bullets: ["Exported from packages/agent-capabilities."],
 	},
 
-	"coding-agent": {
-		title: "Coding Agent",
-		kicker: "drwxr-xr-x  coding-agent/",
-		path: "coding-agent",
-		color: "#34d399",
+	autoresearch: {
+		title: "Autoresearch",
+		kicker: "drwxr-xr-x  autoresearch/",
+		path: "autoresearch",
+		color: "#f472b6",
+		type: "leaf",
+		summary: "Measured experiment loops: run, evaluate, keep or discard.",
+		bullets: [
+			"Depends only on agent-core to drive experiment trials.",
+			"Ported from pi-autoresearch.",
+			"Used for reproducible improvement loops rather than one-off runs.",
+		],
+	},
+
+	mcp: {
+		title: "Tools · MCP · Skills",
+		kicker: "agent-core/capabilities",
+		path: "agent-core/capabilities",
+		color: "#56d364",
+		type: "leaf",
+		summary: "Built-in tools, skills, and the MCP client — inside agent-core.",
+		bullets: [
+			"File ops, search, system commands, and web & docs tools.",
+			"SKILL.md-driven capabilities loaded on demand rather than kept in the system prompt at all times.",
+			"MCP client supports both stdio and streamable HTTP transports, exposing external servers' tools to Tool Execution as if they were local.",
+		],
+	},
+
+	data: {
+		title: "Data & Evaluation",
+		kicker: "drwxr-xr-x  {memory,rag,agent-eval}/",
+		path: "data",
+		color: "#f59e0b",
 		type: "grid",
 		summary:
-			"The full coding-agent runtime built on top of the harness: built-in tools, skills, MCP support, and sessions.",
-		children: [
-			"ca-tools",
-			"ca-skills",
-			"ca-mcp",
-			"ca-context",
-			"ca-prompts",
-			"ca-sessions",
+			"Standalone packages for persistent memory, retrieval, and outcome-grounded evaluation. None depend on agent-core or each other.",
+		children: ["data-memory", "data-rag", "data-eval"],
+	},
+	"data-memory": {
+		title: "memory",
+		kicker: "packages/memory",
+		color: "#f59e0b",
+		type: "leaf",
+		summary: "SQLite-backed persistent memory.",
+		bullets: [
+			"Observation capture, consolidation, and lexical + semantic retrieval.",
+			"Context injection back into the agent loop.",
+			"Exposed to any MCP client via @logician/memory-mcp (apps/memory-mcp), independent of the TUI.",
 		],
 	},
-	"ca-tools": {
-		title: "Tools",
-		kicker: "coding-agent/tools",
-		color: "#34d399",
+	"data-rag": {
+		title: "rag",
+		kicker: "packages/rag",
+		color: "#f59e0b",
 		type: "leaf",
-		summary: "Built-in tools the model can call directly.",
+		summary: "Hybrid retrieval.",
 		bullets: [
-			"File ops: read, write, edit.",
-			"Search: grep-style content search across the repo.",
-			"System: bash and other shell-level commands.",
-			"Web & docs: web_search / web_fetch.",
+			"Dense + BM25 hybrid search with structural chunking and cross-encoder reranking.",
+			"Query rewriting, source attribution, and context budgeting.",
+			"Consumed by agent-blocks's rag/ module — dependency runs one way.",
 		],
 	},
-	"ca-skills": {
-		title: "Skills",
-		kicker: "coding-agent/skills",
-		color: "#34d399",
+	"data-eval": {
+		title: "agent-eval",
+		kicker: "packages/agent-eval",
+		color: "#f59e0b",
 		type: "leaf",
-		summary: "SKILL.md-driven capabilities.",
+		summary: "Outcome-grounded evaluation runner for agent trials.",
 		bullets: [
-			"Best-practice playbooks the agent reads before touching a given file type or task.",
-			"Loaded on demand rather than kept in the system prompt at all times.",
-		],
-	},
-	"ca-mcp": {
-		title: "MCP client",
-		kicker: "coding-agent/mcp",
-		color: "#34d399",
-		type: "leaf",
-		summary: "Connects to external MCP servers.",
-		bullets: [
-			"Supports both stdio and streamable HTTP transports.",
-			"Exposes each server's tools to the harness's Tool Execution stage as if they were local.",
-		],
-	},
-	"ca-context": {
-		title: "Context files",
-		kicker: "coding-agent/context-files",
-		color: "#34d399",
-		type: "leaf",
-		summary: "Loads repository and documentation context.",
-		bullets: [
-			"Feeds into Context Assembly in the harness loop alongside the system prompt.",
-		],
-	},
-	"ca-prompts": {
-		title: "Prompts + Trust",
-		kicker: "coding-agent/prompts",
-		color: "#34d399",
-		type: "leaf",
-		summary: "System prompts and permission modes.",
-		bullets: [
-			"Defines what a tool call is allowed to do before the Permission Gate checks it.",
-			"acceptAll / acceptEdits / ask / plan are configured here.",
-		],
-	},
-	"ca-sessions": {
-		title: "Sessions",
-		kicker: "coding-agent/sessions",
-		color: "#34d399",
-		type: "leaf",
-		summary: "Session persistence, bookmarks, and rewind.",
-		bullets: [
-			"The same store Append to Session writes into on every turn.",
-			"Bookmarks mark a point to return to; rewind restores an earlier checkpoint.",
+			"Treats repository state and executable checks as authoritative.",
+			"An agent's own completion claim is retained only as diagnostic evidence, never the pass/fail signal.",
 		],
 	},
 
@@ -404,7 +420,7 @@ const NODES = {
 		summary: "stdio & streamable HTTP.",
 		bullets: [
 			"Any MCP server reachable this way exposes extra tools to the agent.",
-			"Reached through the Coding Agent's MCP client.",
+			"Reached through agent-core's MCP client (capabilities/mcp).",
 		],
 	},
 	"ext-searxng": {

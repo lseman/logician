@@ -17,7 +17,7 @@ import { ProgressTracker } from "../../../core/policy/progress-tracker.ts";
 // true original value, even when other tests mutate process.env.PATH.
 const __originalPath = process.env.PATH;
 
-function withFakeRtk<T>(body: () => T): T {
+async function withFakeRtk<T>(body: () => Promise<T>): Promise<T> {
 	const root = mkdtempSync(path.join(tmpdir(), "logician-rtk-"));
 	const executable = path.join(root, "rtk");
 	writeFileSync(
@@ -36,7 +36,7 @@ esac
 	chmodSync(executable, 0o755);
 	process.env.PATH = `${root}${path.delimiter}${__originalPath ?? ""}`;
 	try {
-		return body();
+		return await body();
 	} finally {
 		if (__originalPath === undefined) delete process.env.PATH;
 		else process.env.PATH = __originalPath;
@@ -118,23 +118,23 @@ void test("explicitly disabling guards bypasses the default duplicate guard", ()
 	assert.equal(checks, 0);
 });
 
-void test("RTK rewrite delegates supported and compound commands to RTK", () => {
-	withFakeRtk(() => {
-		assert.equal(rewriteCommandWithRtk("git status"), "rtk git status");
+void test("RTK rewrite delegates supported and compound commands to RTK", async () => {
+	await withFakeRtk(async () => {
+		assert.equal(await rewriteCommandWithRtk("git status"), "rtk git status");
 		assert.equal(
-			rewriteCommandWithRtk("cd repo && git status"),
+			await rewriteCommandWithRtk("cd repo && git status"),
 			"cd repo && rtk git status",
 		);
 		assert.equal(
-			rewriteCommandWithRtk("cargo test && echo done"),
+			await rewriteCommandWithRtk("cargo test && echo done"),
 			"rtk cargo test && echo done",
 		);
 	});
 });
 
-void test("RTK rewrite leaves unsupported commands unchanged", () => {
-	withFakeRtk(() => {
-		assert.equal(rewriteCommandWithRtk("echo hello"), "echo hello");
+void test("RTK rewrite leaves unsupported commands unchanged", async () => {
+	await withFakeRtk(async () => {
+		assert.equal(await rewriteCommandWithRtk("echo hello"), "echo hello");
 	});
 });
 

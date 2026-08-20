@@ -175,34 +175,36 @@ export async function executeToolBatch(
 	const plans: Plan[] = [];
 	for (const toolCall of toolCalls) {
 		const prepared = registry.prepare(toolCall);
+		const context = { toolCall: prepared.call, args: prepared.args, iteration };
+		const before =
+			signal?.aborted || prepared.error !== undefined
+				? undefined
+				: await options.hooks?.beforeToolCall?.(context, signal);
+		const args = before?.args ?? prepared.args;
 		await emit({
 			type: "tool_execution_start",
 			toolCallId: prepared.call.id,
 			toolName: prepared.call.name,
-			args: prepared.args,
+			args,
 		});
 
 		let permissionDenial: string | undefined;
 		if (
 			!signal?.aborted &&
 			prepared.error === undefined &&
+			before?.content === undefined &&
 			options.permissions
 		) {
 			permissionDenial = await evaluatePermission(
 				options.permissions,
 				options.onPermissionRequest,
 				prepared.call,
-				prepared.args,
+				args,
 				registry.get(prepared.call.name),
 				emit,
 			);
 		}
 
-		const context = { toolCall: prepared.call, args: prepared.args, iteration };
-		const before =
-			signal?.aborted || permissionDenial !== undefined
-				? undefined
-				: await options.hooks?.beforeToolCall?.(context, signal);
 		const immediateContent =
 			before?.content ??
 			prepared.error ??
@@ -210,7 +212,7 @@ export async function executeToolBatch(
 			(signal?.aborted ? CANCELLED_TOOL_RESULT : undefined);
 		plans.push({
 			prepared,
-			args: before?.args ?? prepared.args,
+			args,
 			immediateContent,
 			immediateError:
 				before?.isError === true ||

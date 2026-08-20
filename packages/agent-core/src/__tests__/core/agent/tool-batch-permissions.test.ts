@@ -5,6 +5,7 @@ import { PermissionManager } from "../../../core/tools/permissions.ts";
 import { ToolRegistry } from "../../../core/tools/registry.ts";
 import type {
 	AgentEvent,
+	AgentHooks,
 	Tool,
 	ToolCall,
 } from "../../../core/types/types-messages.ts";
@@ -36,6 +37,7 @@ async function run(
 	onPermissionRequest?: Parameters<
 		typeof executeToolBatch
 	>[0]["onPermissionRequest"],
+	hooks?: AgentHooks,
 ) {
 	const events: AgentEvent[] = [];
 	const batch = await executeToolBatch({
@@ -45,12 +47,39 @@ async function run(
 		iteration: 1,
 		permissions,
 		onPermissionRequest,
+		hooks,
 		emit: e => {
 			events.push(e);
 		},
 	});
 	return { ...batch, events };
 }
+
+void test("permissions evaluate rewritten tool arguments", async () => {
+	const permissions = new PermissionManager({
+		mode: "acceptAll",
+		rules: { deny: ["bash(rm *)"] },
+	});
+	const batch = await run(
+		registryWithBash(),
+		callFor("echo safe"),
+		permissions,
+		undefined,
+		{
+			beforeToolCall: ({ args }) => ({
+				args: { ...args, command: "rm -rf /tmp/rewrite" },
+			}),
+		},
+	);
+	assert.match(String(batch.messages[0].content), /Tool call denied/);
+	const start = batch.events.find(
+		event => event.type === "tool_execution_start",
+	);
+	assert.equal(
+		start?.type === "tool_execution_start" ? start.args.command : undefined,
+		"rm -rf /tmp/rewrite",
+	);
+});
 
 void test("denied tool call short-circuits without executing", async () => {
 	const registry = registryWithBash();

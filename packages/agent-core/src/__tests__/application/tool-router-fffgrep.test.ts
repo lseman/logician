@@ -40,9 +40,10 @@ function makeRouter(
 	return { router, onContextChangedCalls, onToolAddedCalls };
 }
 
-function _makeTool(name: string): Tool {
+function makeTool(name: string, origin?: Tool["origin"]): Tool {
 	return {
 		name,
+		origin,
 		label: name,
 		description: `Tool ${name}`,
 		parameters: { type: "object", properties: {} },
@@ -150,4 +151,52 @@ void test("fffgrepEnabled: false in constructor does not affect non-fff tools", 
 	assert.ok(names.includes("grep"), "local grep should still be present");
 	assert.ok(names.includes("bash"), "bash should still be present");
 	assert.ok(names.includes("find"), "find should still be present");
+});
+
+void test("constructor hides FFF grep by origin even when its exposed name has a collision suffix", () => {
+	const fffGrep = makeTool("fff__grep__2", {
+		kind: "mcp",
+		server: "fff",
+		tool: "grep",
+	});
+	const fffMultiGrep = makeTool("multi_grep", {
+		kind: "mcp",
+		server: "fff",
+		tool: "multi_grep",
+	});
+	const { router } = makeRouter({
+		fffgrepEnabled: false,
+		tools: [makeTool("grep"), fffGrep, fffMultiGrep],
+	});
+	assert.deepEqual(
+		router.getDefaultTools().map(tool => tool.name),
+		["grep", "multi_grep"],
+	);
+	assert.equal(router.getMcpToolCount(), 1);
+});
+
+void test("FFF grep can be disabled and re-enabled without losing tool identity", () => {
+	const fffGrep = makeTool("fff__grep", {
+		kind: "mcp",
+		server: "fff",
+		tool: "grep",
+	});
+	const { router, onContextChangedCalls } = makeRouter({
+		tools: [makeTool("grep"), fffGrep],
+	});
+
+	router.setFffgrepEnabled(false);
+	assert.deepEqual(
+		router.getDefaultTools().map(tool => tool.name),
+		["grep"],
+	);
+	assert.equal(router.getMcpToolCount(), 0);
+
+	router.setFffgrepEnabled(true);
+	assert.deepEqual(
+		router.getDefaultTools().map(tool => tool.name),
+		["grep", "fff__grep"],
+	);
+	assert.equal(router.getMcpToolCount(), 1);
+	assert.equal(onContextChangedCalls.length, 2);
 });

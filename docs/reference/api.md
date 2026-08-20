@@ -20,6 +20,20 @@ point. Launch it as a script; it reads its config from `.logician.json`
 tsx apps/tui/src/index.ts
 ```
 
+### Memory MCP server
+
+`@logician/memory-mcp` (`apps/memory-mcp`) is a stdio MCP server that exposes
+`@logician/memory` — search, capture, and consolidation — to any MCP client,
+independent of the TUI or headless bridge. It requires an explicit
+`--workspace`; the default database is `<workspace>/.logician/memory.db`.
+
+```sh
+bun run apps/memory-mcp/src/index.ts --workspace /absolute/project/path
+```
+
+See [apps/memory-mcp/README.md](https://github.com/lseman/logician/blob/main/apps/memory-mcp/README.md)
+for the full tool list and MCP client configuration.
+
 ### Headless (programmatic)
 
 The headless entry point is `AgentCoreBridge` from `@logician/agent-core`'s

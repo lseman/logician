@@ -18,17 +18,18 @@ Logician is a local-first coding agent built on a modular architecture. This pag
 
 ```mermaid
 graph TB
-  subgraph TUI
+  subgraph TUI["apps/tui"]
     A[Terminal UI]
   end
   subgraph Agent
-    B[Coding Agent]
     C[Agent Core]
   end
-  subgraph Capabilities
+  subgraph Capabilities["agent-blocks"]
     D[Reasoners]
     E[Subagents]
     F[Todo & Task Mgmt]
+  end
+  subgraph Evolution
     G[EOH Engine]
   end
   subgraph Storage
@@ -40,16 +41,15 @@ graph TB
     K[MCP Servers]
   end
 
-  A --> B
-  B --> C
+  A --> C
   C --> J
-  B --> D
-  B --> E
-  B --> F
-  B --> G
-  B --> H
-  B --> I
-  B --> K
+  A --> D
+  D --> C
+  D --> G
+  C --> G
+  C --> H
+  C --> I
+  C --> K
 ```
 
 ### Core packages
@@ -59,7 +59,13 @@ graph TB
 | `agent-protocol` | Dependency-free, versioned notifications for clients |
 | `agent-core` | Agent loop, harness, context, configuration, sessions, skills, MCP, trust, and product orchestration |
 | `agent-blocks` | Optional reasoners, subagents, todo management, interaction, and RAG tools |
-| `tui` | Terminal UI components, engine, layers, state management |
+| `eoh` | Evolution of Heuristics — standalone optimization engine, wired into `agent-core` and re-exported by `agent-blocks` |
+| `memory` | SQLite-backed persistent memory: observation capture, consolidation, retrieval |
+| `rag` | Hybrid dense + BM25 retrieval, chunking, reranking, context budgets |
+| `autoresearch` | Measured experiment loops — run, evaluate, keep or discard |
+| `agent-eval` | Outcome-grounded evaluation runner for agent trials |
+| `tui` | Terminal UI components, engine, layers, state management (`apps/tui`) |
+| `memory-mcp` | Stdio MCP adapter exposing `@logician/memory` to any MCP client (`apps/memory-mcp`) |
 
 ### Key concepts
 
