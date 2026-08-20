@@ -10,7 +10,7 @@ export interface TaskStatusRecord {
 	ts: number;
 }
 
-import { currentRunTaskState } from "./run-task-state.ts";
+import { currentRunTaskState } from "./context.ts";
 
 /** The status recorded this run, or null. Reset at each run start. */
 export function getTaskStatus(): TaskStatusRecord | null {

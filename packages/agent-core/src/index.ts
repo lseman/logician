@@ -58,17 +58,17 @@ export type { ReflectionConfig } from "./core/loop/reflection.ts";
 export * from "./core/types/index.ts";
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
-export type { TaskStatusRecord } from "./runtime/tasks/task-status-state.ts";
+export type { TaskStatusRecord } from "./runtime/task-state/status.ts";
 export {
 	getTaskStatus,
 	recordTaskStatus,
 	resetTaskStatus,
-} from "./runtime/tasks/task-status-state.ts";
+} from "./runtime/task-state/status.ts";
 export type {
 	Task,
 	TaskState,
 	TaskStatus,
-} from "./runtime/tasks/todo-state.ts";
+} from "./runtime/task-state/todo.ts";
 export {
 	allocateTaskId,
 	getTasks,
@@ -76,7 +76,7 @@ export {
 	notifyTodosChanged,
 	onTodosChanged,
 	replaceTasks,
-} from "./runtime/tasks/todo-state.ts";
+} from "./runtime/task-state/todo.ts";
 
 // ── Compaction ──────────────────────────────────────────────────────────────
 export {

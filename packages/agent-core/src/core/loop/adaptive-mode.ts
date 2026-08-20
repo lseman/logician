@@ -64,9 +64,7 @@ export function selectAdaptiveMode(
 		};
 	}
 	if (
-		/\b(?:implement|fix|code|refactor|build|add|change|test)\b/.test(
-			objective,
-		)
+		/\b(?:implement|fix|code|refactor|build|add|change|test)\b/.test(objective)
 	) {
 		return {
 			mode: "thinking-coding",
@@ -84,8 +82,12 @@ export function taskObjectiveFromMessages(
 	messages: Array<{ role: string; content: unknown }>,
 ): string {
 	const prompts = messages
-		.filter(message => message.role === "user" && typeof message.content === "string")
-		.map(message => String(message.content).replace(/\s+/g, " ").trim().slice(0, 1000))
+		.filter(
+			message => message.role === "user" && typeof message.content === "string",
+		)
+		.map(message =>
+			String(message.content).replace(/\s+/g, " ").trim().slice(0, 1000),
+		)
 		.filter(Boolean);
 	const meaningful = prompts.filter(
 		prompt =>

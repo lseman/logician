@@ -18,7 +18,7 @@ export interface Task {
 	metadata?: Record<string, unknown>;
 }
 
-import { currentRunTaskState } from "./run-task-state.ts";
+import { currentRunTaskState } from "./context.ts";
 
 const listeners = new Set<(tasks: Task[]) => void>();
 

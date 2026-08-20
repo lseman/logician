@@ -4,8 +4,8 @@
 // agent loops without changing the public Tool execution API.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { TaskStatusRecord } from "./task-status-state.ts";
-import type { Task } from "./todo-state.ts";
+import type { TaskStatusRecord } from "./status.ts";
+import type { Task } from "./todo.ts";
 
 export interface RunTaskState {
 	tasks: Task[];

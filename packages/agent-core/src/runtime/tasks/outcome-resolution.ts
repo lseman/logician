@@ -1,5 +1,5 @@
 import type { RunOutcomeStatus } from "../../core/policy/execution-policy.ts";
-import type { TaskStatusRecord } from "./task-status-state.ts";
+import type { TaskStatusRecord } from "./status.ts";
 
 export interface OutcomeResolutionInput {
 	declared: TaskStatusRecord | null;
