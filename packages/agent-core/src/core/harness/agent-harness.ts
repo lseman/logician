@@ -43,7 +43,6 @@ import type {
 import type {
 	AgentConfig,
 	AgentEvent,
-	AgentHarnessStreamOptions,
 	AgentHooks,
 	AgentModelConfig,
 	BeforeCompactContext,
@@ -87,8 +86,6 @@ import {
 	emitPreCompact as emitPreCompactHelper,
 	emitSessionEnd as emitSessionEndHelper,
 	emitSessionStart as emitSessionStartHelper,
-	listSessions as listSessionsHelper,
-	loadSessionMessages,
 } from "./session/lifecycle.ts";
 
 export type {
@@ -148,7 +145,6 @@ export class AgentHarness {
 	private outputGuard: OutputGuard;
 	private _hooksEnabled: boolean;
 	private _session?: Session;
-	private _sessionBaseDir?: string;
 	private _sessionId?: string;
 	private _transcriptPath?: string;
 	private _hasStartedSession = false;
@@ -316,16 +312,6 @@ export class AgentHarness {
 
 	setExtensionRunner(runner: ExtensionRunner | undefined): void {
 		this._extensionRunner = runner;
-	}
-
-	// ── Stream options management ──────────────────────────────────────────
-
-	getStreamOptions(): AgentHarnessStreamOptions {
-		return { ...this.config.streamOptions };
-	}
-
-	setStreamOptions(options: Partial<AgentHarnessStreamOptions>): void {
-		this.config.streamOptions = { ...this.config.streamOptions, ...options };
 	}
 
 	private transition(to: HarnessPhase, op: string): void {
@@ -951,54 +937,14 @@ export class AgentHarness {
 
 	// ── Session & history ──────────────────────────────────────────────────
 
-	async enableSession(baseDir?: string): Promise<void> {
-		const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-		this._sessionBaseDir = baseDir;
-		this._session = new Session(sessionId, { baseDir, enabled: true });
-		this._sessionId = sessionId;
-		await this.emitSessionStart("startup");
-	}
-
 	/**
-	 * Attach an already-constructed Session (e.g. one a caller's own session
-	 * manager already owns) as this harness's durable branch/compaction/model
-	 * journal, instead of minting a new one via enableSession/resumeSession.
+	 * Attach a caller-owned durable branch/compaction/model journal.
 	 * Conversation history itself is not touched — the caller is responsible
-	 * for loading it (their Session may hold a different persisted shape than
-	 * plain Message[], as the TUI's Turn-based sessions do).
+	 * for loading it.
 	 */
 	attachSession(session: Session): void {
 		this._session = session;
 		this._sessionId = session.getMeta().id;
-	}
-
-	async resumeSession(sessionId: string, baseDir?: string): Promise<boolean> {
-		const sessionBaseDir = baseDir ?? this._sessionBaseDir;
-		const resumed = loadSessionMessages(sessionId, sessionBaseDir);
-		if (!resumed) return false;
-
-		if (resumed.messages.length > 0) {
-			this.conversation.history = resumed.messages.filter(
-				(m): m is Message => m != null && m.role !== "system",
-			);
-		}
-		this._sessionBaseDir = sessionBaseDir;
-		this._session = resumed.session;
-		this._sessionId = sessionId;
-		await this.emitSessionStart("resume");
-		return true;
-	}
-
-	listSessions(): Array<{
-		id: string;
-		name?: string;
-		messageCount: number;
-		lastActivity: number;
-	}> {
-		const baseDir =
-			this._sessionBaseDir ??
-			(this._session ? `${this._session.dirPath}/../..` : undefined);
-		return listSessionsHelper(baseDir);
 	}
 
 	get messages(): Message[] {

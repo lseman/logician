@@ -11,7 +11,7 @@ void test("runtime settings update the live harness and preserve guard auto mode
 	});
 	const patches: Array<Record<string, unknown>> = [];
 	(bridge as unknown as { harness: unknown }).harness = {
-		setRuntimeOptions: (patch: Record<string, unknown>) => patches.push(patch),
+		updateConfig: (patch: Record<string, unknown>) => patches.push(patch),
 	};
 
 	bridge.setGuardMode("off");
@@ -438,7 +438,7 @@ void test("loaded skills are exposed as a persistent catalog, not scored per tur
 	let promptSeenByTurn = "";
 	internal.harness = {
 		messages: [],
-		setSystemPrompt: () => {},
+		updateConfig: () => {},
 		prompt: async () => {
 			promptSeenByTurn = internal.config.systemPrompt;
 		},
@@ -463,7 +463,7 @@ void test("automatic continuation reuses the current system prompt", async () =>
 	const seen: Array<{ kind: string; systemPrompt: string }> = [];
 	internal.harness = {
 		messages: [],
-		setSystemPrompt: () => {},
+		updateConfig: () => {},
 		prompt: async () => {
 			seen.push({ kind: "prompt", systemPrompt: internal.config.systemPrompt });
 			if (seen.length === 1)
@@ -503,6 +503,7 @@ void test("sendMessage rejects when the turn fails", async () => {
 	internal.toolRouter.isMcpLoaded = () => true;
 	internal.harness = {
 		messages: [],
+		updateConfig: () => {},
 		prompt: async () => {
 			throw new Error("provider failed");
 		},
@@ -551,6 +552,7 @@ void test("core iterations reconcile output without completing the UI turn early
 	internal.toolRouter.isMcpLoaded = () => true;
 	internal.harness = {
 		messages: [],
+		updateConfig: () => {},
 		prompt: async () => {
 			internal.config.onEvent({
 				type: "turn_end",

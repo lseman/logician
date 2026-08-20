@@ -107,46 +107,6 @@ export async function summarizeAndMergeBranch(
 	};
 }
 
-/** Render the branch tree as an ASCII summary string. */
-export function renderBranchTree(branches: Branch[]): string {
-	if (branches.length === 0) {
-		return "No active branches.";
-	}
-
-	const lines: string[] = [];
-	lines.push(`Branches (${branches.length}):`);
-
-	for (const branch of branches) {
-		const depth = branches.indexOf(branch);
-		const prefix = "  ".repeat(depth) + (depth > 0 ? "└─ " : "");
-		lines.push(`${prefix}[${branch.id}] forked at message ${branch.forkedAt}`);
-
-		if (branch.summary) {
-			const goal = branch.summary.goal;
-			const preview = goal.length > 60 ? `${goal.slice(0, 60)}...` : goal;
-			lines.push(`${"  ".repeat(depth + 1)}Goal: ${preview}`);
-
-			if (branch.summary.progress.done.length > 0) {
-				lines.push(
-					`${"  ".repeat(depth + 1)}Done: ${branch.summary.progress.done.length} items`,
-				);
-			}
-			if (branch.summary.progress.inProgress.length > 0) {
-				lines.push(
-					`${"  ".repeat(depth + 1)}In Progress: ${branch.summary.progress.inProgress.length} items`,
-				);
-			}
-			if (branch.summary.progress.blocked.length > 0) {
-				lines.push(
-					`${"  ".repeat(depth + 1)}Blocked: ${branch.summary.progress.blocked.length} items`,
-				);
-			}
-		}
-	}
-
-	return lines.join("\n");
-}
-
 export function listBranches(branches: Branch[]): BranchInfo[] {
 	return branches.map((b, i) => ({
 		id: b.id,
