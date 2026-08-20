@@ -44,4 +44,6 @@ Compaction changes the context sent to the model, not the historical record show
 
 ## File recovery
 
-Conversation branches are distinct from file checkpoints. When checkpointing is enabled, Logician records recoverable file state around edits so rewind can restore both conversational position and affected files without destructive Git operations.
+Conversation branches are distinct from file checkpoints. When checkpointing is enabled, Logician records recoverable file state around edits so rewind can restore both conversational position and affected files without destructive Git operations. See [Durability & Recovery](./run-kernel.md) for how checkpoint frames are captured.
+
+Session directories are marked to be skipped by OS-level cloud sync (Time Machine/iCloud on macOS) on a best-effort basis — this is an exclusion hint, not a persistence mechanism, and failures are silent.

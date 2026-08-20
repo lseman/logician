@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1100" role="img"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" role="img"
   aria-labelledby="title description">
   <title id="title">Logician package architecture</title>
-  <desc id="description">Four TypeScript packages in one Node.js process. The terminal UI composes the coding agent, agent capabilities, and agent core. The coding agent and capabilities both build on agent core. External access flows through the tool bus.</desc>
+  <desc id="description">Eight TypeScript packages plus a terminal UI app in one Node.js process. agent-protocol is the dependency-free foundation. agent-core builds on the protocol and owns the harness loop. agent-blocks, autoresearch, and eoh build on agent-core; agent-blocks also uses rag. memory, rag, and agent-eval stand alone. apps/tui composes agent-core, agent-blocks, agent-protocol, autoresearch, and memory. External access flows through the tool bus.</desc>
 
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
@@ -10,7 +10,7 @@
       <stop offset="0.55" stop-color="#0d1117"/>
       <stop offset="1" stop-color="#111827"/>
     </linearGradient>
-    <radialGradient id="aura" cx="50%" cy="42%" r="52%">
+    <radialGradient id="aura" cx="50%" cy="38%" r="55%">
       <stop offset="0" stop-color="#2563eb" stop-opacity=".14"/>
       <stop offset=".55" stop-color="#06b6d4" stop-opacity=".04"/>
       <stop offset="1" stop-color="#0d1117" stop-opacity="0"/>
@@ -36,111 +36,177 @@
       .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2.5px; }
       .title { font-size: 38px; font-weight: 800; letter-spacing: 7px; }
       .subtitle { font-size: 13px; font-weight: 600; letter-spacing: 3px; }
-      .package { font-size: 11px; font-weight: 700; letter-spacing: .5px; }
-      .card-title { fill: #f8fafc; font-size: 20px; font-weight: 750; }
-      .body { fill: #94a3b8; font-size: 12px; }
-      .chip { fill: #cbd5e1; font-size: 11px; font-weight: 600; }
+      .package { font-size: 10.5px; font-weight: 700; letter-spacing: .3px; }
+      .card-title { fill: #f8fafc; font-size: 17px; font-weight: 750; }
+      .body { fill: #94a3b8; font-size: 11px; }
+      .chip { fill: #cbd5e1; font-size: 10.5px; font-weight: 600; }
       .link-label { fill: #64748b; font-size: 10px; font-style: italic; }
       .external-title { fill: #e2e8f0; font-size: 14px; font-weight: 700; }
       .external-sub { fill: #64748b; font-size: 10px; }
+      .group-label { fill: #64748b; font-size: 10.5px; font-weight: 700; letter-spacing: 2px; }
     </style>
   </defs>
 
-  <rect width="1400" height="1100" rx="18" fill="url(#background)"/>
-  <rect width="1400" height="1100" rx="18" fill="url(#grid)"/>
-  <rect width="1400" height="1100" rx="18" fill="url(#aura)"/>
+  <rect width="1400" height="1180" rx="18" fill="url(#background)"/>
+  <rect width="1400" height="1180" rx="18" fill="url(#grid)"/>
+  <rect width="1400" height="1180" rx="18" fill="url(#aura)"/>
 
   <g aria-label="Diagram heading">
-    <text x="700" y="55" text-anchor="middle" class="title" fill="#60a5fa">LOGICIAN</text>
-    <text x="700" y="82" text-anchor="middle" class="subtitle" fill="#94a3b8">PACKAGE ARCHITECTURE</text>
-    <g transform="translate(526 100)">
+    <text x="700" y="50" text-anchor="middle" class="title" fill="#60a5fa">LOGICIAN</text>
+    <text x="700" y="76" text-anchor="middle" class="subtitle" fill="#94a3b8">PACKAGE ARCHITECTURE</text>
+    <g transform="translate(476 92)">
       <rect width="104" height="25" rx="12.5" fill="#58a6ff" fill-opacity=".1" stroke="#58a6ff" stroke-opacity=".75"/>
       <text x="52" y="17" text-anchor="middle" class="chip" fill="#60a5fa">TypeScript</text>
       <rect x="116" width="142" height="25" rx="12.5" fill="#56d364" fill-opacity=".1" stroke="#56d364" stroke-opacity=".75"/>
       <text x="187" y="17" text-anchor="middle" class="chip" fill="#56d364">Node.js ≥22.19</text>
-      <rect x="270" width="78" height="25" rx="12.5" fill="#94a3b8" fill-opacity=".08" stroke="#64748b"/>
-      <text x="309" y="17" text-anchor="middle" class="chip">4 packages</text>
+      <rect x="270" width="98" height="25" rx="12.5" fill="#94a3b8" fill-opacity=".08" stroke="#64748b"/>
+      <text x="319" y="17" text-anchor="middle" class="chip">9 packages</text>
     </g>
   </g>
 
   <g aria-label="User session">
-    <rect x="500" y="148" width="400" height="55" rx="13" fill="#161d28" stroke="#334155"/>
-    <circle cx="530" cy="175" r="5" fill="#22d3ee" filter="url(#glow)"/>
-    <text x="700" y="171" text-anchor="middle" fill="#e2e8f0" font-size="15" font-weight="700">User · Terminal Session</text>
-    <text x="700" y="189" text-anchor="middle" class="body">local · SSH · tmux · VT100</text>
-    <path d="M700 203V230" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-blue)"/>
+    <rect x="500" y="128" width="400" height="50" rx="13" fill="#161d28" stroke="#334155"/>
+    <circle cx="530" cy="153" r="5" fill="#22d3ee" filter="url(#glow)"/>
+    <text x="700" y="149" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="700">User · Terminal Session</text>
+    <text x="700" y="166" text-anchor="middle" class="body">local · SSH · tmux · VT100</text>
+    <path d="M700 178V200" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-blue)"/>
   </g>
 
   <g id="package-tui" filter="url(#shadow)">
-    <rect x="150" y="230" width="1100" height="105" rx="16" fill="#171c26" stroke="#a78bfa" stroke-width="2"/>
-    <rect x="150" y="230" width="7" height="105" rx="3.5" fill="#a78bfa"/>
-    <text x="184" y="258" class="package" fill="#a78bfa">apps/tui</text>
-    <text x="184" y="288" class="card-title">Terminal UI</text>
-    <text x="184" y="310" class="body">Streaming presentation and runtime controls</text>
-    <g transform="translate(620 253)">
-      <rect width="130" height="34" rx="17" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
-      <text x="65" y="22" text-anchor="middle" class="chip">Rendering</text>
-      <rect x="146" width="130" height="34" rx="17" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
-      <text x="211" y="22" text-anchor="middle" class="chip">Input</text>
-      <rect x="292" width="130" height="34" rx="17" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
-      <text x="357" y="22" text-anchor="middle" class="chip">Themes</text>
-      <rect x="438" width="130" height="34" rx="17" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
-      <text x="503" y="22" text-anchor="middle" class="chip">Overlays</text>
+    <rect x="150" y="200" width="1100" height="85" rx="16" fill="#171c26" stroke="#a78bfa" stroke-width="2"/>
+    <rect x="150" y="200" width="7" height="85" rx="3.5" fill="#a78bfa"/>
+    <text x="184" y="225" class="package" fill="#a78bfa">apps/tui · @logician/tui</text>
+    <text x="184" y="250" class="card-title">Terminal UI</text>
+    <g transform="translate(560 213)">
+      <rect width="106" height="26" rx="13" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
+      <text x="53" y="17.5" text-anchor="middle" class="chip">Rendering</text>
+      <rect x="118" width="86" height="26" rx="13" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
+      <text x="161" y="17.5" text-anchor="middle" class="chip">Input</text>
+      <rect x="216" width="106" height="26" rx="13" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
+      <text x="269" y="17.5" text-anchor="middle" class="chip">Themes</text>
+      <rect x="334" width="106" height="26" rx="13" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
+      <text x="387" y="17.5" text-anchor="middle" class="chip">Overlays</text>
+      <rect x="452" width="140" height="26" rx="13" fill="#a78bfa" fill-opacity=".08" stroke="#a78bfa" stroke-opacity=".55"/>
+      <text x="522" y="17.5" text-anchor="middle" class="chip">exec · doctor CLI</text>
     </g>
   </g>
 
-  <g aria-label="Package dependency links" fill="none" stroke-linecap="round">
-    <path d="M700 335V366H430V395" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
-    <path d="M700 335V395" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
-    <path d="M700 335V366H970V395" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
-    <text x="713" y="360" class="link-label">direct dependencies</text>
+  <text x="184" y="315" class="group-label">FEATURE PACKAGES</text>
+  <line x1="150" y1="322" x2="1250" y2="322" stroke="#243043" stroke-width="1"/>
+
+  <g aria-label="TUI to feature-package links" fill="none" stroke-linecap="round">
+    <path d="M300 285V335" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M700 285V335" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M1140 285V335" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
   </g>
 
-  <g id="package-capabilities" filter="url(#shadow)">
-    <rect x="150" y="395" width="390" height="175" rx="16" fill="#151d26" stroke="#22d3ee" stroke-width="2"/>
-    <rect x="150" y="395" width="7" height="175" rx="3.5" fill="#22d3ee"/>
-    <text x="184" y="424" class="package" fill="#22d3ee">packages/agent-capabilities</text>
-    <text x="184" y="453" class="card-title">Agent Capabilities</text>
-    <text x="184" y="482" class="body">todo · ask-user · subagents</text>
-    <text x="184" y="506" class="body">reasoners · EOH optimization</text>
-    <rect x="184" y="528" width="190" height="25" rx="12.5" fill="#22d3ee" fill-opacity=".08" stroke="#22d3ee" stroke-opacity=".45"/>
-    <text x="279" y="545" text-anchor="middle" class="chip">behavior modules</text>
+  <g id="package-blocks" filter="url(#shadow)">
+    <rect x="150" y="335" width="330" height="150" rx="16" fill="#151d26" stroke="#22d3ee" stroke-width="2"/>
+    <rect x="150" y="335" width="7" height="150" rx="3.5" fill="#22d3ee"/>
+    <text x="184" y="362" class="package" fill="#22d3ee">packages/agent-blocks</text>
+    <text x="184" y="388" class="card-title">Agent Blocks</text>
+    <text x="184" y="412" class="body">delegation · interaction · tasks</text>
+    <text x="184" y="430" class="body">reasoning · rag-backed retrieval</text>
+    <rect x="184" y="450" width="180" height="22" rx="11" fill="#22d3ee" fill-opacity=".08" stroke="#22d3ee" stroke-opacity=".45"/>
+    <text x="274" y="465" text-anchor="middle" class="chip">feature modules</text>
   </g>
 
-  <g id="package-coding-agent" filter="url(#shadow)">
-    <rect x="590" y="395" width="390" height="175" rx="16" fill="#151d26" stroke="#56d364" stroke-width="2"/>
-    <rect x="590" y="395" width="7" height="175" rx="3.5" fill="#56d364"/>
-    <text x="624" y="424" class="package" fill="#56d364">packages/coding-agent</text>
-    <text x="624" y="453" class="card-title">Coding Agent</text>
-    <text x="624" y="482" class="body">sessions · config · skills · prompts</text>
-    <text x="624" y="506" class="body">tools · MCP · trust · context files</text>
-    <rect x="624" y="528" width="190" height="25" rx="12.5" fill="#56d364" fill-opacity=".08" stroke="#56d364" stroke-opacity=".45"/>
-    <text x="719" y="545" text-anchor="middle" class="chip">orchestration layer</text>
+  <g id="package-autoresearch" filter="url(#shadow)">
+    <rect x="535" y="335" width="330" height="150" rx="16" fill="#151d26" stroke="#f472b6" stroke-width="2"/>
+    <rect x="535" y="335" width="7" height="150" rx="3.5" fill="#f472b6"/>
+    <text x="569" y="362" class="package" fill="#f472b6">packages/autoresearch</text>
+    <text x="569" y="388" class="card-title">Autoresearch</text>
+    <text x="569" y="412" class="body">run · measure · keep or discard</text>
+    <text x="569" y="430" class="body">measured experiment loops</text>
+    <rect x="569" y="450" width="180" height="22" rx="11" fill="#f472b6" fill-opacity=".08" stroke="#f472b6" stroke-opacity=".45"/>
+    <text x="659" y="465" text-anchor="middle" class="chip">experiment loop</text>
   </g>
+
+  <g id="package-eoh" filter="url(#shadow)">
+    <rect x="920" y="335" width="330" height="150" rx="16" fill="#151d26" stroke="#fbbf24" stroke-width="2"/>
+    <rect x="920" y="335" width="7" height="150" rx="3.5" fill="#fbbf24"/>
+    <text x="954" y="362" class="package" fill="#fbbf24">packages/eoh</text>
+    <text x="954" y="388" class="card-title">EoH</text>
+    <text x="954" y="412" class="body">Evolution of Heuristics (arXiv 2401.02051)</text>
+    <text x="954" y="430" class="body">session logic · persistence · dashboard</text>
+    <rect x="954" y="450" width="180" height="22" rx="11" fill="#fbbf24" fill-opacity=".08" stroke="#fbbf24" stroke-opacity=".45"/>
+    <text x="1044" y="465" text-anchor="middle" class="chip">heuristic evolution</text>
+  </g>
+
+  <g aria-label="Feature to runtime links" fill="none" stroke-linecap="round">
+    <path d="M280 485V493H580V560" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M665 485V560" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M1050 485V493H750V560" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+  </g>
+
+  <text x="184" y="533" class="group-label">RUNTIME FOUNDATION</text>
+  <text x="1250" y="533" text-anchor="end" class="link-label">built on agent-core</text>
+  <line x1="150" y1="541" x2="1250" y2="541" stroke="#243043" stroke-width="1"/>
 
   <g id="package-core" filter="url(#shadow)">
-    <rect x="1030" y="395" width="220" height="175" rx="16" fill="#151d26" stroke="#58a6ff" stroke-width="2"/>
-    <rect x="1030" y="395" width="7" height="175" rx="3.5" fill="#58a6ff"/>
-    <text x="1064" y="424" class="package" fill="#58a6ff">packages/agent-core</text>
-    <text x="1064" y="453" class="card-title">Agent Core</text>
-    <text x="1064" y="482" class="body">loop · harness</text>
-    <text x="1064" y="506" class="body">hooks · compaction</text>
-    <text x="1064" y="530" class="body">queue · tool registry</text>
+    <rect x="150" y="560" width="700" height="140" rx="16" fill="#151d26" stroke="#58a6ff" stroke-width="2"/>
+    <rect x="150" y="560" width="7" height="140" rx="3.5" fill="#58a6ff"/>
+    <text x="184" y="587" class="package" fill="#58a6ff">packages/agent-core</text>
+    <text x="184" y="613" class="card-title">Agent Core</text>
+    <text x="184" y="637" class="body">loop · harness · hooks · compaction</text>
+    <text x="184" y="654" class="body">tool registry · thread ledger · context engine</text>
+    <rect x="184" y="670" width="200" height="22" rx="11" fill="#58a6ff" fill-opacity=".08" stroke="#58a6ff" stroke-opacity=".45"/>
+    <text x="284" y="685" text-anchor="middle" class="chip">runtime foundation</text>
   </g>
 
-  <g aria-label="Internal dependency links" fill="none" stroke-linecap="round">
-    <path d="M540 510H565V585H1010V510H1030" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow-blue)"/>
-    <path d="M980 482H1030" stroke="#56d364" stroke-width="2" marker-end="url(#arrow-blue)"/>
-    <text x="765" y="602" text-anchor="middle" class="link-label">capabilities and coding-agent build on agent-core</text>
+  <g aria-label="Core to protocol link" fill="none" stroke-linecap="round">
+    <path d="M850 630H875" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+  </g>
+
+  <g id="package-protocol" filter="url(#shadow)">
+    <rect x="875" y="560" width="375" height="140" rx="16" fill="#151d26" stroke="#34d399" stroke-width="2"/>
+    <rect x="875" y="560" width="7" height="140" rx="3.5" fill="#34d399"/>
+    <text x="909" y="587" class="package" fill="#34d399">packages/agent-protocol</text>
+    <text x="909" y="613" class="card-title">Agent Protocol</text>
+    <text x="909" y="637" class="body">versioned, dependency-free client protocol</text>
+    <text x="909" y="654" class="body">UI-ready notifications</text>
+    <rect x="909" y="670" width="200" height="22" rx="11" fill="#34d399" fill-opacity=".08" stroke="#34d399" stroke-opacity=".45"/>
+    <text x="1009" y="685" text-anchor="middle" class="chip">zero dependencies</text>
+  </g>
+
+  <text x="184" y="732" class="group-label">DATA &amp; EVALUATION</text>
+  <text x="1250" y="732" text-anchor="end" class="link-label">consumed by agent-blocks (rag) and apps/tui (memory) — no dependency on agent-core</text>
+  <line x1="150" y1="739" x2="1250" y2="739" stroke="#243043" stroke-width="1"/>
+
+  <g id="package-memory" filter="url(#shadow)">
+    <rect x="150" y="752" width="330" height="110" rx="16" fill="#151d26" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="150" y="752" width="7" height="110" rx="3.5" fill="#f59e0b"/>
+    <text x="184" y="778" class="package" fill="#f59e0b">packages/memory</text>
+    <text x="184" y="802" class="card-title">Memory</text>
+    <text x="184" y="825" class="body">SQLite observation capture,</text>
+    <text x="184" y="841" class="body">consolidation, retrieval, context injection</text>
+  </g>
+
+  <g id="package-rag" filter="url(#shadow)">
+    <rect x="535" y="752" width="330" height="110" rx="16" fill="#151d26" stroke="#38bdf8" stroke-width="2"/>
+    <rect x="535" y="752" width="7" height="110" rx="3.5" fill="#38bdf8"/>
+    <text x="569" y="778" class="package" fill="#38bdf8">packages/rag</text>
+    <text x="569" y="802" class="card-title">RAG</text>
+    <text x="569" y="825" class="body">hybrid dense + BM25 search,</text>
+    <text x="569" y="841" class="body">chunking, reranking, context budgets</text>
+  </g>
+
+  <g id="package-agent-eval" filter="url(#shadow)">
+    <rect x="920" y="752" width="330" height="110" rx="16" fill="#151d26" stroke="#fb7185" stroke-width="2"/>
+    <rect x="920" y="752" width="7" height="110" rx="3.5" fill="#fb7185"/>
+    <text x="954" y="778" class="package" fill="#fb7185">packages/agent-eval</text>
+    <text x="954" y="802" class="card-title">Agent Eval</text>
+    <text x="954" y="825" class="body">outcome-grounded evaluation runner</text>
+    <text x="954" y="841" class="body">executable checks over self-reports</text>
   </g>
 
   <g id="harness-detail" aria-label="Agent core harness loop" filter="url(#shadow)">
-    <path d="M1140 570V610H700V630" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5 4"/>
-    <rect x="150" y="630" width="1100" height="155" rx="18" fill="#111925" stroke="#58a6ff" stroke-width="1.5"/>
-    <text x="182" y="658" class="package" fill="#58a6ff">AGENT-CORE · HARNESS LOOP</text>
-    <text x="1218" y="658" text-anchor="end" class="link-label">each turn follows the same controlled path</text>
+    <path d="M500 700V730" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <rect x="150" y="900" width="1100" height="150" rx="18" fill="#111925" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="182" y="926" class="package" fill="#58a6ff">AGENT-CORE · HARNESS LOOP</text>
+    <text x="1218" y="926" text-anchor="end" class="link-label">each turn follows the same controlled path</text>
 
-    <g transform="translate(182 680)">
+    <g transform="translate(182 946)">
       <rect width="155" height="55" rx="11" fill="#172033" stroke="#38bdf8"/>
       <text x="77.5" y="23" text-anchor="middle" class="chip">Message Intake</text>
       <text x="77.5" y="41" text-anchor="middle" class="external-sub">steering · follow-ups</text>
@@ -170,47 +236,22 @@
       <text x="1009" y="23" text-anchor="middle" class="chip">Loop Gate</text>
       <text x="1009" y="41" text-anchor="middle" class="external-sub">compact · finish</text>
     </g>
-    <path d="M1191 747V763H259V739" fill="none" stroke="#64748b" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#arrow-muted)"/>
-    <rect x="505" y="754" width="440" height="22" rx="11" fill="#111925"/>
-    <text x="725" y="770" text-anchor="middle" class="link-label">tool result → context assembly → next model turn</text>
+    <path d="M1191 1013V1029H259V1005" fill="none" stroke="#64748b" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#arrow-muted)"/>
+    <rect x="505" y="1020" width="440" height="22" rx="11" fill="#111925"/>
+    <text x="725" y="1036" text-anchor="middle" class="link-label">tool result → context assembly → next model turn</text>
   </g>
 
   <g aria-label="Tool bus">
-    <path d="M700 785V815" fill="none" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-muted)"/>
-    <rect x="500" y="815" width="400" height="40" rx="20" fill="#111827" stroke="#475569"/>
-    <text x="700" y="840" text-anchor="middle" class="eyebrow" fill="#94a3b8">GATED TOOL BUS</text>
-    <path d="M700 855V880M205 880H1195M205 880V900M535 880V900M865 880V900M1195 880V900"
-      fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrow-muted)"/>
-  </g>
-
-  <g aria-label="External systems">
-    <g>
-      <rect x="85" y="900" width="240" height="100" rx="14" fill="#141a23" stroke="#475569" stroke-dasharray="6 4"/>
-      <text x="205" y="940" text-anchor="middle" class="external-title">LLM Backend</text>
-      <text x="205" y="965" text-anchor="middle" class="external-sub">OpenAI-compatible API</text>
-    </g>
-    <g>
-      <rect x="415" y="900" width="240" height="100" rx="14" fill="#141a23" stroke="#475569" stroke-dasharray="6 4"/>
-      <text x="535" y="940" text-anchor="middle" class="external-title">MCP Servers</text>
-      <text x="535" y="965" text-anchor="middle" class="external-sub">stdio · streamable HTTP</text>
-    </g>
-    <g>
-      <rect x="745" y="900" width="240" height="100" rx="14" fill="#141a23" stroke="#475569" stroke-dasharray="6 4"/>
-      <text x="865" y="940" text-anchor="middle" class="external-title">SearXNG</text>
-      <text x="865" y="965" text-anchor="middle" class="external-sub">web search · web fetch</text>
-    </g>
-    <g>
-      <rect x="1075" y="900" width="240" height="100" rx="14" fill="#141a23" stroke="#475569" stroke-dasharray="6 4"/>
-      <text x="1195" y="940" text-anchor="middle" class="external-title">Filesystem · Git</text>
-      <text x="1195" y="965" text-anchor="middle" class="external-sub">files · shell · repository</text>
-    </g>
+    <path d="M700 1050V1068" fill="none" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-muted)"/>
+    <rect x="500" y="1068" width="400" height="34" rx="17" fill="#111827" stroke="#475569"/>
+    <text x="700" y="1090" text-anchor="middle" class="eyebrow" fill="#94a3b8">GATED TOOL BUS</text>
   </g>
 
   <g aria-label="Footer">
-    <text x="85" y="1060" class="body">local-first · SSH-ready · thinking-visible</text>
-    <text x="1315" y="1060" text-anchor="end" class="body">github.com/lseman/logician</text>
-    <circle cx="680" cy="1056" r="3" fill="#58a6ff"/>
-    <circle cx="700" cy="1056" r="3" fill="#22d3ee"/>
-    <circle cx="720" cy="1056" r="3" fill="#56d364"/>
+    <text x="85" y="1150" class="body">local-first · SSH-ready · thinking-visible</text>
+    <text x="1315" y="1150" text-anchor="end" class="body">github.com/lseman/logician</text>
+    <circle cx="680" cy="1146" r="3" fill="#58a6ff"/>
+    <circle cx="700" cy="1146" r="3" fill="#22d3ee"/>
+    <circle cx="720" cy="1146" r="3" fill="#56d364"/>
   </g>
 </svg>

@@ -12,10 +12,12 @@ runtime is organized around four decisions:
    validated and deeply merged once. Every subsystem receives that resolved
    snapshot. Runtime application is side-effect free; only explicit user
    changes persist, using atomic field updates.
-2. **An event ledger, not mutable run-state files.** The Run Kernel records
-   typed semantic transitions and reconstructs projections by replay. Streaming
-   deltas remain ephemeral; durable writes happen at turn, tool, queue, and
-   recovery boundaries.
+2. **Durability scoped to what changed, not one global ledger.** The thread
+   ledger append-only-records conversation projections, file checkpoints
+   snapshot workspace state per prompt frame, and run-scoped policy tracks
+   budgets and outcomes. Streaming deltas remain ephemeral; durable writes
+   happen at turn, tool, and recovery boundaries. See
+   [Durability & Recovery](./run-kernel.md).
 3. **A responsive presentation boundary.** Input, scrolling, and rendering read
    bounded projections. Network discovery, extraction, persistence, and other
    potentially slow work run outside the input/render path.

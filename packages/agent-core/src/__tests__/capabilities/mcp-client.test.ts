@@ -40,11 +40,17 @@ void test("MCP tools expose concise names and retain qualified hook aliases", ()
 		inputSchema: { type: "object", properties: {} },
 	}) as {
 		name: string;
+		origin: { kind: string; server: string; tool: string };
 		promptSnippet: string;
 		hookAliases: string[];
 	};
 
 	assert.equal(tool.name, "ctx_batch_execute");
+	assert.deepEqual(tool.origin, {
+		kind: "mcp",
+		server: "plugin_context-mode_context-mode",
+		tool: "ctx_batch_execute",
+	});
 	assert.deepEqual(tool.hookAliases, [
 		"mcp__plugin_context-mode_context-mode__ctx_batch_execute",
 	]);

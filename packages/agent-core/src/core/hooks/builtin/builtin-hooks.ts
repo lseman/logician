@@ -5,7 +5,7 @@
 // Tool-call guards (duplicate + failure-loop) are powered by LoopDetector,
 // the harness's single live instance.
 
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { compactToFit } from "../../compaction/engine.ts";
 import { resetToRunCheckpoint } from "../../compaction/run-checkpoint.ts";
 import type { LoopDetector } from "../../guards/loop-detector.ts";
@@ -44,18 +44,30 @@ const RTK_REWRITE_TIMEOUT_MS = 2_000;
  * Any missing binary, unsupported command, timeout, or rewrite failure falls
  * back to the original command so enabling RTK can never block execution.
  */
-export function rewriteCommandWithRtk(command: string): string {
-	const result = spawnSync("rtk", ["rewrite", command], {
-		encoding: "utf8",
-		timeout: RTK_REWRITE_TIMEOUT_MS,
-		maxBuffer: 1024 * 1024,
-		windowsHide: true,
+export function rewriteCommandWithRtk(command: string): Promise<string> {
+	return new Promise(resolve => {
+		execFile(
+			"rtk",
+			["rewrite", command],
+			{
+				encoding: "utf8",
+				timeout: RTK_REWRITE_TIMEOUT_MS,
+				maxBuffer: 1024 * 1024,
+				windowsHide: true,
+			},
+			(error, stdout) => {
+				const exitCode =
+					error && "code" in error && typeof error.code === "number"
+						? error.code
+						: undefined;
+				if (error && exitCode !== 3) {
+					resolve(command);
+					return;
+				}
+				resolve(stdout.trim() || command);
+			},
+		);
 	});
-	if (result.error || (result.status !== 0 && result.status !== 3)) {
-		return command;
-	}
-	const rewritten = result.stdout.trim();
-	return rewritten || command;
 }
 
 export interface BuiltinHookDeps {
@@ -152,7 +164,8 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// hook can diff and record the paths the command mutated.
 	const bashSnapshots = new Map<string, WorkspaceSnapshot | null>();
 
-	hooks.beforeToolCall = ({ toolCall, args, iteration }) => {
+	hooks.beforeToolCall = async ({ toolCall, args, iteration }) => {
+		const originalArgs = args;
 		// Snapshot pre-write state for /rewind: file tools record the target
 		// path directly; bash records a workspace tree to diff afterwards.
 		if (toolCall.name === "write_file" || toolCall.name === "edit_file") {
@@ -166,20 +179,25 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		}
 		// RTK proxy: let RTK's registry selectively rewrite supported commands.
 		if (toolCall.name === "bash" && config.rtkProxyEnabled === true) {
-			if (args.command !== undefined && typeof args.command === "string") {
-				args.command = rewriteCommandWithRtk(args.command);
+			const rewrittenArgs = { ...args };
+			if (typeof args.command === "string") {
+				rewrittenArgs.command = await rewriteCommandWithRtk(args.command);
 			}
-			if (args.commands !== undefined && Array.isArray(args.commands)) {
-				args.commands = args.commands.map((entry: unknown) => {
-					if (typeof entry === "object" && entry !== null) {
-						const obj = entry as Record<string, unknown>;
-						if (typeof obj.command === "string") {
-							obj.command = rewriteCommandWithRtk(obj.command);
-						}
-					}
-					return entry;
-				});
+			if (Array.isArray(args.commands)) {
+				rewrittenArgs.commands = await Promise.all(
+					args.commands.map(async (entry: unknown) => {
+						if (!entry || typeof entry !== "object") return entry;
+						const command = (entry as Record<string, unknown>).command;
+						return typeof command === "string"
+							? {
+									...(entry as Record<string, unknown>),
+									command: await rewriteCommandWithRtk(command),
+								}
+							: entry;
+					}),
+				);
 			}
+			args = rewrittenArgs;
 		}
 		if (guardThresholds && loopDetector) {
 			const decision = loopDetector.checkToolCall(
@@ -197,7 +215,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				return { content: decision.message, isError: true };
 			}
 		}
-		return undefined;
+		return args === originalArgs ? undefined : { args };
 	};
 
 	hooks.afterToolCall = ({ toolCall, result, isError }) => {

@@ -125,6 +125,12 @@ export type ToolExecutionMode = "sequential" | "parallel";
 
 export interface Tool {
 	name: string;
+	/** Structured provenance for tools contributed by an external runtime. */
+	origin?: {
+		kind: "mcp";
+		server: string;
+		tool: string;
+	};
 	/** Human-readable label shown in UI/tool lists. */
 	label?: string;
 	description: string;
