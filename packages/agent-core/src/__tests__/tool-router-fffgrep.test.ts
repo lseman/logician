@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { ToolRouter } from "../application/tool-router.ts";
-import type { Tool } from "../index.ts";
+import type { Tool } from "../core/types/types-messages.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

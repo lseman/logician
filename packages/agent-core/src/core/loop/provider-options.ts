@@ -9,14 +9,15 @@
 import type { GenerateOptions } from "../provider/backend.ts";
 import type { AgentHooks } from "../types/types-messages.ts";
 import type { AgentSettings } from "../configuration/agent-settings.ts";
-import type { AgentConfig, ThinkingLevel } from "../types/index.ts";
+import type { ThinkingLevel } from "../types/index.ts";
 import type { InferenceModeDef } from "../types/types-config.ts";
+import type { AgentLoopConfig } from "./config.ts";
 
 export interface ProviderOptionsContext {
 	chatMessages: Record<string, unknown>[];
 	toolDefinitions: Record<string, unknown>[];
 	settings: AgentSettings;
-	config: AgentConfig;
+	config: Pick<AgentLoopConfig, "maxTokens" | "model" | "temperature">;
 	requestHeaders: Record<string, string>;
 	requestTimeoutMs: number;
 	requestMaxRetries: number;

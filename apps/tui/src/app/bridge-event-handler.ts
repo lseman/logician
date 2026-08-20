@@ -201,12 +201,8 @@ export function handleEvent(
 		case "runtime_status":
 			ctx.statusPanel.update({
 				runPhase: event.runPhase,
-				continuationsRemaining: event.continuationsRemaining,
-				noProgressRemaining: event.noProgressRemaining,
-				runTimeRemainingMs: event.timeRemainingMs,
 				runtimeRetry: event.retry,
 				runtimeRepair: event.repair,
-				compactionGeneration: event.compactionGeneration,
 				activeSubagents: event.activeSubagents,
 			});
 			break;

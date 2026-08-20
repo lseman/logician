@@ -300,11 +300,6 @@ export async function openSettingsSelector(
 					"Compact and retry automatically when context fills up",
 				],
 				[
-					"Reflection",
-					data.reflectionEnabled,
-					"Run bounded self-review before completion",
-				],
-				[
 					"Budget early-stop",
 					data.budgetStopEnabled,
 					"Stop when useful token growth flattens",
@@ -507,7 +502,6 @@ export function handleSettingsSelectorAction(
 		case "failure-loop guard":
 		case "continuation":
 		case "auto-compact on full context":
-		case "reflection":
 		case "budget early-stop":
 		case "memory": {
 			const on = value === "true";
@@ -516,16 +510,13 @@ export function handleSettingsSelectorAction(
 				"failure-loop guard": "failureGuardEnabled",
 				continuation: "continuationEnabled",
 				"auto-compact on full context": "autoRetryEnabled",
-				reflection: "reflectionEnabled",
 				"budget early-stop": "budgetStopEnabled",
 				memory: "memoryEnabled",
 			} as const;
 			const configKey =
 				runtimeKeys[settingName.toLowerCase() as keyof typeof runtimeKeys];
 			ctx.bridge.setRuntimeToggle(configKey, on);
-			if (configKey === "reflectionEnabled")
-				saveConfigNestedField("reflectionConfig", "enabled", on);
-			else saveConfigField(configKey, on);
+			saveConfigField(configKey, on);
 			ctx.notify(`${settingName}: ${on ? "on" : "off"}`, "success");
 			break;
 		}

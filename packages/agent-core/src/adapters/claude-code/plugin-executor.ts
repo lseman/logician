@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { stripJsonComments } from "../../../../infrastructure/tools/utils/json-utils.ts";
+import { stripJsonComments } from "../../infrastructure/tools/utils/json-utils.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

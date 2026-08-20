@@ -6,7 +6,7 @@
 
 import type { CompactionSettings } from "../compaction/engine.ts";
 import type { ExtensionRunner } from "../extension/index.ts";
-import type { ClaudeCodeHookLayer } from "../extension/adapters/claude-code/hook-layer.ts";
+import type { ClaudeCodeHookLayer } from "../../adapters/claude-code/hook-layer.ts";
 import { type DeliveryMode, MessageQueue } from "../../runtime/queue/queue.ts";
 import { ToolRegistry } from "../../infrastructure/tools/registry.ts";
 import { validateAgentConfig } from "../configuration/config-validator.ts";
@@ -14,14 +14,8 @@ import {
 	type RunAgentLoopConfig,
 	createSteeringInterruptReason,
 	runAgentLoop,
-	STEERING_INTERRUPT_SUMMARY,
 } from "../execution/agent-loop-runner.ts";
 import type { LLMBackend } from "../provider/backend.ts";
-import {
-	type ContinuationDecision,
-	ContinuationTracker,
-	type RunBudgetStatus,
-} from "../policy/continuation-tracker.ts";
 import { HarnessInterventionController } from "../policy/intervention-controller.ts";
 import {
 	createUserMessage,
@@ -130,10 +124,7 @@ export class AgentHarness {
 	private extensionRuntimeState = createExtensionRuntimeState();
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
-	private onSettled?: (
-		nextTurnCount: number,
-		reason: "steering_interrupt" | "normal",
-	) => void;
+	private onSettled?: (nextTurnCount: number) => void;
 	private autoCompactionSettings: CompactionSettings = {
 		enabled: false,
 		reserveTokens: 16_384,
@@ -148,7 +139,6 @@ export class AgentHarness {
 	private _sessionId?: string;
 	private _transcriptPath?: string;
 	private _hasStartedSession = false;
-	private continuationTracker = new ContinuationTracker();
 	private durableBudgetState = {
 		providerCalls: 0,
 		toolCalls: 0,
@@ -231,21 +221,6 @@ export class AgentHarness {
 		};
 	}
 
-	get continuationStatus() {
-		const state = this.continuationTracker.snapshot();
-		return state.taskId
-			? {
-					taskId: state.taskId,
-					status: state.status,
-					compactionGeneration: state.compactionGeneration,
-				}
-			: undefined;
-	}
-
-	get continuationBudget(): RunBudgetStatus | undefined {
-		return this.continuationTracker.budgetStatus();
-	}
-
 	/** Carries cumulative budget counters across turns in this session. */
 	private durableExecutionConfig(): Pick<
 		RunAgentLoopConfig,
@@ -263,29 +238,13 @@ export class AgentHarness {
 		};
 	}
 
-	requestContinuation(
-		_cause: string,
-		progressFingerprint: string,
-	): ContinuationDecision {
-		return this.continuationTracker.requestContinuation(progressFingerprint);
-	}
-
-	failRun(reason?: string): void {
-		this.continuationTracker.finish("failed", reason);
-	}
-
 	setOnPhaseChange(
 		cb: (phase: HarnessPhase, prev: HarnessPhase) => void,
 	): void {
 		this.onPhaseChange = cb;
 	}
 
-	setOnSettled(
-		cb: (
-			nextTurnCount: number,
-			reason: "steering_interrupt" | "normal",
-		) => void,
-	): void {
+	setOnSettled(cb: (nextTurnCount: number) => void): void {
 		this.onSettled = cb;
 	}
 
@@ -347,15 +306,7 @@ export class AgentHarness {
 		this._runPromise = undefined;
 		this._runResolve = undefined;
 		const nextTurnCount = this.queue.getNextTurn().length;
-		// A steering interrupt should resume as a plain next turn, not go through
-		// the autonomous continuation budget/task-restart policy meant for the
-		// model queueing its own follow-up work.
-		const reason: "steering_interrupt" | "normal" =
-			this.runtime.outcome?.status === "cancelled" &&
-			this.runtime.outcome.summary === STEERING_INTERRUPT_SUMMARY
-				? "steering_interrupt"
-				: "normal";
-		this.onSettled?.(nextTurnCount, reason);
+		this.onSettled?.(nextTurnCount);
 		this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 	}
 
@@ -441,9 +392,6 @@ export class AgentHarness {
 
 	/** Task/checkpoint setup that must happen before a snapshot is created. */
 	private async beginTurn(request: TurnRequest): Promise<AbortSignal> {
-		if (request.kind === "prompt") {
-			this.continuationTracker.startTask();
-		}
 		this.abortController = new AbortController();
 		this.conversation.checkpoint();
 
@@ -669,11 +617,6 @@ export class AgentHarness {
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
 		this.reduceRuntimeEvent(event);
-		if (event.type === "compaction")
-			this.continuationTracker.recordCompaction();
-		if (event.type === "agent_end" && event.status) {
-			this.continuationTracker.finish(event.status, event.summary);
-		}
 		// The primary application event path is synchronous and latency-sensitive;
 		// extension delivery must not hold streaming deltas behind an await.
 		this.loopConfig?.onEvent?.(event);
@@ -1178,7 +1121,6 @@ export class AgentHarness {
 		this.conversation.history = result.messages;
 		const after = result.tokensAfter;
 		this.persistCompactedContext(result.messages, before);
-		this.continuationTracker.recordCompaction();
 		await this.emitPostCompact();
 		await this._extensionRunner?.emit({
 			type: "session_compact",

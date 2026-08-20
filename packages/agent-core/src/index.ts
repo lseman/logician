@@ -1,67 +1,44 @@
-// ── Agent Core Entry Point ─────────────────────────────────────────────────
-// Barrel re-exporting every module. This is the only supported way to import
-// from @logician/agent-core — there is no other public entry point.
-//
-// Module layout:
-//   application    — bridge and high-level orchestration
-//   core           — agent engine, harness, hooks, extensions, and shared types
-//   features       — commands, MCP, prompts, and skills
-//   infrastructure — tools, guards, configuration, trust, and diagnostics
-//   runtime        — sessions, queues, tasks, summaries, and runtime events
+// Deliberately small package facade. Internal subsystems are available through
+// named package subpaths; only the engine contract shared by workspace
+// consumers belongs at the package root.
 
-// ── Core ────────────────────────────────────────────────────────────────────
-export * from "./core/execution/agent-loop-runner.ts";
-export * from "./core/configuration/agent-settings.ts";
-export * from "./core/provider/backend.ts";
 export {
-	type ContinuationDecision,
-	type ContinuationLimits,
-	type ContinuationState,
-	ContinuationTracker,
-	type RunBudgetStatus,
-} from "./core/policy/continuation-tracker.ts";
-export * from "./core/policy/execution-policy.ts";
-export * from "./core/session/file-checkpoints.ts";
-export * from "./core/policy/intervention-controller.ts";
-export * from "./core/provider/messages.ts";
+	runAgentLoop,
+	STEERING_INTERRUPT_SUMMARY,
+	type RunAgentLoopConfig,
+	type RunAgentLoopContext,
+} from "./core/execution/agent-loop-runner.ts";
+export type {
+	GenerateOptions,
+	LLMBackend,
+	LLMResponse,
+} from "./core/provider/backend.ts";
 export {
-	createRuntimeState,
-	reduceRuntimeState,
-	type AgentRuntimeState,
-	type HarnessPhase,
-} from "./core/state/runtime-state.ts";
-export * from "./core/session/session.ts";
-export * from "./core/state/tool-cache.ts";
-export * from "./core/policy/exit-path.ts";
-export * from "./core/policy/run-budget.ts";
-export * from "./core/policy/conclusion-policy.ts";
-export * from "./core/execution/tool-batch-controller.ts";
-
-// ── Harness ─────────────────────────────────────────────────────────────────
-export * from "./core/harness/agent-harness.ts";
+	DEFAULT_TRUNCATION,
+	INFERENCE_MODE_ORDER,
+	type AgentConfig,
+	type InferenceMode,
+} from "./core/types/types-config.ts";
 export type {
-	BranchInfo,
-	BranchSummaryData,
-} from "./runtime/summaries/types.ts";
+	AgentEvent,
+	Message,
+	Tool,
+	ToolContext,
+	ToolResult,
+} from "./core/types/types-messages.ts";
 export type {
-	AbortResult,
-	AgentHarnessOptions,
-	HarnessQueues,
-} from "./core/harness/types.ts";
-export { HarnessBusyError } from "./core/harness/runtime/phase.ts";
-
-// ── Guards ──────────────────────────────────────────────────────────────────
-export * from "./infrastructure/guards/index.ts";
-
-// ── Types ───────────────────────────────────────────────────────────────────
-export * from "./core/types/index.ts";
-
-// ── Tasks ───────────────────────────────────────────────────────────────────
-export type {
-	Task,
-	TaskState,
-	TaskStatus,
-} from "./runtime/todo-state.ts";
+	AcceptanceConfig,
+	AcceptanceLedger,
+} from "./infrastructure/guards/acceptance-contract.ts";
+export { stripAcceptanceReport } from "./infrastructure/guards/acceptance-contract.ts";
+export { PermissionManager } from "./infrastructure/tools/permissions.ts";
+export { parseFrontmatter } from "./infrastructure/tools/utils/frontmatter.ts";
+export {
+	highlight,
+	highlightAuto,
+} from "./infrastructure/tools/utils/syntax-highlighter.ts";
+export { stripTextToolCalls } from "./infrastructure/tools/utils/text-to-tool-calls.ts";
+export type { Task, TaskStatus } from "./runtime/todo-state.ts";
 export {
 	allocateTaskId,
 	getTasks,
@@ -70,35 +47,4 @@ export {
 	onTodosChanged,
 	replaceTasks,
 } from "./runtime/todo-state.ts";
-
-// ── Compaction ──────────────────────────────────────────────────────────────
-export {
-	type CompactionSettings,
-	compactToFit,
-	DEFAULT_COMPACTION_SETTINGS,
-	estimateContextTokens,
-	shouldCompact,
-} from "./core/compaction/index.ts";
-
-// ── Extension ───────────────────────────────────────────────────────────────
-export * from "./core/extension/index.ts";
-
-// ── Hooks ───────────────────────────────────────────────────────────────────
-export * from "./core/hooks/builtin/index.ts";
-export * from "./core/hooks/index.ts";
-
-// ── Queue ───────────────────────────────────────────────────────────────────
-export * from "./runtime/queue/index.ts";
-
-// ── Tools ───────────────────────────────────────────────────────────────────
-export * from "./infrastructure/tools/index.ts";
-
-// ── TUI Utilities ───────────────────────────────────────────────────────────
-export {
-	formatContextSize,
-	formatTokenCount,
-	formatDelay,
-	escapeTable,
-	tableRow,
-	parseInterval,
-} from "./tui-utils.ts";
+export { formatContextSize } from "./tui-utils.ts";

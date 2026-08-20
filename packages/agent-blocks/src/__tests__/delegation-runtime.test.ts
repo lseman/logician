@@ -53,75 +53,7 @@ function report(status: "satisfied" | "failed", answer: string): LLMResponse {
 	};
 }
 
-void test.skip("delegated contracts retry failed output and preserve a clean final result", async () => {
-	const result = await runDelegatedAgent({
-		task: "Produce the result",
-		config: baseConfig,
-		backend: new FakeBackend([
-			report("failed", "incomplete"),
-			report("satisfied", "corrected result"),
-		]),
-		tools: [],
-		maxIterations: 4,
-		contract: { expectedOutput: "a corrected result", maxValidationRetries: 1 },
-		onEvent: () => {},
-	});
 
-	assert.equal(result.status, "completed");
-	assert.equal(result.content, "corrected result");
-	assert.equal(result.validationAttempts, 2);
-	assert.equal(result.turns, 2);
-});
-
-void test.skip("valid acceptance reports do not trigger redundant continuation nudges", async () => {
-	let calls = 0;
-	const responses = [
-		{
-			content: "",
-			toolCalls: [{ id: "probe-1", name: "probe", arguments: "{}" }],
-			stopReason: "stop" as const,
-		},
-		report("satisfied", "verified result"),
-	];
-	const backend: LLMBackend = {
-		model: "fake",
-		withModel() {
-			return this;
-		},
-		async generate() {
-			calls++;
-			return responses.shift() ?? report("satisfied", "repeated result");
-		},
-	};
-	const tools: Tool[] = [
-		{
-			name: "probe",
-			description: "Inspect",
-			parameters: { type: "object", properties: {} },
-			execute: async () => "evidence",
-		},
-		{
-			name: "task_status",
-			description: "Conclude",
-			parameters: { type: "object", properties: {} },
-			execute: async () => "done",
-		},
-	];
-
-	const result = await runDelegatedAgent({
-		task: "Inspect and report",
-		config: { ...baseConfig, tools, continuationEnabled: true },
-		backend,
-		tools,
-		maxIterations: 4,
-		contract: { successCriteria: ["Inspection has evidence"] },
-		onEvent: () => {},
-	});
-
-	assert.equal(result.status, "completed");
-	assert.equal(result.content, "verified result");
-	assert.equal(calls, 2);
-});
 
 void test("delegated tool-call budgets are shared across the whole run", async () => {
 	let executions = 0;

@@ -14,17 +14,19 @@ import {
 	getBuiltInSubagentTools,
 	type SubagentToolDeps,
 } from "@logician/agent-blocks/tools";
+import type { AgentHarness } from "../core/harness/agent-harness.ts";
+import type { LLMBackend } from "../core/provider/backend.ts";
 import {
-	type AgentConfig,
-	type AgentHarness,
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
-	type LLMBackend,
-	type Message,
-	type Tool,
-	type ToolContext,
-} from "../index.ts";
+} from "../core/provider/messages.ts";
+import type { AgentConfig } from "../core/types/types-config.ts";
+import type {
+	Message,
+	Tool,
+	ToolContext,
+} from "../core/types/types-messages.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
 
 export interface SubagentCoordinatorDeps {

@@ -49,24 +49,17 @@ void describe("StatusBar", () => {
 		assert.ok(lines[0].includes("3"));
 	});
 
-	it("shows durable runtime phase, budgets, recovery, compaction, and children", () => {
+	it("shows runtime phase, recovery, and active children", () => {
 		setupTheme();
 		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			runPhase: "verify",
-			continuationsRemaining: 5,
-			noProgressRemaining: 2,
-			runTimeRemainingMs: 9 * 60_000,
 			runtimeRepair: "acceptance",
-			compactionGeneration: 3,
 			activeSubagents: 2,
 		});
 		const line = bar.render(220)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.match(line, /verify/);
-		assert.match(line, /↻5/);
-		assert.match(line, /Δ2/);
 		assert.match(line, /repair acceptance/);
-		assert.match(line, /cmp#3/);
 		assert.match(line, /agents 2/);
 	});
 

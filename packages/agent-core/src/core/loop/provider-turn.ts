@@ -18,13 +18,13 @@ import { convertToChatFormat } from "../provider/messages.ts";
 import type { OutputGuard } from "../../infrastructure/guards/output-guard.ts";
 import { selectAdaptiveMode } from "./adaptive-mode.ts";
 import type {
-	AgentConfig,
 	AgentEvent,
 	AgentEventSink,
 	AgentMessage,
 	CompactableMessage,
 	Message,
 } from "../types/index.ts";
+import type { AgentLoopConfig } from "./config.ts";
 import { getInferenceMode } from "../types/types-config.ts";
 import { applyHeaderPatch } from "./callbacks.ts";
 import { buildProviderRequestOptions } from "./provider-options.ts";
@@ -59,11 +59,7 @@ export type ProviderTurnResult =
  * (rather than importing RunAgentLoopConfig from core/agent-loop-runner.ts)
  * to avoid a core <-> loop import cycle, since the runner imports this module.
  */
-export interface ProviderTurnConfig extends AgentConfig {
-	backend: LLMBackend;
-	signal?: AbortSignal;
-	onContextCompacted?: (messages: Message[]) => void;
-}
+export type ProviderTurnConfig = AgentLoopConfig;
 
 export interface RequestAssistantTurnInput {
 	state: ProviderTurnState;

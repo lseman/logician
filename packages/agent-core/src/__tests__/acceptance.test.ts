@@ -91,14 +91,6 @@ void test("validate accepts minimal config", () => {
 	assert.equal(errors.length, 0);
 });
 
-void test("validate rejects maxFinalizationTurns out of range", () => {
-	const errors = validateAcceptanceInput({
-		criteria: ["do something"],
-		maxFinalizationTurns: 15,
-	});
-	assert.ok(errors.some(e => e.includes("10")));
-});
-
 void test("format returns empty for none level", () => {
 	const resolved = resolveEffectiveAcceptance({ explicit: undefined });
 	assert.equal(formatAcceptancePrompt(resolved), "");

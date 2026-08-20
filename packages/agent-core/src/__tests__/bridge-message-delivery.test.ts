@@ -16,7 +16,6 @@ void test("runtime settings update the live harness and preserve guard auto mode
 
 	bridge.setGuardMode("off");
 	bridge.setRuntimeToggle("continuationEnabled", false);
-	bridge.setRuntimeToggle("reflectionEnabled", true);
 	bridge.setGuardMode("auto");
 
 	const settings = bridge.getSettingsData();
@@ -24,11 +23,9 @@ void test("runtime settings update the live harness and preserve guard auto mode
 	assert.equal(settings.inferenceMode, "none");
 	assert.equal(settings.guardMode, "auto");
 	assert.equal(settings.continuationEnabled, false);
-	assert.equal(settings.reflectionEnabled, true);
 	assert.deepEqual(patches, [
 		{ guardsEnabled: false },
 		{ continuationEnabled: false },
-		{ reflectionConfig: { enabled: true } },
 		{ guardsEnabled: undefined },
 	]);
 });
@@ -467,7 +464,7 @@ void test("automatic continuation reuses the current system prompt", async () =>
 		prompt: async () => {
 			seen.push({ kind: "prompt", systemPrompt: internal.config.systemPrompt });
 			if (seen.length === 1)
-				internal.sessionManager.setPendingAutoContinue(true);
+				internal.sessionManager.setPendingContinuation(true);
 		},
 		continueWithNextTurn: async () => {
 			seen.push({
@@ -475,11 +472,6 @@ void test("automatic continuation reuses the current system prompt", async () =>
 				systemPrompt: internal.config.systemPrompt,
 			});
 		},
-		requestContinuation: () => ({
-			action: "continue",
-			state: { continuationRuns: 1 },
-		}),
-		failRun: () => {},
 	};
 	internal.sessionManager.setHarness(internal.harness);
 

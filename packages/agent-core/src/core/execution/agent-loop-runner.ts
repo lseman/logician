@@ -38,6 +38,7 @@ import {
 	isToolFailureResult,
 	taskObjectiveFromMessages,
 } from "../loop/adaptive-mode.ts";
+import type { AgentLoopConfig } from "../loop/config.ts";
 import type {
 	AgentConfig,
 	AgentEventSink,
@@ -100,36 +101,7 @@ export interface RunAgentLoopContext {
 	cwd?: string;
 }
 
-export interface RunAgentLoopConfig extends AgentConfig {
-	backend: LLMBackend;
-	signal?: AbortSignal;
-	maxIterations?: number;
-	/** Called when in-loop context-full recovery replaces the active transcript. */
-	onContextCompacted?: (messages: Message[]) => void;
-	/** Refresh mutable harness configuration after a completed turn. */
-	refreshNextTurnConfig?: () => Promise<AgentConfig> | AgentConfig;
-	// Output guard config (optional). When provided, the loop uses OutputGuard
-	// to handle context_full, retryable errors, and empty responses.
-	outputGuard?: OutputGuard | null;
-	/** Resolve the acceptance config at call time (allows harness to update it). */
-	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
-
-	/** Escalation state persists here across turns; defaults to a fresh, single-turn controller. */
-	interventionController?: HarnessInterventionController;
-	/** Task-spanning counters carried over from an earlier turn in this session. */
-	durableBudgetState?: {
-		providerCalls: number;
-		toolCalls: number;
-		tokens: number;
-		startedAt?: number;
-	};
-	/** Notified as budget is consumed, so the harness can carry counters into the next turn. */
-	onBudgetConsumed?: (
-		resource: "provider_call" | "tool_call" | "token",
-		amount: number,
-	) => void;
-
-}
+export type RunAgentLoopConfig = AgentLoopConfig;
 
 async function runAgentLoopInternal(
 	context: RunAgentLoopContext,
@@ -616,6 +588,8 @@ async function runAgentLoopInternal(
 			pendingMessages = await drainSteering();
 		}
 
+		pendingMessages = await drainFollowUps();
+		if (pendingMessages.length > 0) continue;
 		break;
 	}
 

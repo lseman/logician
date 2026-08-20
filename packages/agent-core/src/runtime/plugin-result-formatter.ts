@@ -3,7 +3,7 @@
 // the transcript. Pure formatting, no bridge state — extracted from
 // AgentCoreBridge.
 
-import type { PluginCommandResult } from "../core/extension/index.ts";
+import type { PluginCommandResult } from "../adapters/claude-code/plugin-manager.ts";
 import { tableRow } from "../tui-utils.ts";
 
 export function formatPluginResult(

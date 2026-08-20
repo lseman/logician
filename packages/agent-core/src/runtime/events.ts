@@ -211,12 +211,8 @@ export interface AgentErrorEvent {
 export interface RuntimeStatusEvent {
 	type: "runtime_status";
 	runPhase: string;
-	continuationsRemaining?: number;
-	noProgressRemaining?: number;
-	timeRemainingMs?: number;
 	retry?: string;
 	repair?: string;
-	compactionGeneration: number;
 	activeSubagents: number;
 }
 

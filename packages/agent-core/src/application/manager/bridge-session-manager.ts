@@ -4,13 +4,9 @@
 // mirrors it to the UI, wires slash commands, and drives the autonomous
 // continuation budget policy.
 
-import type {
-	AgentHarness,
-	HarnessPhase,
-	Message,
-	Session,
-	QueueMode,
-} from "../../index.ts";
+import type { AgentHarness } from "../../core/harness/agent-harness.ts";
+import type { HarnessPhase } from "../../core/state/runtime-state.ts";
+import type { QueueMode } from "../../core/types/types-config.ts";
 import {
 	formatActivatedSkills,
 	formatSkillActivationNotice,
@@ -24,8 +20,6 @@ export interface SessionManagerDeps {
 	harness: AgentHarness | null;
 	emit: (event: RuntimeEvent) => void;
 	getSystemPrompt: () => string;
-	setSystemPrompt: (prompt: string) => void;
-	setSteeringInterrupt: (enabled: boolean) => void;
 	getSteeringInterrupt: () => boolean;
 	setConfigSteeringMode: (mode: QueueMode) => void;
 	setConfigSteeringInterrupt: (enabled: boolean) => void;
@@ -36,22 +30,15 @@ export interface SessionManagerDeps {
 
 export class BridgeSessionManager {
 	private harness: AgentHarness | null;
-	private pendingAutoContinue = false;
-	private pendingSteeringContinue = false;
+	private pendingContinuation = false;
 	activeRepositoryQuery?: string;
 
 	constructor(private readonly deps: SessionManagerDeps) {
 		this.harness = deps.harness;
 	}
 
-	/** Set pending steering continuation flag. */
-	setPendingSteeringContinue(v: boolean): void {
-		this.pendingSteeringContinue = v;
-	}
-
-	/** Set pending auto-continuation flag. */
-	setPendingAutoContinue(v: boolean): void {
-		this.pendingAutoContinue = v;
+	setPendingContinuation(value: boolean): void {
+		this.pendingContinuation = value;
 	}
 
 	/** Set the harness reference (called once when ensureHarness builds it). */
@@ -153,81 +140,22 @@ export class BridgeSessionManager {
 		});
 	}
 
-	// ── Session lifecycle ────────────────────────────────────────────────────
-
-	/**
-	 * Replace the harness conversation with restored session history (resume /
-	 * session switch). Pass [] to clear (new session).
-	 */
-	restoreHistory(messages: Message[]): boolean {
-		try {
-			this.harness?.setHistory(messages);
-			return true;
-		} catch {
-			return false;
-		}
-	}
-
-	/**
-	 * Use the user-facing conversation session as the hook and memory session.
-	 */
-	useConversationSession(sessionId: string, durableSession?: Session): void {
-		if (!sessionId.trim()) return;
-		this.harness?.setSessionId(sessionId);
-		if (durableSession) this.harness?.attachSession(durableSession);
-	}
-
-	renameConversationSession(sessionId: string, name: string): void {
-		// Session rename is handled by MemoryManager — no-op here
-	}
-
 	// ── Continuation logic ───────────────────────────────────────────────────
 
 	/**
 	 * After a turn settles, resume with whichever continuation was queued.
 	 */
 	checkPendingContinuation(activations: SkillActivation[]): void {
-		if (this.pendingSteeringContinue) {
-			this.pendingSteeringContinue = false;
-			this.runQueuedContinuation(activations).catch(error => {
-				this.pendingSteeringContinue = false;
-				const message = error instanceof Error ? error.message : String(error);
-				this.harness?.failRun(message);
-			});
-			return;
-		}
-		if (this.pendingAutoContinue) {
-			this.pendingAutoContinue = false;
-			this.scheduleAutoContinuation(activations);
-		}
-	}
-
-	scheduleAutoContinuation(activations: SkillActivation[]): void {
-		const harness = this.harness;
-		if (!harness) return;
-		const decision = harness.requestContinuation(
-			"next_turn_queue",
-			"", // progressFingerprint — simplified
-		);
-		if (decision.action === "pause") {
+		if (!this.pendingContinuation) return;
+		this.pendingContinuation = false;
+		void this.runQueuedContinuation(activations).catch(error => {
+			const message = error instanceof Error ? error.message : String(error);
 			this.deps.emit({
 				type: "notice",
-				level: "warn",
-				label: "Continuation paused",
-				text: decision.reason,
+				level: "error",
+				label: "Continuation",
+				text: message,
 			});
-			return;
-		}
-		this.deps.emit({
-			type: "notice",
-			level: "info",
-			label: "Continuation",
-			text: `Starting native continuation run ${decision.state.continuationRuns}.`,
-		});
-		void this.runQueuedContinuation(activations).catch(error => {
-			this.pendingAutoContinue = false;
-			const message = error instanceof Error ? error.message : String(error);
-			harness.failRun(message);
 		});
 	}
 

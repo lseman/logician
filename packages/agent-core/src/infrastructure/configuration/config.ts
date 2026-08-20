@@ -63,7 +63,6 @@ const KNOWN_KEYS = new Set([
 	"toolFailureLoopThreshold",
 	"budgetStopEnabled",
 	"continuationEnabled",
-	"reflectionConfig",
 	"postEditDiagnostics",
 	"lsp",
 	"compaction",
@@ -602,35 +601,6 @@ export function validateConfig(
 		}
 	}
 
-	// reflectionConfig sub-object: self-evaluation before final conclusion.
-	if (obj.reflectionConfig !== undefined) {
-		if (
-			typeof obj.reflectionConfig !== "object" ||
-			obj.reflectionConfig === null
-		) {
-			warn(warnings, '"reflectionConfig" must be an object.');
-		} else {
-			const r = obj.reflectionConfig as Record<string, unknown>;
-			for (const key of Object.keys(r)) {
-				if (key !== "enabled" && key !== "maxReflections" && key !== "prompt") {
-					warn(warnings, `Unknown reflectionConfig key: "${key}".`);
-				}
-			}
-			const rc: {
-				enabled?: boolean;
-				maxReflections?: number;
-				prompt?: string;
-			} = {};
-			const re = configBool(r.enabled);
-			if (re !== undefined) rc.enabled = re;
-			const rm = configNumber(r.maxReflections);
-			if (rm !== undefined && rm > 0) rc.maxReflections = rm;
-			const rp = configString(r.prompt);
-			if (rp !== undefined) rc.prompt = rp;
-			if (Object.keys(rc).length > 0) cfg.reflectionConfig = rc;
-		}
-	}
-
 	// compaction sub-object.
 	if (obj.compaction !== undefined) {
 		if (typeof obj.compaction !== "object" || obj.compaction === null) {
@@ -860,12 +830,6 @@ export interface LogicianTuiConfig {
 	ariadneEnabled?: boolean;
 	/** Prefer the fff MCP indexed grep tool when available (ON by default). */
 	fffgrepEnabled?: boolean;
-	// Self-evaluation step run before the agent's final conclusion (OFF by default).
-	reflectionConfig?: {
-		enabled?: boolean;
-		maxReflections?: number;
-		prompt?: string;
-	};
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
 	turnTimeoutMs?: number;
