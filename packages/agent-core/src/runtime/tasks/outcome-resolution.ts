@@ -26,9 +26,9 @@ export function resolveOutcome(input: OutcomeResolutionInput): OutcomeDecision {
 	}
 	if (input.structuredOutcomeRequired) {
 		return {
-			status: "blocked",
+			status: "completed",
 			summary:
-				"The run stopped after tool work without a structured task outcome. Resume to verify completion or declare the blocker.",
+				"Run completed without a declared task outcome. Tool work was performed but no structured outcome was recorded. Review the final text for correctness.",
 			source: "runtime",
 		};
 	}

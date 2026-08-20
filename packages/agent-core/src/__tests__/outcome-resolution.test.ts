@@ -12,11 +12,12 @@ void test("structured done is authoritative", () => {
 	);
 });
 
-void test("undeclared tool-bearing stop is blocked", () => {
+void test("undeclared tool-bearing stop completes with warning", () => {
 	const decision = resolveOutcome({
 		declared: null,
 		structuredOutcomeRequired: true,
 	});
-	assert.equal(decision.status, "blocked");
+	assert.equal(decision.status, "completed");
 	assert.equal(decision.source, "runtime");
+	assert.ok(decision.summary?.includes("without a declared task outcome"));
 });

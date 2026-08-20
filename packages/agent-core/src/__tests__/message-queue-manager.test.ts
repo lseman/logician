@@ -1,18 +1,18 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { MessageDeliveryManager } from "../runtime/queue/manager.ts";
+import { MessageQueue } from "../runtime/queue/queue.ts";
 
 void test("one-at-a-time steering drains without dropping later messages", () => {
-	const manager = new MessageDeliveryManager({ steeringMode: "one-at-a-time" });
-	manager.queue.steering("one");
-	manager.queue.steering("two");
+	const manager = new MessageQueue({ steeringMode: "one-at-a-time" });
+	manager.steering("one");
+	manager.steering("two");
 
 	assert.deepEqual(
 		manager.afterTurn().map(message => message.content),
 		["one"],
 	);
 	assert.deepEqual(
-		manager.queue.getSteering().map(message => message.content),
+		manager.getSteering().map(message => message.content),
 		["two"],
 	);
 	assert.deepEqual(
@@ -22,25 +22,25 @@ void test("one-at-a-time steering drains without dropping later messages", () =>
 });
 
 void test("one-at-a-time idle drain preserves remaining steering and follow-ups", () => {
-	const manager = new MessageDeliveryManager({
+	const manager = new MessageQueue({
 		steeringMode: "one-at-a-time",
 		followUpMode: "one-at-a-time",
 	});
-	manager.queue.steering("steer-one");
-	manager.queue.steering("steer-two");
-	manager.queue.followUp("follow-one");
-	manager.queue.followUp("follow-two");
+	manager.steering("steer-one");
+	manager.steering("steer-two");
+	manager.followUp("follow-one");
+	manager.followUp("follow-two");
 
 	assert.deepEqual(
 		manager.onIdle().map(message => message.content),
 		["steer-one", "follow-one"],
 	);
 	assert.deepEqual(
-		manager.queue.getSteering().map(message => message.content),
+		manager.getSteering().map(message => message.content),
 		["steer-two"],
 	);
 	assert.deepEqual(
-		manager.queue.getFollowUp().map(message => message.content),
+		manager.getFollowUp().map(message => message.content),
 		["follow-two"],
 	);
 });

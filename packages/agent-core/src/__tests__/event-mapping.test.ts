@@ -52,9 +52,8 @@ void test("harness interventions map to one evidence-rich notice", () => {
 void test("heuristic terminal outcomes remain visible", () => {
 	assert.deepEqual(
 		mapAgentEvent({
-			type: "run_outcome",
+			type: "agent_end",
 			status: "completed",
-			source: "heuristic",
 			summary: "No more work remains.",
 		}),
 		{
@@ -69,10 +68,9 @@ void test("heuristic terminal outcomes remain visible", () => {
 void test("steering cancellation maps to one informational notice", () => {
 	assert.deepEqual(
 		mapAgentEvent({
-			type: "run_outcome",
+			type: "agent_end",
 			status: "cancelled",
 			summary: STEERING_INTERRUPT_SUMMARY,
-			source: "runtime",
 		}),
 		{
 			type: "notice",

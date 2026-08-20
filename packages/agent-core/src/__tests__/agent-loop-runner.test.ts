@@ -346,9 +346,8 @@ void test("structured run outcomes take precedence and reset between runs", asyn
 	assert.ok(
 		structuredEvents.some(
 			event =>
-				event.type === "run_outcome" &&
-				event.status === "needs_input" &&
-				event.source === "structured",
+				event.type === "agent_end" &&
+				event.status === "needs_input",
 		),
 	);
 
@@ -364,9 +363,8 @@ void test("structured run outcomes take precedence and reset between runs", asyn
 	assert.ok(
 		nextEvents.some(
 			event =>
-				event.type === "run_outcome" &&
-				event.status === "completed" &&
-				event.source === "heuristic",
+				event.type === "agent_end" &&
+				event.status === "completed",
 		),
 	);
 });
@@ -429,15 +427,48 @@ void test("concurrent loops isolate structured task status", async () => {
 				events.push(event);
 			},
 		);
-		return events.find(event => event.type === "run_outcome");
+		return events.find(event => event.type === "agent_end");
 		});
 	};
 
-	const [done, blocked] = await Promise.all([run("done"), run("blocked")]);
-	assert.ok(done?.type === "run_outcome");
+	const [done, explicitBlock] = await Promise.all([run("done"), run("blocked")]);
+	assert.ok(done?.type === "agent_end");
 	assert.equal(done.status, "completed");
-	assert.ok(blocked?.type === "run_outcome");
-	assert.equal(blocked.status, "blocked");
+	assert.ok(explicitBlock?.type === "agent_end");
+	assert.equal(explicitBlock.status, "blocked");
+});
+
+void test("undeclared outcome after tool work completes with warning", async () => {
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop, task_status] },
+		[user("do work")],
+		{
+			...makeConfig({
+				tools: [noop, task_status],
+				hooks: {
+					afterToolCall: () => ({ terminate: true }),
+				},
+			}),
+			callbacks: createTaskCallbacks(),
+			backend: new FakeBackend([
+				() => ({
+					content: "",
+					toolCalls: [
+						{ id: "1", name: "noop", arguments: "{}" },
+					],
+					stopReason: "stop",
+				}),
+			]),
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	const outcome = events.find(e => e.type === "agent_end");
+	assert.ok(outcome);
+	assert.equal(outcome.status, "completed");
+	assert.ok(outcome.summary?.includes("without a declared task outcome"));
 });
 
 void test("provider retry stays within one iteration and ends only after success", async () => {
@@ -587,8 +618,8 @@ void test("aborting an in-flight provider request does not emit a fake retry", a
 		),
 		false,
 	);
-	const outcome = events.find(event => event.type === "run_outcome");
-	assert.ok(outcome?.type === "run_outcome");
+	const outcome = events.find(event => event.type === "agent_end");
+	assert.ok(outcome);
 	assert.equal(outcome.status, "cancelled");
 });
 
@@ -627,7 +658,7 @@ void test("steering interruption suppresses provider errors and retries", async 
 	assert.ok(
 		events.some(
 			event =>
-				event.type === "run_outcome" &&
+				event.type === "agent_end" &&
 				event.status === "cancelled" &&
 				event.summary === STEERING_INTERRUPT_SUMMARY,
 		),
@@ -1207,9 +1238,8 @@ void test("minimal profile stops naturally when no embedded features enabled", a
 	assert.ok(
 		events.some(
 			event =>
-				event.type === "run_outcome" &&
-				event.status === "completed" &&
-				event.source === "runtime",
+				event.type === "agent_end" &&
+				event.status === "completed",
 		),
 	);
 	assert.equal(
@@ -1307,7 +1337,7 @@ void test.skip("continuation exhaustion is visible and ends blocked", async () =
 	);
 	assert.ok(
 		events.some(
-			event => event.type === "run_outcome" && event.status === "blocked",
+			event => event.type === "agent_end" && event.status === "blocked",
 		),
 	);
 });
@@ -1336,10 +1366,9 @@ void test.skip("external stop policy can return a structured minimal outcome", a
 	assert.ok(
 		events.some(
 			event =>
-				event.type === "run_outcome" &&
+				event.type === "agent_end" &&
 				event.status === "blocked" &&
-				event.summary === "Repository access is required." &&
-				event.source === "structured",
+				event.summary === "Repository access is required.",
 		),
 	);
 });
@@ -1366,9 +1395,8 @@ void test.skip("continuation pauses when the agent ends in a question", async ()
 	assert.ok(
 		events.some(
 			event =>
-				event.type === "run_outcome" &&
-				event.status === "needs_input" &&
-				event.source === "heuristic",
+				event.type === "agent_end" &&
+				event.status === "needs_input",
 		),
 	);
 });
@@ -1402,7 +1430,7 @@ void test.skip("question after tool work beats the structured-conclusion nudge",
 	assert.equal(backend.calls, 2);
 	assert.ok(
 		events.some(
-			event => event.type === "run_outcome" && event.status === "needs_input",
+			event => event.type === "agent_end" && event.status === "needs_input",
 		),
 	);
 });
@@ -1465,9 +1493,8 @@ void test.skip("continuation requires a structured conclusion after tool work", 
 	assert.ok(
 		events.some(
 			event =>
-				event.type === "run_outcome" &&
-				event.status === "completed" &&
-				event.source === "structured",
+				event.type === "agent_end" &&
+				event.status === "completed",
 		),
 	);
 });
@@ -1609,7 +1636,7 @@ void test.skip("failed acceptance gets a bounded corrective provider turn", asyn
 	);
 	assert.ok(
 		events.some(
-			event => event.type === "run_outcome" && event.status === "completed",
+			event => event.type === "agent_end" && event.status === "completed",
 		),
 	);
 });

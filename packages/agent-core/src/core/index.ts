@@ -22,5 +22,4 @@ export * from "./state/tool-cache.ts";
 export * from "./policy/exit-path.ts";
 export * from "./policy/run-budget.ts";
 export * from "./policy/conclusion-policy.ts";
-export * from "./harness/runtime/queue-hooks.ts";
 export * from "./execution/tool-batch-controller.ts";

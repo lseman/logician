@@ -9,6 +9,12 @@
 // Escape aborts and restores queued messages to the editor.
 
 export type MessageType = "steering" | "followUp" | "nextTurn";
+export type DeliveryMode = "one-at-a-time" | "all";
+
+export interface MessageQueueOptions {
+	steeringMode?: DeliveryMode;
+	followUpMode?: DeliveryMode;
+}
 
 export interface QueuedMessage {
 	id: string;
@@ -20,6 +26,39 @@ export interface QueuedMessage {
 export class MessageQueue {
 	private queue: QueuedMessage[] = [];
 	private nextId = 0;
+	private steeringMode: DeliveryMode;
+	private followUpMode: DeliveryMode;
+
+	constructor(options: MessageQueueOptions = {}) {
+		this.steeringMode = options.steeringMode ?? "one-at-a-time";
+		this.followUpMode = options.followUpMode ?? "one-at-a-time";
+	}
+
+	afterTurn(): QueuedMessage[] {
+		return this.steeringMode === "all"
+			? this.dequeueSteering()
+			: this.dequeueOneSteering();
+	}
+
+	onIdle(): QueuedMessage[] {
+		return [
+			...(this.steeringMode === "all"
+				? this.dequeueSteering()
+				: this.dequeueOneSteering()),
+			...(this.followUpMode === "all"
+				? this.dequeueFollowUp()
+				: this.dequeueOneFollowUp()),
+		];
+	}
+
+	setMode(type: "steering" | "followUp", mode: DeliveryMode): void {
+		if (type === "steering") this.steeringMode = mode;
+		else this.followUpMode = mode;
+	}
+
+	getMode(type: "steering" | "followUp"): DeliveryMode {
+		return type === "steering" ? this.steeringMode : this.followUpMode;
+	}
 
 	/** Submit a steering message (Enter). Delivered after current turn. */
 	steering(content: string): QueuedMessage {

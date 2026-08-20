@@ -20,7 +20,6 @@ export interface AgentRuntimeState {
 	outcome?: {
 		status: RunOutcomeStatus;
 		summary?: string;
-		source: "structured" | "heuristic" | "runtime";
 	};
 }
 
@@ -54,15 +53,7 @@ export function reduceRuntimeState(
 				lastEventSeq: event.seq,
 				startedAt: now,
 			};
-		case "run_outcome":
-			return {
-				...current,
-				outcome: {
-					status: event.status,
-					summary: event.summary,
-					source: event.source,
-				},
-			};
+
 		case "turn_start":
 			return { ...current, turnId: event.turnId, turnStartedAt: now };
 		case "turn_end":
@@ -125,6 +116,9 @@ export function reduceRuntimeState(
 		case "agent_end":
 			return {
 				...current,
+				...(event.status && event.summary
+					? { outcome: { status: event.status, summary: event.summary } }
+					: {}),
 				lastRunDurationMs: current.startedAt
 					? Math.max(0, now - current.startedAt)
 					: undefined,

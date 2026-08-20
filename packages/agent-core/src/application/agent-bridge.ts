@@ -976,11 +976,11 @@ export class AgentCoreBridge {
 			const harness = this.ensureHarness();
 			this.activeRepositoryQuery = undefined;
 			const repositoryContext = this.repositoryMap?.render(message);
-			if (repositoryContext && typeof harness.setSystemPrompt === "function") {
+			if (repositoryContext) {
 				persistentSystemPrompt = this.config.systemPrompt;
 				this.activeRepositoryQuery = message;
 				turnSystemPrompt = `${persistentSystemPrompt}\n\n${repositoryContext}`;
-				harness.setSystemPrompt(turnSystemPrompt);
+				harness.updateConfig({ systemPrompt: turnSystemPrompt });
 			}
 			if (this.agentCoordinator) {
 				try {
@@ -991,7 +991,7 @@ export class AgentCoreBridge {
 					if (advisory) {
 						persistentSystemPrompt ??= this.config.systemPrompt;
 						turnSystemPrompt = `${turnSystemPrompt}\n\nA structured reasoner produced the following advisory analysis for this turn. Verify it, use tools as needed, and do not mention this internal advisory unless useful:\n\n${advisory}`;
-						harness.setSystemPrompt(turnSystemPrompt);
+						harness.updateConfig({ systemPrompt: turnSystemPrompt });
 					}
 				} catch (error) {
 					// Reasoner errors are already emitted by the coordinator
@@ -1004,9 +1004,9 @@ export class AgentCoreBridge {
 			turnActivations = activations;
 			if (activations.length) {
 				persistentSystemPrompt ??= this.config.systemPrompt;
-				harness.setSystemPrompt(
-					`${turnSystemPrompt}\n\n${formatActivatedSkills(activations)}`,
-				);
+				harness.updateConfig({
+					systemPrompt: `${turnSystemPrompt}\n\n${formatActivatedSkills(activations)}`,
+				});
 				this.emit({
 					type: "notice",
 					level: "info",
@@ -1032,7 +1032,7 @@ export class AgentCoreBridge {
 			throw error;
 		} finally {
 			if (persistentSystemPrompt !== undefined) {
-				this.harness?.setSystemPrompt(persistentSystemPrompt);
+				this.harness?.updateConfig({ systemPrompt: persistentSystemPrompt });
 			}
 			this.running = false;
 			this.publishContextUsage();
@@ -1660,7 +1660,7 @@ export class AgentCoreBridge {
 
 	setTemperature(temperature: number): void {
 		this.config.temperature = temperature;
-		this.harness?.setTemperature(temperature);
+		this.harness?.updateConfig({ temperature });
 	}
 
 	setReasonerId(reasonerId: string): void {
@@ -1684,22 +1684,24 @@ export class AgentCoreBridge {
 
 	setInferenceMode(mode: string): void {
 		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
-		this.harness?.setInferenceMode(mode);
+		this.harness?.updateConfig({
+			inferenceMode: mode as AgentConfig["inferenceMode"],
+		});
 	}
 
 	setMaxTokens(maxTokens: number): void {
 		this.config.maxTokens = maxTokens;
-		this.harness?.setMaxTokens(maxTokens);
+		this.harness?.updateConfig({ maxTokens });
 	}
 
 	setMaxIterations(maxIterations: number): void {
 		this.config.maxIterations = maxIterations;
-		this.harness?.setMaxIterations(maxIterations);
+		this.harness?.updateConfig({ maxIterations });
 	}
 
 	setExecutionProfile(profile: "autonomous" | "minimal"): void {
 		this.config.executionProfile = profile;
-		this.harness?.setExecutionProfile(profile);
+		this.harness?.updateConfig({ executionProfile: profile });
 	}
 
 	setRuntimeToggle(
@@ -1738,7 +1740,7 @@ export class AgentCoreBridge {
 				...this.config.reflectionConfig,
 				enabled,
 			};
-			this.harness?.setRuntimeOptions({
+			this.harness?.updateConfig({
 				reflectionConfig: this.config.reflectionConfig,
 			});
 			return;
@@ -1776,7 +1778,7 @@ export class AgentCoreBridge {
 			key === "continuationEnabled" ||
 			key === "autoRetryEnabled"
 		) {
-			this.harness?.setRuntimeOptions({ [key]: enabled });
+			this.harness?.updateConfig({ [key]: enabled });
 		}
 		if (key === "proactiveCompactionEnabled") {
 			this.harness?.enableAutoCompaction(enabled);
@@ -1785,7 +1787,7 @@ export class AgentCoreBridge {
 
 	setGuardMode(mode: "auto" | "on" | "off"): void {
 		this.config.guardsEnabled = mode === "auto" ? undefined : mode === "on";
-		this.harness?.setRuntimeOptions({
+		this.harness?.updateConfig({
 			guardsEnabled: this.config.guardsEnabled,
 		});
 	}

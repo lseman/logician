@@ -144,9 +144,9 @@ export function resolveOutcomeDefault(ctx: {
 	}
 	if (ctx.structuredOutcomeRequired) {
 		return {
-			status: "blocked",
+			status: "completed",
 			summary:
-				"The run stopped after tool work without a structured task outcome. Resume to verify completion or declare the blocker.",
+				"Run completed without a declared task outcome. Tool work was performed but no structured outcome was recorded. Review the final text for correctness.",
 			source: "runtime",
 		};
 	}
@@ -283,8 +283,7 @@ async function runAgentLoopInternal(
 		summary?: string;
 		source: "structured" | "heuristic" | "runtime";
 	}): Promise<Message[]> => {
-		await emit({ type: "run_outcome", ...outcome });
-		await emit({ type: "agent_end", messages: newMessages });
+		await emit({ type: "agent_end", messages: newMessages, status: outcome.status, summary: outcome.summary });
 		return newMessages;
 	};
 	let settings = resolveAgentSettings(config);

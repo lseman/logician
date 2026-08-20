@@ -85,7 +85,7 @@ export class BridgeSessionManager {
 	/** Toggle mid-stream steering interrupt (cut the stream vs. queue). */
 	setSteeringInterrupt(enabled: boolean): void {
 		this.deps.setConfigSteeringInterrupt(enabled);
-		this.harness?.setSteeringInterrupt(enabled);
+		this.harness?.updateConfig({ steeringInterrupt: enabled });
 	}
 
 	getSteeringInterrupt(): boolean {
@@ -246,16 +246,16 @@ export class BridgeSessionManager {
 				activations.length ? formatActivatedSkills(activations) : undefined,
 			].filter((value): value is string => Boolean(value));
 			if (dynamicContext.length) {
-				harness.setSystemPrompt(
-					`${originalPrompt}\n\n${dynamicContext.join("\n\n")}`,
-				);
+				harness.updateConfig({
+					systemPrompt: `${originalPrompt}\n\n${dynamicContext.join("\n\n")}`,
+				});
 			}
 			this.deps.emit({ type: "turn_start", turnId });
 			await harness.continueWithNextTurn();
 			turnSucceeded = true;
 		} finally {
 			if (activations.length || this.activeRepositoryQuery) {
-				harness.setSystemPrompt(originalPrompt);
+				harness.updateConfig({ systemPrompt: originalPrompt });
 			}
 			this.deps.emit({ type: "turn_end", turnId });
 			this.deps.emit({ type: "phase", state: "ready" });
