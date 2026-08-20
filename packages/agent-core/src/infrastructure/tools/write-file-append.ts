@@ -6,7 +6,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Tool, ToolResult } from "../../engine/core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/index.ts";
 import { ensureInsideCwd, readUtf8IfExists, resolvePath } from "./utils/path-utils.ts";
 import {
 	hasBeenRead,

@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { resolveOutcome } from "../tasks/outcome-resolution.ts";
+import { resolveOutcome } from "../runtime/tasks/outcome-resolution.ts";
 
 void test("structured done is authoritative", () => {
 	assert.deepEqual(

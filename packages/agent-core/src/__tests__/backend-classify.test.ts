@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { classifyHttpError, parseProviderUsage } from "../core/backend.ts";
+import { classifyHttpError, parseProviderUsage } from "../core/provider/backend.ts";
 
 void test("429 with numeric Retry-After carries retryAfterMs", () => {
 	const err = classifyHttpError(429, "rate limited", "2");

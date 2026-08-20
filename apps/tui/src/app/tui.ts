@@ -7,18 +7,18 @@ import {
 	GoalManager,
 	type GoalState,
 	LoopManager,
-} from "@logician/coding-agent/application";
-import { createSlashCommands } from "@logician/coding-agent/commands";
-import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
+} from "@logician/agent-core/application";
+import { createSlashCommands } from "@logician/agent-core/commands";
+import { resolveRuntimeConfig } from "@logician/agent-core/runtime";
 import {
 	Transcript,
 	TuiSessionService,
 	type Turn,
-} from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/sessions";
 import {
 	createAutoresearchTools,
 	getVirtualEnvPythonVersion,
-} from "@logician/coding-agent/tools";
+} from "@logician/agent-core/tools";
 import { StatusBar } from "../footer/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";

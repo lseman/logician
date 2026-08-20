@@ -5,7 +5,7 @@
 
 import { readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
 import path from "node:path";
-import type { Tool, ToolResult } from "../../engine/core/types/index.ts";
+import type { Tool, ToolResult } from "../../core/types/index.ts";
 import { ensureInsideCwd, resolvePath } from "./utils/path-utils.ts";
 import { formatSize, truncateHead } from "./utils/truncate.ts";
 

@@ -162,11 +162,10 @@ Logician is a TypeScript monorepo organized as a layered agent runtime:
 ```mermaid
 flowchart LR
     User([User or automation]) --> TUI[Terminal UI / JSONL]
-    TUI --> Coding[Coding orchestration]
-    Coding --> Core[Agent core]
+    TUI --> Core[Agent core]
     Core --> Model[OpenAI-compatible model]
     Core --> Tools[Built-in and MCP tools]
-    Coding --> Memory[Memory and RAG]
+    Core --> Memory[Memory and RAG]
     Core --> Capabilities[Capabilities and subagents]
     Capabilities --> Research[Autoresearch]
 ```
@@ -174,8 +173,7 @@ flowchart LR
 | Package | Responsibility |
 |---|---|
 | `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
-| `@logician/coding-agent` | Configuration, sessions, commands, skills, plugins, MCP, trust, and tool orchestration |
-| `@logician/agent-core` | Provider loop, harness, event lifecycle, hooks, queues, guards, and compaction |
+| `@logician/agent-core` | Provider loop, harness, event lifecycle, hooks, queues, guards, compaction, tools, config, sessions, commands, skills, MCP, trust, and orchestration |
 | `@logician/agent-capabilities` | Delegation, reasoning strategies, tasks, user interaction, and agent primitives |
 | `@logician/memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
 | `@logician/memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |

@@ -9,11 +9,11 @@ import type {
 	AgentCoreBridge,
 	GoalManager,
 	LoopManager,
-} from "@logician/coding-agent/application";
+} from "@logician/agent-core/application";
 import type {
 	Transcript,
 	TuiSessionService,
-} from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/sessions";
 import type { MemoryStore } from "@logician/memory";
 import type { ChoicePopup } from "../../overlays/choice-popup.ts";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";

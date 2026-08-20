@@ -6,7 +6,7 @@ import { highlight, highlightAuto } from "@logician/agent-core";
 import type {
 	AssistantChunk,
 	ThinkingDisplayStyle,
-} from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/sessions";
 import { BOLD, DIM, RESET } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
 import { wrapText } from "../layout.ts";

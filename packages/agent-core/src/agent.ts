@@ -1,25 +1,26 @@
 // ── Agent Facade ───────────────────────────────────────────────────────────
 // Simple, opinionated agent API matching Pi's agent.ts pattern.
-// For full control, import AgentHarness directly from "./harness/agent-harness.ts".
+// For full control, import AgentHarness directly from "./core/harness/agent-harness.ts".
 
-import { AgentHarness } from "./harness/agent-harness.ts";
-import type { LLMBackend } from "./harness/utils/backend.ts";
-import type { AgentConfig } from "./types/types-config.ts";
-import type { Message } from "./types/types-messages.ts";
+import { AgentHarness } from "./core/harness/agent-harness.ts";
+import type { LLMBackend } from "./core/provider/backend.ts";
+import type { AgentConfig } from "./core/types/types-config.ts";
+import type { Message } from "./core/types/types-messages.ts";
 
 export type {
-	AgentHarnessApi,
 	BranchInfo,
 	BranchSummaryData,
-} from "./harness/agent-harness.ts";
+} from "./core/harness/agent-harness.ts";
 export {
-	type AbortResult,
 	type AgentRuntimeState,
-	HarnessBusyError,
 	type HarnessPhase,
-	type HarnessQueues,
-} from "./harness/result.ts";
-export type { AgentHarnessOptions } from "./harness/types.ts";
+} from "./core/state/runtime-state.ts";
+export { HarnessBusyError } from "./core/harness/runtime/phase.ts";
+export type {
+	AbortResult,
+	AgentHarnessOptions,
+	HarnessQueues,
+} from "./core/harness/types.ts";
 export { AgentHarness };
 
 /**

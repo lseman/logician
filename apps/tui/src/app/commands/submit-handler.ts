@@ -1,8 +1,8 @@
 // ── Slash-command submission dispatcher ────────────────────────────────────
 
-import { formatContextSize } from "@logician/coding-agent";
-import { GoalManager } from "@logician/coding-agent/application";
-import type { SlashCommandDef } from "@logician/coding-agent/commands";
+import { formatContextSize } from "@logician/agent-core";
+import { GoalManager } from "@logician/agent-core/application";
+import type { SlashCommandDef } from "@logician/agent-core/commands";
 import { describeSandboxProfile, parseLoopInterval } from "../tui-helpers.ts";
 import {
 	handleMcp,

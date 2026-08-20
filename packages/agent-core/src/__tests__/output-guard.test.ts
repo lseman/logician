@@ -1,7 +1,7 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import { BackendError } from "../core/backend.ts";
-import { OutputGuard } from "../guards/output-guard.ts";
+import { BackendError } from "../core/provider/backend.ts";
+import { OutputGuard } from "../infrastructure/guards/output-guard.ts";
 
 describe("OutputGuard", () => {
 	const makeGuard = (overrides = {}) =>

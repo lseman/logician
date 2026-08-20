@@ -1,6 +1,6 @@
 import type { AutoresearchSession } from "@logician/autoresearch";
-import type { AgentCoreBridge } from "@logician/coding-agent/application";
-import type { Transcript } from "@logician/coding-agent/sessions";
+import type { AgentCoreBridge } from "@logician/agent-core/application";
+import type { Transcript } from "@logician/agent-core/sessions";
 import type { InputBar } from "../../input/input-bar.ts";
 import type { AutoresearchDashboardOverlay } from "../../overlays/autoresearch-dashboard.ts";
 import type { FileMentionPopup } from "../../overlays/file-mention-popup.ts";

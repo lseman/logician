@@ -5,8 +5,8 @@ import {
 	getReasonerMeta,
 	type ReasonerMeta,
 } from "@logician/agent-blocks/reasoning";
-import { saveConfigField } from "@logician/coding-agent/configuration";
-import { listProjectFiles } from "@logician/coding-agent/context";
+import { saveConfigField } from "@logician/agent-core/configuration";
+import { listProjectFiles } from "@logician/agent-core/context";
 import type {
 	InferenceModeInfo,
 	InferenceModeSelectorAction,

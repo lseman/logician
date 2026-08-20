@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { AgentHooks } from "../../engine/core/types/index.ts";
+import type { AgentHooks } from "../../core/types/index.ts";
 import { ensureInsideCwd } from "../tools/utils/path-utils.ts";
 import type { LspManager } from "./lsp-manager.ts";
 

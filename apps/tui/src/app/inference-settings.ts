@@ -6,8 +6,8 @@ import {
 	INFERENCE_MODE_ORDER,
 	type InferenceMode,
 } from "@logician/agent-core";
-import type { AgentCoreBridge } from "@logician/coding-agent/application";
-import { saveConfigField } from "@logician/coding-agent/configuration";
+import type { AgentCoreBridge } from "@logician/agent-core/application";
+import { saveConfigField } from "@logician/agent-core/configuration";
 import type { StatusBar } from "../footer/layout.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 

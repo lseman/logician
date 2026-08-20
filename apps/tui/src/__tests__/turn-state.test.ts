@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { RuntimeEvent } from "@logician/coding-agent/runtime";
+import type { RuntimeEvent } from "@logician/agent-core/runtime";
 import { INITIAL_TURN_STATE, reduceTurnState } from "../state/turn-state.ts";
 
 const event = (value: Record<string, unknown>): RuntimeEvent =>

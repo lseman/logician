@@ -5,10 +5,10 @@ import {
 	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
-} from "../core/messages.ts";
-import type { CompactableMessage } from "../types/index.ts";
-import { compactToFit } from "../compaction/compaction.ts";
-import { serializeConversation } from "../compaction/utils.ts";
+} from "../core/provider/messages.ts";
+import type { CompactableMessage } from "../core/types/index.ts";
+import { compactToFit } from "../core/compaction/engine.ts";
+import { serializeConversation } from "../core/compaction/serialization.ts";
 
 void test("conversation serialization tolerates null and malformed content", () => {
 	assert.equal(

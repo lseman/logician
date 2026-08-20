@@ -4,7 +4,7 @@ import {
 	parseJsonWithComments,
 	parseJsonWithCommentsSafe,
 	stripJsonComments,
-} from "../tools/json-utils.ts";
+} from "../infrastructure/tools/utils/json-utils.ts";
 
 function describe(_name: string, fn: () => void) {
 	fn();

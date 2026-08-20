@@ -53,7 +53,11 @@ export { web_fetch } from "./web-fetch.ts";
 export { createWebSearchTool } from "./web-search.ts";
 export { write_file } from "./write-file.ts";
 export { write_file_append } from "./write-file-append.ts";
-export { highlightAuto } from "./utils/syntax-highlighter.ts";
+export {
+	highlight,
+	highlightAuto,
+	type HighlightResult,
+} from "./utils/syntax-highlighter.ts";
 export {
 	ensureInsideCwd,
 	readUtf8IfExists,
@@ -73,6 +77,7 @@ export {
 	parseJsonWithCommentsSafe,
 	stripJsonComments,
 } from "./utils/json-utils.ts";
+export { stripTextToolCalls } from "./utils/text-to-tool-calls.ts";
 export { ToolRegistry } from "./registry.ts";
 export {
 	PermissionManager,

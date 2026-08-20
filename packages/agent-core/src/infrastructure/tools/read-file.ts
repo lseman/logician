@@ -2,7 +2,7 @@
 // Read file contents with line-based pagination and two-axis truncation.
 
 import * as fs from "node:fs";
-import type { Tool } from "../../engine/core/types/index.ts";
+import type { Tool } from "../../core/types/index.ts";
 import { ensureInsideCwd, resolveReadPath } from "./utils/path-utils.ts";
 import { recordRead } from "./utils/read-tracker.ts";
 import {

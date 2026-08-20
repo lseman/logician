@@ -8,7 +8,7 @@ import { highlight, highlightAuto } from "@logician/agent-core";
 import type {
 	ThinkingDisplayStyle,
 	ToolExecution,
-} from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/sessions";
 import {
 	BOLD,
 	clampLineToWidth,

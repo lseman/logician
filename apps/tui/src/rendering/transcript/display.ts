@@ -7,7 +7,7 @@ import type {
 	ThinkingDisplayStyle,
 	ToolExecution,
 	Turn,
-} from "@logician/coding-agent/sessions";
+} from "@logician/agent-core/sessions";
 import {
 	BOLD,
 	type Component,

@@ -1,9 +1,9 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { AgentEvent, Tool, ToolCall } from "../types/index.ts";
-import { executeToolBatch } from "../core/tool-batch-controller.ts";
-import { PermissionManager } from "../tools/permissions.ts";
-import { ToolRegistry } from "../tools/registry.ts";
+import type { AgentEvent, Tool, ToolCall } from "../core/types/index.ts";
+import { executeToolBatch } from "../core/execution/tool-batch-controller.ts";
+import { PermissionManager } from "../infrastructure/tools/permissions.ts";
+import { ToolRegistry } from "../infrastructure/tools/registry.ts";
 
 function registryWithBash(): ToolRegistry {
 	const registry = new ToolRegistry({ cache: null });

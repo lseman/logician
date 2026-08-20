@@ -3,7 +3,7 @@
 // text (e.g. <function=tool_name>...args...</function>) instead of structured
 // tool_calls array.
 
-import type { ToolCall } from "../../../engine/core/types/index.ts";
+import type { ToolCall } from "../../../core/types/index.ts";
 
 function normalizeTextToolMarkup(content: string): string {
 	return content.replace(

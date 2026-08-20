@@ -1,8 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { Tool } from "../types/index.ts";
-import { microCompactMessages } from "../compaction/compaction.ts";
-import { ToolRegistry } from "../tools/registry.ts";
+import type { Tool } from "../core/types/index.ts";
+import { microCompactCompactableMessages } from "../core/compaction/engine.ts";
+import { ToolRegistry } from "../infrastructure/tools/registry.ts";
 
 function makeTool(overrides: Partial<Tool> & { name: string }): Tool {
 	return {
@@ -182,7 +182,7 @@ void test("micro-compaction spares recent messages and user prompts", () => {
 		})),
 	];
 
-	const result = microCompactMessages(messages);
+	const result = microCompactCompactableMessages(messages);
 
 	// Old tool result trimmed, both head and tail preserved.
 	const trimmedTool = String(result.messages[1].content);

@@ -6,7 +6,16 @@
 	"type": "module",
 	"main": "src/index.ts",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./application": "./src/application/index.ts",
+		"./commands": "./src/features/commands/index.ts",
+		"./configuration": "./src/infrastructure/configuration/index.ts",
+		"./context": "./src/infrastructure/context/index.ts",
+		"./developer-tools": "./src/infrastructure/developer-tools/index.ts",
+		"./runtime": "./src/runtime/index.ts",
+		"./sessions": "./src/runtime/sessions/index.ts",
+		"./tools": "./src/infrastructure/tools/index.ts",
+		"./trust": "./src/infrastructure/trust/index.ts"
 	},
 	"scripts": {
 		"test": "bun test $(find src -name '*.test.ts' -type f -print)",

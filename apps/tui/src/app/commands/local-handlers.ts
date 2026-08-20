@@ -3,7 +3,7 @@
 import {
 	saveConfigField,
 	saveConfigNestedField,
-} from "@logician/coding-agent/configuration";
+} from "@logician/agent-core/configuration";
 import type { CompressedObservation, ObservationType } from "@logician/memory";
 import { theme } from "../../terminal/theme.ts";
 import type { SlashCommandsCtx } from "./context.ts";
