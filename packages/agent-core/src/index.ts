@@ -38,13 +38,4 @@ export {
 	highlightAuto,
 } from "./infrastructure/tools/utils/syntax-highlighter.ts";
 export { stripTextToolCalls } from "./infrastructure/tools/utils/text-to-tool-calls.ts";
-export type { Task, TaskStatus } from "./runtime/todo-state.ts";
-export {
-	allocateTaskId,
-	getTasks,
-	getTasksMutable,
-	notifyTodosChanged,
-	onTodosChanged,
-	replaceTasks,
-} from "./runtime/todo-state.ts";
 export { formatContextSize } from "./tui-utils.ts";

@@ -141,6 +141,34 @@ function warn(warnings: string[], msg: string): void {
 	warnings.push(msg);
 }
 
+function copyStrings(
+	source: Record<string, unknown>,
+	target: LogicianTuiConfig,
+	keys: readonly (keyof LogicianTuiConfig)[],
+): void {
+	const output = target as Record<string, unknown>;
+	for (const key of keys) output[key] = configString(source[key]);
+}
+
+function copyBooleans(
+	source: Record<string, unknown>,
+	target: LogicianTuiConfig,
+	defaults: Readonly<Record<string, boolean | undefined>>,
+): void {
+	const output = target as Record<string, unknown>;
+	for (const [key, fallback] of Object.entries(defaults))
+		output[key] = configBool(source[key], fallback);
+}
+
+function copyNumbers(
+	source: Record<string, unknown>,
+	target: LogicianTuiConfig,
+	keys: readonly (keyof LogicianTuiConfig)[],
+): void {
+	const output = target as Record<string, unknown>;
+	for (const key of keys) output[key] = configNumber(source[key]);
+}
+
 export function validateConfig(
 	raw: unknown,
 	warnings: string[],
@@ -176,8 +204,7 @@ export function validateConfig(
 		}
 	}
 
-	// Simple strings.
-	cfg.model = configString(obj.model);
+	copyStrings(obj, cfg, ["model", "theme", "systemPrompt", "chatTemplate"]);
 	if (obj.executionProfile !== undefined) {
 		const profile = configString(obj.executionProfile);
 		if (profile === "autonomous" || profile === "minimal") {
@@ -259,10 +286,6 @@ export function validateConfig(
 			cfg.models = parsed as LogicianTuiConfig["models"];
 		}
 	}
-	cfg.theme = configString(obj.theme);
-	cfg.systemPrompt = configString(obj.systemPrompt);
-	cfg.chatTemplate = configString(obj.chatTemplate);
-
 	// temperature: 0–2
 	if (obj.temperature !== undefined) {
 		const t = configNumber(obj.temperature);
@@ -347,9 +370,20 @@ export function validateConfig(
 		}
 	}
 
-	// Boolean fields.
-	cfg.hooks = configBool(obj.hooks);
-	cfg.steeringInterrupt = configBool(obj.steeringInterrupt);
+	copyBooleans(obj, cfg, {
+		hooks: undefined,
+		steeringInterrupt: undefined,
+		guardsEnabled: undefined,
+		duplicateGuardEnabled: true,
+		failureGuardEnabled: undefined,
+		budgetStopEnabled: undefined,
+		continuationEnabled: true,
+		postEditDiagnostics: true,
+		autoRetryEnabled: true,
+		rtkProxyEnabled: undefined,
+		ariadneEnabled: true,
+		fffgrepEnabled: true,
+	});
 
 	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
 	if (obj.inferenceMode !== undefined) {
@@ -373,25 +407,8 @@ export function validateConfig(
 		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
 	}
 
-	cfg.guardsEnabled = configBool(obj.guardsEnabled);
-	cfg.duplicateGuardEnabled = configBool(obj.duplicateGuardEnabled, true);
-	cfg.failureGuardEnabled = configBool(obj.failureGuardEnabled);
-	cfg.budgetStopEnabled = configBool(obj.budgetStopEnabled);
-	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
-	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
-	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
-	cfg.rtkProxyEnabled = configBool(obj.rtkProxyEnabled);
-	cfg.ariadneEnabled = configBool(obj.ariadneEnabled, true);
-	cfg.fffgrepEnabled = configBool(obj.fffgrepEnabled, true);
-	if (obj.memory !== undefined) {
-		cfg.memory = configBool(obj.memory);
-	}
-	if (obj.memoryDbPath !== undefined) {
-		cfg.memoryDbPath = configString(obj.memoryDbPath);
-	}
-	if (obj.memoryExtractorModel !== undefined) {
-		cfg.memoryExtractorModel = configString(obj.memoryExtractorModel);
-	}
+	if (obj.memory !== undefined) cfg.memory = configBool(obj.memory);
+	copyStrings(obj, cfg, ["memoryDbPath", "memoryExtractorModel"]);
 	if (obj.memoryExtractor !== undefined) {
 		if (
 			!obj.memoryExtractor ||
@@ -418,15 +435,11 @@ export function validateConfig(
 			cfg.memoryExtractor = { baseUrl, model: configString(extractor.model) };
 		}
 	}
-	if (obj.memoryViewer !== undefined) {
+	if (obj.memoryViewer !== undefined)
 		cfg.memoryViewer = configBool(obj.memoryViewer);
-	}
-	if (obj.memoryEmbeddings !== undefined) {
+	if (obj.memoryEmbeddings !== undefined)
 		cfg.memoryEmbeddings = configBool(obj.memoryEmbeddings);
-	}
-	if (obj.memoryEmbeddingModel !== undefined) {
-		cfg.memoryEmbeddingModel = configString(obj.memoryEmbeddingModel);
-	}
+	copyStrings(obj, cfg, ["memoryEmbeddingModel"]);
 	if (obj.reasoner !== undefined) {
 		cfg.reasoner = configString(obj.reasoner)?.toLowerCase();
 		if (!cfg.reasoner) warn(warnings, '"reasoner" must be a non-empty string.');
@@ -448,17 +461,11 @@ export function validateConfig(
 			warn(warnings, '"reasonerConfig" must be an object.');
 		}
 	}
-	if (obj.memoryViewerPort !== undefined) {
-		cfg.memoryViewerPort = configNumber(obj.memoryViewerPort);
-	}
-	if (obj.transcriptMaxTurns !== undefined) {
-		cfg.transcriptMaxTurns = configNumber(obj.transcriptMaxTurns);
-	}
-	if (obj.transcriptMaxRenderedLines !== undefined) {
-		cfg.transcriptMaxRenderedLines = configNumber(
-			obj.transcriptMaxRenderedLines,
-		);
-	}
+	copyNumbers(obj, cfg, [
+		"memoryViewerPort",
+		"transcriptMaxTurns",
+		"transcriptMaxRenderedLines",
+	]);
 
 	for (const [key, minimum, inclusive] of [
 		["maxRetries", 0, true],

@@ -152,7 +152,7 @@ export function createLocalHandlers(
 					const number = Number(value);
 					if (!Number.isFinite(number) || number < 0 || number > 2)
 						return "Temperature must be between 0 and 2.";
-					ctx.bridge.setTemperature(number);
+					ctx.bridge.updateSettings({ temperature: number });
 					saveConfigField("temperature", number);
 					return `Temperature: ${number}`;
 				}
@@ -161,7 +161,7 @@ export function createLocalHandlers(
 					const number = Number.parseInt(value, 10);
 					if (!Number.isFinite(number) || number < 1)
 						return "Max tokens must be a positive integer.";
-					ctx.bridge.setMaxTokens(number);
+					ctx.bridge.updateSettings({ maxTokens: number });
 					saveConfigField("maxTokens", number);
 					return `Max tokens: ${number}`;
 				}
@@ -170,7 +170,7 @@ export function createLocalHandlers(
 					const number = Number.parseInt(value, 10);
 					if (!Number.isFinite(number) || number < 1)
 						return "Max iterations must be a positive integer.";
-					ctx.bridge.setMaxIterations(number);
+					ctx.bridge.updateSettings({ maxIterations: number });
 					saveConfigField("maxIterations", number);
 					return `Max iterations: ${number}`;
 				}
@@ -184,16 +184,18 @@ export function createLocalHandlers(
 				case "guards":
 					if (!["on", "off", "auto"].includes(value.toLowerCase()))
 						return "Usage: /settings guards <auto|on|off>";
-					ctx.bridge.setGuardMode(value.toLowerCase() as "auto" | "on" | "off");
+					ctx.bridge.updateSettings({
+						guardMode: value.toLowerCase() as "auto" | "on" | "off",
+					});
 					saveConfigField("guardsEnabled", value.toLowerCase() === "auto" ? undefined : on);
 					return `Guards: ${value.toLowerCase()}`;
 				case "compaction":
-					ctx.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
+					ctx.bridge.updateSettings({ proactiveCompactionEnabled: on });
 					saveConfigNestedField("compaction", "enabled", on);
 					return `Compaction: ${on ? "on" : "off"}`;
 				case "diagnostics":
 				case "post-edit-diagnostics":
-					ctx.bridge.setRuntimeToggle("postEditDiagnostics", on);
+					ctx.bridge.updateSettings({ postEditDiagnostics: on });
 					saveConfigField("postEditDiagnostics", on);
 					return `Post-edit diagnostics: ${on ? "on" : "off"}`;
 				case "inference-mode":
@@ -347,7 +349,7 @@ export function createLocalHandlers(
 		toggleRtkProxy: () => {
 			const current = ctx.bridge.getConfig()?.rtkProxyEnabled ?? false;
 			const next = !current;
-			ctx.bridge.setRuntimeToggle("rtkProxyEnabled", next);
+			ctx.bridge.updateSettings({ rtkProxyEnabled: next });
 			saveConfigField("rtkProxyEnabled", next);
 			ctx.statusPanel.update({ rtkProxyEnabled: next });
 			return next;

@@ -73,7 +73,7 @@ export function handleReasonerSelectorAction(
 	const reasoner = action.reasoner;
 	ctx.reasonerSelector.setMessage(`Setting: ${reasoner.name}...`);
 	ctx.tui.requestRender();
-	ctx.bridge.setReasonerId(reasoner.id);
+	ctx.bridge.updateSettings({ reasonerId: reasoner.id });
 	saveConfigField("reasoner", reasoner.id);
 	ctx.tui.removeOverlay(ctx.reasonerSelector);
 	ctx.statusPanel.update({ phase: "ready" });
@@ -391,7 +391,9 @@ export function handleInferenceModeSelectorAction(
 	const selected = action.mode;
 	ctx.inferenceModeSelector.setMessage(`Setting: ${selected.label}...`);
 	ctx.tui.requestRender();
-	ctx.bridge.setInferenceMode(selected.id);
+	ctx.bridge.updateSettings({
+		inferenceMode: selected.id as InferenceMode,
+	});
 	saveConfigField("inferenceMode", selected.id);
 	ctx.tui.removeOverlay(ctx.inferenceModeSelector);
 	ctx.statusPanel.update({ inferenceMode: selected.id });

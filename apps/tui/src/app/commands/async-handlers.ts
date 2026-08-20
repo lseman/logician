@@ -129,7 +129,7 @@ export async function handleReasoner(
 			return;
 		}
 		// Direct set: /reasoner ssr, /reasoner none, etc.
-		ctx.bridge.setReasonerId(normalized);
+		ctx.bridge.updateSettings({ reasonerId: normalized });
 		saveConfigField("reasoner", normalized);
 		const meta = getReasonerMeta(normalized);
 		const label = meta ? meta.name : normalized;

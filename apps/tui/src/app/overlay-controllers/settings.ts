@@ -373,7 +373,7 @@ export function handleSettingsSelectorAction(
 		case "temperature": {
 			const num = Number(value);
 			if (Number.isFinite(num) && num >= 0 && num <= 2) {
-				ctx.bridge.setTemperature(num);
+				ctx.bridge.updateSettings({ temperature: num });
 				saveConfigField("temperature", num);
 				ctx.notify(`Temperature: ${num}`, "success");
 			} else {
@@ -384,7 +384,7 @@ export function handleSettingsSelectorAction(
 		case "max tokens": {
 			const num = Number.parseInt(value, 10);
 			if (Number.isFinite(num) && num >= 1) {
-				ctx.bridge.setMaxTokens(num);
+				ctx.bridge.updateSettings({ maxTokens: num });
 				saveConfigField("maxTokens", num);
 				ctx.notify(`Max tokens: ${num}`, "success");
 			} else {
@@ -395,7 +395,7 @@ export function handleSettingsSelectorAction(
 		case "max iterations": {
 			const num = Number.parseInt(value, 10);
 			if (Number.isFinite(num) && num >= 1) {
-				ctx.bridge.setMaxIterations(num);
+				ctx.bridge.updateSettings({ maxIterations: num });
 				saveConfigField("maxIterations", num);
 				ctx.notify(`Max iterations: ${num}`, "success");
 			} else {
@@ -416,7 +416,7 @@ export function handleSettingsSelectorAction(
 			break;
 		case "guards": {
 			const mode = value as "auto" | "on" | "off";
-			ctx.bridge.setGuardMode(mode);
+			ctx.bridge.updateSettings({ guardMode: mode });
 			saveConfigField(
 				"guardsEnabled",
 				mode === "auto" ? undefined : mode === "on",
@@ -426,21 +426,21 @@ export function handleSettingsSelectorAction(
 		}
 		case "compaction": {
 			const on = value === "true";
-			ctx.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
+			ctx.bridge.updateSettings({ proactiveCompactionEnabled: on });
 			saveConfigNestedField("compaction", "enabled", on);
 			ctx.notify(`Compaction: ${on ? "on" : "off"}`, "success");
 			break;
 		}
 		case "post-edit diagnostics": {
 			const on = value === "true";
-			ctx.bridge.setRuntimeToggle("postEditDiagnostics", on);
+			ctx.bridge.updateSettings({ postEditDiagnostics: on });
 			saveConfigField("postEditDiagnostics", on);
 			ctx.notify(`Post-edit diagnostics: ${on ? "on" : "off"}`, "success");
 			break;
 		}
 		case "rtk cli proxy": {
 			const on = value === "true";
-			ctx.bridge.setRuntimeToggle("rtkProxyEnabled", on);
+			ctx.bridge.updateSettings({ rtkProxyEnabled: on });
 			saveConfigField("rtkProxyEnabled", on);
 			ctx.statusPanel.update({ rtkProxyEnabled: on });
 			ctx.notify(`RTK proxy: ${on ? "on" : "off"}`, "success");
@@ -448,7 +448,7 @@ export function handleSettingsSelectorAction(
 		}
 		case "ariadne": {
 			const on = value === "true";
-			ctx.bridge.setRuntimeToggle("ariadneEnabled", on);
+			ctx.bridge.updateSettings({ ariadneEnabled: on });
 			saveConfigField("ariadneEnabled", on);
 			ctx.statusPanel.update({ ariadneEnabled: on });
 			ctx.notify(`Ariadne: ${on ? "on" : "off"}`, "success");
@@ -456,7 +456,7 @@ export function handleSettingsSelectorAction(
 		}
 		case "fffgrep": {
 			const on = value === "true";
-			ctx.bridge.setRuntimeToggle("fffgrepEnabled", on);
+			ctx.bridge.updateSettings({ fffgrepEnabled: on });
 			saveConfigField("fffgrepEnabled", on);
 			ctx.statusPanel.update({ fffgrepEnabled: on });
 			ctx.notify(`fffgrep: ${on ? "on" : "off"}`, "success");
@@ -515,7 +515,7 @@ export function handleSettingsSelectorAction(
 			} as const;
 			const configKey =
 				runtimeKeys[settingName.toLowerCase() as keyof typeof runtimeKeys];
-			ctx.bridge.setRuntimeToggle(configKey, on);
+			ctx.bridge.updateSettings({ [configKey]: on });
 			saveConfigField(configKey, on);
 			ctx.notify(`${settingName}: ${on ? "on" : "off"}`, "success");
 			break;

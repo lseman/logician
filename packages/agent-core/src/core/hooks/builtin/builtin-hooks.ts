@@ -20,7 +20,7 @@ import {
 } from "../../provider/messages.ts";
 import type { LoopDetector } from "../../../infrastructure/guards/loop-detector.ts";
 import { awaitsUserInput } from "../../../infrastructure/guards/response-patterns.ts";
-import { getTasks } from "../../../runtime/todo-state.ts";
+import { getTasks } from "@logician/agent-blocks/tasks/todo.ts";
 import type {
 	AgentConfig,
 	AgentHooks,

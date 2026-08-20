@@ -34,7 +34,7 @@ export function setInferenceMode(
 	if (!INFERENCE_MODE_ORDER.includes(mode as InferenceMode)) return;
 	const oldMode = ctx.inferenceMode;
 	ctx.inferenceMode = mode as InferenceMode;
-	ctx.bridge.setInferenceMode(mode);
+	ctx.bridge.updateSettings({ inferenceMode: mode as InferenceMode });
 	ctx.statusPanel.update({ inferenceMode: mode });
 	if (oldMode !== mode && options.notify !== false) {
 		const labels: Record<string, string> = {
@@ -71,7 +71,9 @@ export function applyThinkingLevel(
 	options: { persist?: boolean } = {},
 ): void {
 	ctx.thinkingLevel = level;
-	ctx.bridge.setThinkingLevel(level);
+	ctx.bridge.updateSettings({
+		thinkingLevel: level as Parameters<AgentCoreBridge["updateSettings"]>[0]["thinkingLevel"],
+	});
 	ctx.statusPanel.update({ thinkingLevel: level });
 	if (options.persist === true) saveConfigField("thinkingLevel", level);
 }
@@ -80,7 +82,7 @@ export function setExecutionProfile(
 	ctx: InferenceSettingsCtx,
 	profile: "autonomous" | "minimal",
 ): void {
-	ctx.bridge.setExecutionProfile(profile);
+	ctx.bridge.updateSettings({ executionProfile: profile });
 	ctx.statusPanel.update({ executionProfile: profile });
 	saveConfigField("executionProfile", profile);
 }

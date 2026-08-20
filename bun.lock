@@ -49,21 +49,6 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/agent": {
-      "name": "@logician/agent",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sinclair/typebox": "^0.34.41",
-        "ignore": "^7.0.5",
-        "yaml": "^2.9.0",
-      },
-      "devDependencies": {
-        "@types/node": "^22.0.0",
-        "bun-types": "^1.3.14",
-        "tsx": "^4.23.1",
-        "typescript": "^7.0.2",
-      },
-    },
     "packages/agent-blocks": {
       "name": "@logician/agent-blocks",
       "version": "0.2.0",
@@ -305,8 +290,6 @@
     "@img/sharp-win32-ia32": ["@img/sharp-win32-ia32@0.34.5", "", { "os": "win32", "cpu": "ia32" }, "sha512-FV9m/7NmeCmSHDD5j4+4pNI8Cp3aW+JvLoXcTUo0IqyjSfAZJ8dIUmijx1qaJsIiU+Hosw6xM5KijAWRJCSgNg=="],
 
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.34.5", "", { "os": "win32", "cpu": "x64" }, "sha512-+29YMsqY2/9eFEiW93eqWnuLcWcufowXewwSNIT6UwZdUUCrM3oFjMWH/Z6/TMmb4hlFenmfAVbpWeup2jryCw=="],
-
-    "@logician/agent": ["@logician/agent@workspace:packages/agent"],
 
     "@logician/agent-blocks": ["@logician/agent-blocks@workspace:packages/agent-blocks"],
 
