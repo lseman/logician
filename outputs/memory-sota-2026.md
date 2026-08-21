@@ -57,7 +57,7 @@ The initial hardening patch establishes prerequisites for trustworthy retrieval:
 - Never inject untrusted memory as instructions; show citations and validity in expanded records.
 
 ### P2 — retrieval depth
-
+s
 - Introduce one narrow `MemoryService` interface: capture/remember/recall/expand/forget/explain; keep repository, extractor, embedder, reranker, and maintenance seams internal.
 - Replace the newest-4,000 brute-force vector cliff with an ANN adapter or a content-addressed candidate index.
 - Add query planning, temporal/entity filters, one-to-two-hop relation expansion, calibrated reranking, typed quotas, and abstention.

@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { LoopDetector } from "../../core/guards/loop-detector.ts";
+import { LoopDetector } from "../../control/guards/loop-detector.ts";
 
 // ── Guard: duplicate call blocking ──────────────────────────────────────
 

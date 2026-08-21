@@ -20,6 +20,6 @@
 		"noEmit": true,
 		"types": ["node", "bun-types"]
 	},
-	"include": ["src/**/*", "../agent-core/src/**/*", "../rag/src/**/*"],
+	"include": ["src/**/*", "../log-core/src/**/*", "../rag/src/**/*"],
 	"exclude": ["node_modules", "dist"]
 }

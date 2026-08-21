@@ -6,7 +6,7 @@ import type {
 	GenerateOptions,
 	LLMBackend,
 	LLMResponse,
-} from "../core/provider/backend.ts";
+} from "../capabilities/provider/backend.ts";
 
 export type Responder = (
 	messages: Record<string, unknown>[],

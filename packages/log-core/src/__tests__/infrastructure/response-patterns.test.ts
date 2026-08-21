@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { awaitsUserInput } from "../../core/guards/response-patterns.ts";
+import { awaitsUserInput } from "../../control/guards/response-patterns.ts";
 
 // ── awaitsUserInput ────────────────────────────────────────────────────────
 

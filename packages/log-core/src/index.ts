@@ -5,18 +5,18 @@ export {
 	type RunAgentLoopContext,
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
-} from "./core/execution/agent-loop-runner.ts";
+} from "./runtime/execution/agent-loop-runner.ts";
 export type {
 	AcceptanceConfig,
 	AcceptanceLedger,
-} from "./core/guards/acceptance-contract.ts";
-export { stripAcceptanceReport } from "./core/guards/acceptance-contract.ts";
+} from "./control/guards/acceptance-contract.ts";
+export { stripAcceptanceReport } from "./control/guards/acceptance-contract.ts";
 export type {
 	BackendErrorCategory,
 	GenerateOptions,
 	LLMBackend,
 	LLMResponse,
-} from "./core/provider/backend.ts";
+} from "./capabilities/provider/backend.ts";
 export {
 	BackendError,
 	classifyHttpError,
@@ -25,11 +25,11 @@ export {
 	normalizeProviderMessages,
 	OpenAIBackend,
 	parseProviderUsage,
-} from "./core/provider/backend.ts";
+} from "./capabilities/provider/backend.ts";
 export {
 	parseTextToolCalls,
 	stripTextToolCalls,
-} from "./core/provider/text-tool-calls.ts";
+} from "./capabilities/provider/text-tool-calls.ts";
 export {
 	type AgentConfig,
 	type AgentModelConfig,
@@ -46,7 +46,7 @@ export {
 	type ThinkingLevel,
 	type TruncationConfig,
 	type WebSearchConfig,
-} from "./core/types/types-config.ts";
+} from "./system/types/types-config.ts";
 export type {
 	AgentEvent,
 	AgentHooks,
@@ -57,4 +57,4 @@ export type {
 	ToolCall,
 	ToolContext,
 	ToolResult,
-} from "./core/types/types-messages.ts";
+} from "./system/types/types-messages.ts";

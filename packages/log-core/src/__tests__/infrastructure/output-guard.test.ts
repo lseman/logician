@@ -1,7 +1,7 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import { BackendError } from "@logician/log-core";
-import { OutputGuard } from "../../core/guards/output-guard.ts";
+import { OutputGuard } from "../../control/guards/output-guard.ts";
 
 describe("OutputGuard", () => {
 	const makeGuard = (overrides = {}) =>

@@ -9,4 +9,4 @@ export type {
 	ExtensionEventType,
 	RegisteredCommand,
 	RegisteredTool,
-} from "./core/extension/types.ts";
+} from "./system/extension/types.ts";
