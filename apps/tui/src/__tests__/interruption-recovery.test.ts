@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { Transcript } from "@logician/agent-core/sessions";
+import { Transcript } from "@logician/agent-runtime/sessions";
 import { LogicianTUI } from "../app/tui.ts";
 
 interface CancellationTestTui {

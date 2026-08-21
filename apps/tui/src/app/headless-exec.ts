@@ -6,10 +6,12 @@ export const EXEC_STREAM_SCHEMA = "logician.exec-stream";
 export const EXEC_STREAM_SCHEMA_VERSION = 1;
 
 export interface ExecBridge {
-	onNotification(
-		callback: (notification: AgentProtocolNotification) => void,
-	): () => void;
-	onError(callback: (error: Error) => void): void;
+	events: {
+		subscribe(
+			callback: (notification: AgentProtocolNotification) => void,
+		): () => void;
+		onError(callback: (error: Error) => void): () => void;
+	};
 	init(): Promise<Record<string, unknown>>;
 	sendMessage(message: string): Promise<void>;
 	stop(): Promise<void>;
@@ -66,7 +68,7 @@ export async function runHeadlessExec(
 		);
 	};
 
-	const unsubscribe = bridge.onNotification(({ event }) => {
+	const unsubscribe = bridge.events.subscribe(({ event }) => {
 		switch (event.type) {
 			case "token":
 				output += event.token;
@@ -128,7 +130,7 @@ export async function runHeadlessExec(
 		}
 	});
 
-	bridge.onError(error => {
+	bridge.events.onError(error => {
 		lastError = error.message;
 	});
 

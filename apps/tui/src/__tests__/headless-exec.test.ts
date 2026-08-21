@@ -25,21 +25,25 @@ class FakeBridge implements ExecBridge {
 		| ((notification: AgentProtocolNotification) => void)
 		| undefined;
 	stopped = false;
-	constructor(private readonly events: RuntimeEvent[]) {}
-	onNotification(
-		callback: (notification: AgentProtocolNotification) => void,
-	): () => void {
-		this.callback = callback;
-		return () => {
-			this.callback = undefined;
-		};
-	}
-	onError(_callback: (error: Error) => void): void {}
+	readonly events = {
+		subscribe: (
+			callback: (notification: AgentProtocolNotification) => void,
+		): (() => void) => {
+			this.callback = callback;
+			return () => {
+				this.callback = undefined;
+			};
+		},
+		onError:
+			(_callback: (error: Error) => void): (() => void) =>
+			() => {},
+	};
+	constructor(private readonly runtimeEvents: RuntimeEvent[]) {}
 	async init(): Promise<Record<string, unknown>> {
 		return {};
 	}
 	async sendMessage(_message: string): Promise<void> {
-		for (const [index, event] of this.events.entries()) {
+		for (const [index, event] of this.runtimeEvents.entries()) {
 			this.callback?.(createNotification(event, index + 1));
 		}
 	}

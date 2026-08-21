@@ -5,8 +5,8 @@ import {
 	getReasonerMeta,
 	type ReasonerMeta,
 } from "@logician/agent-blocks/reasoning";
-import { saveConfigField } from "@logician/agent-core/configuration";
-import { listProjectFiles } from "@logician/agent-core/context";
+import { saveConfigField } from "@logician/agent-runtime/configuration";
+import { listProjectFiles } from "@logician/agent-runtime/context";
 import type {
 	InferenceModeInfo,
 	InferenceModeSelectorAction,
@@ -113,7 +113,7 @@ export async function updateFileMentionPopup(
 
 export function openModelSelector(ctx: OverlayHandlersCtx): void {
 	ctx.statusPanel.update({ phase: "model" });
-	const modelInfos: ModelInfo[] = ctx.bridge.getModelOptions().map(option => ({
+	const modelInfos: ModelInfo[] = ctx.bridge.models.options().map(option => ({
 		id: option.key,
 		name: option.name,
 		active: option.active,
@@ -144,7 +144,7 @@ export function handleModelSelectorAction(
 	ctx.modelSelector.setMessage(`Switching to ${selected.name}...`);
 	ctx.tui.requestRender();
 	// Switch the model via the bridge (handles url switching too)
-	const applied = ctx.bridge.setModelOption(selected.id);
+	const applied = ctx.bridge.models.selectOption(selected.id);
 	if (!applied) return;
 	// Save to global settings
 	saveConfigField("model", applied.model);

@@ -2,22 +2,22 @@
 // Wires agent-core, transcript, and components together.
 
 import {
-	AgentCoreBridge,
+	AgentRuntime,
 	GoalManager,
 	type GoalState,
 	LoopManager,
-} from "@logician/agent-core/application";
-import { createSlashCommands } from "@logician/agent-core/commands";
-import { resolveRuntimeConfig } from "@logician/agent-core/configuration/runtime";
+} from "@logician/agent-runtime/application";
+import { createSlashCommands } from "@logician/agent-runtime/commands";
+import { resolveRuntimeConfig } from "@logician/agent-runtime/configuration/runtime";
 import {
 	Transcript,
 	TuiSessionService,
 	type Turn,
-} from "@logician/agent-core/sessions";
+} from "@logician/agent-runtime/sessions";
 import {
 	createAutoresearchTools,
 	getVirtualEnvPythonVersion,
-} from "@logician/agent-core/tools";
+} from "@logician/agent-runtime/tools";
 import { AutoresearchSession } from "@logician/autoresearch";
 import { StatusBar } from "../footer/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
@@ -131,7 +131,7 @@ export class LogicianTUI {
 	// the narrow surface TUI implements — see TuiHandle in terminal/core.ts
 	// for what's actually called across app/*.ts.
 	tui: TUI;
-	bridge: AgentCoreBridge;
+	bridge: AgentRuntime;
 	transcript: Transcript;
 	statusPanel: StatusBar;
 	todoBar: TodoBar;
@@ -277,7 +277,7 @@ export class LogicianTUI {
 		// AutoresearchSession per process rather than per pi-session.
 		this.researchManager.reload();
 		this.researchWidget = new ResearchWidget(this.researchManager);
-		this.bridge = new AgentCoreBridge({
+		this.bridge = new AgentRuntime({
 			...runtimeConfig.bridge,
 			extraTools: [
 				...(runtimeConfig.bridge.extraTools ?? []),

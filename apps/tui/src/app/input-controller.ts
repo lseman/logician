@@ -3,7 +3,7 @@
 import {
 	filterSlashCommands,
 	type SlashCommandDef,
-} from "@logician/agent-core/commands";
+} from "@logician/agent-runtime/commands";
 import { beginPendingTurn } from "../state/turn-state.ts";
 import type { LogicianTUI } from "./tui.ts";
 
@@ -23,7 +23,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 					.sendMessage(
 						"The user approved the plan. Execute the approved plan now. Do not create another plan or ask for approval again.",
 					)
-					.catch(err => ctx.bridge.reportError(err));
+					.catch(err => ctx.bridge.events.reportError(err));
 			} else {
 				ctx.planPhase = "idle";
 				ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
@@ -566,7 +566,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			setImmediate(() => {
 				void ctx.bridge
 					.sendMessage(text)
-					.catch(err => ctx.bridge.reportError(err));
+					.catch(err => ctx.bridge.events.reportError(err));
 				if (intent === "steer-now") {
 					const count = ctx.bridge.flushSteeringNow();
 					ctx.notify(
@@ -601,7 +601,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		setImmediate(() => {
 			void ctx.bridge
 				.sendMessage(prompt)
-				.catch(err => ctx.bridge.reportError(err));
+				.catch(err => ctx.bridge.events.reportError(err));
 		});
 	};
 

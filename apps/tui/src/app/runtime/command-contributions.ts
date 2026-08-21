@@ -1,12 +1,12 @@
-import type { AgentCoreBridge } from "@logician/agent-core/application";
-import type { SlashCommandDef } from "@logician/agent-core/commands";
-import type { Transcript } from "@logician/agent-core/sessions";
+import type { AgentRuntime } from "@logician/agent-runtime/application";
+import type { SlashCommandDef } from "@logician/agent-runtime/commands";
+import type { Transcript } from "@logician/agent-runtime/sessions";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { TuiHandle } from "../../terminal/core.ts";
 
 export interface CommandContributionCtx {
-	bridge: AgentCoreBridge;
+	bridge: AgentRuntime;
 	slashPopup: SlashPopup;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;

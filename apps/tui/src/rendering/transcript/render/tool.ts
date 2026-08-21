@@ -4,11 +4,11 @@
 // helpers (diff/terminal/preview/mcp/permission blocks) used by both the
 // per-tool-type detail renderers and the subagent renderers.
 
-import { highlight, highlightAuto } from "@logician/agent-core/formatting";
+import { highlight, highlightAuto } from "@logician/agent-runtime/formatting";
 import type {
 	ThinkingDisplayStyle,
 	ToolExecution,
-} from "@logician/agent-core/sessions";
+} from "@logician/agent-runtime/sessions";
 import {
 	BOLD,
 	clampLineToWidth,

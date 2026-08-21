@@ -47,34 +47,34 @@ function makeHarness(overrides?: Record<string, unknown>) {
 describe("Model cycling", () => {
 	it("cycles forward through models", () => {
 		const h = makeHarness();
-		assert.strictEqual(h.getModel(), "gpt-4");
+		assert.strictEqual(h.models.model, "gpt-4");
 
-		assert.strictEqual(h.cycleModel("forward"), "claude-sonnet");
-		assert.strictEqual(h.cycleModel("forward"), "gemma");
-		assert.strictEqual(h.cycleModel("forward"), "llama");
-		assert.strictEqual(h.cycleModel("forward"), "claude-sonnet");
+		assert.strictEqual(h.models.cycle("forward"), "claude-sonnet");
+		assert.strictEqual(h.models.cycle("forward"), "gemma");
+		assert.strictEqual(h.models.cycle("forward"), "llama");
+		assert.strictEqual(h.models.cycle("forward"), "claude-sonnet");
 	});
 
 	it("cycles backward through models", () => {
 		const h = makeHarness();
-		assert.strictEqual(h.getModel(), "gpt-4");
-		assert.strictEqual(h.cycleModel("backward"), "llama");
-		assert.strictEqual(h.cycleModel("backward"), "gemma");
+		assert.strictEqual(h.models.model, "gpt-4");
+		assert.strictEqual(h.models.cycle("backward"), "llama");
+		assert.strictEqual(h.models.cycle("backward"), "gemma");
 	});
 
 	it("returns same model when only one available", () => {
 		const h = makeHarness({ models: undefined });
-		assert.strictEqual(h.cycleModel("forward"), "gpt-4");
+		assert.strictEqual(h.models.cycle("forward"), "gpt-4");
 	});
 
 	it("returns same model when only one model in list", () => {
 		const h = makeHarness({ models: [{ name: "gpt-4", model: "gpt-4" }] });
-		assert.strictEqual(h.cycleModel("forward"), "gpt-4");
+		assert.strictEqual(h.models.cycle("forward"), "gpt-4");
 	});
 
 	it("includes current model in getModels", () => {
 		const h = makeHarness();
-		const models = h.getModels();
+		const models = h.models.models();
 		assert.strictEqual(models[0], "gpt-4");
 		assert.strictEqual(models.length, 4);
 		assert.strictEqual(models[1], "claude-sonnet");
@@ -84,7 +84,7 @@ describe("Model cycling", () => {
 
 	it("cycleModel with no models returns current model", () => {
 		const h = makeHarness({ models: [] });
-		assert.strictEqual(h.cycleModel("forward"), "gpt-4");
+		assert.strictEqual(h.models.cycle("forward"), "gpt-4");
 	});
 
 	it("switches baseUrl when target model has url override", () => {
@@ -94,15 +94,15 @@ describe("Model cycling", () => {
 				{ name: "Remote", model: "qwen", url: "http://192.168.1.225:8080" },
 			],
 		});
-		assert.strictEqual(h.getBaseUrl(), "http://localhost:11434/v1");
+		assert.strictEqual(h.models.baseUrl, "http://localhost:11434/v1");
 
-		h.cycleModel("forward");
-		assert.strictEqual(h.getModel(), "llama-local");
-		assert.strictEqual(h.getBaseUrl(), "http://localhost:8080");
+		h.models.cycle("forward");
+		assert.strictEqual(h.models.model, "llama-local");
+		assert.strictEqual(h.models.baseUrl, "http://localhost:8080");
 
-		h.cycleModel("forward");
-		assert.strictEqual(h.getModel(), "qwen");
-		assert.strictEqual(h.getBaseUrl(), "http://192.168.1.225:8080");
+		h.models.cycle("forward");
+		assert.strictEqual(h.models.model, "qwen");
+		assert.strictEqual(h.models.baseUrl, "http://192.168.1.225:8080");
 	});
 });
 
@@ -111,7 +111,7 @@ describe("Model cycling", () => {
 describe("Thinking level", () => {
 	it("defaults to off", () => {
 		const h = makeHarness();
-		assert.strictEqual(h.getThinkingLevel(), "off");
+		assert.strictEqual(h.models.thinkingLevel, "off");
 	});
 
 	it("setThinkingLevel accepts all valid levels", () => {
@@ -120,8 +120,8 @@ describe("Thinking level", () => {
 			"off" | "minimal" | "low" | "medium" | "high" | "xhigh"
 		> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 		for (const level of levels) {
-			h.setThinkingLevel(level);
-			assert.strictEqual(h.getThinkingLevel(), level);
+			h.models.setThinkingLevel(level);
+			assert.strictEqual(h.models.thinkingLevel, level);
 		}
 	});
 });
@@ -133,9 +133,9 @@ describe("Model cycle events", () => {
 		const events: AgentEvent[] = [];
 		const h = makeHarness();
 		const unsub = h.observe({ event: e => events.push(e) });
-		h.setThinkingLevel("high");
+		h.models.setThinkingLevel("high");
 
-		h.cycleModel("forward");
+		h.models.cycle("forward");
 		unsub();
 		const cycleEvent = events.find(
 			e => e.type === "model_cycle" && e.fromModel !== e.model,
@@ -153,7 +153,7 @@ describe("Model cycle events", () => {
 		const h = makeHarness();
 		const unsub = h.observe({ event: e => events.push(e) });
 
-		h.setThinkingLevel("xhigh");
+		h.models.setThinkingLevel("xhigh");
 		unsub();
 		const cycleEvent = events.find(e => e.type === "model_cycle");
 		assert.ok(cycleEvent !== undefined);
