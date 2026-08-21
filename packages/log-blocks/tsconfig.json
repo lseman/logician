@@ -15,11 +15,11 @@
 		"allowImportingTsExtensions": true,
 		"composite": true,
 		"paths": {
-			"@logician/log-rag/*": ["../rag/src/*"]
+			"@logician/log-rag/*": ["../log-rag/src/*"]
 		},
 		"noEmit": true,
 		"types": ["node", "bun-types"]
 	},
-	"include": ["src/**/*", "../log-core/src/**/*", "../rag/src/**/*"],
+	"include": ["src/**/*", "../log-core/src/**/*", "../log-rag/src/**/*"],
 	"exclude": ["node_modules", "dist"]
 }

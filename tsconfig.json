@@ -1,15 +1,16 @@
 {
 	"files": [],
 	"references": [
-		{ "path": "packages/agent-protocol" },
-		{ "path": "packages/agent-core" },
-		{ "path": "packages/agent-blocks" },
-		{ "path": "packages/agent-eval" },
-		{ "path": "packages/autoresearch" },
-		{ "path": "packages/eoh" },
-		{ "path": "packages/rag" },
-		{ "path": "packages/memory" },
-		{ "path": "apps/memory-mcp" },
+		{ "path": "packages/log-protocol" },
+		{ "path": "packages/log-core" },
+		{ "path": "packages/log-blocks" },
+		{ "path": "packages/log-eval" },
+		{ "path": "packages/log-autoresearch" },
+		{ "path": "packages/log-eoh" },
+		{ "path": "packages/log-rag" },
+		{ "path": "packages/log-memory" },
+		{ "path": "packages/log-runtime" },
+		{ "path": "apps/log-memory-mcp" },
 		{ "path": "apps/tui" }
 	]
 }
