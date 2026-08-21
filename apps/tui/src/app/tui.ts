@@ -60,6 +60,8 @@ import {
 	type ThemeSelectorAction,
 	ThemeSelectorOverlay,
 } from "../overlays/theme-selector.ts";
+import type { ThinkingLevelSelectorAction } from "../overlays/thinking-level-selector.ts";
+import { ThinkingLevelSelectorOverlay } from "../overlays/thinking-level-selector.ts";
 import { Flex } from "../rendering/flex.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
 import { Separator } from "../rendering/separator.ts";
@@ -103,6 +105,7 @@ import {
 	handleReasonerSelectorAction as handleReasonerSelectorActionImpl,
 	handleSettingsSelectorAction as handleSettingsSelectorActionImpl,
 	handleThemeSelectorAction as handleThemeSelectorActionImpl,
+	handleThinkingLevelSelectorAction as handleThinkingLevelSelectorActionImpl,
 	openAutoresearchDashboard as openAutoresearchDashboardImpl,
 	openInferenceModeSelector as openInferenceModeSelectorImpl,
 	openMcpManager as openMcpManagerImpl,
@@ -111,6 +114,7 @@ import {
 	openReasonerSelector as openReasonerSelectorImpl,
 	openSettingsSelector as openSettingsSelectorImpl,
 	openThemeSelector as openThemeSelectorImpl,
+	openThinkingLevelSelector as openThinkingLevelSelectorImpl,
 	setThemeByName as setThemeByNameImpl,
 	updateFileMentionPopup as updateFileMentionPopupImpl,
 } from "./overlay-controllers/index.ts";
@@ -154,6 +158,7 @@ export class LogicianTUI {
 	reasonerSelector: ReasonerSelectorOverlay;
 	modelSelector: ModelSelectorOverlay;
 	inferenceModeSelector: InferenceModeSelector;
+	thinkingLevelSelector: ThinkingLevelSelectorOverlay;
 	themeSelector: ThemeSelectorOverlay;
 	settingsSelector: SettingsSelectorOverlay;
 	transcriptDisplay: TranscriptDisplay;
@@ -305,6 +310,7 @@ export class LogicianTUI {
 		this.inferenceModeSelector = new InferenceModeSelector();
 		this.themeSelector = new ThemeSelectorOverlay();
 		this.settingsSelector = new SettingsSelectorOverlay();
+		this.thinkingLevelSelector = new ThinkingLevelSelectorOverlay();
 		this.transcriptDisplay = new TranscriptDisplay({
 			thinkingMode: this.thinkingDisplayMode,
 			maxMessageLength:
@@ -701,8 +707,16 @@ export class LogicianTUI {
 		await openSettingsSelectorImpl(this);
 	}
 
+	openThinkingLevelSelector(): void {
+		openThinkingLevelSelectorImpl(this);
+	}
+
 	handleSettingsSelectorAction(action: SettingsSelectorAction): void {
 		handleSettingsSelectorActionImpl(this, action);
+	}
+
+	handleThinkingLevelSelectorAction(action: ThinkingLevelSelectorAction): void {
+		handleThinkingLevelSelectorActionImpl(this, action);
 	}
 
 	applyThinkingLevel(level: string): void {

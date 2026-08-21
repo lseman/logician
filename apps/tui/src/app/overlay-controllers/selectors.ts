@@ -5,6 +5,7 @@ import {
 	getReasonerMeta,
 	type ReasonerMeta,
 } from "@logician/agent-blocks/reasoning";
+import type { ThinkingLevel } from "@logician/agent-core";
 import { saveConfigField } from "@logician/agent-runtime/configuration";
 import { listProjectFiles } from "@logician/agent-runtime/context";
 import type {
@@ -23,6 +24,10 @@ import type {
 	ThemeInfo,
 	ThemeSelectorAction,
 } from "../../overlays/theme-selector.ts";
+import type {
+	ThinkingLevelInfo,
+	ThinkingLevelSelectorAction,
+} from "../../overlays/thinking-level-selector.ts";
 import {
 	getAvailableThemes,
 	getCurrentThemeName,
@@ -378,6 +383,84 @@ export function openInferenceModeSelector(ctx: OverlayHandlersCtx): void {
 		maxHeight: 18,
 	});
 	overlay.focus();
+}
+
+// ── Thinking level selector ──────────────────────────────────────────
+
+export function openThinkingLevelSelector(ctx: OverlayHandlersCtx): void {
+	const thinkingLevels: ThinkingLevelInfo[] = [
+		{
+			id: "off",
+			label: "Off",
+			description: "No reasoning",
+			active: ctx.thinkingLevel === "off",
+		},
+		{
+			id: "minimal",
+			label: "Minimal",
+			description: "Very brief reasoning (~1k tokens)",
+			active: ctx.thinkingLevel === "minimal",
+		},
+		{
+			id: "low",
+			label: "Low",
+			description: "Light reasoning (~2k tokens)",
+			active: ctx.thinkingLevel === "low",
+		},
+		{
+			id: "medium",
+			label: "Medium",
+			description: "Moderate reasoning (~8k tokens)",
+			active: ctx.thinkingLevel === "medium",
+		},
+		{
+			id: "high",
+			label: "High",
+			description: "Deep reasoning (~16k tokens)",
+			active: ctx.thinkingLevel === "high",
+		},
+		{
+			id: "xhigh",
+			label: "X-High",
+			description: "Extra-high reasoning (~32k tokens)",
+			active: ctx.thinkingLevel === "xhigh",
+		},
+	];
+
+	ctx.thinkingLevelSelector.setLevels(thinkingLevels);
+	ctx.thinkingLevelSelector.setMessage(
+		"Enter selects thinking level for the next turn.",
+	);
+	ctx.thinkingLevelSelector.show();
+	const overlay = ctx.tui.showOverlay(ctx.thinkingLevelSelector, {
+		anchor: "aboveInput",
+		align: "left",
+		maxHeight: 18,
+	});
+	overlay.focus();
+}
+
+export function handleThinkingLevelSelectorAction(
+	ctx: OverlayHandlersCtx,
+	action: ThinkingLevelSelectorAction,
+): void {
+	if (action.type === "close") {
+		ctx.tui.removeOverlay(ctx.thinkingLevelSelector);
+		ctx.statusPanel.update({ phase: "ready" });
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		return;
+	}
+	const selected = action.level;
+	ctx.thinkingLevelSelector.setMessage(`Setting: ${selected.label}...`);
+	ctx.tui.requestRender();
+	ctx.bridge.updateSettings({
+		thinkingLevel: selected.id as ThinkingLevel,
+	});
+	ctx.thinkingLevel = selected.id as ThinkingLevel;
+	ctx.statusPanel.update({ phase: "ready", thinkingLevel: selected.id });
+	ctx.tui.removeOverlay(ctx.thinkingLevelSelector);
+	ctx.notify(`Thinking level: ${selected.label}`, "success");
+	ctx.tui.requestRender();
 }
 
 export function handleInferenceModeSelectorAction(

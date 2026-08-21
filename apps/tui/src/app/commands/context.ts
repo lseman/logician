@@ -58,6 +58,7 @@ export interface SlashCommandsCtx {
 	openMcpManager: () => Promise<void>;
 	openReasonerSelector: () => Promise<void>;
 	openThemeSelector: () => Promise<void>;
+	openThinkingLevelSelector: () => void;
 	setThemeByName: (name: string) => boolean;
 	_autoSaveTurn: () => void;
 	stop: () => Promise<void>;
