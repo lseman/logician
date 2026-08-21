@@ -2,16 +2,16 @@
 	"name": "@logician/log-core",
 	"version": "0.2.0",
 	"private": true,
-	"description": "Lean agent engine for Logician — loop, harness, hooks, types",
+	"description": "Lean agent engine for Logician \u2014 loop, harness, hooks, types",
 	"type": "module",
 	"main": "src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./harness": "./src/core/harness/agent-session.ts",
-		"./evaluation": "./src/core/evaluation/trajectory.ts",
+		"./harness": "./src/runtime/harness/agent-session.ts",
+		"./evaluation": "./src/system/evaluation/trajectory.ts",
 		"./extensions": "./src/extensions.ts",
 		"./frontmatter": "./src/frontmatter.ts",
-		"./permissions": "./src/core/tools/permissions.ts",
+		"./permissions": "./src/capabilities/tools/permissions.ts",
 		"./runtime": "./src/runtime.ts"
 	},
 	"scripts": {

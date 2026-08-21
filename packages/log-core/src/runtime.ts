@@ -1,10 +1,10 @@
 /** Contracts used by hosts that embed the core engine. */
 
-export { resolveAgentSettings } from "./core/configuration/agent-settings.ts";
-export { loadExtensions } from "./core/extension/loader.ts";
-export { ExtensionRunner } from "./core/extension/runner.ts";
-export type { AbortResult } from "./core/harness/types.ts";
-export * from "./core/provider/messages.ts";
-export * from "./core/session/session.ts";
-export type { HarnessPhase } from "./core/state/runtime-state.ts";
-export { ToolRegistry } from "./core/tools/registry.ts";
+export { resolveAgentSettings } from "./control/configuration/agent-settings.ts";
+export { loadExtensions } from "./system/extension/loader.ts";
+export { ExtensionRunner } from "./system/extension/runner.ts";
+export type { AbortResult } from "./runtime/harness/types.ts";
+export * from "./capabilities/provider/messages.ts";
+export * from "./capabilities/session/session.ts";
+export type { HarnessPhase } from "./runtime/state/runtime-state.ts";
+export { ToolRegistry } from "./capabilities/tools/registry.ts";

@@ -1,14 +1,14 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { compactToFit, pruneHistoricalToolOutputs } from "../../core/compaction/engine.ts";
-import { serializeConversation } from "../../core/compaction/serialization.ts";
-import type { CompactableMessage } from "../../core/types/types-messages.ts";
+import { compactToFit, pruneHistoricalToolOutputs } from "../../runtime/compaction/engine.ts";
+import { serializeConversation } from "../../runtime/compaction/serialization.ts";
+import type { CompactableMessage } from "../../system/types/types-messages.ts";
 import {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
-} from "../../core/provider/messages.ts";
+} from "../../capabilities/provider/messages.ts";
 
 void test("conversation serialization tolerates null and malformed content", () => {
 	assert.equal(

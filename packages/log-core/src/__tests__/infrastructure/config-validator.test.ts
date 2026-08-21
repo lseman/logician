@@ -4,7 +4,7 @@ import type { AgentConfig } from "@logician/log-core";
 import {
 	throwOnAgentConfigErrors as throwOnValidationErrors,
 	validateAgentConfig as validateConfig,
-} from "../../core/configuration/config-validator.ts";
+} from "../../control/configuration/config-validator.ts";
 
 function describe(_name: string, fn: () => void) {
 	fn();

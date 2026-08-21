@@ -1,8 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { Tool } from "@logician/log-core";
-import { microCompactCompactableMessages } from "../../core/compaction/engine.ts";
-import { ToolRegistry } from "../../core/tools/registry.ts";
+import { microCompactCompactableMessages } from "../../runtime/compaction/engine.ts";
+import { ToolRegistry } from "../../capabilities/tools/registry.ts";
 
 function makeTool(overrides: Partial<Tool> & { name: string }): Tool {
 	return {
