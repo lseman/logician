@@ -2,9 +2,9 @@
 // Mixes bridge control + status display + disk config persistence for the
 // inference-mode and execution-profile settings.
 
-import { INFERENCE_MODE_ORDER, type InferenceMode } from "@logician/agent-core";
-import type { AgentRuntime } from "@logician/agent-runtime/application";
-import { saveConfigField } from "@logician/agent-runtime/configuration";
+import { INFERENCE_MODE_ORDER, type InferenceMode } from "@logician/log-core";
+import type { AgentRuntime } from "@logician/log-runtime/application";
+import { saveConfigField } from "@logician/log-runtime/configuration";
 import type { StatusBar } from "../footer/layout.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 

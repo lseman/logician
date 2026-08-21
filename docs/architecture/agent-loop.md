@@ -9,10 +9,10 @@ The agent loop is the core execution cycle that drives all agent behavior.
 
 ## Harness composition
 
-`AgentHarness` is available from `@logician/agent-core/harness`. Applications can assemble reusable capability bundles with `defineHarnessModule()` instead of wrapping or subclassing the harness:
+`AgentHarness` is available from `@logician/log-core/harness`. Applications can assemble reusable capability bundles with `defineHarnessModule()` instead of wrapping or subclassing the harness:
 
 ```ts
-import { AgentHarness, defineHarnessModule } from "@logician/agent-core/harness";
+import { AgentHarness, defineHarnessModule } from "@logician/log-core/harness";
 
 const diagnostics = defineHarnessModule({
   name: "diagnostics",

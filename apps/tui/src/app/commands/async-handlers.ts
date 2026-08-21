@@ -1,8 +1,8 @@
 // ── Async slash-command helpers ────────────────────────────────────────────
 
-import { getReasonerMeta } from "@logician/agent-blocks/reasoning";
-import { saveConfigField } from "@logician/agent-runtime/configuration";
-import { formatContextSize } from "@logician/agent-runtime/formatting";
+import { getReasonerMeta } from "@logician/log-blocks/reasoning";
+import { saveConfigField } from "@logician/log-runtime/configuration";
+import { formatContextSize } from "@logician/log-runtime/formatting";
 import {
 	getAvailableThemes,
 	getCurrentThemeName,

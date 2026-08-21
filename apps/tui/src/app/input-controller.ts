@@ -3,7 +3,7 @@
 import {
 	filterSlashCommands,
 	type SlashCommandDef,
-} from "@logician/agent-runtime/commands";
+} from "@logician/log-runtime/commands";
 import { beginPendingTurn } from "../state/turn-state.ts";
 import type { LogicianTUI } from "./tui.ts";
 

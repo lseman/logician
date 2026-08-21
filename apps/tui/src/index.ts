@@ -36,19 +36,19 @@ import { join } from "node:path";
 	}
 })();
 
-import { AgentRuntime } from "@logician/agent-runtime/application";
-import { resolveRuntimeConfig } from "@logician/agent-runtime/configuration/runtime";
+import { AgentRuntime } from "@logician/log-runtime/application";
+import { resolveRuntimeConfig } from "@logician/log-runtime/configuration/runtime";
 import {
 	buildDoctorReport,
 	formatDoctorReport,
-} from "@logician/agent-runtime/developer-tools";
-import { activateProjectVirtualEnv } from "@logician/agent-runtime/tools";
+} from "@logician/log-runtime/developer-tools";
+import { activateProjectVirtualEnv } from "@logician/log-runtime/tools";
 import {
 	applyTrustChoice,
 	resolveTrust,
 	resolveTrustInfo,
 	TrustStore,
-} from "@logician/agent-runtime/trust";
+} from "@logician/log-runtime/trust";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
 import { LogicianTUI } from "./app/tui.ts";
 import {

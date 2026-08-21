@@ -4,10 +4,10 @@ import {
 	getReasonerIds,
 	getReasonerMeta,
 	type ReasonerMeta,
-} from "@logician/agent-blocks/reasoning";
-import type { ThinkingLevel } from "@logician/agent-core";
-import { saveConfigField } from "@logician/agent-runtime/configuration";
-import { listProjectFiles } from "@logician/agent-runtime/context";
+} from "@logician/log-blocks/reasoning";
+import type { ThinkingLevel } from "@logician/log-core";
+import { saveConfigField } from "@logician/log-runtime/configuration";
+import { listProjectFiles } from "@logician/log-runtime/context";
 import type {
 	InferenceModeInfo,
 	InferenceModeSelectorAction,

@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="logo/logician-banner.svg">
-  <img src="logo/logician-banner-light.svg" alt="Logician" width="800">
+  <source media="(prefers-color-scheme: dark)" srcset="logo/logician-banner-dark.svg">
+  <img src="logo/logician-logo.svg" alt="Logician" width="800">
 </picture>
 
 ### A local-first coding agent built for the terminal
@@ -175,14 +175,14 @@ flowchart LR
 | Package | Responsibility |
 |---|---|
 | `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
-| `@logician/agent-protocol` | Dependency-free, versioned client notifications shared by the runtime and presentation layers |
-| `@logician/agent-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, config, sessions, and application orchestration |
-| `@logician/agent-blocks` | Delegation, reasoning strategies, tasks, user interaction, and optional agent features |
-| `@logician/memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
-| `@logician/memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |
-| `@logician/rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
-| `@logician/autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |
-| `@logician/agent-eval` | Versioned coding-task corpora, independent graders, trials, and quality reports |
+| `@logician/log-protocol` | Dependency-free, versioned client notifications shared by the runtime and presentation layers |
+| `@logician/log-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, config, sessions, and application orchestration |
+| `@logician/log-blocks` | Delegation, reasoning strategies, tasks, user interaction, and optional agent features |
+| `@logician/log-memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
+| `@logician/log-memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |
+| `@logician/log-rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
+| `@logician/log-autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |
+| `@logician/log-eval` | Versioned coding-task corpora, independent graders, trials, and quality reports |
 
 The core flow is deliberately simple:
 

@@ -14,12 +14,12 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@logician/agent-blocks": "0.2.0",
-		"@logician/agent-core": "0.2.0",
-		"@logician/agent-protocol": "0.1.0",
-		"@logician/agent-runtime": "0.2.0",
-		"@logician/autoresearch": "0.2.0",
-		"@logician/memory": "0.1.0",
+		"@logician/log-blocks": "0.2.0",
+		"@logician/log-core": "0.2.0",
+		"@logician/log-protocol": "0.1.0",
+		"@logician/log-runtime": "0.2.0",
+		"@logician/log-autoresearch": "0.2.0",
+		"@logician/log-memory": "0.1.0",
 		"string-width": "^8.2.2"
 	},
 	"devDependencies": {

@@ -8,13 +8,13 @@ import type {
 	AgentRuntime,
 	GoalManager,
 	LoopManager,
-} from "@logician/agent-runtime/application";
+} from "@logician/log-runtime/application";
 import type {
 	Transcript,
 	TuiSessionService,
-} from "@logician/agent-runtime/sessions";
-import type { AutoresearchSession } from "@logician/autoresearch";
-import type { MemoryStore } from "@logician/memory";
+} from "@logician/log-runtime/sessions";
+import type { AutoresearchSession } from "@logician/log-autoresearch";
+import type { MemoryStore } from "@logician/log-memory";
 import type { ChoicePopup } from "../../overlays/choice-popup.ts";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";

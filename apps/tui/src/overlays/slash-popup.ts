@@ -7,7 +7,7 @@ import {
 	groupByCategory,
 	type SlashCommandCategory,
 	type SlashCommandDef,
-} from "@logician/agent-runtime/commands";
+} from "@logician/log-runtime/commands";
 import {
 	BOLD,
 	type Component,

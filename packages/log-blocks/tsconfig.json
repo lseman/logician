@@ -1,0 +1,25 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"rootDir": "..",
+		"outDir": "dist",
+		"strict": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"declaration": true,
+		"sourceMap": true,
+		"resolveJsonModule": true,
+		"forceConsistentCasingInFileNames": true,
+		"allowImportingTsExtensions": true,
+		"composite": true,
+		"paths": {
+			"@logician/log-rag/*": ["../rag/src/*"]
+		},
+		"noEmit": true,
+		"types": ["node", "bun-types"]
+	},
+	"include": ["src/**/*", "../agent-core/src/**/*", "../rag/src/**/*"],
+	"exclude": ["node_modules", "dist"]
+}

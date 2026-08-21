@@ -1,6 +1,6 @@
-import type { AgentRuntime } from "@logician/agent-runtime/application";
-import type { SlashCommandDef } from "@logician/agent-runtime/commands";
-import type { Transcript } from "@logician/agent-runtime/sessions";
+import type { AgentRuntime } from "@logician/log-runtime/application";
+import type { SlashCommandDef } from "@logician/log-runtime/commands";
+import type { Transcript } from "@logician/log-runtime/sessions";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { TuiHandle } from "../../terminal/core.ts";

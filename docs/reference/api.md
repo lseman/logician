@@ -22,8 +22,8 @@ tsx apps/tui/src/index.ts
 
 ### Memory MCP server
 
-`@logician/memory-mcp` (`apps/memory-mcp`) is a stdio MCP server that exposes
-`@logician/memory` — search, capture, and consolidation — to any MCP client,
+`@logician/log-memory-mcp` (`apps/memory-mcp`) is a stdio MCP server that exposes
+`@logician/log-memory` — search, capture, and consolidation — to any MCP client,
 independent of the TUI or headless bridge. It requires an explicit
 `--workspace`; the default database is `<workspace>/.logician/memory.db`.
 
@@ -36,13 +36,13 @@ for the full tool list and MCP client configuration.
 
 ### Headless (programmatic)
 
-The headless entry point is `AgentCoreBridge` from `@logician/agent-core`'s
+The headless entry point is `AgentCoreBridge` from `@logician/log-core`'s
 `application` export—the same bridge the TUI itself drives. It is
 event-driven: subscribe with `onNotification()`/`onError()`, then call
 `sendMessage()`.
 
 ```typescript
-import { AgentCoreBridge } from '@logician/agent-core/application'
+import { AgentCoreBridge } from '@logician/log-core/application'
 
 const bridge = new AgentCoreBridge({
   baseUrl: 'http://127.0.0.1:8080',
@@ -72,7 +72,7 @@ type ErrorCallback = (err: Error) => void
 ```
 
 `RuntimeEvent` is a discriminated union keyed on `type`, exported from the
-dependency-free `@logician/agent-protocol` package. Subscribe with
+dependency-free `@logician/log-protocol` package. Subscribe with
 `onNotification()` to receive an ordered envelope containing `protocolVersion`,
 `sequence`, `timestamp`, and `event`. Event families include:
 

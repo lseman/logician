@@ -7,8 +7,8 @@ import { pathToFileURL } from "node:url";
 import {
 	stripAcceptanceReport,
 	stripTextToolCalls,
-} from "@logician/agent-core";
-import type { AssistantChunk } from "@logician/agent-runtime/sessions";
+} from "@logician/log-core";
+import type { AssistantChunk } from "@logician/log-runtime/sessions";
 import { BOLD, DIM, RESET } from "../../terminal/core.ts";
 import { hyperlink, supportsHyperlinks } from "../../terminal/hyperlinks.ts";
 import { theme } from "../../terminal/theme.ts";

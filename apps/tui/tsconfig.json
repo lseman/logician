@@ -16,14 +16,14 @@
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"paths": {
-			"@logician/agent-protocol": ["../../packages/agent-protocol/src/index.ts"]
+			"@logician/log-protocol": ["../../packages/log-protocol/src/index.ts"]
 		},
 		"types": ["node", "bun-types"]
 	},
 	"include": [
 		"src/**/*",
-		"../../packages/agent-core/src/**/*",
-		"../../packages/agent-protocol/src/**/*"
+		"../../packages/log-core/src/**/*",
+		"../../packages/log-protocol/src/**/*"
 	],
 	"exclude": ["node_modules", "dist"]
 }

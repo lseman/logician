@@ -3,8 +3,8 @@
 import {
 	saveConfigField,
 	saveConfigNestedField,
-} from "@logician/agent-runtime/configuration";
-import type { CompressedObservation, ObservationType } from "@logician/memory";
+} from "@logician/log-runtime/configuration";
+import type { CompressedObservation, ObservationType } from "@logician/log-memory";
 import { theme } from "../../terminal/theme.ts";
 import type { SlashCommandsCtx } from "./context.ts";
 
