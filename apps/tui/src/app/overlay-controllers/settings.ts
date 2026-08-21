@@ -3,7 +3,7 @@
 import {
 	saveConfigField,
 	saveConfigNestedField,
-} from "@logician/agent-core/configuration";
+} from "@logician/agent-runtime/configuration";
 import type {
 	SettingDef,
 	SettingsSelectorAction,
@@ -370,7 +370,7 @@ export function handleSettingsSelectorAction(
 	// Apply the setting via the bridge
 	switch (settingName.toLowerCase()) {
 		case "model":
-			ctx.bridge.setModel(value);
+			ctx.bridge.models.select(value);
 			ctx.notify(`Model: ${value}`, "success");
 			break;
 		case "temperature": {

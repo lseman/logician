@@ -208,7 +208,7 @@ void test("phase observers fire on turn transitions", async () => {
 
 void test("getModel returns the configured model", async () => {
 	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));
-	assert.equal(harness.getModel(), "fake");
+	assert.equal(harness.models.model, "fake");
 });
 
 void test("prompt with empty user message works", async () => {

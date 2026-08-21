@@ -3,15 +3,15 @@
 // inference-mode and execution-profile settings.
 
 import { INFERENCE_MODE_ORDER, type InferenceMode } from "@logician/agent-core";
-import type { AgentCoreBridge } from "@logician/agent-core/application";
-import { saveConfigField } from "@logician/agent-core/configuration";
+import type { AgentRuntime } from "@logician/agent-runtime/application";
+import { saveConfigField } from "@logician/agent-runtime/configuration";
 import type { StatusBar } from "../footer/layout.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 
 export { INFERENCE_MODE_ORDER, type InferenceMode };
 
 export interface InferenceSettingsCtx {
-	bridge: AgentCoreBridge;
+	bridge: AgentRuntime;
 	statusPanel: StatusBar;
 	tui: TuiHandle;
 	inferenceMode: InferenceMode;
@@ -73,7 +73,7 @@ export function applyThinkingLevel(
 	ctx.thinkingLevel = level;
 	ctx.bridge.updateSettings({
 		thinkingLevel: level as Parameters<
-			AgentCoreBridge["updateSettings"]
+			AgentRuntime["updateSettings"]
 		>[0]["thinkingLevel"],
 	});
 	ctx.statusPanel.update({ thinkingLevel: level });

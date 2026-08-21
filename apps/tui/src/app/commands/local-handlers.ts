@@ -3,7 +3,7 @@
 import {
 	saveConfigField,
 	saveConfigNestedField,
-} from "@logician/agent-core/configuration";
+} from "@logician/agent-runtime/configuration";
 import type { CompressedObservation, ObservationType } from "@logician/memory";
 import { theme } from "../../terminal/theme.ts";
 import type { SlashCommandsCtx } from "./context.ts";
@@ -142,12 +142,12 @@ export function createLocalHandlers(
 					return `Thinking level: ${value}`;
 				case "model":
 					if (!value) return "Usage: /settings model <name>";
-					ctx.bridge.setModel(value);
+					ctx.bridge.models.select(value);
 					saveConfigField("model", value);
 					return `Model: ${value}`;
 				case "model-cycle":
 				case "model_cycle":
-					return `Model: ${ctx.bridge.cycleModel() ?? "unchanged"}`;
+					return `Model: ${ctx.bridge.models.cycle() ?? "unchanged"}`;
 				case "temp": {
 					const number = Number(value);
 					if (!Number.isFinite(number) || number < 0 || number > 2)

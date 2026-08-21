@@ -1,5 +1,5 @@
-import type { AgentCoreBridge } from "@logician/agent-core/application";
-import type { Transcript } from "@logician/agent-core/sessions";
+import type { AgentRuntime } from "@logician/agent-runtime/application";
+import type { Transcript } from "@logician/agent-runtime/sessions";
 import type { AutoresearchSession } from "@logician/autoresearch";
 import type { InputBar } from "../../input/input-bar.ts";
 import type { AutoresearchDashboardOverlay } from "../../overlays/autoresearch-dashboard.ts";
@@ -23,7 +23,7 @@ export type NotifyFn = (
 
 export interface OverlayHandlersCtx {
 	tui: TuiHandle;
-	bridge: AgentCoreBridge;
+	bridge: AgentRuntime;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
 	statusPanel: StatusBar;

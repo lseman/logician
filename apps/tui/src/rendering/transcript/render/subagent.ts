@@ -7,7 +7,7 @@ import type {
 	ChildChunk,
 	ChildToolCall,
 	ToolExecution,
-} from "@logician/agent-core/sessions";
+} from "@logician/agent-runtime/sessions";
 import { clampLineToWidth, DIM, RESET } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
 import {

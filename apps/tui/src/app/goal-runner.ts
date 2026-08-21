@@ -4,16 +4,16 @@
 // transcript access, bridge config, and fetch.
 
 import {
-	type AgentCoreBridge,
+	type AgentRuntime,
 	GoalManager,
 	type GoalState,
-} from "@logician/agent-core/application";
-import type { Transcript } from "@logician/agent-core/sessions";
+} from "@logician/agent-runtime/application";
+import type { Transcript } from "@logician/agent-runtime/sessions";
 import type { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 
 export interface GoalRunnerCtx {
-	bridge: AgentCoreBridge;
+	bridge: AgentRuntime;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
 	tui: TuiHandle;
@@ -133,7 +133,7 @@ export async function evaluateGoal(
 		if (stillActive) {
 			const reminder = `Goal reminder: "${goalState.condition}". ${reason}. Continue working toward the goal.`;
 			void ctx.bridge.sendMessage(reminder).catch((error: unknown) => {
-				ctx.bridge.reportError(error);
+				ctx.bridge.events.reportError(error);
 			});
 		}
 	}

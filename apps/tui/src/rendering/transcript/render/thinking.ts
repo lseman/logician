@@ -2,11 +2,11 @@
 // Renders assistant reasoning chunks (collapsed/summary/expanded modes) with
 // code-block syntax highlighting in expanded mode.
 
-import { highlight, highlightAuto } from "@logician/agent-core/formatting";
+import { highlight, highlightAuto } from "@logician/agent-runtime/formatting";
 import type {
 	AssistantChunk,
 	ThinkingDisplayStyle,
-} from "@logician/agent-core/sessions";
+} from "@logician/agent-runtime/sessions";
 import { BOLD, DIM, RESET } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
 import { wrapText } from "../layout.ts";

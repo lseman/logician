@@ -17,52 +17,28 @@ async function sourceFiles(root: string): Promise<string[]> {
 }
 
 describe("core architecture boundaries", () => {
-	test("source layers follow the declared dependency direction", async () => {
+	test("production source contains only the foundational core", async () => {
 		const sourceRoot = path.resolve(import.meta.dir, "../../");
-		const allowed: Record<string, ReadonlySet<string>> = {
-			core: new Set(["core"]),
-			capabilities: new Set(["core", "capabilities"]),
-			infrastructure: new Set(["core", "infrastructure"]),
-			adapters: new Set(["core", "infrastructure", "adapters"]),
-			application: new Set([
-				"core",
-				"capabilities",
-				"infrastructure",
-				"adapters",
-				"application",
-			]),
-		};
-		const offenders: string[] = [];
-		for (const [sourceLayer, permitted] of Object.entries(allowed)) {
-			const layerRoot = path.join(sourceRoot, sourceLayer);
-			for (const file of await sourceFiles(layerRoot)) {
-				const source = await readFile(file, "utf8");
-				for (const match of source.matchAll(/from\s+["'](\.[^"']+)["']/g)) {
-					const target = path.resolve(path.dirname(file), match[1]);
-					const relative = path.relative(sourceRoot, target);
-					if (relative.startsWith("..")) continue;
-					const targetLayer = relative.split(path.sep)[0];
-					if (!permitted.has(targetLayer)) {
-						offenders.push(`${path.relative(sourceRoot, file)} -> ${relative}`);
-					}
-				}
-			}
-		}
-		expect(offenders).toEqual([]);
+		const entries = await readdir(sourceRoot, { withFileTypes: true });
+		const directories = entries
+			.filter(entry => entry.isDirectory() && entry.name !== "__tests__")
+			.map(entry => entry.name)
+			.sort();
+		expect(directories).toEqual(["core"]);
 	});
 
-	test("core does not import product feature packages", async () => {
+	test("core does not import workspace feature packages", async () => {
 		const coreRoot = path.resolve(import.meta.dir, "../../core");
 		const offenders: string[] = [];
 		for (const file of await sourceFiles(coreRoot)) {
-			if ((await readFile(file, "utf8")).includes("@logician/agent-blocks")) {
+			if (/from\s+["']@logician\//.test(await readFile(file, "utf8"))) {
 				offenders.push(path.relative(coreRoot, file));
 			}
 		}
 		expect(offenders).toEqual([]);
 	});
 
-	test("client protocol is independent and application events use it", async () => {
+	test("client protocol remains independent", async () => {
 		const sourceRoot = path.resolve(import.meta.dir, "../../");
 		const protocolRoot = path.resolve(sourceRoot, "../../agent-protocol/src");
 		const protocolOffenders: string[] = [];
@@ -73,17 +49,22 @@ describe("core architecture boundaries", () => {
 			}
 		}
 		expect(protocolOffenders).toEqual([]);
+	});
 
-		const applicationRoot = path.join(sourceRoot, "application");
-		const legacyEventImports: string[] = [];
-		for (const file of await sourceFiles(applicationRoot)) {
-			if (
-				(await readFile(file, "utf8")).includes("core/types/runtime-events")
-			) {
-				legacyEventImports.push(path.relative(applicationRoot, file));
+	test("every public export resolves to a source file", async () => {
+		const packageRoot = path.resolve(import.meta.dir, "../../..");
+		const packageJson = JSON.parse(
+			await readFile(path.join(packageRoot, "package.json"), "utf8"),
+		) as { exports?: Record<string, string> };
+		const missing: string[] = [];
+		for (const [name, target] of Object.entries(packageJson.exports ?? {})) {
+			try {
+				await readFile(path.resolve(packageRoot, target));
+			} catch {
+				missing.push(`${name} -> ${target}`);
 			}
 		}
-		expect(legacyEventImports).toEqual([]);
+		expect(missing).toEqual([]);
 	});
 
 	test("removed compatibility seams cannot be reintroduced", async () => {

@@ -36,19 +36,19 @@ import { join } from "node:path";
 	}
 })();
 
-import { AgentCoreBridge } from "@logician/agent-core/application";
-import { resolveRuntimeConfig } from "@logician/agent-core/configuration/runtime";
+import { AgentRuntime } from "@logician/agent-runtime/application";
+import { resolveRuntimeConfig } from "@logician/agent-runtime/configuration/runtime";
 import {
 	buildDoctorReport,
 	formatDoctorReport,
-} from "@logician/agent-core/developer-tools";
-import { activateProjectVirtualEnv } from "@logician/agent-core/tools";
+} from "@logician/agent-runtime/developer-tools";
+import { activateProjectVirtualEnv } from "@logician/agent-runtime/tools";
 import {
 	applyTrustChoice,
 	resolveTrust,
 	resolveTrustInfo,
 	TrustStore,
-} from "@logician/agent-core/trust";
+} from "@logician/agent-runtime/trust";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
 import { LogicianTUI } from "./app/tui.ts";
 import {
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 			for (const warning of runtimeConfig.warnings) {
 				process.stderr.write(`warning: ${warning}\n`);
 			}
-			const bridge = new AgentCoreBridge(runtimeConfig.bridge);
+			const bridge = new AgentRuntime(runtimeConfig.bridge);
 			process.exitCode = await runHeadlessExec(bridge, {
 				...execArgs,
 				cwd,

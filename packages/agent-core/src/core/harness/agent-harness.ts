@@ -40,11 +40,7 @@ import {
 	reduceRuntimeState,
 } from "../state/runtime-state.ts";
 import { ToolRegistry } from "../tools/registry.ts";
-import type {
-	AgentConfig,
-	AgentModelConfig,
-	QueueMode,
-} from "../types/types-config.ts";
+import type { AgentConfig, QueueMode } from "../types/types-config.ts";
 import type {
 	AgentEvent,
 	AgentHooks,
@@ -117,7 +113,7 @@ type TurnRequest = { kind: "prompt"; text: string } | { kind: "continue" };
 
 export class AgentHarness {
 	private readonly configuration: ConfigurationStore<AgentConfig>;
-	private readonly modelController: HarnessModelController;
+	readonly models: HarnessModelController;
 	private cwd?: string;
 	private maxIterations?: number;
 
@@ -187,7 +183,7 @@ export class AgentHarness {
 			},
 		});
 		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
-		this.modelController = new HarnessModelController({
+		this.models = new HarnessModelController({
 			backend: options.backend,
 			configuration: this.configuration,
 			emit: event => this.emitToSubscribers(event),
@@ -265,7 +261,7 @@ export class AgentHarness {
 	}
 
 	private get backend(): LLMBackend {
-		return this.modelController.backend;
+		return this.models.backend;
 	}
 
 	get phase(): HarnessPhase {
@@ -1143,49 +1139,6 @@ export class AgentHarness {
 	/** Immutable snapshot of the configuration used for the next turn. */
 	get currentConfig(): Readonly<AgentConfig> {
 		return Object.freeze({ ...this.config });
-	}
-
-	// ── Model / thinking-level operations ─────────────────────────────────
-
-	getModel(): string {
-		return this.modelController.model;
-	}
-
-	getBaseUrl(): string {
-		return this.modelController.baseUrl;
-	}
-
-	getModels(): string[] {
-		return this.modelController.models();
-	}
-
-	setModelEndpoint(model: string, baseUrl: string): void {
-		this.modelController.setEndpoint(model, baseUrl);
-	}
-
-	/** Set the models array for cycling. */
-	setModels(models: AgentModelConfig[]): void {
-		this.modelController.setModels(models);
-	}
-
-	cycleModel(direction: "forward" | "backward" = "forward"): string {
-		return this.modelController.cycle(direction);
-	}
-
-	// ── Thinking level ─────────────────────────────────────────────────────
-
-	getThinkingLevel(): string {
-		return this.modelController.thinkingLevel;
-	}
-
-	setThinkingLevel(level: string): void {
-		this.modelController.setThinkingLevel(level);
-	}
-
-	// ── Model & provider ──────────────────────────────────────────────────
-
-	setModel(model: string): void {
-		this.modelController.setModel(model);
 	}
 
 	// ── Internals ──────────────────────────────────────────────────────────

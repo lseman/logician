@@ -5,14 +5,14 @@
 // inline slash-command wiring block.
 
 import type {
-	AgentCoreBridge,
+	AgentRuntime,
 	GoalManager,
 	LoopManager,
-} from "@logician/agent-core/application";
+} from "@logician/agent-runtime/application";
 import type {
 	Transcript,
 	TuiSessionService,
-} from "@logician/agent-core/sessions";
+} from "@logician/agent-runtime/sessions";
 import type { AutoresearchSession } from "@logician/autoresearch";
 import type { MemoryStore } from "@logician/memory";
 import type { ChoicePopup } from "../../overlays/choice-popup.ts";
@@ -24,7 +24,7 @@ import type { TuiHandle } from "../../terminal/core.ts";
 
 export interface SlashCommandsCtx {
 	tui: TuiHandle;
-	bridge: AgentCoreBridge;
+	bridge: AgentRuntime;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
 	statusPanel: StatusBar;

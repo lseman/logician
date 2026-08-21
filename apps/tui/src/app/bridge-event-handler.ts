@@ -1,16 +1,16 @@
 // ── Bridge setup & event dispatch ───────────────────────────────────────────
-// Wires the AgentCoreBridge event stream and error stream, and fuses
+// Wires the AgentRuntime event stream and error stream, and fuses
 // bridge-event handling with overlay-opening side effects for
 // permission/question requests.
 
+import { isTranscriptEvent, type RuntimeEvent } from "@logician/agent-protocol";
 import type {
-	AgentCoreBridge,
+	AgentRuntime,
 	GoalManager,
 	GoalState,
-} from "@logician/agent-core/application";
-import { formatContextSize } from "@logician/agent-core/formatting";
-import type { Transcript } from "@logician/agent-core/sessions";
-import { isTranscriptEvent, type RuntimeEvent } from "@logician/agent-protocol";
+} from "@logician/agent-runtime/application";
+import { formatContextSize } from "@logician/agent-runtime/formatting";
+import type { Transcript } from "@logician/agent-runtime/sessions";
 import type { AutoresearchSession } from "@logician/autoresearch";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";
 import type { PermissionPopup } from "../overlays/permission-popup.ts";
@@ -34,7 +34,7 @@ import { formatStartupMessage } from "./startup/message.ts";
 
 export interface BridgeEventHandlerCtx {
 	tui: TuiHandle;
-	bridge: AgentCoreBridge;
+	bridge: AgentRuntime;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
 	statusPanel: StatusBar;
@@ -63,8 +63,8 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 		handleEvent(ctx, event);
 	};
 
-	ctx.bridge.onNotification(notification => eventHandler(notification.event));
-	ctx.bridge.onError(err => {
+	ctx.bridge.events.subscribe(notification => eventHandler(notification.event));
+	ctx.bridge.events.onError(err => {
 		// Also display in transcript so the user sees connection/server errors
 		ctx.transcript.addSystemMessage(`Connection error: ${err.message}`);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());

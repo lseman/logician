@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import type { CompactableMessage } from "@logician/agent-core";
 import { compactToFit } from "../../core/compaction/engine.ts";
 import { serializeConversation } from "../../core/compaction/serialization.ts";
 import {
@@ -8,7 +9,6 @@ import {
 	createUserMessage,
 	estimateChatPayloadTokens,
 } from "../../core/provider/messages.ts";
-import type { CompactableMessage } from "../../core/types/types-messages.ts";
 
 void test("conversation serialization tolerates null and malformed content", () => {
 	assert.equal(

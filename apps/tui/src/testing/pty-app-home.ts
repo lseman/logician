@@ -88,7 +88,7 @@ const DARK_THEME_JSON = JSON.stringify({
 
 /**
  * Create an isolated HOME directory with a valid theme file, so PTY tests
- * that boot the real LogicianTUI app (real AgentCoreBridge, real SQLite
+ * that boot the real LogicianTUI app (real AgentRuntime, real SQLite
  * memory store under ~/.logician) don't collide with each other or with the
  * developer's own ~/.logician when run concurrently. Without this, parallel
  * PTY tests hit "SQLiteError: database is locked" against a shared DB file.
