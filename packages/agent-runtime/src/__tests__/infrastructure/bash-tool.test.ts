@@ -114,3 +114,34 @@ void test("bash rejects ambiguous and invalid structured inputs", async () => {
 		/duplicate command id/,
 	);
 });
+
+void test("bash waitMsBeforeAsync moves long-running command to background task", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-bash-async-"));
+	const result = await bash.execute(
+		{ command: "sleep 2; echo done", waitMsBeforeAsync: 100 },
+		{ cwd },
+	);
+	assert.equal(typeof result, "object");
+	if (typeof result === "string") return;
+	assert.match(result.content, /running in the background as task/);
+	assert.equal(result.details?.background, true);
+	assert.ok(typeof result.details?.taskId === "string");
+});
+
+void test("bash runPersistent executes inside persistent shell session", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-bash-persist-"));
+	const res1 = await bash.execute(
+		{ command: "export MY_VAR='foo123'", runPersistent: true, terminalId: "unit-term" },
+		{ cwd },
+	);
+	assert.equal(typeof res1, "object");
+
+	const res2 = await bash.execute(
+		{ command: "echo $MY_VAR", runPersistent: true, terminalId: "unit-term" },
+		{ cwd },
+	);
+	assert.equal(typeof res2, "object");
+	if (typeof res2 === "string") return;
+	assert.match(res2.content, /foo123/);
+});
+
