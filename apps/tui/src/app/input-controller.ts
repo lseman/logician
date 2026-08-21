@@ -146,6 +146,14 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
+		if (ctx.thinkingLevelSelector.isVisibleOverlay()) {
+			const action = ctx.thinkingLevelSelector.handleInput(data);
+			if (action) {
+				ctx.handleThinkingLevelSelectorAction(action);
+			}
+			ctx.tui.requestRender();
+			return { consume: true };
+		}
 
 		// ChoicePopup — agent Q&A popup
 		if (ctx.choicePopup.isVisibleOverlay()) {
@@ -283,6 +291,12 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			}
 			// Everything else (typing, backspace, etc.) goes to the input bar; the
 			// onChange hook re-syncs the popup query afterwards.
+		}
+
+		// Ctrl+H — open thinking level selector
+		if (data === "\x08") {
+			ctx.openThinkingLevelSelector();
+			return { consume: true };
 		}
 
 		// Ctrl+L — open model selector

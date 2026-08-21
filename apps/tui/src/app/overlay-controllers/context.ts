@@ -11,6 +11,7 @@ import type { PluginManagerOverlay } from "../../overlays/plugin-manager.ts";
 import type { ReasonerSelectorOverlay } from "../../overlays/reasoner-selector.ts";
 import type { SettingsSelectorOverlay } from "../../overlays/settings-overlay.ts";
 import type { ThemeSelectorOverlay } from "../../overlays/theme-selector.ts";
+import type { ThinkingLevelSelectorOverlay } from "../../overlays/thinking-level-selector.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { StatusBar } from "../../status/status-bar.ts";
 import type { TuiHandle } from "../../terminal/core.ts";
@@ -41,6 +42,7 @@ export interface OverlayHandlersCtx {
 	inferenceModeSelector: InferenceModeSelector;
 	themeSelector: ThemeSelectorOverlay;
 	settingsSelector: SettingsSelectorOverlay;
+	thinkingLevelSelector: ThinkingLevelSelectorOverlay;
 	thinkingLevel: string;
 	inferenceMode: InferenceMode;
 	workflowMode: "act" | "plan";
