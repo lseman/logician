@@ -600,7 +600,7 @@ export class AgentRuntime {
 			this.emit({ type: "turn_end", turnId });
 			// Keep the harness alive to retain history across turns.
 			this.emit({ type: "phase", state: "ready" });
-			if (turnSucceeded) {
+			if (turnSucceeded && (this.session?.getQueues().nextTurn.length ?? 0) > 0) {
 				this.running = true;
 				const repoQuery = this.repositoryMap
 					? await this.repositoryMap.render("")
