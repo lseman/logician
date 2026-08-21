@@ -15,12 +15,12 @@ graph LR
     A["@logician/tui"]
   end
   subgraph Protocol
-    P["@logician/agent-protocol"]
+    P["@logician/log-protocol"]
   end
   subgraph Runtime
-    C["@logician/agent-core"]
-    D["@logician/agent-blocks"]
-    H["@logician/eoh"]
+    C["@logician/log-core"]
+    D["@logician/log-blocks"]
+    H["@logician/log-eoh"]
   end
   subgraph DataAndEvaluation["Data and evaluation"]
     M["memory + rag"]
@@ -85,7 +85,7 @@ Optional product feature modules:
 - Subagent delegation
 - Todo/task management
 - Tool selection and execution strategies
-- Re-exports `@logician/eoh` (below) as an opt-in reasoning strategy
+- Re-exports `@logician/log-eoh` (below) as an opt-in reasoning strategy
 
 ### eoh
 

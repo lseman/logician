@@ -4,7 +4,7 @@ import {
 	type AgentProtocolNotification,
 	createNotification,
 	type RuntimeEvent,
-} from "@logician/agent-protocol";
+} from "@logician/log-protocol";
 import {
 	EXEC_STREAM_SCHEMA,
 	type ExecBridge,

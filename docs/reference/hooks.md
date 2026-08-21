@@ -12,10 +12,10 @@ fires, see [Hook System](/architecture/hooks). This page covers the
 ## AgentHooks
 
 Each hook point is an optional handler on the `AgentHooks` interface,
-imported from `@logician/agent-core`:
+imported from `@logician/log-core`:
 
 ```typescript
-import type { AgentHooks } from '@logician/agent-core'
+import type { AgentHooks } from '@logician/log-core'
 
 const hooks: AgentHooks = {
   beforeToolCall(ctx, signal) {
@@ -38,7 +38,7 @@ Hooks are registered on a `HookBus` instance, not via a global function.
 handler it defines in one call, returning a single unsubscribe function:
 
 ```typescript
-import { HookBus } from '@logician/agent-core/hooks/native'
+import { HookBus } from '@logician/log-core/hooks/native'
 
 const bus = new HookBus({ errorMode: 'continue' })
 

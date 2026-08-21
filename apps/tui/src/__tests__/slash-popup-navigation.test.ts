@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { SlashCommandDef } from "@logician/agent-runtime/commands";
+import type { SlashCommandDef } from "@logician/log-runtime/commands";
 import { SlashPopup } from "../overlays/slash-popup.ts";
 import { initTheme } from "../terminal/theme.ts";
 

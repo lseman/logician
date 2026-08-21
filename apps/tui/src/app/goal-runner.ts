@@ -7,8 +7,8 @@ import {
 	type AgentRuntime,
 	GoalManager,
 	type GoalState,
-} from "@logician/agent-runtime/application";
-import type { Transcript } from "@logician/agent-runtime/sessions";
+} from "@logician/log-runtime/application";
+import type { Transcript } from "@logician/log-runtime/sessions";
 import type { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 

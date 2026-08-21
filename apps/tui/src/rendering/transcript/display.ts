@@ -2,12 +2,12 @@
 // Renders the full conversation history with streaming support and markdown.
 // Chunks are interleaved in chronological order: thinking → content → tool → ...
 
-import { DEFAULT_TRUNCATION } from "@logician/agent-core";
+import { DEFAULT_TRUNCATION } from "@logician/log-core";
 import type {
 	ThinkingDisplayStyle,
 	ToolExecution,
 	Turn,
-} from "@logician/agent-runtime/sessions";
+} from "@logician/log-runtime/sessions";
 import {
 	BOLD,
 	type Component,

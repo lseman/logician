@@ -3,14 +3,14 @@
 // session browser overlay. handleSessionAction reaches into overlay
 // internals (tui.removeOverlay/requestRender) as well as session state.
 
-import type { AgentRuntime } from "@logician/agent-runtime/application";
+import type { AgentRuntime } from "@logician/log-runtime/application";
 import {
 	inferSessionTitle,
 	isGeneratedSessionTitle,
 	type Transcript,
 	type TuiSessionService,
 	type Turn,
-} from "@logician/agent-runtime/sessions";
+} from "@logician/log-runtime/sessions";
 import type { SessionBrowserOverlay } from "../../overlays/session-manager.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { StatusBar } from "../../status/status-bar.ts";

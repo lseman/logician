@@ -50,7 +50,7 @@ commands:
 
 ```typescript
 // my-extension.ts
-import type { ExtensionAPI } from '@logician/agent-core/extensions'
+import type { ExtensionAPI } from '@logician/log-core/extensions'
 
 export default (api: ExtensionAPI) => {
   api.on('tool_execution_start', ({ toolName, args }) => {

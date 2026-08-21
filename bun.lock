@@ -14,14 +14,14 @@
         "typescript": "^7.0.2",
       },
     },
-    "apps/memory-mcp": {
-      "name": "@logician/memory-mcp",
+    "apps/log-memory-mcp": {
+      "name": "@logician/log-memory-mcp",
       "version": "0.1.0",
       "bin": {
         "logician-memory-mcp": "src/index.ts",
       },
       "dependencies": {
-        "@logician/memory": "0.1.0",
+        "@logician/log-memory": "0.1.0",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -34,12 +34,12 @@
       "name": "@logician/tui",
       "version": "0.2.0",
       "dependencies": {
-        "@logician/agent-blocks": "0.2.0",
-        "@logician/agent-core": "0.2.0",
-        "@logician/agent-protocol": "0.1.0",
-        "@logician/agent-runtime": "0.2.0",
-        "@logician/autoresearch": "0.2.0",
-        "@logician/memory": "0.1.0",
+        "@logician/log-autoresearch": "0.2.0",
+        "@logician/log-blocks": "0.2.0",
+        "@logician/log-core": "0.2.0",
+        "@logician/log-memory": "0.1.0",
+        "@logician/log-protocol": "0.1.0",
+        "@logician/log-runtime": "0.2.0",
         "string-width": "^8.2.2",
       },
       "devDependencies": {
@@ -51,12 +51,25 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/agent-blocks": {
-      "name": "@logician/agent-blocks",
+    "packages/log-autoresearch": {
+      "name": "@logician/log-autoresearch",
       "version": "0.2.0",
       "dependencies": {
-        "@logician/agent-core": "0.2.0",
-        "@logician/rag": "0.2.0",
+        "@logician/log-core": "0.2.0",
+      },
+      "devDependencies": {
+        "@sinclair/typebox": "^0.34.41",
+        "@types/node": "^22.0.0",
+        "tsx": "^4.23.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/log-blocks": {
+      "name": "@logician/log-blocks",
+      "version": "0.2.0",
+      "dependencies": {
+        "@logician/log-core": "0.2.0",
+        "@logician/log-rag": "0.2.0",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",
@@ -64,8 +77,8 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/agent-core": {
-      "name": "@logician/agent-core",
+    "packages/log-core": {
+      "name": "@logician/log-core",
       "version": "0.2.0",
       "dependencies": {
         "ignore": "^6.0.2",
@@ -78,8 +91,21 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/agent-eval": {
-      "name": "@logician/agent-eval",
+    "packages/log-eoh": {
+      "name": "@logician/log-eoh",
+      "version": "0.1.0",
+      "dependencies": {
+        "@logician/log-core": "0.2.0",
+      },
+      "devDependencies": {
+        "@sinclair/typebox": "^0.34.41",
+        "@types/node": "^22.0.0",
+        "tsx": "^4.23.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/log-eval": {
+      "name": "@logician/log-eval",
       "version": "0.1.0",
       "bin": {
         "logician-eval": "src/cli.ts",
@@ -90,65 +116,8 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/agent-protocol": {
-      "name": "@logician/agent-protocol",
-      "version": "0.1.0",
-      "devDependencies": {
-        "@types/bun": "^1.3.14",
-        "@types/node": "^22.0.0",
-        "bun-types": "^1.3.14",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/agent-runtime": {
-      "name": "@logician/agent-runtime",
-      "version": "0.2.0",
-      "dependencies": {
-        "@logician/agent-blocks": "0.2.0",
-        "@logician/agent-core": "0.2.0",
-        "@logician/agent-protocol": "0.1.0",
-        "@logician/autoresearch": "0.2.0",
-        "@logician/eoh": "0.1.0",
-        "@logician/memory": "0.1.0",
-        "emphasize": "^7.0.0",
-        "ignore": "^7.0.5",
-        "yaml": "^2.9.0",
-      },
-      "devDependencies": {
-        "@types/node": "^22.0.0",
-        "bun-types": "^1.3.14",
-        "tsx": "^4.23.1",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/autoresearch": {
-      "name": "@logician/autoresearch",
-      "version": "0.2.0",
-      "dependencies": {
-        "@logician/agent-core": "0.2.0",
-      },
-      "devDependencies": {
-        "@sinclair/typebox": "^0.34.41",
-        "@types/node": "^22.0.0",
-        "tsx": "^4.23.1",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/eoh": {
-      "name": "@logician/eoh",
-      "version": "0.1.0",
-      "dependencies": {
-        "@logician/agent-core": "0.2.0",
-      },
-      "devDependencies": {
-        "@sinclair/typebox": "^0.34.41",
-        "@types/node": "^22.0.0",
-        "tsx": "^4.23.1",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/memory": {
-      "name": "@logician/memory",
+    "packages/log-memory": {
+      "name": "@logician/log-memory",
       "version": "0.1.0",
       "dependencies": {
         "@huggingface/transformers": "^4.2.0",
@@ -161,12 +130,43 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/rag": {
-      "name": "@logician/rag",
+    "packages/log-protocol": {
+      "name": "@logician/log-protocol",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^22.0.0",
+        "bun-types": "^1.3.14",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/log-rag": {
+      "name": "@logician/log-rag",
       "version": "0.2.0",
       "dependencies": {
         "@huggingface/transformers": "^4.2.0",
         "usearch": "^2.26.0",
+      },
+    },
+    "packages/log-runtime": {
+      "name": "@logician/log-runtime",
+      "version": "0.2.0",
+      "dependencies": {
+        "@logician/log-autoresearch": "0.2.0",
+        "@logician/log-blocks": "0.2.0",
+        "@logician/log-core": "0.2.0",
+        "@logician/log-eoh": "0.1.0",
+        "@logician/log-memory": "0.1.0",
+        "@logician/log-protocol": "0.1.0",
+        "emphasize": "^7.0.0",
+        "ignore": "^7.0.5",
+        "yaml": "^2.9.0",
+      },
+      "devDependencies": {
+        "@types/node": "^22.0.0",
+        "bun-types": "^1.3.14",
+        "tsx": "^4.23.1",
+        "typescript": "^7.0.2",
       },
     },
   },
@@ -323,25 +323,25 @@
 
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.34.5", "", { "os": "win32", "cpu": "x64" }, "sha512-+29YMsqY2/9eFEiW93eqWnuLcWcufowXewwSNIT6UwZdUUCrM3oFjMWH/Z6/TMmb4hlFenmfAVbpWeup2jryCw=="],
 
-    "@logician/agent-blocks": ["@logician/agent-blocks@workspace:packages/agent-blocks"],
+    "@logician/log-autoresearch": ["@logician/log-autoresearch@workspace:packages/log-autoresearch"],
 
-    "@logician/agent-core": ["@logician/agent-core@workspace:packages/agent-core"],
+    "@logician/log-blocks": ["@logician/log-blocks@workspace:packages/log-blocks"],
 
-    "@logician/agent-eval": ["@logician/agent-eval@workspace:packages/agent-eval"],
+    "@logician/log-core": ["@logician/log-core@workspace:packages/log-core"],
 
-    "@logician/agent-protocol": ["@logician/agent-protocol@workspace:packages/agent-protocol"],
+    "@logician/log-eoh": ["@logician/log-eoh@workspace:packages/log-eoh"],
 
-    "@logician/agent-runtime": ["@logician/agent-runtime@workspace:packages/agent-runtime"],
+    "@logician/log-eval": ["@logician/log-eval@workspace:packages/log-eval"],
 
-    "@logician/autoresearch": ["@logician/autoresearch@workspace:packages/autoresearch"],
+    "@logician/log-memory": ["@logician/log-memory@workspace:packages/log-memory"],
 
-    "@logician/eoh": ["@logician/eoh@workspace:packages/eoh"],
+    "@logician/log-memory-mcp": ["@logician/log-memory-mcp@workspace:apps/log-memory-mcp"],
 
-    "@logician/memory": ["@logician/memory@workspace:packages/memory"],
+    "@logician/log-protocol": ["@logician/log-protocol@workspace:packages/log-protocol"],
 
-    "@logician/memory-mcp": ["@logician/memory-mcp@workspace:apps/memory-mcp"],
+    "@logician/log-rag": ["@logician/log-rag@workspace:packages/log-rag"],
 
-    "@logician/rag": ["@logician/rag@workspace:packages/rag"],
+    "@logician/log-runtime": ["@logician/log-runtime@workspace:packages/log-runtime"],
 
     "@logician/tui": ["@logician/tui@workspace:apps/tui"],
 
@@ -665,9 +665,9 @@
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
-    "@logician/agent-runtime/ignore": ["ignore@7.0.6", "", {}, "sha512-BAg6QkE8W+TuQLrrw0Ugr7HegXduRuuj8/ti2kSOc+jz1dmx8/WNcjr6XGnq5YpDWxFwwaavqD0+jIUOKelTsw=="],
+    "@logician/log-memory/@types/node": ["@types/node@26.1.2", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg=="],
 
-    "@logician/memory/@types/node": ["@types/node@26.1.2", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg=="],
+    "@logician/log-runtime/ignore": ["ignore@7.0.6", "", {}, "sha512-BAg6QkE8W+TuQLrrw0Ugr7HegXduRuuj8/ti2kSOc+jz1dmx8/WNcjr6XGnq5YpDWxFwwaavqD0+jIUOKelTsw=="],
 
     "@typescript-eslint/eslint-plugin/ignore": ["ignore@7.0.6", "", {}, "sha512-BAg6QkE8W+TuQLrrw0Ugr7HegXduRuuj8/ti2kSOc+jz1dmx8/WNcjr6XGnq5YpDWxFwwaavqD0+jIUOKelTsw=="],
 
@@ -675,6 +675,6 @@
 
     "onnxruntime-web/onnxruntime-common": ["onnxruntime-common@1.24.0-dev.20251116-b39e144322", "", {}, "sha512-BOoomdHYmNRL5r4iQ4bMvsl2t0/hzVQ3OM3PHD0gxeXu1PmggqBv3puZicEUVOA3AtHHYmqZtjMj9FOfGrATTw=="],
 
-    "@logician/memory/@types/node/undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
+    "@logician/log-memory/@types/node/undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
   }
 }

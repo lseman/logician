@@ -3,15 +3,15 @@
 // bridge-event handling with overlay-opening side effects for
 // permission/question requests.
 
-import { isTranscriptEvent, type RuntimeEvent } from "@logician/agent-protocol";
+import { isTranscriptEvent, type RuntimeEvent } from "@logician/log-protocol";
 import type {
 	AgentRuntime,
 	GoalManager,
 	GoalState,
-} from "@logician/agent-runtime/application";
-import { formatContextSize } from "@logician/agent-runtime/formatting";
-import type { Transcript } from "@logician/agent-runtime/sessions";
-import type { AutoresearchSession } from "@logician/autoresearch";
+} from "@logician/log-runtime/application";
+import { formatContextSize } from "@logician/log-runtime/formatting";
+import type { Transcript } from "@logician/log-runtime/sessions";
+import type { AutoresearchSession } from "@logician/log-autoresearch";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";
 import type { PermissionPopup } from "../overlays/permission-popup.ts";
 import type { SlashPopup } from "../overlays/slash-popup.ts";

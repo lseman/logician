@@ -3,7 +3,7 @@
 import {
 	saveConfigField,
 	saveConfigNestedField,
-} from "@logician/agent-runtime/configuration";
+} from "@logician/log-runtime/configuration";
 import type {
 	SettingDef,
 	SettingsSelectorAction,

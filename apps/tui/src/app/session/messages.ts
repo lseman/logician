@@ -1,5 +1,5 @@
-import type { Message } from "@logician/agent-core";
-import type { Turn } from "@logician/agent-runtime/sessions";
+import type { Message } from "@logician/log-core";
+import type { Turn } from "@logician/log-runtime/sessions";
 
 export function turnsToMessages(turns: Turn[]): Message[] {
 	const messages: Message[] = [];

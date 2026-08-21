@@ -2,7 +2,7 @@
 // List, search, rename, and switch sessions. Powered by TuiSessionService,
 // backed by agent-core's Session/SessionManager JSONL tree.
 
-import type { TuiSessionService } from "@logician/agent-runtime/sessions";
+import type { TuiSessionService } from "@logician/log-runtime/sessions";
 import { BOLD, type Component, RESET, visibleWidth } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 import {

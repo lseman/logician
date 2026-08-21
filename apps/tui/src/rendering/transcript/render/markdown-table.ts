@@ -2,7 +2,7 @@
 // Block-level markdown line rendering (code fences, tables, JSON) and the
 // table layout helpers it depends on. No instance state.
 
-import { highlight, highlightAuto } from "@logician/agent-runtime/formatting";
+import { highlight, highlightAuto } from "@logician/log-runtime/formatting";
 import { BOLD, DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
 import { wrapText } from "../layout.ts";

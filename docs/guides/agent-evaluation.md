@@ -5,7 +5,7 @@ description: Run independently graded Logician coding-task trials.
 
 # Agent evaluation
 
-The `@logician/agent-eval` workspace defines versioned task corpora and grades
+The `@logician/log-eval` workspace defines versioned task corpora and grades
 the resulting repository state independently of the agent's completion claim.
 
 Validate the bundled smoke corpus:

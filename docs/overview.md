@@ -65,7 +65,7 @@ graph TB
 | `autoresearch` | Measured experiment loops — run, evaluate, keep or discard |
 | `agent-eval` | Outcome-grounded evaluation runner for agent trials |
 | `tui` | Terminal UI components, engine, layers, state management (`apps/tui`) |
-| `memory-mcp` | Stdio MCP adapter exposing `@logician/memory` to any MCP client (`apps/memory-mcp`) |
+| `memory-mcp` | Stdio MCP adapter exposing `@logician/log-memory` to any MCP client (`apps/memory-mcp`) |
 
 ### Key concepts
 

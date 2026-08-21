@@ -7,7 +7,7 @@ import {
 	filterSlashCommands,
 	groupByCategory,
 	type SlashCommandDef,
-} from "@logician/agent-runtime/commands";
+} from "@logician/log-runtime/commands";
 
 const TEST_COMMANDS: SlashCommandDef[] = [
 	{

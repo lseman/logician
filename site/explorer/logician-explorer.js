@@ -364,7 +364,7 @@ const NODES = {
 		bullets: [
 			"Observation capture, consolidation, and lexical + semantic retrieval.",
 			"Context injection back into the agent loop.",
-			"Exposed to any MCP client via @logician/memory-mcp (apps/memory-mcp), independent of the TUI.",
+			"Exposed to any MCP client via @logician/log-memory-mcp (apps/memory-mcp), independent of the TUI.",
 		],
 	},
 	"data-rag": {

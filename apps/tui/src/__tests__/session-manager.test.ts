@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { TuiSessionService } from "@logician/agent-runtime/sessions";
+import type { TuiSessionService } from "@logician/log-runtime/sessions";
 import { SessionBrowserOverlay } from "../overlays/session-manager.ts";
 import { initTheme } from "../terminal/theme.ts";
 

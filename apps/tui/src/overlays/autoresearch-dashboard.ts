@@ -10,7 +10,7 @@ import {
 	type AutoresearchDashboardRow,
 	type AutoresearchSession,
 	formatNum,
-} from "@logician/autoresearch";
+} from "@logician/log-autoresearch";
 import type { Component } from "../terminal/core.ts";
 
 import { theme } from "../terminal/theme.ts";
