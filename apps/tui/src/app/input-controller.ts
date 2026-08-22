@@ -114,6 +114,14 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
+		if (ctx.queueManager.isVisibleOverlay()) {
+			const action = ctx.queueManager.handleInput(data);
+			if (action) {
+				ctx.handleQueueManagerAction(action);
+			}
+			ctx.tui.requestRender();
+			return { consume: true };
+		}
 		if (ctx.modelSelector.isVisibleOverlay()) {
 			const action = ctx.modelSelector.handleInput(data);
 			if (action) {
@@ -371,6 +379,12 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			return { consume: true };
 		}
 
+		// Ctrl+Q — open the interactive message queue manager
+		if (data === "\x11") {
+			ctx.openQueueManager();
+			return { consume: true };
+		}
+
 		// Ctrl+K — cycle sandbox mode (off / code / full)
 		if (data === "\x0b") {
 			const mode = ctx.bridge.cycleSandboxMode();
@@ -572,23 +586,22 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		// starting a new run. The bridge emits a `steered` event that
 		// renders the message, so skip the normal turn/animation setup.
 		if (ctx.bridge.isActive()) {
-			ctx.notify(
-				intent === "steer-now" ? "Steering now…" : "Steering queued…",
-				"info",
-			);
+			const label = intent === "steer-now" ? "Steering now…" : "Steering queued…";
+			ctx.notify(label, "info");
 			ctx.tui.requestRender(false, true);
 			setImmediate(() => {
-				void ctx.bridge
-					.sendMessage(text)
-					.catch(err => ctx.bridge.events.reportError(err));
-				if (intent === "steer-now") {
-					const count = ctx.bridge.flushSteeringNow();
-					ctx.notify(
-						`Steering now with ${count} message${count === 1 ? "" : "s"}.`,
-						"info",
-					);
-					ctx.tui.requestRender();
+				try {
+					if (intent === "steer-now") {
+						ctx.bridge.steerNow(text);
+					} else {
+						ctx.bridge.steerQueue(text);
+					}
+					ctx.bridge.events.emit({ type: "steered", message: text });
+				} catch (err) {
+					ctx.bridge.events.reportError(err as Error);
 				}
+				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+				ctx.tui.requestRender();
 			});
 			return;
 		}

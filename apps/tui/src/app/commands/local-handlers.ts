@@ -366,6 +366,9 @@ export function createLocalHandlers(
 		openModelSelector: () => {
 			ctx.openModelSelector();
 		},
+		openQueueManager: () => {
+			ctx.openQueueManager();
+		},
 		openSessionManager: () => {
 			ctx.openSessionManager();
 		},

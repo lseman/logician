@@ -16,6 +16,7 @@ import type {
 	ModelInfo,
 	ModelSelectorAction,
 } from "../../overlays/model-selector.ts";
+import type { QueueManagerAction } from "../../overlays/queue-manager.ts";
 import type {
 	ReasonerInfo,
 	ReasonerSelectorAction,
@@ -456,6 +457,7 @@ export function handleThinkingLevelSelectorAction(
 	ctx.bridge.updateSettings({
 		thinkingLevel: selected.id as ThinkingLevel,
 	});
+	saveConfigField("thinkingLevel", selected.id);
 	ctx.thinkingLevel = selected.id as ThinkingLevel;
 	ctx.statusPanel.update({ phase: "ready", thinkingLevel: selected.id });
 	ctx.tui.removeOverlay(ctx.thinkingLevelSelector);
@@ -482,5 +484,55 @@ export function handleInferenceModeSelectorAction(
 	ctx.statusPanel.update({ inferenceMode: selected.id });
 	ctx.inferenceMode = selected.id as InferenceMode;
 	ctx.notify(`Inference mode: ${selected.label}`, "success");
+	ctx.tui.requestRender();
+}
+
+// ── Queue manager ──────────────────────────────────────────────────────
+
+export function openQueueManager(ctx: OverlayHandlersCtx): void {
+	ctx.queueManager.setQueues(
+		ctx.bridge.getSteeringMessages(),
+		ctx.bridge.getFollowUpMessages(),
+		ctx.bridge.getNextTurnMessages(),
+	);
+	ctx.queueManager.setMessage("");
+	ctx.queueManager.show();
+	const overlay = ctx.tui.showOverlay(ctx.queueManager, {
+		anchor: "aboveInput",
+		align: "left",
+		maxHeight: 18,
+	});
+	overlay.focus();
+}
+
+export function handleQueueManagerAction(
+	ctx: OverlayHandlersCtx,
+	action: QueueManagerAction,
+): void {
+	if (action.type === "close") {
+		ctx.tui.removeOverlay(ctx.queueManager);
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		return;
+	}
+	if (action.type === "clear") {
+		ctx.bridge.clearQueue();
+		ctx.notify("Queue cleared.", "info");
+	} else {
+		const removed =
+			action.entry.dropIndex !== undefined
+				? ctx.bridge.dropQueuedMessage(action.entry.dropIndex)
+				: undefined;
+		if (removed === undefined) {
+			ctx.queueManager.setMessage("Can't remove a next-turn message directly.");
+			ctx.tui.requestRender();
+			return;
+		}
+		ctx.notify("Removed from queue.", "info");
+	}
+	ctx.queueManager.setQueues(
+		ctx.bridge.getSteeringMessages(),
+		ctx.bridge.getFollowUpMessages(),
+		ctx.bridge.getNextTurnMessages(),
+	);
 	ctx.tui.requestRender();
 }

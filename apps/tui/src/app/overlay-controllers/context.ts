@@ -8,6 +8,7 @@ import type { InferenceModeSelector } from "../../overlays/inference-mode-select
 import type { McpManagerOverlay } from "../../overlays/mcp-manager.ts";
 import type { ModelSelectorOverlay } from "../../overlays/model-selector.ts";
 import type { PluginManagerOverlay } from "../../overlays/plugin-manager.ts";
+import type { QueueManagerOverlay } from "../../overlays/queue-manager.ts";
 import type { ReasonerSelectorOverlay } from "../../overlays/reasoner-selector.ts";
 import type { SettingsSelectorOverlay } from "../../overlays/settings-overlay.ts";
 import type { ThemeSelectorOverlay } from "../../overlays/theme-selector.ts";
@@ -35,6 +36,7 @@ export interface OverlayHandlersCtx {
 	researchManager: AutoresearchSession;
 	mcpManager: McpManagerOverlay;
 	reasonerSelector: ReasonerSelectorOverlay;
+	queueManager: QueueManagerOverlay;
 	fileMentionPopup: FileMentionPopup;
 	fileMentionListedCwd: string | null;
 	fileMentionListing: Promise<string[]> | null;

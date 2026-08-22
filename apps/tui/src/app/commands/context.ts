@@ -54,6 +54,7 @@ export interface SlashCommandsCtx {
 	openSettingsSelector: () => Promise<void>;
 	openSessionManager: () => void;
 	openModelSelector: () => void;
+	openQueueManager: () => void;
 	openPluginManager: () => Promise<void>;
 	openMcpManager: () => Promise<void>;
 	openReasonerSelector: () => Promise<void>;
