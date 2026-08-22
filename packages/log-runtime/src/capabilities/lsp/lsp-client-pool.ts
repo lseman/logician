@@ -257,7 +257,7 @@ class LspClient {
 }
 
 /** Lazy, per-language LSP transport pool. Missing servers fail silently. */
-export class LspManager {
+export class LspClientPool {
 	private clients = new Map<string, LspClient>();
 	private timeoutMs: number;
 	private servers: Record<string, LspServerDefinition>;

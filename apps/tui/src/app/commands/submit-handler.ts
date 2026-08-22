@@ -1,6 +1,6 @@
 // ── Slash-command submission dispatcher ────────────────────────────────────
 
-import { GoalManager } from "@logician/log-runtime/application";
+import { GoalTracker } from "@logician/log-runtime/application";
 import type { SlashCommandDef } from "@logician/log-runtime/commands";
 import { formatContextSize } from "@logician/log-runtime/formatting";
 import { describeSandboxProfile, parseLoopInterval } from "../tui-helpers.ts";
@@ -183,7 +183,7 @@ export function createSlashSubmitHandler(
 					return;
 				}
 				// Parse condition, extracting optional turn limit
-				const parsed = GoalManager.parseCondition(args);
+				const parsed = GoalTracker.parseCondition(args);
 				ctx.goalManager.set(parsed.condition, parsed.maxTurns);
 				ctx.goalActive = true;
 				const info = parsed.maxTurns ? ` (max ${parsed.maxTurns} turns)` : "";

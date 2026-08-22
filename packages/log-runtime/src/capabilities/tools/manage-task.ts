@@ -3,7 +3,7 @@
 // Actions: list, status, send_input, kill.
 
 import type { Tool, ToolResult } from "@logician/log-core";
-import { defaultTaskManager, type TaskManager } from "./support/utils/task-manager.ts";
+import { defaultTaskManager, type BackgroundTaskRegistry } from "./support/utils/background-task-registry.ts";
 
 const manageTaskSchema = {
 	type: "object",
@@ -38,7 +38,7 @@ export interface ManageTaskArgs {
 }
 
 export function createManageTaskTool(
-	taskManager: TaskManager = defaultTaskManager,
+	taskManager: BackgroundTaskRegistry = defaultTaskManager,
 ): Tool {
 	return {
 		name: "manage_task",

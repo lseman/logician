@@ -6,8 +6,8 @@
 
 import type {
 	AgentRuntime,
-	GoalManager,
-	LoopManager,
+	GoalTracker,
+	LoopRunner,
 } from "@logician/log-runtime/application";
 import type {
 	Transcript,
@@ -35,9 +35,9 @@ export interface SlashCommandsCtx {
 	thinkingDisplayMode: "collapsed" | "summary" | "expanded";
 	currentSessionId: string | null;
 	sessionService: TuiSessionService;
-	loopManager: LoopManager;
+	loopManager: LoopRunner;
 	loopActive: boolean;
-	goalManager: GoalManager;
+	goalManager: GoalTracker;
 	goalActive: boolean;
 	researchManager: AutoresearchSession;
 	inferenceMode: string;

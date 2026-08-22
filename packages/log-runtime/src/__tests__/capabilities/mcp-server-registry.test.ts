@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { McpManager } from "../../capabilities/mcp/mcp-manager.ts";
+import { McpServerRegistry } from "../../capabilities/mcp/mcp-server-registry.ts";
 import type { McpClient } from "../../capabilities/mcp/client.ts";
 
 function withIsolatedMcpEnvironment(
@@ -64,7 +64,7 @@ void test("MCP snapshot merges plugin, global, and project servers with project 
 			}),
 		);
 
-		const manager = new McpManager({
+		const manager = new McpServerRegistry({
 			loadPluginConfigs: async () => ({
 				plugin: { command: "plugin-mcp" },
 				shared: { command: "plugin-shared" },
@@ -91,7 +91,7 @@ void test("MCP snapshot merges plugin, global, and project servers with project 
 
 void test("MCP snapshot includes loaded plugin-provided servers", async () => {
 	await withIsolatedMcpEnvironment(async (_home, workspace) => {
-		const manager = new McpManager({
+		const manager = new McpServerRegistry({
 			loadPluginConfigs: async () => ({
 				plugin_example_server: { command: "plugin-mcp" },
 			}),
@@ -141,7 +141,7 @@ void test("MCP snapshot asks live servers for tools concurrently", async () => {
 			callTool: async () => ({}),
 			close: () => {},
 		});
-		const manager = new McpManager({
+		const manager = new McpServerRegistry({
 			loadPluginConfigs: async () => ({
 				first: { command: "first" },
 				second: { command: "second" },
@@ -179,7 +179,7 @@ void test("toggling a global MCP from a project workspace updates its defining f
 				mcpServers: { project: { command: "project-mcp" } },
 			}),
 		);
-		const manager = new McpManager({
+		const manager = new McpServerRegistry({
 			loadPluginConfigs: async () => ({}),
 		});
 

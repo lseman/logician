@@ -69,7 +69,7 @@ const TOGGLE_KEYS: readonly RuntimeToggleKey[] = [
 ];
 
 /** Normalizes settings mutations and projects the single settings view used by clients. */
-export class RuntimeSettingsManager {
+export class SettingsGateway {
 	constructor(private readonly host: RuntimeSettingsHost) {}
 
 	update(patch: RuntimeSettingsPatch): void {

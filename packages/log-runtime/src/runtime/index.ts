@@ -1,3 +1,3 @@
-export * from "../capabilities/commands/goal-manager.ts";
-export * from "../capabilities/commands/loop-manager.ts";
+export * from "../capabilities/commands/goal-tracker.ts";
+export * from "../capabilities/commands/loop-runner.ts";
 export * from "./bridge/agent-bridge.ts";

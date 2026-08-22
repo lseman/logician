@@ -31,7 +31,7 @@ Respond with EXACTLY one line:
 
 Be strict. Only say YES when the condition is clearly satisfied. If uncertain, say NO.`;
 
-export class GoalManager {
+export class GoalTracker {
 	private state: GoalState | null = null;
 	private onStateChange?: GoalStateHandler;
 

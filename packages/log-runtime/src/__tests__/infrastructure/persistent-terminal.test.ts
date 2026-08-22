@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PersistentTerminalManager } from "../../capabilities/tools/support/utils/persistent-terminal.ts";
+import { TerminalPool } from "../../capabilities/tools/support/utils/terminal-pool.ts";
 
-void test("PersistentTerminalManager preserves environment variables across calls", async () => {
+void test("TerminalPool preserves environment variables across calls", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-term-env-"));
-	const manager = new PersistentTerminalManager();
+	const manager = new TerminalPool();
 
 	const res1 = await manager.execute("test-term", "export LOGICIAN_TEST_VAR='alpha_beta_123'", { cwd });
 	assert.equal(res1.status, "completed");
@@ -21,9 +21,9 @@ void test("PersistentTerminalManager preserves environment variables across call
 	manager.closeAll();
 });
 
-void test("PersistentTerminalManager preserves directory navigation across calls", async () => {
+void test("TerminalPool preserves directory navigation across calls", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-term-dir-"));
-	const manager = new PersistentTerminalManager();
+	const manager = new TerminalPool();
 
 	const res1 = await manager.execute("dir-term", "mkdir -p my_sub_dir && cd my_sub_dir", { cwd });
 	assert.equal(res1.status, "completed");
@@ -35,9 +35,9 @@ void test("PersistentTerminalManager preserves directory navigation across calls
 	manager.closeAll();
 });
 
-void test("PersistentTerminalManager accurately captures exit codes", async () => {
+void test("TerminalPool accurately captures exit codes", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-term-exit-"));
-	const manager = new PersistentTerminalManager();
+	const manager = new TerminalPool();
 
 	const res1 = await manager.execute("exit-term", "exit 42 || false", { cwd });
 	// in subshell { exit 42; } __LOGICIAN_EXIT=$?

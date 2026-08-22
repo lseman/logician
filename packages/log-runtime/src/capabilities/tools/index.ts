@@ -1,7 +1,7 @@
 export { stripTextToolCalls } from "@logician/log-core";
 export { parseFrontmatter } from "@logician/log-core/frontmatter";
 export {
-	PermissionManager,
+	PermissionPolicy,
 	type PermissionMode,
 	type PermissionRules,
 } from "@logician/log-core/permissions";

@@ -231,7 +231,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.toolRouter.mcpManager = {
+	internal.toolRouter.mcpRegistry = {
 		load: async () => ({
 			tools: [],
 			servers: 0,
@@ -262,7 +262,7 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 	const internal = bridge as unknown as Record<string, any>;
 	internal.toolRouter.skillsContext =
 		"<available-skills>skill catalog</available-skills>";
-	internal.toolRouter.mcpManager = {
+	internal.toolRouter.mcpRegistry = {
 		load: async () => ({
 			tools: [],
 			servers: 0,

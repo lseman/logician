@@ -1,19 +1,19 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { LoopManager } from "../../capabilities/commands/loop-manager.ts";
+import { LoopRunner } from "../../capabilities/commands/loop-runner.ts";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 void test("parseInterval validates units and bounds", () => {
-	assert.equal(LoopManager.parseInterval("30s"), 30_000);
-	assert.equal(LoopManager.parseInterval("2H"), 7_200_000);
-	assert.equal(LoopManager.parseInterval("100ms"), 100);
-	assert.equal(LoopManager.parseInterval("0s"), null);
-	assert.equal(LoopManager.parseInterval("soon"), null);
+	assert.equal(LoopRunner.parseInterval("30s"), 30_000);
+	assert.equal(LoopRunner.parseInterval("2H"), 7_200_000);
+	assert.equal(LoopRunner.parseInterval("100ms"), 100);
+	assert.equal(LoopRunner.parseInterval("0s"), null);
+	assert.equal(LoopRunner.parseInterval("soon"), null);
 });
 
 void test("loop callbacks never overlap", async () => {
-	const manager = new LoopManager();
+	const manager = new LoopRunner();
 	let active = 0;
 	let maxActive = 0;
 	let calls = 0;
@@ -32,7 +32,7 @@ void test("loop callbacks never overlap", async () => {
 });
 
 void test("stop aborts an active callback and prevents rescheduling", async () => {
-	const manager = new LoopManager();
+	const manager = new LoopRunner();
 	let aborted = false;
 	manager.setOnTick(
 		(_iteration, _prompt, signal) =>
@@ -52,7 +52,7 @@ void test("stop aborts an active callback and prevents rescheduling", async () =
 });
 
 void test("state snapshots cannot mutate manager state", () => {
-	const manager = new LoopManager();
+	const manager = new LoopRunner();
 	manager.start("work", 1000);
 	const snapshot = manager.getState();
 	assert.ok(snapshot);
@@ -64,7 +64,7 @@ void test("state snapshots cannot mutate manager state", () => {
 });
 
 void test("repeated callback failures open the circuit breaker", async () => {
-	const manager = new LoopManager();
+	const manager = new LoopRunner();
 	manager.setOnTick(() => {
 		throw new Error("still broken");
 	});

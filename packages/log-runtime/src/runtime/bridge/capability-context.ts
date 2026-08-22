@@ -1,7 +1,7 @@
 /**
  * Shared registration point for AgentRuntime's independent capability
- * managers (RepositoryMap, LspManager, ExtensionManager, InteractionManager,
- * MemoryManager). Each is self-contained at construction time — its
+ * managers (RepositoryMap, LspClientPool, ExtensionRegistry, InteractionGateway,
+ * MemoryHost). Each is self-contained at construction time — its
  * constructor takes only cwd/sessionId/options/emit, never another manager
  * — so they mount into typed slots on the exported RuntimeContext in any
  * order, instead of being `new`'d as inline constructor statements with no
@@ -14,25 +14,25 @@
  * What deliberately stays OUT of this context: ToolRouter (its `extraTools`
  * closure reads memory lazily, but its own construction has no cross-manager
  * input worth registering for), the AgentConfig object, and
- * RuntimeModelManager/RuntimeSettingsManager/AgentCoordinator. Those are
+ * ModelSelector/SettingsGateway/AgentCoordinator. Those are
  * consumers that aggregate context slots' output (hooks from lsp+memory,
  * permissions from interactions, tools from toolRouter) — they are built
  * from the context, not entries in it, and forcing them into slots would
  * hide real build-order dependencies behind fake independence.
  */
 
-import type { ExtensionManager } from "../../capabilities/extensions/extensions.ts";
-import type { InteractionManager } from "../../capabilities/interactions/interaction-manager.ts";
-import type { LspManager } from "../../capabilities/lsp/lsp-manager.ts";
+import type { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
+import type { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import type { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
-import type { MemoryManager } from "../../capabilities/memory/memory.ts";
+import type { MemoryHost } from "../../capabilities/memory/memory.ts";
 
 interface RuntimeContextSlots {
 	repositoryMap: RepositoryMap | undefined;
-	lsp: LspManager;
-	extensions: ExtensionManager;
-	interactions: InteractionManager;
-	memory: MemoryManager;
+	lsp: LspClientPool;
+	extensions: ExtensionRegistry;
+	interactions: InteractionGateway;
+	memory: MemoryHost;
 }
 
 type SlotKey = keyof RuntimeContextSlots;
@@ -74,19 +74,19 @@ export class RuntimeContext {
 		return this.read("repositoryMap");
 	}
 
-	get lsp(): LspManager {
+	get lsp(): LspClientPool {
 		return this.read("lsp");
 	}
 
-	get extensions(): ExtensionManager {
+	get extensions(): ExtensionRegistry {
 		return this.read("extensions");
 	}
 
-	get interactions(): InteractionManager {
+	get interactions(): InteractionGateway {
 		return this.read("interactions");
 	}
 
-	get memory(): MemoryManager {
+	get memory(): MemoryHost {
 		return this.read("memory");
 	}
 

@@ -1,6 +1,6 @@
 /** Process-level runtime functions for Claude Code-compatible plugins. */
 
-import { type PluginCommandResult, TsPluginManager } from "./plugin-manager.ts";
+import { type PluginCommandResult, PluginRegistry } from "./plugin-registry.ts";
 
 // ── CLI functions ─────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ export async function runPluginBackend(
 	action: string,
 	args: string[],
 ): Promise<PluginCommandResult> {
-	const manager = new TsPluginManager({ env: pluginRuntimeEnv });
+	const manager = new PluginRegistry({ env: pluginRuntimeEnv });
 	try {
 		switch (action) {
 			case "list": {
@@ -198,6 +198,6 @@ export {
 export type {
 	PluginCommandResult,
 	PluginInstall,
-} from "./plugin-manager.ts";
+} from "./plugin-registry.ts";
 // Manager exports
-export { TsPluginManager } from "./plugin-manager.ts";
+export { PluginRegistry } from "./plugin-registry.ts";

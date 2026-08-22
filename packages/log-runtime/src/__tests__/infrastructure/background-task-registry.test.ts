@@ -4,12 +4,12 @@ import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TaskManager } from "../../capabilities/tools/support/utils/task-manager.ts";
+import { BackgroundTaskRegistry } from "../../capabilities/tools/support/utils/background-task-registry.ts";
 import { getShellConfig } from "../../capabilities/tools/support/utils/shell.ts";
 
-void test("TaskManager registers, tracks, lists and gets status of a background task", async () => {
+void test("BackgroundTaskRegistry registers, tracks, lists and gets status of a background task", async () => {
 	const logDir = mkdtempSync(join(tmpdir(), "logician-task-mgr-"));
-	const manager = new TaskManager(logDir);
+	const manager = new BackgroundTaskRegistry(logDir);
 	const { shell, args } = getShellConfig();
 
 	const child = spawn(shell, [...args, "echo 'hello task'; sleep 0.2; echo 'done task'"], {
@@ -42,9 +42,9 @@ void test("TaskManager registers, tracks, lists and gets status of a background 
 	manager.cleanupAll();
 });
 
-void test("TaskManager allows sending stdin and killing a task", async () => {
+void test("BackgroundTaskRegistry allows sending stdin and killing a task", async () => {
 	const logDir = mkdtempSync(join(tmpdir(), "logician-task-kill-"));
-	const manager = new TaskManager(logDir);
+	const manager = new BackgroundTaskRegistry(logDir);
 	const { shell, args } = getShellConfig();
 
 	const child = spawn(shell, [...args, "sleep 10"], {

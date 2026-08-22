@@ -2,7 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { ToolCall } from "@logician/log-core";
 import {
-	PermissionManager,
+	PermissionPolicy,
 	primaryArgString,
 } from "@logician/log-core/permissions";
 
@@ -11,7 +11,7 @@ function call(name: string, args: Record<string, unknown>): ToolCall {
 }
 
 void test("deny rules win over allow rules and modes", () => {
-	const pm = new PermissionManager({
+	const pm = new PermissionPolicy({
 		mode: "acceptAll",
 		rules: { deny: ["bash(rm *)"], allow: ["bash"] },
 	});
@@ -23,7 +23,7 @@ void test("deny rules win over allow rules and modes", () => {
 });
 
 void test("allow rule matches glob against the command", () => {
-	const pm = new PermissionManager({
+	const pm = new PermissionPolicy({
 		mode: "ask",
 		rules: { allow: ["bash(git status*)"] },
 	});
@@ -43,7 +43,7 @@ void test("allow rule matches glob against the command", () => {
 });
 
 void test("plan mode allows read-only tools, denies the rest", () => {
-	const pm = new PermissionManager({ mode: "plan" });
+	const pm = new PermissionPolicy({ mode: "plan" });
 	assert.equal(
 		pm.evaluate(call("read_file", { path: "a" }), { path: "a" }, {
 			readOnly: true,
@@ -56,7 +56,7 @@ void test("plan mode allows read-only tools, denies the rest", () => {
 });
 
 void test("acceptEdits allows edit tools, asks for bash", () => {
-	const pm = new PermissionManager({ mode: "acceptEdits" });
+	const pm = new PermissionPolicy({ mode: "acceptEdits" });
 	assert.equal(
 		pm.evaluate(call("edit_file", { path: "a" }), { path: "a" }).decision,
 		"allow",
@@ -69,7 +69,7 @@ void test("acceptEdits allows edit tools, asks for bash", () => {
 });
 
 void test("session allow persists after an 'always' decision", () => {
-	const pm = new PermissionManager({ mode: "ask" });
+	const pm = new PermissionPolicy({ mode: "ask" });
 	assert.equal(
 		pm.evaluate(call("write_file", { path: "a" }), { path: "a" }).decision,
 		"ask",
@@ -92,7 +92,7 @@ void test("primaryArgString prefers command, then path, then JSON", () => {
 });
 
 void test("batch bash permissions deny if any command is denied", () => {
-	const pm = new PermissionManager({
+	const pm = new PermissionPolicy({
 		mode: "acceptAll",
 		rules: { deny: ["bash(rm *)"] },
 	});
@@ -103,7 +103,7 @@ void test("batch bash permissions deny if any command is denied", () => {
 });
 
 void test("batch bash permissions require every command to match allow rules", () => {
-	const pm = new PermissionManager({
+	const pm = new PermissionPolicy({
 		mode: "ask",
 		rules: { allow: ["bash(npm test*)"] },
 	});

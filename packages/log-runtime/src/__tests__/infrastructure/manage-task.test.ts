@@ -4,13 +4,13 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createManageTaskTool } from "../../capabilities/tools/manage-task.ts";
-import { TaskManager } from "../../capabilities/tools/support/utils/task-manager.ts";
+import { BackgroundTaskRegistry } from "../../capabilities/tools/support/utils/background-task-registry.ts";
 import { spawn } from "node:child_process";
 import { getShellConfig } from "../../capabilities/tools/support/utils/shell.ts";
 
 void test("manage_task tool lists, checks status, and kills background tasks", async () => {
 	const logDir = mkdtempSync(join(tmpdir(), "logician-manage-task-"));
-	const manager = new TaskManager(logDir);
+	const manager = new BackgroundTaskRegistry(logDir);
 	const tool = createManageTaskTool(manager);
 	const { shell, args } = getShellConfig();
 

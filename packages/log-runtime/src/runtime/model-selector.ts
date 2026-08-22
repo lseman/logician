@@ -10,7 +10,7 @@ export interface ModelOption {
 }
 
 /** Model selection and endpoint changes for a live runtime. */
-export class RuntimeModelManager {
+export class ModelSelector {
 	constructor(
 		private readonly config: () => AgentConfig,
 		private readonly harness: () => AgentSession | null,

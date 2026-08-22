@@ -1,4 +1,4 @@
-// ── PersistentTerminalManager ───────────────────────────────────────────────
+// ── TerminalPool ───────────────────────────────────────────────
 // Maintains long-lived interactive shell sessions so that environment variables,
 // working directory changes, and shell functions persist across tool calls.
 
@@ -38,7 +38,7 @@ export interface PersistentExecutionResult {
 	details?: Record<string, unknown>;
 }
 
-export class PersistentTerminalManager {
+export class TerminalPool {
 	private terminals = new Map<string, PersistentTerminalSession>();
 
 	getTerminal(id = "default"): PersistentTerminalSession | undefined {
@@ -296,6 +296,6 @@ export class PersistentTerminalManager {
 	}
 }
 
-/** Global default PersistentTerminalManager instance. */
+/** Global default TerminalPool instance. */
 export const defaultPersistentTerminalManager =
-	new PersistentTerminalManager();
+	new TerminalPool();

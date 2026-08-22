@@ -18,9 +18,9 @@ export interface ExtensionManagerOptions {
 	projectTrusted: boolean;
 }
 
-// ── ExtensionManager class ─────────────────────────────────────────────────────
+// ── ExtensionRegistry class ─────────────────────────────────────────────────────
 
-export class ExtensionManager {
+export class ExtensionRegistry {
 	private _runner: ExtensionRunner | null = null;
 	private extensionDirs?: { user?: string; paths?: string[] };
 	private loadPromise: Promise<void> = Promise.resolve();

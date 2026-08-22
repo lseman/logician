@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentHooks } from "@logician/log-core";
 import { ensureInsideCwd } from "../tools/support/utils/path-utils.ts";
-import type { LspManager } from "./lsp-manager.ts";
+import type { LspClientPool } from "./lsp-client-pool.ts";
 
 const execFileAsync = promisify(execFile);
 const runtimeRequire = createRequire(import.meta.url);
@@ -225,7 +225,7 @@ function formatDiagnostics(
 export function createPostEditDiagnosticHooks(
 	cwd: string,
 	isEnabled: () => boolean = () => true,
-	lspManager?: LspManager,
+	lspManager?: LspClientPool,
 	pathPolicy?: {
 		allowedPaths?: string[];
 		allowAllPaths?: boolean;

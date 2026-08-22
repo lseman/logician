@@ -45,7 +45,7 @@ import {
 	type Skill,
 } from "../../capabilities/skills/loader.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
-import { LspManager } from "../../capabilities/lsp/lsp-manager.ts";
+import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
 import {
 	createMemoryGetTool,
@@ -56,16 +56,16 @@ import { killAllTrackedChildren } from "../../capabilities/tools/support/utils/s
 import type {
 	McpSnapshotResult,
 	McpToggleResult,
-} from "../../capabilities/mcp/mcp-manager.ts";
+} from "../../capabilities/mcp/mcp-server-registry.ts";
 import { mapAgentEvent } from "../events/event-mapping.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
 import { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
-import { InteractionManager } from "../../capabilities/interactions/interaction-manager.ts";
-import { RuntimeModelManager } from "../model-manager.ts";
+import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import { ModelSelector } from "../model-selector.ts";
 import {
-	RuntimeSettingsManager,
+	SettingsGateway,
 	type RuntimeToggleKey,
-} from "../runtime-settings.ts";
+} from "../settings-gateway.ts";
 import { buildToolRegistry } from "../runtime-context.ts";
 import { ToolRouter } from "../tool-router.ts";
 import { AgentCoordinator } from "./agent-coordinator.ts";
@@ -77,8 +77,8 @@ import {
 	eventLogPathFor,
 	resolveWebSearchConfig,
 } from "./environment.ts";
-import { ExtensionManager } from "../../capabilities/extensions/extensions.ts";
-import { MemoryManager } from "../../capabilities/memory/memory.ts";
+import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
+import { MemoryHost } from "../../capabilities/memory/memory.ts";
 import { formatPluginResult } from "./plugin-result-formatter.ts";
 
 
@@ -101,7 +101,7 @@ export class AgentRuntime {
 	private session: AgentSession | null = null;
 	private durableSession: Session | undefined;
 	readonly events = new RuntimeEventBus();
-	readonly models: RuntimeModelManager;
+	readonly models: ModelSelector;
 	private running = false;
 	private sendTail: Promise<void> = Promise.resolve();
 
@@ -188,7 +188,7 @@ export class AgentRuntime {
 			: this.baseSystemPrompt;
 	}
 	private readonly runtimeCtx: RuntimeContext;
-	private get extensionManager(): ExtensionManager {
+	private get extensions(): ExtensionRegistry {
 		return this.runtimeCtx.extensions;
 	}
 
@@ -203,15 +203,15 @@ export class AgentRuntime {
 	private contextMaxTokens?: number;
 	private configPath: string | null;
 	private postEditDiagnosticsEnabled: boolean;
-	private get lspManager(): LspManager {
+	private get lsp(): LspClientPool {
 		return this.runtimeCtx.lsp;
 	}
 	private readonly projectTrusted: boolean;
-	private get interactions(): InteractionManager {
+	private get interactions(): InteractionGateway {
 		return this.runtimeCtx.interactions;
 	}
-	private readonly settings: RuntimeSettingsManager;
-	private get memoryManager(): MemoryManager {
+	private readonly settings: SettingsGateway;
+	private get memory(): MemoryHost {
 		return this.runtimeCtx.memory;
 	}
 	private agentCoordinator: AgentCoordinator | null = null;
@@ -265,7 +265,7 @@ export class AgentRuntime {
 				id: "lsp",
 				register: () => {
 					const serverOverrides = opts.lsp?.serverOverrides;
-					return new LspManager(this.cwd, {
+					return new LspClientPool(this.cwd, {
 						timeoutMs: opts.lsp?.timeoutMs ?? 2_000,
 						servers:
 							serverOverrides && Object.keys(serverOverrides).length > 0
@@ -277,7 +277,7 @@ export class AgentRuntime {
 			{
 				id: "extensions",
 				register: () =>
-					new ExtensionManager({
+					new ExtensionRegistry({
 						sessionId: this.sessionId,
 						cwd: this.cwd,
 						extensionDirs: opts.extensions?.dirs,
@@ -287,7 +287,7 @@ export class AgentRuntime {
 			{
 				id: "interactions",
 				register: () =>
-					new InteractionManager({
+					new InteractionGateway({
 						mode: opts.permissions?.mode ?? "acceptEdits",
 						rules: opts.permissions?.rules,
 						emit: event => this.emit(event),
@@ -296,7 +296,7 @@ export class AgentRuntime {
 			{
 				id: "memory",
 				register: () =>
-					new MemoryManager(this.cwd, this.sessionId, {
+					new MemoryHost(this.cwd, this.sessionId, {
 						memoryEnabled: opts.memory?.enabled,
 						memoryDbPath: opts.memory?.dbPath,
 						memoryExtractorModel: opts.memory?.extractorModel,
@@ -315,7 +315,7 @@ export class AgentRuntime {
 		// Extension loading is a real side effect (reads disk, may run init
 		// hooks) — kept as an explicit statement rather than folded into
 		// register(), which the context treats as pure construction.
-		void this.extensionManager.initialize();
+		void this.extensions.initialize();
 
 		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
 		const defaultWebSearch = resolveWebSearchConfig();
@@ -328,10 +328,10 @@ export class AgentRuntime {
 					...(opts.memory?.enabled !== false
 						? [
 								createMemorySearchTool(
-									() => this.memoryManager?.getStore() ?? null,
+									() => this.memory?.getStore() ?? null,
 								),
 								createMemoryGetTool(
-									() => this.memoryManager?.getStore() ?? null,
+									() => this.memory?.getStore() ?? null,
 								),
 							]
 						: []),
@@ -428,7 +428,7 @@ export class AgentRuntime {
 				createPostEditDiagnosticHooks(
 					this.cwd,
 					() => this.postEditDiagnosticsEnabled,
-					opts.lsp?.enabled === false ? undefined : this.lspManager,
+					opts.lsp?.enabled === false ? undefined : this.lsp,
 					{
 						allowedPaths: opts.allowedPaths,
 						allowAllPaths: opts.allowAllPaths,
@@ -463,11 +463,11 @@ export class AgentRuntime {
 				this.emitRuntimeStatus();
 			},
 		};
-		this.models = new RuntimeModelManager(
+		this.models = new ModelSelector(
 			() => this.config,
 			() => this.session,
 		);
-		this.settings = new RuntimeSettingsManager({
+		this.settings = new SettingsGateway({
 			config: () => this.config,
 			patchCore: patch => {
 				Object.assign(this.config, patch);
@@ -482,7 +482,7 @@ export class AgentRuntime {
 			setToggle: (key, enabled) => this.applyRuntimeToggle(key, enabled),
 			permissionMode: () => this.getPermissionMode(),
 			postEditDiagnostics: () => this.postEditDiagnosticsEnabled,
-			memoryEnabled: () => Boolean(this.memoryManager?.getStore()),
+			memoryEnabled: () => Boolean(this.memory?.getStore()),
 		});
 
 		onTodosChanged(todos => {
@@ -513,13 +513,13 @@ export class AgentRuntime {
 	}
 
 	/**
-	 * Build memory hooks by delegating to the MemoryManager.
+	 * Build memory hooks by delegating to the MemoryHost.
 	 */
 	private buildMemoryHooks(
 		existingHooks: AgentConfig["hooks"],
 	): AgentConfig["hooks"] {
-		if (!this.memoryManager) return existingHooks;
-		return this.memoryManager.createHooks(existingHooks, {
+		if (!this.memory) return existingHooks;
+		return this.memory.createHooks(existingHooks, {
 			isRunning: () => this.running,
 			getBackend: () => this.backend,
 			emit: event => this.emit(event),
@@ -537,7 +537,7 @@ export class AgentRuntime {
 	// ── High-level commands ──────────────────────────────────────────────
 
 	async sendMessage(message: string): Promise<void> {
-		await this.extensionManager?.getLoadPromise();
+		await this.extensions?.getLoadPromise();
 		// A message submitted while a turn is in flight steers the running
 		// turn instead of starting a second concurrent run. Route through
 		// steer() so the queue update reaches the UI.
@@ -557,7 +557,7 @@ export class AgentRuntime {
 		// Local extractor models can saturate CPU/GPU and make both the UI and
 		// primary provider sluggish. Prefer the interactive turn; extraction's
 		// deterministic fallback still records the completed prior turn.
-		this.memoryManager?.abortExtractors();
+		this.memory?.abortExtractors();
 		this.running = true;
 		const turnId = `turn_${Date.now()}`;
 		let persistentSystemPrompt: string | undefined;
@@ -678,7 +678,7 @@ export class AgentRuntime {
 				backend: this.backend,
 				cwd: this.config.cwd,
 				maxIterations: this.config.maxIterations,
-				extensionRunner: this.extensionManager?.runner ?? undefined,
+				extensionRunner: this.extensions?.runner ?? undefined,
 				pluginHookFactory: context =>
 					createClaudeCodeHookLayer({
 						enabled: context.enabled,
@@ -908,7 +908,7 @@ export class AgentRuntime {
 		this.config.hookTranscriptPath = this.transcriptPath;
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
 		// Sync memory session
-		this.memoryManager?.resetSession(this.sessionId);
+		this.memory?.resetSession(this.sessionId);
 
 		// Reset state that is per-session
 		this.toolRouter.resetSkillsAndPrompts();
@@ -921,7 +921,7 @@ export class AgentRuntime {
 		await this.injectPrompts();
 
 		// ── Re-load extensions ────────────────────────────────────────────
-		await this.extensionManager
+		await this.extensions
 			?.reload()
 			.catch(err => console.error("[logician] extension reload error:", err));
 
@@ -1178,7 +1178,7 @@ export class AgentRuntime {
 
 	private applyRuntimeToggle(key: RuntimeToggleKey, enabled: boolean): void {
 		if (key === "memoryEnabled") {
-			this.memoryManager?.setEnabled(enabled, this.sessionId);
+			this.memory?.setEnabled(enabled, this.sessionId);
 			this.emit({
 				type: "notice",
 				level: "info",
@@ -1255,7 +1255,7 @@ export class AgentRuntime {
 	getMemoryStore(): ReturnType<
 		typeof import("@logician/log-memory").createMemoryStore
 	> | null {
-		return this.memoryManager?.getStore() ?? null;
+		return this.memory?.getStore() ?? null;
 	}
 
 	getMemoryStats(): {
@@ -1265,7 +1265,7 @@ export class AgentRuntime {
 		observationCount: number;
 		viewerPort?: number;
 	} {
-		if (!this.memoryManager) {
+		if (!this.memory) {
 			return {
 				memoryEnabled: false,
 				memoryCount: 0,
@@ -1273,7 +1273,7 @@ export class AgentRuntime {
 				observationCount: 0,
 			};
 		}
-		return this.memoryManager.getStats(this.sessionId);
+		return this.memory.getStats(this.sessionId);
 	}
 
 	/** Use the user-facing conversation session as the hook and memory session. */
@@ -1289,11 +1289,11 @@ export class AgentRuntime {
 		this.config.hookTranscriptPath = this.transcriptPath;
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
 		// Sync memory session
-		this.memoryManager?.onSessionChanged(sessionId, provisionalSessionId);
+		this.memory?.onSessionChanged(sessionId, provisionalSessionId);
 	}
 
 	renameConversationSession(sessionId: string, name: string): void {
-		this.memoryManager?.renameSession(sessionId, name);
+		this.memory?.renameSession(sessionId, name);
 	}
 
 	reset(): void {
@@ -1307,7 +1307,7 @@ export class AgentRuntime {
 		this.config.hookTranscriptPath = this.transcriptPath;
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
 		// Update memory session ID
-		this.memoryManager?.resetSession(this.sessionId);
+		this.memory?.resetSession(this.sessionId);
 		// Reset skill/prompt injection state
 		this.toolRouter.resetInjectedContext();
 		this.startupHooksRan = false;
@@ -1410,7 +1410,7 @@ export class AgentRuntime {
 	// ── State management ─────────────────────────────────────────────────
 
 	async init(): Promise<Record<string, unknown>> {
-		await this.extensionManager?.getLoadPromise();
+		await this.extensions?.getLoadPromise();
 		await this.runStartupHooksOnce();
 		this.ensureSession();
 		// MCP discovery already started in ToolRouter's constructor — fire-
@@ -1480,7 +1480,7 @@ export class AgentRuntime {
 		usage?: string;
 		acceptsArgs?: boolean;
 	}> {
-		return this.extensionManager?.getCommands() ?? [];
+		return this.extensions?.getCommands() ?? [];
 	}
 
 	invokeExtensionCommand(
@@ -1488,7 +1488,7 @@ export class AgentRuntime {
 		args: string,
 	): Promise<string | undefined> {
 		return (
-			this.extensionManager?.executeCommand(name, args) ??
+			this.extensions?.executeCommand(name, args) ??
 			Promise.resolve(undefined)
 		);
 	}
@@ -1496,9 +1496,9 @@ export class AgentRuntime {
 	async stop(): Promise<void> {
 		void this.cancel();
 		// Abort extraction and wait for background tasks to complete.
-		await this.memoryManager?.waitForBackgroundTasks();
+		await this.memory?.waitForBackgroundTasks();
 		await this.fireSessionEnd("shutdown");
-		this.lspManager.close();
+		this.lsp.close();
 		await this.toolRouter.closeMcp();
 		killAllTrackedChildren();
 		this.running = false;
@@ -1587,10 +1587,10 @@ export class AgentRuntime {
 	}
 
 	private getMemoryContextForInspection(messages: Message[]): string {
-		if (!this.memoryManager) return "";
+		if (!this.memory) return "";
 		// Cast: Message content is string | null but manager expects string | undefined
 		const msgArray = messages as Array<{ role: string; content?: string }>;
-		return this.memoryManager.getContextForInspection(msgArray);
+		return this.memory.getContextForInspection(msgArray);
 	}
 
 	getContextSourceMap(memoryContext: string = ""): Array<{

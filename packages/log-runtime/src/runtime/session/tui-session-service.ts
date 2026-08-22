@@ -1,10 +1,10 @@
 // ── TUI session service ──────────────────────────────────────────────────
 // Backs the session browser, resume, rename, and delete over agent-core's
-// JSONL Session/SessionManager tree — replaces the old SQLite SessionStore.
+// JSONL Session/SessionRegistry tree — replaces the old SQLite SessionStore.
 // One Session per conversation, cwd-scoped listing, Turn[] persisted as
 // opaque entries via turn-entries.ts.
 
-import { type Session, SessionManager } from "@logician/log-core/runtime";
+import { type Session, SessionRegistry } from "@logician/log-core/runtime";
 import type { Turn } from "../transcript/transcript.ts";
 import {
 	loadTurns as loadTurnsFromSession,
@@ -98,19 +98,19 @@ function extractSessionTopic(
 }
 
 export class TuiSessionService {
-	private manager: SessionManager;
+	private manager: SessionRegistry;
 	private cwd: string;
 	private currentSessionId: string | null = null;
 	// One Session instance per id, reused across calls. Session's own
 	// activeLeafId is cached in-memory on construction — a second instance
 	// for the same id would go stale the moment either one appends an entry
 	// (branching, compaction, turn saves), so every accessor below must
-	// route through this cache rather than ask SessionManager fresh each time.
+	// route through this cache rather than ask SessionRegistry fresh each time.
 	private openSessions = new Map<string, Session>();
 
 	constructor(cwd: string) {
 		this.cwd = cwd;
-		this.manager = new SessionManager();
+		this.manager = new SessionRegistry();
 	}
 
 	getCwd(): string {

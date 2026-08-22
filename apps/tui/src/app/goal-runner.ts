@@ -5,7 +5,7 @@
 
 import {
 	type AgentRuntime,
-	GoalManager,
+	GoalTracker,
 	type GoalState,
 } from "@logician/log-runtime/application";
 import type { Transcript } from "@logician/log-runtime/sessions";
@@ -17,7 +17,7 @@ export interface GoalRunnerCtx {
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
 	tui: TuiHandle;
-	goalManager: GoalManager;
+	goalManager: GoalTracker;
 	goalActive: boolean;
 	goalEvaluationPending: boolean;
 }
@@ -40,7 +40,7 @@ export async function evaluateGoal(
 		.filter(Boolean)
 		.join("\n\n");
 
-	const evaluatorPrompt = GoalManager.buildEvaluatorPrompt(
+	const evaluatorPrompt = GoalTracker.buildEvaluatorPrompt(
 		goalState.condition,
 		snapshot,
 	);
@@ -107,7 +107,7 @@ export async function evaluateGoal(
 		return;
 	}
 
-	const { met, reason } = GoalManager.parseEvaluatorResponse(response);
+	const { met, reason } = GoalTracker.parseEvaluatorResponse(response);
 
 	if (met) {
 		ctx.goalManager.recordEvaluation(true, reason);

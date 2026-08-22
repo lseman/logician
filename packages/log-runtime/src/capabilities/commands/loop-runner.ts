@@ -35,7 +35,7 @@ const MIN_INTERVAL_MS = 100;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
 
-export class LoopManager {
+export class LoopRunner {
 	private state: LoopState | null = null;
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private controller: AbortController | null = null;

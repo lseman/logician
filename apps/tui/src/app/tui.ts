@@ -3,9 +3,9 @@
 
 import {
 	AgentRuntime,
-	GoalManager,
+	GoalTracker,
 	type GoalState,
-	LoopManager,
+	LoopRunner,
 } from "@logician/log-runtime/application";
 import { createSlashCommands } from "@logician/log-runtime/commands";
 import { resolveRuntimeConfig } from "@logician/log-runtime/configuration/runtime";
@@ -173,8 +173,8 @@ export class LogicianTUI {
 	sessionService: TuiSessionService;
 	private killRing: KillRing;
 	private undoStack: UndoStack<{ value: string; cursor: number }>;
-	loopManager: LoopManager;
-	goalManager: GoalManager;
+	loopManager: LoopRunner;
+	goalManager: GoalTracker;
 	researchManager: AutoresearchSession;
 	turnState: TurnState = INITIAL_TURN_STATE;
 	loopActive = false;
@@ -344,7 +344,7 @@ export class LogicianTUI {
 		}
 		this.killRing = new KillRing();
 		this.undoStack = new UndoStack();
-		this.loopManager = new LoopManager();
+		this.loopManager = new LoopRunner();
 		this.loopManager.setOnTick(async (iteration, prompt) => {
 			this.loopActive = true;
 			this.transcript.addSystemMessage(
@@ -367,7 +367,7 @@ export class LogicianTUI {
 			}
 		});
 
-		this.goalManager = new GoalManager();
+		this.goalManager = new GoalTracker();
 		this.goalManager.setOnStateChange((state: Readonly<GoalState> | null) => {
 			if (state?.lastReason?.startsWith("Evaluation error:")) {
 				this.transcript.addSystemMessage(

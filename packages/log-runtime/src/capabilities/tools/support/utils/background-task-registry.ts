@@ -1,4 +1,4 @@
-// ── TaskManager ─────────────────────────────────────────────────────────────
+// ── BackgroundTaskRegistry ─────────────────────────────────────────────────────────────
 // Manages background asynchronous bash processes, log streams, stdin interaction,
 // status inspection, and lifecycle termination.
 
@@ -63,7 +63,7 @@ export interface TaskEntry {
 	lastLineEndsWithNewline: boolean;
 }
 
-export class TaskManager {
+export class BackgroundTaskRegistry {
 	private tasks = new Map<string, TaskEntry>();
 	private taskCounter = 0;
 	private baseLogDir: string;
@@ -366,5 +366,5 @@ export class TaskManager {
 	}
 }
 
-/** Global default TaskManager instance. */
-export const defaultTaskManager = new TaskManager();
+/** Global default BackgroundTaskRegistry instance. */
+export const defaultTaskManager = new BackgroundTaskRegistry();

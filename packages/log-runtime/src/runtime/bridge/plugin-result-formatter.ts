@@ -3,7 +3,7 @@
 // the transcript. Pure formatting, no bridge state — extracted from
 // AgentRuntime.
 
-import type { PluginCommandResult } from "../../adapters/claude-code/plugin-manager.ts";
+import type { PluginCommandResult } from "../../adapters/claude-code/plugin-registry.ts";
 
 function tableRow(values: string[]): string {
 	return `| ${values.join(" | ")} |`;

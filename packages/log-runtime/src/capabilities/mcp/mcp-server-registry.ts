@@ -190,7 +190,7 @@ async function loadPluginMcpServerConfigs(): Promise<
 	return out;
 }
 
-export class McpManager {
+export class McpServerRegistry {
 	private clients: McpClient[] = [];
 	private loaded = false;
 	private tools: Tool[] = [];

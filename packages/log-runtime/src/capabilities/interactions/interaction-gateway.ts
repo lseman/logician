@@ -1,6 +1,6 @@
 import type { AskUserContext } from "@logician/log-core";
 import {
-	PermissionManager,
+	PermissionPolicy,
 	type PermissionMode,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
@@ -15,8 +15,8 @@ export interface InteractionManagerOptions {
 }
 
 /** Owns interactive requests and their pending resolver lifecycle. */
-export class InteractionManager {
-	readonly permissions: PermissionManager;
+export class InteractionGateway {
+	readonly permissions: PermissionPolicy;
 	private readonly permissionResolvers = new Map<
 		string,
 		(decision: PermissionDecision) => void
@@ -28,7 +28,7 @@ export class InteractionManager {
 	private questionSequence = 0;
 
 	constructor(private readonly options: InteractionManagerOptions) {
-		this.permissions = new PermissionManager({
+		this.permissions = new PermissionPolicy({
 			mode: options.mode,
 			rules: options.rules,
 		});

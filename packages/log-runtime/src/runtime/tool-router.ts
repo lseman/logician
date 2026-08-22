@@ -30,10 +30,10 @@ import {
 } from "../capabilities/tools/sandbox.ts";
 import { resolveWebSearchConfig } from "./bridge/environment.ts";
 import {
-	McpManager,
+	McpServerRegistry,
 	type McpSnapshotResult,
 	type McpToggleResult,
-} from "../capabilities/mcp/mcp-manager.ts";
+} from "../capabilities/mcp/mcp-server-registry.ts";
 import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,
@@ -57,7 +57,7 @@ export interface ToolRouterDeps {
 	 * constructed, instead of waiting for the first caller that needs it.
 	 * Defaults to true for real sessions — this is a construction-time
 	 * side-effect switch only. Set false to keep construction free of network/
-	 * subprocess side effects — tests that stub `mcpManager` or
+	 * subprocess side effects — tests that stub `mcpRegistry` or
 	 * `loadMcpToolsOnce()` after construction need this, since otherwise the
 	 * real load can already be in flight (and win the memoized promise) by
 	 * the time the stub is installed.
@@ -125,7 +125,7 @@ export class ToolRouter {
 	private readonly onContextChanged: () => void;
 
 	private defaultTools: Tool[];
-	private readonly mcpManager = new McpManager();
+	private readonly mcpRegistry = new McpServerRegistry();
 	private readonly mcpProvider: ToolProvider;
 	private mcpLoaded = false;
 	private mcpLoadPromise: Promise<void> | null = null;
@@ -259,14 +259,14 @@ export class ToolRouter {
 		return this.mcpSystemContext;
 	}
 
-	/** Wrap McpManager as a ToolProvider: its load() resolves servers/tools and
+	/** Wrap McpServerRegistry as a ToolProvider: its load() resolves servers/tools and
 	 * formats connection failures into system-prompt context, so the driver
 	 * in loadMcpToolsOnce() only has to apply a ToolProviderResult. */
 	private createMcpProvider(): ToolProvider {
 		return {
 			id: "mcp",
 			load: async () => {
-				const result = await this.mcpManager.load(
+				const result = await this.mcpRegistry.load(
 					this.cwd,
 					this.defaultTools.map(tool => tool.name),
 				);
@@ -320,18 +320,18 @@ export class ToolRouter {
 	}
 
 	async getMcpSnapshot(): Promise<McpSnapshotResult> {
-		return this.mcpManager.getSnapshot(this.cwd);
+		return this.mcpRegistry.getSnapshot(this.cwd);
 	}
 
 	async setMcpServerEnabled(
 		serverName: string,
 		enabled: boolean,
 	): Promise<McpToggleResult> {
-		return this.mcpManager.setServerEnabled(serverName, enabled, this.cwd);
+		return this.mcpRegistry.setServerEnabled(serverName, enabled, this.cwd);
 	}
 
 	async closeMcp(): Promise<void> {
-		await this.mcpManager.close();
+		await this.mcpRegistry.close();
 	}
 
 	// ── Sandbox mode ─────────────────────────────────────────────────────

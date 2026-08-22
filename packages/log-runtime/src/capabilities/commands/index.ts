@@ -1,3 +1,3 @@
-export * from "./goal-manager.ts";
-export * from "./loop-manager.ts";
+export * from "./goal-tracker.ts";
+export * from "./loop-runner.ts";
 export * from "./slash-commands.ts";

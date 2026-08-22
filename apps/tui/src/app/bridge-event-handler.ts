@@ -6,7 +6,7 @@
 import { isTranscriptEvent, type RuntimeEvent } from "@logician/log-protocol";
 import type {
 	AgentRuntime,
-	GoalManager,
+	GoalTracker,
 	GoalState,
 } from "@logician/log-runtime/application";
 import { formatContextSize } from "@logician/log-runtime/formatting";
@@ -47,7 +47,7 @@ export interface BridgeEventHandlerCtx {
 	permissionPopup: PermissionPopup;
 	pendingPermission: { toolCallId: string; toolName: string } | null;
 	turnState: TurnState;
-	goalManager: GoalManager;
+	goalManager: GoalTracker;
 	goalActive: boolean;
 	researchManager: AutoresearchSession;
 	configPath?: string;

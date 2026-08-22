@@ -97,7 +97,7 @@ export interface PluginCommandResult {
 }
 
 /** Plugin manager: install, list, update, remove, and manage plugin hooks. */
-export class TsPluginManager {
+export class PluginRegistry {
 	readonly pluginsDir: string;
 	private registryPath: string;
 	private readonly env?: NodeJS.ProcessEnv;

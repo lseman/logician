@@ -1,6 +1,6 @@
 // ── Session browser overlay ──────────────────────────────────────────────────
 // List, search, rename, and switch sessions. Powered by TuiSessionService,
-// backed by agent-core's Session/SessionManager JSONL tree.
+// backed by agent-core's Session/SessionRegistry JSONL tree.
 
 import type { TuiSessionService } from "@logician/log-runtime/sessions";
 import { BOLD, type Component, RESET, visibleWidth } from "../terminal/core.ts";

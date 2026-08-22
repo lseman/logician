@@ -11,7 +11,7 @@ import type {
 	LLMResponse,
 	Tool,
 } from "@logician/log-core";
-import { PermissionManager } from "@logician/log-core/permissions";
+import { PermissionPolicy } from "@logician/log-core/permissions";
 import {
 	BUILTIN_AGENTS,
 	createSpawnAgentsTool,
@@ -422,7 +422,7 @@ void test("subagents inherit the parent permission boundary", async () => {
 		config: () => ({
 			...baseConfig,
 			tools: [mutate],
-			permissions: new PermissionManager({ mode: "plan" }),
+			permissions: new PermissionPolicy({ mode: "plan" }),
 		}),
 		backend: {
 			model: "fake",

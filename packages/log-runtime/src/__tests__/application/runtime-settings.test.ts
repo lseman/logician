@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentConfig } from "@logician/log-core";
 import {
-	RuntimeSettingsManager,
+	SettingsGateway,
 	type RuntimeToggleKey,
-} from "../../runtime/runtime-settings.ts";
+} from "../../runtime/settings-gateway.ts";
 
-describe("RuntimeSettingsManager", () => {
+describe("SettingsGateway", () => {
 	test("normalizes a client patch into core and feature mutations", () => {
 		const config: AgentConfig = { baseUrl: "local", model: "model" };
 		const toggles: Array<[RuntimeToggleKey, boolean]> = [];
-		const settings = new RuntimeSettingsManager({
+		const settings = new SettingsGateway({
 			config: () => config,
 			patchCore: patch => Object.assign(config, patch),
 			setThinkingLevel: level => {

@@ -20,4 +20,4 @@ export {
 	loadPluginHooks,
 	parseHookResponse,
 } from "./plugin-executor.ts";
-export * from "./plugin-manager.ts";
+export * from "./plugin-registry.ts";

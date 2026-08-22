@@ -1,4 +1,4 @@
-// ── MemoryManager ─────────────────────────────────────────────────────────
+// ── MemoryHost ─────────────────────────────────────────────────────────
 // Owns the bridge's memory store, viewer dashboard, and semantic-extraction
 // lifecycle. Extracted out of AgentRuntime — the store/hooks/viewer fields
 // only ever interact with each other and the session id they're keyed to;
@@ -40,7 +40,7 @@ export interface MemoryManagerRuntime {
 
 type Store = ReturnType<typeof createMemoryStore>;
 
-export class MemoryManager {
+export class MemoryHost {
 	private store: Store | null = null;
 	private captureTools: boolean;
 	private injectContext: boolean;
