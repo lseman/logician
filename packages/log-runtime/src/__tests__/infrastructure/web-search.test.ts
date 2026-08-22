@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { createWebSearchTool } from "../../infrastructure/tools/web-search.ts";
+import { createWebSearchTool } from "../../capabilities/tools/web-search.ts";
 
 void test("web_search sends bounded SearXNG parameters and renders rich metadata", async () => {
 	let requestedUrl = "";

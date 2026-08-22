@@ -1,7 +1,7 @@
 // ── Ariadne tool tests ────────────────────────────────────────────────────────
 
 import { describe, expect, it } from "bun:test";
-import { ariadne } from "../../infrastructure/tools/ariadne.ts";
+import { ariadne } from "../../capabilities/tools/ariadne.ts";
 
 describe("ariadne tool", () => {
 	it("should have correct metadata", () => {

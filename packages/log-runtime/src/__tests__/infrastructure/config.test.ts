@@ -19,7 +19,7 @@ import {
 	saveConfigField,
 	saveConfigNestedField,
 	validateConfig,
-} from "../../infrastructure/configuration/index.ts";
+} from "../../runtime/configuration/index.ts";
 
 // ── validateConfig ───────────────────────────────────────────────────────
 

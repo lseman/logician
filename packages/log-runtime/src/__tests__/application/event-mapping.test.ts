@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { STEERING_INTERRUPT_SUMMARY } from "@logician/log-core";
-import { mapAgentEvent } from "../../application/events/event-mapping.ts";
+import { mapAgentEvent } from "../../runtime/events/event-mapping.ts";
 
 void test("context updates preserve unavailable provider telemetry", () => {
 	assert.deepEqual(

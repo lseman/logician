@@ -4,8 +4,8 @@ import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TaskManager } from "../../infrastructure/tools/utils/task-manager.ts";
-import { getShellConfig } from "../../infrastructure/tools/utils/shell.ts";
+import { TaskManager } from "../../capabilities/tools/support/utils/task-manager.ts";
+import { getShellConfig } from "../../capabilities/tools/support/utils/shell.ts";
 
 void test("TaskManager registers, tracks, lists and gets status of a background task", async () => {
 	const logDir = mkdtempSync(join(tmpdir(), "logician-task-mgr-"));

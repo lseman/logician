@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { Transcript } from "../../application/transcript/transcript.ts";
+import { Transcript } from "../../runtime/transcript/transcript.ts";
 
 void test("transcript instances do not share turn state", () => {
 	const first = new Transcript();

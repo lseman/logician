@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { Transcript } from "../../application/transcript/transcript.ts";
+import { Transcript } from "../../runtime/transcript/transcript.ts";
 
 void test("events that do not change transcript state do not notify listeners", () => {
 	const transcript = new Transcript();

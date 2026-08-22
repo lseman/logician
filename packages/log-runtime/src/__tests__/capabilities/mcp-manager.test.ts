@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { McpManager } from "../../application/capabilities/mcp-manager.ts";
+import { McpManager } from "../../capabilities/mcp/mcp-manager.ts";
 import type { McpClient } from "../../capabilities/mcp/client.ts";
 
 function withIsolatedMcpEnvironment(

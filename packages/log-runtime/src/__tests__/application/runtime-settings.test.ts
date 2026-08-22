@@ -3,7 +3,7 @@ import type { AgentConfig } from "@logician/log-core";
 import {
 	RuntimeSettingsManager,
 	type RuntimeToggleKey,
-} from "../../application/runtime/runtime-settings.ts";
+} from "../../runtime/runtime-settings.ts";
 
 describe("RuntimeSettingsManager", () => {
 	test("normalizes a client patch into core and feature mutations", () => {

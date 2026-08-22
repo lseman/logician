@@ -3,5 +3,5 @@
 export {
 	highlight,
 	highlightAuto,
-} from "./infrastructure/tools/utils/syntax-highlighter.ts";
+} from "./capabilities/tools/support/utils/syntax-highlighter.ts";
 export { formatContextSize } from "./tui-utils.ts";

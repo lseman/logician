@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { Transcript } from "../../application/transcript/transcript.ts";
+import { Transcript } from "../../runtime/transcript/transcript.ts";
 
 function start(transcript: Transcript, id: string, path: string): void {
 	transcript.handleEvent({

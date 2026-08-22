@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { RuntimeEvent } from "@logician/log-protocol";
-import { AgentRuntime } from "../../application/bridge/agent-bridge.ts";
+import { AgentRuntime } from "../../runtime/bridge/agent-bridge.ts";
 
 void test("bridge publishes ordered versioned protocol notifications", () => {
 	const bridge = new AgentRuntime({
@@ -128,7 +128,7 @@ void test("startup state reports the registered web_search capability", async ()
 
 void test("sandbox mode cycles off -> code -> full -> off and updates the tool default", async () => {
 	const { getDefaultSandboxProfile, setDefaultSandboxProfile } = await import(
-		"../../infrastructure/tools/sandbox.ts"
+		"../../capabilities/tools/sandbox.ts"
 	);
 	const prev = getDefaultSandboxProfile();
 	const bridge = new AgentRuntime({
@@ -419,8 +419,10 @@ void test("/context renders request-time memory injection", () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		memoryDbPath: `/tmp/logician-context-memory-${process.pid}-${Date.now()}.db`,
-		memoryViewerEnabled: false,
+		memory: {
+			dbPath: `/tmp/logician-context-memory-${process.pid}-${Date.now()}.db`,
+			viewerEnabled: false,
+		},
 	});
 	const store = bridge.getMemoryStore()!;
 	const memory = store.create(

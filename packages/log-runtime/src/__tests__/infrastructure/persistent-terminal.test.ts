@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PersistentTerminalManager } from "../../infrastructure/tools/utils/persistent-terminal.ts";
+import { PersistentTerminalManager } from "../../capabilities/tools/support/utils/persistent-terminal.ts";
 
 void test("PersistentTerminalManager preserves environment variables across calls", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-term-env-"));

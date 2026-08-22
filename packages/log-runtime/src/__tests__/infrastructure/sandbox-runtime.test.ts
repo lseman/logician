@@ -5,7 +5,7 @@ import {
 	getDefaultSandboxProfile,
 	sandbox,
 	setDefaultSandboxProfile,
-} from "../../infrastructure/tools/sandbox.ts";
+} from "../../capabilities/tools/sandbox.ts";
 
 const bwrapAvailable =
 	process.platform === "linux" &&

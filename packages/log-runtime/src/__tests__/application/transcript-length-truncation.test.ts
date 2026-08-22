@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { Transcript } from "../../application/transcript/transcript.ts";
+import { Transcript } from "../../runtime/transcript/transcript.ts";
 
 // Reproduces the reported "stuck streaming spinner" bug end to end, using the
 // exact event shapes the bridge's mapAgentEvent() produces for each stage:

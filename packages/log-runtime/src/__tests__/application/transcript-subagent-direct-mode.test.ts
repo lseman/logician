@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { Transcript } from "../../application/transcript/transcript.ts";
+import { Transcript } from "../../runtime/transcript/transcript.ts";
 
 /** Direct-mode /spawn: tool_end arrives before subagent_lifecycle events. */
 void test("direct-mode /spawn: lifecycle summary written after tool_end closes chunk", () => {
