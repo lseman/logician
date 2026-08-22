@@ -22,29 +22,30 @@ tsx apps/tui/src/index.ts
 
 ### Memory MCP server
 
-`@logician/log-memory-mcp` (`apps/memory-mcp`) is a stdio MCP server that exposes
-`@logician/log-memory` — search, capture, and consolidation — to any MCP client,
-independent of the TUI or headless bridge. It requires an explicit
-`--workspace`; the default database is `<workspace>/.logician/memory.db`.
+`@logician/log-memory-mcp` (`apps/log-memory-mcp`) is a stdio MCP server that
+exposes `@logician/log-memory` — search, capture, and consolidation — to any
+MCP client, independent of the TUI or headless bridge. It requires an
+explicit `--workspace`; the default database is
+`<workspace>/.logician/memory.db`.
 
 ```sh
-bun run apps/memory-mcp/src/index.ts --workspace /absolute/project/path
+bun run apps/log-memory-mcp/src/index.ts --workspace /absolute/project/path
 ```
 
-See [apps/memory-mcp/README.md](https://github.com/lseman/logician/blob/main/apps/memory-mcp/README.md)
+See [apps/log-memory-mcp/README.md](https://github.com/lseman/logician/blob/main/apps/log-memory-mcp/README.md)
 for the full tool list and MCP client configuration.
 
 ### Headless (programmatic)
 
-The headless entry point is `AgentCoreBridge` from `@logician/log-core`'s
-`application` export—the same bridge the TUI itself drives. It is
+The headless entry point is `AgentRuntime` from `@logician/log-runtime`'s
+`application` export — the same bridge the TUI itself drives. It is
 event-driven: subscribe with `onNotification()`/`onError()`, then call
 `sendMessage()`.
 
 ```typescript
-import { AgentCoreBridge } from '@logician/log-core/application'
+import { AgentRuntime } from '@logician/log-runtime/application'
 
-const bridge = new AgentCoreBridge({
+const bridge = new AgentRuntime({
   baseUrl: 'http://127.0.0.1:8080',
   model: 'gpt-4o',
   cwd: process.cwd(),
@@ -59,7 +60,7 @@ bridge.onError(err => console.error(err))
 await bridge.sendMessage('fix the auth bug')
 ```
 
-Other notable `AgentCoreBridge` methods: `steer()`, `followUp()`,
+Other notable `AgentRuntime` methods: `steer()`, `followUp()`,
 `abort()`, `respondToQuestion()`, `getSkills()` / `invokeSkill()`,
 `getPrompts()` / `invokePrompt()`, `sendSlash()`, and
 `setPermissionMode()` / `getPermissionMode()`.
@@ -92,7 +93,7 @@ type RuntimeEventType =
 ```
 
 Each variant has its own payload shape (see
-`packages/agent-protocol/src/events.ts` for the full interfaces).
+`packages/log-protocol/src/events.ts` for the full interfaces).
 Most core events pass through `mapAgentEvent()`; bridge-owned features also
 emit UI-facing events such as `todos`, `steered`, `notice`, and
 `memory_update`. The [headless JSONL stream](/tutorials/headless) is a separate,
@@ -100,7 +101,7 @@ smaller versioned contract.
 
 ## Configuration
 
-`AgentCoreBridge` takes an `AgentBridgeOptions` object directly (as shown
+`AgentRuntime` takes an `AgentBridgeOptions` object directly (as shown
 above); the TUI CLI instead reads `.logician.json` (or the global
 `~/.logician/settings.json` fallback) and maps it onto the same options via
 `LogicianTuiConfig`. See [Config Schema](/reference/config) for the full

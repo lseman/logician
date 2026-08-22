@@ -182,6 +182,7 @@ flowchart LR
 | `@logician/log-memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |
 | `@logician/log-rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
 | `@logician/log-autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |
+| `@logician/log-eoh` | Evolution of Heuristics (arXiv:2401.02051) — standalone heuristic-evolution engine |
 | `@logician/log-eval` | Versioned coding-task corpora, independent graders, trials, and quality reports |
 
 The core flow is deliberately simple:

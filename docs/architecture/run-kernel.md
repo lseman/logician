@@ -6,7 +6,7 @@ description: Continuation tracking, the thread ledger, file checkpoints, and run
 # Durability & Recovery
 
 Logician does not keep a single monolithic execution ledger. Durability is
-split across a few focused, purpose-built mechanisms inside `agent-core`,
+split across a few focused, purpose-built mechanisms inside `log-core`,
 each owning one kind of state.
 
 ::: tip Renamed from "Run Kernel"
@@ -18,35 +18,39 @@ actually needs it (thread state, file state, run status).
 
 ## Continuation tracking
 
-The harness turn loop (`core/execution/agent-loop-runner.ts`) drives each
+The harness turn loop (`runtime/execution/agent-loop-runner.ts`) drives each
 turn through intake, model call, tool execution, and hooks. In-memory runtime
 status — phase (`idle` / `turn` / `compaction` / `branch_summary`),
 streaming state, pending tool calls, retry attempts, and the last run
-outcome — is projected by `core/state/runtime-state.ts` from the harness's
+outcome — is projected by `runtime/state/runtime-state.ts` from the harness's
 own event stream. This projection drives UI-facing status; it is
 intentionally ephemeral and rebuilds from the next turn if lost.
 
 Run-scoped policy (budgets, stop conditions, acceptance checks) is owned by
-`core/policy/run-controller.ts`, `run-budget.ts`, and `execution-policy.ts`.
+`control/policy/run-controller.ts`, `run-budget.ts`, and
+`execution-policy.ts`; the pure vocabulary those files consume
+(`RunBudgetLimits`, `RunOutcomeStatus`) lives under `system/types/` so
+other layers can reference it without depending on the enforcement classes.
 Task status shown to the harness comes from an optional, capability-supplied
-`TaskLedger` (`core/policy/task-ledger.ts`) — a read-only snapshot, not a
+`TaskLedger` (`system/types/task-ledger.ts`) — a read-only snapshot, not a
 durable store itself.
 
 ## Thread ledger
 
-`core/session/thread-ledger.ts` is the append-only record of conversation
-changes. Rather than mutating history in place, rewinds, branch merges, and
-compactions append a `projection` item with the replacement messages and a
-typed reason (`restore`, `rewind`, `branch-discard`, `branch-merge`,
-`compaction`, `clear`, `run-commit`). The current message projection is
-derived from the entry list, so provenance for how the transcript reached
-its current shape is preserved rather than erased.
+`capabilities/session/thread-ledger.ts` is the append-only record of
+conversation changes. Rather than mutating history in place, rewinds,
+branch merges, and compactions append a `projection` item with the
+replacement messages and a typed reason (`restore`, `rewind`,
+`branch-discard`, `branch-merge`, `compaction`, `clear`, `run-commit`). The
+current message projection is derived from the entry list, so provenance
+for how the transcript reached its current shape is preserved rather than
+erased.
 
 ## File checkpoints
 
-`core/session/file-checkpoints.ts` snapshots files before the agent's own
-tools touch them, so `/rewind` restores the workspace alongside the
-conversation:
+`capabilities/session/file-checkpoints.ts` snapshots files before the
+agent's own tools touch them, so `/rewind` restores the workspace alongside
+the conversation:
 
 - One frame is opened per prompt and popped on rewind; within a frame, only
   the **first** write to a path records its pre-state — that's what the
@@ -67,7 +71,7 @@ then simply not captured for that frame.
 ## Compaction checkpoints
 
 When a transcript has been compacted repeatedly and keeps re-growing,
-`core/compaction/run-checkpoint.ts` resets it to a small, structured
+`runtime/compaction/run-checkpoint.ts` resets it to a small, structured
 handoff instead of compacting again: the original objective, recent tool
 evidence, the last assistant message, and current task state, rewritten as
 a single "continue from here" message. This bounds context growth on long

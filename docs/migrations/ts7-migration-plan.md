@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-- **Files affected**: 1 file (`packages/coding-agent/src/developer-tools/post-edit-diagnostics.ts`)
+- **Files affected**: 1 file (`packages/log-runtime/src/capabilities/lsp/post-edit-diagnostics.ts`)
 - **TypeScript version**: `6.0.3` → `7.0.2`
 - **Breaking change**: `import ts from "typescript"` no longer returns the compiler API — only a version string
 - **Risk**: Medium — requires replacing 20+ compiler API calls
@@ -65,7 +65,7 @@ The following compiler APIs have **no replacement** in the unstable API:
 
 ## Affected Code Analysis
 
-### File: `packages/coding-agent/src/developer-tools/post-edit-diagnostics.ts` (248 lines)
+### File: `packages/log-runtime/src/capabilities/lsp/post-edit-diagnostics.ts` (248 lines)
 
 **Only 1 file imports from "typescript"**, with 2 distinct code paths:
 
@@ -224,7 +224,7 @@ Use CLI for quick transpile diagnostics, socket API for project diagnostics.
 #### Step 1: Extract TypeScript types (Day 1)
 
 ```ts
-// New file: packages/coding-agent/src/developer-tools/ts-types.ts
+// New file: packages/log-runtime/src/capabilities/lsp/ts-types.ts
 // Re-exports from typescript/unstable/ast (safe, will work in TS 7)
 export { ScriptKind, ScriptTarget, ModuleKind, JsxEmit } from "typescript/unstable/ast";
 export type { Diagnostic, SourceFile } from "typescript/unstable/sync";
@@ -294,7 +294,7 @@ import { ScriptKind, ScriptTarget, ModuleKind, JsxEmit } from "typescript/unstab
 #### Step 5: Add runtime check (Day 3)
 
 ```ts
-// packages/coding-agent/src/developer-tools/ts-version-check.ts
+// packages/log-runtime/src/capabilities/lsp/ts-version-check.ts
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { resolve } from "node:path";

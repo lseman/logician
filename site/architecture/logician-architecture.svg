@@ -2,7 +2,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" role="img"
   aria-labelledby="title description">
   <title id="title">Logician package architecture</title>
-  <desc id="description">Eight TypeScript packages plus a terminal UI app in one Node.js process. agent-protocol is the dependency-free foundation. agent-core builds on the protocol and owns the harness loop. agent-blocks, autoresearch, and eoh build on agent-core; agent-blocks also uses rag. memory, rag, and agent-eval stand alone. apps/tui composes agent-core, agent-blocks, agent-protocol, autoresearch, and memory. External access flows through the tool bus.</desc>
+  <desc id="description">Eight TypeScript packages plus a terminal UI app in one Node.js process. log-protocol and log-core are two independent, dependency-free foundations. log-autoresearch, log-eoh, log-memory, and log-rag each depend only on log-core (or stand alone). log-runtime is the composition layer: it depends on log-core, log-protocol, log-autoresearch, log-eoh, log-memory, and log-rag, and hosts every optional capability. apps/tui composes log-core, log-protocol, log-runtime, log-autoresearch, and log-memory directly, reaching log-rag and log-eoh indirectly through log-runtime. External access flows through the tool bus.</desc>
 
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
@@ -60,7 +60,7 @@
       <rect x="116" width="142" height="25" rx="12.5" fill="#56d364" fill-opacity=".1" stroke="#56d364" stroke-opacity=".75"/>
       <text x="187" y="17" text-anchor="middle" class="chip" fill="#56d364">Node.js ≥22.19</text>
       <rect x="270" width="98" height="25" rx="12.5" fill="#94a3b8" fill-opacity=".08" stroke="#64748b"/>
-      <text x="319" y="17" text-anchor="middle" class="chip">9 packages</text>
+      <text x="319" y="17" text-anchor="middle" class="chip">8 packages</text>
     </g>
   </g>
 
@@ -91,119 +91,116 @@
     </g>
   </g>
 
-  <text x="184" y="315" class="group-label">FEATURE PACKAGES</text>
+  <text x="184" y="315" class="group-label">COMPOSITION LAYER</text>
+  <text x="1250" y="315" text-anchor="end" class="link-label">the only package that depends on every feature package</text>
   <line x1="150" y1="322" x2="1250" y2="322" stroke="#243043" stroke-width="1"/>
 
-  <g aria-label="TUI to feature-package links" fill="none" stroke-linecap="round">
-    <path d="M300 285V335" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+  <g aria-label="TUI to runtime link" fill="none" stroke-linecap="round">
     <path d="M700 285V335" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
-    <path d="M1140 285V335" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
   </g>
 
-  <g id="package-blocks" filter="url(#shadow)">
-    <rect x="150" y="335" width="330" height="150" rx="16" fill="#151d26" stroke="#22d3ee" stroke-width="2"/>
-    <rect x="150" y="335" width="7" height="150" rx="3.5" fill="#22d3ee"/>
-    <text x="184" y="362" class="package" fill="#22d3ee">packages/agent-blocks</text>
-    <text x="184" y="388" class="card-title">Agent Blocks</text>
-    <text x="184" y="412" class="body">delegation · interaction · tasks</text>
-    <text x="184" y="430" class="body">reasoning · rag-backed retrieval</text>
-    <rect x="184" y="450" width="180" height="22" rx="11" fill="#22d3ee" fill-opacity=".08" stroke="#22d3ee" stroke-opacity=".45"/>
-    <text x="274" y="465" text-anchor="middle" class="chip">feature modules</text>
+  <g id="package-runtime" filter="url(#shadow)">
+    <rect x="150" y="335" width="1100" height="110" rx="16" fill="#151d26" stroke="#22d3ee" stroke-width="2"/>
+    <rect x="150" y="335" width="7" height="110" rx="3.5" fill="#22d3ee"/>
+    <text x="184" y="362" class="package" fill="#22d3ee">packages/log-runtime</text>
+    <text x="184" y="388" class="card-title">Log Runtime</text>
+    <text x="184" y="411" class="body">reasoning · delegation · tasks · ask-user · rag · tools</text>
+    <text x="184" y="428" class="body">memory · lsp · mcp · skills · interactions · extensions — one folder per capability</text>
+    <rect x="900" y="368" width="315" height="22" rx="11" fill="#22d3ee" fill-opacity=".08" stroke="#22d3ee" stroke-opacity=".45"/>
+    <text x="1057.5" y="383" text-anchor="middle" class="chip">composition point</text>
   </g>
+
+  <g aria-label="Runtime to middle-tier links" fill="none" stroke-linecap="round">
+    <path d="M300 445V453H345V510" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M580 445V453H585V510" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M820 445V453H815V510" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M1100 445V453H1055V510" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+  </g>
+
+  <text x="184" y="483" class="group-label">EXPERIMENT · MEMORY · RETRIEVAL</text>
+  <text x="1250" y="483" text-anchor="end" class="link-label">each depends only on log-core, or stands alone</text>
+  <line x1="150" y1="490" x2="1250" y2="490" stroke="#243043" stroke-width="1"/>
 
   <g id="package-autoresearch" filter="url(#shadow)">
-    <rect x="535" y="335" width="330" height="150" rx="16" fill="#151d26" stroke="#f472b6" stroke-width="2"/>
-    <rect x="535" y="335" width="7" height="150" rx="3.5" fill="#f472b6"/>
-    <text x="569" y="362" class="package" fill="#f472b6">packages/autoresearch</text>
-    <text x="569" y="388" class="card-title">Autoresearch</text>
-    <text x="569" y="412" class="body">run · measure · keep or discard</text>
-    <text x="569" y="430" class="body">measured experiment loops</text>
-    <rect x="569" y="450" width="180" height="22" rx="11" fill="#f472b6" fill-opacity=".08" stroke="#f472b6" stroke-opacity=".45"/>
-    <text x="659" y="465" text-anchor="middle" class="chip">experiment loop</text>
+    <rect x="150" y="510" width="260" height="130" rx="16" fill="#151d26" stroke="#f472b6" stroke-width="2"/>
+    <rect x="150" y="510" width="7" height="130" rx="3.5" fill="#f472b6"/>
+    <text x="180" y="536" class="package" fill="#f472b6">log-autoresearch</text>
+    <text x="180" y="560" class="card-title" font-size="15">Autoresearch</text>
+    <text x="180" y="583" class="body">run · measure ·</text>
+    <text x="180" y="598" class="body">keep or discard</text>
+    <rect x="180" y="612" width="185" height="20" rx="10" fill="#f472b6" fill-opacity=".08" stroke="#f472b6" stroke-opacity=".45"/>
+    <text x="272.5" y="626" text-anchor="middle" class="chip" font-size="9.5">needs log-core</text>
   </g>
 
   <g id="package-eoh" filter="url(#shadow)">
-    <rect x="920" y="335" width="330" height="150" rx="16" fill="#151d26" stroke="#fbbf24" stroke-width="2"/>
-    <rect x="920" y="335" width="7" height="150" rx="3.5" fill="#fbbf24"/>
-    <text x="954" y="362" class="package" fill="#fbbf24">packages/eoh</text>
-    <text x="954" y="388" class="card-title">EoH</text>
-    <text x="954" y="412" class="body">Evolution of Heuristics (arXiv 2401.02051)</text>
-    <text x="954" y="430" class="body">session logic · persistence · dashboard</text>
-    <rect x="954" y="450" width="180" height="22" rx="11" fill="#fbbf24" fill-opacity=".08" stroke="#fbbf24" stroke-opacity=".45"/>
-    <text x="1044" y="465" text-anchor="middle" class="chip">heuristic evolution</text>
+    <rect x="430" y="510" width="260" height="130" rx="16" fill="#151d26" stroke="#fbbf24" stroke-width="2"/>
+    <rect x="430" y="510" width="7" height="130" rx="3.5" fill="#fbbf24"/>
+    <text x="460" y="536" class="package" fill="#fbbf24">log-eoh</text>
+    <text x="460" y="560" class="card-title" font-size="15">EoH</text>
+    <text x="460" y="583" class="body">Evolution of Heuristics</text>
+    <text x="460" y="598" class="body">(arXiv 2401.02051)</text>
+    <rect x="460" y="612" width="185" height="20" rx="10" fill="#fbbf24" fill-opacity=".08" stroke="#fbbf24" stroke-opacity=".45"/>
+    <text x="552.5" y="626" text-anchor="middle" class="chip" font-size="9.5">needs log-core</text>
   </g>
-
-  <g aria-label="Feature to runtime links" fill="none" stroke-linecap="round">
-    <path d="M280 485V493H580V560" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
-    <path d="M665 485V560" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
-    <path d="M1050 485V493H750V560" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
-  </g>
-
-  <text x="184" y="533" class="group-label">RUNTIME FOUNDATION</text>
-  <text x="1250" y="533" text-anchor="end" class="link-label">built on agent-core</text>
-  <line x1="150" y1="541" x2="1250" y2="541" stroke="#243043" stroke-width="1"/>
-
-  <g id="package-core" filter="url(#shadow)">
-    <rect x="150" y="560" width="700" height="140" rx="16" fill="#151d26" stroke="#58a6ff" stroke-width="2"/>
-    <rect x="150" y="560" width="7" height="140" rx="3.5" fill="#58a6ff"/>
-    <text x="184" y="587" class="package" fill="#58a6ff">packages/agent-core</text>
-    <text x="184" y="613" class="card-title">Agent Core</text>
-    <text x="184" y="637" class="body">loop · harness · hooks · compaction</text>
-    <text x="184" y="654" class="body">tool registry · thread ledger · context engine</text>
-    <rect x="184" y="670" width="200" height="22" rx="11" fill="#58a6ff" fill-opacity=".08" stroke="#58a6ff" stroke-opacity=".45"/>
-    <text x="284" y="685" text-anchor="middle" class="chip">runtime foundation</text>
-  </g>
-
-  <g aria-label="Core to protocol link" fill="none" stroke-linecap="round">
-    <path d="M850 630H875" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
-  </g>
-
-  <g id="package-protocol" filter="url(#shadow)">
-    <rect x="875" y="560" width="375" height="140" rx="16" fill="#151d26" stroke="#34d399" stroke-width="2"/>
-    <rect x="875" y="560" width="7" height="140" rx="3.5" fill="#34d399"/>
-    <text x="909" y="587" class="package" fill="#34d399">packages/agent-protocol</text>
-    <text x="909" y="613" class="card-title">Agent Protocol</text>
-    <text x="909" y="637" class="body">versioned, dependency-free client protocol</text>
-    <text x="909" y="654" class="body">UI-ready notifications</text>
-    <rect x="909" y="670" width="200" height="22" rx="11" fill="#34d399" fill-opacity=".08" stroke="#34d399" stroke-opacity=".45"/>
-    <text x="1009" y="685" text-anchor="middle" class="chip">zero dependencies</text>
-  </g>
-
-  <text x="184" y="732" class="group-label">DATA &amp; EVALUATION</text>
-  <text x="1250" y="732" text-anchor="end" class="link-label">consumed by agent-blocks (rag) and apps/tui (memory) — no dependency on agent-core</text>
-  <line x1="150" y1="739" x2="1250" y2="739" stroke="#243043" stroke-width="1"/>
 
   <g id="package-memory" filter="url(#shadow)">
-    <rect x="150" y="752" width="330" height="110" rx="16" fill="#151d26" stroke="#f59e0b" stroke-width="2"/>
-    <rect x="150" y="752" width="7" height="110" rx="3.5" fill="#f59e0b"/>
-    <text x="184" y="778" class="package" fill="#f59e0b">packages/memory</text>
-    <text x="184" y="802" class="card-title">Memory</text>
-    <text x="184" y="825" class="body">SQLite observation capture,</text>
-    <text x="184" y="841" class="body">consolidation, retrieval, context injection</text>
+    <rect x="710" y="510" width="260" height="130" rx="16" fill="#151d26" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="710" y="510" width="7" height="130" rx="3.5" fill="#f59e0b"/>
+    <text x="740" y="536" class="package" fill="#f59e0b">log-memory</text>
+    <text x="740" y="560" class="card-title" font-size="15">Memory</text>
+    <text x="740" y="583" class="body">SQLite observations,</text>
+    <text x="740" y="598" class="body">consolidation, retrieval</text>
+    <rect x="740" y="612" width="185" height="20" rx="10" fill="#f59e0b" fill-opacity=".08" stroke="#f59e0b" stroke-opacity=".45"/>
+    <text x="832.5" y="626" text-anchor="middle" class="chip" font-size="9.5">stands alone</text>
   </g>
 
   <g id="package-rag" filter="url(#shadow)">
-    <rect x="535" y="752" width="330" height="110" rx="16" fill="#151d26" stroke="#38bdf8" stroke-width="2"/>
-    <rect x="535" y="752" width="7" height="110" rx="3.5" fill="#38bdf8"/>
-    <text x="569" y="778" class="package" fill="#38bdf8">packages/rag</text>
-    <text x="569" y="802" class="card-title">RAG</text>
-    <text x="569" y="825" class="body">hybrid dense + BM25 search,</text>
-    <text x="569" y="841" class="body">chunking, reranking, context budgets</text>
+    <rect x="990" y="510" width="260" height="130" rx="16" fill="#151d26" stroke="#38bdf8" stroke-width="2"/>
+    <rect x="990" y="510" width="7" height="130" rx="3.5" fill="#38bdf8"/>
+    <text x="1020" y="536" class="package" fill="#38bdf8">log-rag</text>
+    <text x="1020" y="560" class="card-title" font-size="15">RAG</text>
+    <text x="1020" y="583" class="body">hybrid dense + BM25,</text>
+    <text x="1020" y="598" class="body">chunking, reranking</text>
+    <rect x="1020" y="612" width="185" height="20" rx="10" fill="#38bdf8" fill-opacity=".08" stroke="#38bdf8" stroke-opacity=".45"/>
+    <text x="1112.5" y="626" text-anchor="middle" class="chip" font-size="9.5">stands alone</text>
   </g>
 
-  <g id="package-agent-eval" filter="url(#shadow)">
-    <rect x="920" y="752" width="330" height="110" rx="16" fill="#151d26" stroke="#fb7185" stroke-width="2"/>
-    <rect x="920" y="752" width="7" height="110" rx="3.5" fill="#fb7185"/>
-    <text x="954" y="778" class="package" fill="#fb7185">packages/agent-eval</text>
-    <text x="954" y="802" class="card-title">Agent Eval</text>
-    <text x="954" y="825" class="body">outcome-grounded evaluation runner</text>
-    <text x="954" y="841" class="body">executable checks over self-reports</text>
+  <g aria-label="Middle tier to foundation links" fill="none" stroke-linecap="round">
+    <path d="M280 640V648H500V700" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M560 640V648H500V700" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
+    <path d="M840 640V648H500V700" stroke="#58a6ff" stroke-width="1.7" marker-end="url(#arrow-blue)"/>
   </g>
 
-  <g id="harness-detail" aria-label="Agent core harness loop" filter="url(#shadow)">
-    <path d="M500 700V730" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="184" y="668" class="group-label">TWO INDEPENDENT FOUNDATIONS</text>
+  <text x="1250" y="668" text-anchor="end" class="link-label">zero dependency on each other, or on anything else in the workspace</text>
+  <line x1="150" y1="675" x2="1250" y2="675" stroke="#243043" stroke-width="1"/>
+
+  <g id="package-core" filter="url(#shadow)">
+    <rect x="150" y="700" width="700" height="140" rx="16" fill="#151d26" stroke="#58a6ff" stroke-width="2"/>
+    <rect x="150" y="700" width="7" height="140" rx="3.5" fill="#58a6ff"/>
+    <text x="184" y="727" class="package" fill="#58a6ff">packages/log-core</text>
+    <text x="184" y="753" class="card-title">Log Core</text>
+    <text x="184" y="777" class="body">loop · harness · hooks · compaction</text>
+    <text x="184" y="794" class="body">tool registry · thread ledger · context engine</text>
+    <rect x="184" y="810" width="200" height="22" rx="11" fill="#58a6ff" fill-opacity=".08" stroke="#58a6ff" stroke-opacity=".45"/>
+    <text x="284" y="825" text-anchor="middle" class="chip">runtime foundation</text>
+  </g>
+
+  <g id="package-protocol" filter="url(#shadow)">
+    <rect x="875" y="700" width="375" height="140" rx="16" fill="#151d26" stroke="#34d399" stroke-width="2"/>
+    <rect x="875" y="700" width="7" height="140" rx="3.5" fill="#34d399"/>
+    <text x="909" y="727" class="package" fill="#34d399">packages/log-protocol</text>
+    <text x="909" y="753" class="card-title">Log Protocol</text>
+    <text x="909" y="777" class="body">versioned, dependency-free client protocol</text>
+    <text x="909" y="794" class="body">UI-ready notifications</text>
+    <rect x="909" y="810" width="200" height="22" rx="11" fill="#34d399" fill-opacity=".08" stroke="#34d399" stroke-opacity=".45"/>
+    <text x="1009" y="825" text-anchor="middle" class="chip">zero dependencies</text>
+  </g>
+
+  <g id="harness-detail" aria-label="Log core harness loop" filter="url(#shadow)">
+    <path d="M500 840V870" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5 4"/>
     <rect x="150" y="900" width="1100" height="150" rx="18" fill="#111925" stroke="#58a6ff" stroke-width="1.5"/>
-    <text x="182" y="926" class="package" fill="#58a6ff">AGENT-CORE · HARNESS LOOP</text>
+    <text x="182" y="926" class="package" fill="#58a6ff">LOG-CORE · HARNESS LOOP</text>
     <text x="1218" y="926" text-anchor="end" class="link-label">each turn follows the same controlled path</text>
 
     <g transform="translate(182 946)">

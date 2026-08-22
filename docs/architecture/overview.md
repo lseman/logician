@@ -23,8 +23,8 @@ graph LR
     H["@logician/log-eoh"]
   end
   subgraph DataAndEvaluation["Data and evaluation"]
-    M["memory + rag"]
-    E["autoresearch + agent-eval"]
+    M["log-memory + log-rag"]
+    E["log-autoresearch + log-eval"]
   end
   A --> P
   A --> C
@@ -40,7 +40,7 @@ graph LR
 
 ## Package details
 
-### agent-core
+### log-core
 
 The foundation layer. Handles:
 - LLM backend (OpenAI-compatible HTTP client)
@@ -51,19 +51,22 @@ The foundation layer. Handles:
 - Hook system
 - Tool registry and execution
 
-Inside the package, dependency direction is strict:
+Inside the package, source is organized by role rather than one flat `core/`:
 
 ```text
-protocol <- core
-core <- capabilities
-core <- infrastructure
-core + infrastructure <- adapters
-core + capabilities + infrastructure + adapters <- application
+capabilities/  session, provider, tools — the durable/model-facing seams
+control/       guards, policy, configuration — enforcement over the loop
+runtime/       harness, execution, hooks, compaction, loop, state — the engine itself
+system/        types (vocabulary) and cross-cutting context/evaluation concerns
 ```
 
-`core/` cannot import product feature packages. Product composition lives at
-the application edge. The harness uses immutable configuration revisions, an
-append-only thread ledger, a run-scoped policy controller, and a context engine.
+`system/types/` holds pure vocabulary (`TaskLedger`, `RunBudgetLimits`,
+`AcceptanceConfig`, and similar) with no behavior, so `control/`'s
+enforcement classes and `capabilities/`/`runtime/` code can share one
+definition without a circular dependency. Product composition — wiring
+log-core into a running agent — lives in `log-runtime`, not inside log-core
+itself. The harness uses immutable configuration revisions, an append-only
+thread ledger, a run-scoped policy controller, and a context engine.
 
 Execution durability is split across the thread ledger, file checkpoints,
 and run-scoped policy state — see
@@ -72,29 +75,38 @@ and run-scoped policy state — see
 The evidence and invariants behind the current runtime boundaries are recorded
 in [Runtime Design Decisions](/architecture/modernization).
 
-### agent-protocol
+### log-protocol
 
 The dependency-free client protocol. It owns versioned UI-ready notifications.
 Internal provider, hook, and tool events are translated before crossing this
 seam. TUI and future clients depend on this package rather than core internals.
 
-### agent-blocks
+### log-runtime
 
-Optional product feature modules:
-- Reasoners (ToT, SSR, Reflexion, etc.)
-- Subagent delegation
-- Todo/task management
-- Tool selection and execution strategies
-- Re-exports `@logician/log-eoh` (below) as an opt-in reasoning strategy
+Composes log-core into a running agent and hosts every optional product
+capability, organized as one folder per capability under `capabilities/`:
+- `reasoning/` — ToT, SSR, Reflexion, Best-of-N, Self-Consistency, Auto-CoT,
+  In-Context CoT, GoT, plus a shared base and registry
+- `delegation/` — subagent spawning and definitions
+- `tasks/` — todo/task tracking
+- `ask-user/` — structured mid-turn prompts back to the user
+- `rag/` — retrieval-backed tools (backed by `@logician/log-rag`)
+- `tools/` — the built-in tool registry, including `builtin-blocks.ts`,
+  which assembles tools from the capabilities above
+- `memory/`, `lsp/`, `mcp/`, `skills/`, `interactions/`, `extensions/`,
+  `repository-map/`, `prompts/`, `commands/` — the remaining capability seams
 
-### eoh
+`runtime/` is the orchestration layer on top: the agent bridge, tool router,
+session/transcript handling, and configuration — the code that wires
+capabilities together rather than being one itself.
+
+### log-eoh
 
 Evolution of Heuristics ([arXiv:2401.02051](https://arxiv.org/abs/2401.02051)):
 an evolutionary optimization engine with its own session logic, population
-management, compaction, and dashboard. It's a standalone workspace package —
-`agent-core`'s application layer wires it in directly, and `agent-blocks`
-re-exports it as one more reasoning strategy. Not on the runtime's critical
-path; opt-in.
+management, compaction, and dashboard. It's a standalone workspace package
+that `log-runtime` wires in directly as one more capability. Not on the
+runtime's critical path; opt-in.
 
 ### tui
 
@@ -105,14 +117,14 @@ The presentation layer. Handles:
 - State management
 - Layout and theming
 
-### memory and rag
+### log-memory and log-rag
 
 Workspace-scoped durable memory and document/repository retrieval, with hybrid
 ranking, provenance, context budgets, and component evaluation.
 Memory claims also use gated lifecycles, executable validity predicates, and
 outcome-linked shadow learning; see [Evolving memory](./evolving-memory.md).
 
-### autoresearch and agent-eval
+### log-autoresearch and log-eval
 
 Measured experiment loops and independently graded coding-task trials. Agent
 evaluation treats repository state and executable checks as authoritative; an
@@ -122,9 +134,9 @@ agent's own completion claim is retained only as diagnostic evidence.
 
 ```mermaid
 flowchart LR
-    User --> TUI --> Core["Agent core"] --> Provider
+    User --> TUI --> Runtime["log-runtime"] --> Core["log-core"] --> Provider
     Provider --> Core
     Core --> Tools
     Tools --> Core
-    Core --> Protocol["Agent protocol"] --> TUI --> User
+    Core --> Protocol["log-protocol"] --> TUI --> User
 ```

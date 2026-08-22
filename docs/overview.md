@@ -21,13 +21,11 @@ graph TB
   subgraph TUI["apps/tui"]
     A[Terminal UI]
   end
-  subgraph Agent
-    C[Agent Core]
+  subgraph Core["log-core"]
+    C[Agent loop / harness]
   end
-  subgraph Capabilities["agent-blocks"]
-    D[Reasoners]
-    E[Subagents]
-    F[Todo & Task Mgmt]
+  subgraph Runtime["log-runtime"]
+    D[Capabilities: reasoning, delegation,<br/>tasks, ask-user, rag, tools, memory,<br/>lsp, mcp, skills]
   end
   subgraph Evolution
     G[EOH Engine]
@@ -41,14 +39,13 @@ graph TB
     K[MCP Servers]
   end
 
-  A --> C
-  C --> J
   A --> D
   D --> C
+  C --> J
   D --> G
   C --> G
   C --> H
-  C --> I
+  D --> I
   C --> K
 ```
 
@@ -56,16 +53,16 @@ graph TB
 
 | Package | Responsibility |
 |---|---|
-| `agent-protocol` | Dependency-free, versioned notifications for clients |
-| `agent-core` | Agent loop, harness, context, configuration, sessions, skills, MCP, trust, and product orchestration |
-| `agent-blocks` | Optional reasoners, subagents, todo management, interaction, and RAG tools |
-| `eoh` | Evolution of Heuristics — standalone optimization engine, wired into `agent-core` and re-exported by `agent-blocks` |
-| `memory` | SQLite-backed persistent memory: observation capture, consolidation, retrieval |
-| `rag` | Hybrid dense + BM25 retrieval, chunking, reranking, context budgets |
-| `autoresearch` | Measured experiment loops — run, evaluate, keep or discard |
-| `agent-eval` | Outcome-grounded evaluation runner for agent trials |
+| `log-protocol` | Dependency-free, versioned notifications for clients |
+| `log-core` | Agent loop, harness, context, configuration, sessions, hooks, compaction, and tool registry |
+| `log-runtime` | Runtime composition: capabilities (reasoning, delegation, tasks, ask-user, RAG tools, built-in tools, memory wiring, LSP, MCP, skills) plus orchestration (bridge, session, transcript) |
+| `log-eoh` | Evolution of Heuristics — standalone optimization engine, wired into `log-runtime`'s capabilities |
+| `log-memory` | SQLite-backed persistent memory: observation capture, consolidation, retrieval |
+| `log-rag` | Hybrid dense + BM25 retrieval, chunking, reranking, context budgets |
+| `log-autoresearch` | Measured experiment loops — run, evaluate, keep or discard |
+| `log-eval` | Outcome-grounded evaluation runner for agent trials |
 | `tui` | Terminal UI components, engine, layers, state management (`apps/tui`) |
-| `memory-mcp` | Stdio MCP adapter exposing `@logician/log-memory` to any MCP client (`apps/memory-mcp`) |
+| `log-memory-mcp` | Stdio MCP adapter exposing `@logician/log-memory` to any MCP client (`apps/log-memory-mcp`) |
 
 ### Key concepts
 

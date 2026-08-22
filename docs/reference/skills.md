@@ -5,7 +5,7 @@ description: Skill data structures, loading, diagnostics, and frontmatter.
 
 # Skills API
 
-Import the loader from `@logician/log-core/skills`.
+Import the loader from `@logician/log-runtime/skills`.
 
 ## Skill shape
 
@@ -42,7 +42,7 @@ interface Skill {
 `loadSkills` accepts one directory or a list of directories/source descriptors and returns both skills and diagnostics:
 
 ```typescript
-import { loadSkills } from '@logician/log-core/skills'
+import { loadSkills } from '@logician/log-runtime/skills'
 
 const { skills, diagnostics } = await loadSkills([
   { dir: '/home/me/.agents/skills', source: 'user' },

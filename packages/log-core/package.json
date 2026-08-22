@@ -11,6 +11,7 @@
 		"./evaluation": "./src/system/evaluation/trajectory.ts",
 		"./extensions": "./src/extensions.ts",
 		"./frontmatter": "./src/frontmatter.ts",
+		"./hooks/native": "./src/runtime/hooks/hook-bus.ts",
 		"./permissions": "./src/capabilities/tools/permissions.ts",
 		"./runtime": "./src/runtime.ts"
 	},

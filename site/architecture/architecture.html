@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description"
-        content="How Logician is built: the package layout, the agent harness loop, and how the TUI, feature packages, and core engine fit together." />
+        content="How Logician is built: the package layout, the log-core harness loop, and how the TUI, log-runtime capabilities, and core engine fit together." />
     <title>Architecture — Logician</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -64,9 +64,10 @@
                 <div class="hero-kicker">System design</div>
                 <h1 class="arch-title">How <span class="grad">Logician</span> is built</h1>
                 <p class="section-copy arch-lede">
-                    A TypeScript monorepo arranged as a fan-in: a dependency-free protocol and a lean agent
-                    engine form the foundation, feature packages build on the engine, and the terminal UI
-                    pulls everything together into one running process.
+                    A TypeScript monorepo arranged as a fan-in: two dependency-free foundations — a
+                    protocol and a lean agent engine — sit at the bottom, <code>log-runtime</code> composes
+                    them with every optional capability, and the terminal UI pulls it all together into one
+                    running process.
                 </p>
             </div>
         </div>
@@ -81,14 +82,14 @@
         <div class="container">
             <div class="reveal">
                 <div class="section-tag">01 — Package map</div>
-                <h2 class="section-title">Nine packages, <span class="grad">one process</span></h2>
+                <h2 class="section-title">Eight packages, <span class="grad">one process</span></h2>
                 <p class="section-copy">Everything runs locally in a single Node process. No services to
                     orchestrate — packages are TypeScript workspaces, not network boundaries.</p>
             </div>
 
             <div class="diagram-frame reveal reveal-d1">
                 <img src="logician-architecture.svg"
-                    alt="Logician architecture: nine TypeScript packages in one Node.js process, a detailed agent-core harness loop, and a gated tool bus connecting external systems." />
+                    alt="Logician architecture: eight TypeScript packages in one Node.js process, a detailed log-core harness loop, and a gated tool bus connecting external systems." />
             </div>
         </div>
     </section>
@@ -103,8 +104,9 @@
             <div class="reveal">
                 <div class="section-tag">02 — Dependency shape</div>
                 <h2 class="section-title">A <span class="grad">fan-in</span>, not a stack</h2>
-                <p class="section-copy">Package dependencies converge on <code>agent-core</code> and
-                    <code>agent-protocol</code>, with the terminal UI composing the complete runtime:</p>
+                <p class="section-copy">Package dependencies converge on <code>log-runtime</code>, which is
+                    the only package that depends on every other feature package. <code>log-core</code> and
+                    <code>log-protocol</code> are two independent, dependency-free foundations underneath it:</p>
             </div>
 
             <div class="dep-graph reveal reveal-d1">
@@ -112,29 +114,39 @@
                     <div class="dep-node dep-tui">tui</div>
                 </div>
                 <div class="dep-row dep-row-mid">
-                    <div class="dep-node dep-cap">agent-blocks</div>
-                    <div class="dep-node dep-coding">autoresearch</div>
-                    <div class="dep-node dep-cap">eoh</div>
+                    <div class="dep-node dep-cap">log-runtime</div>
+                </div>
+                <div class="dep-row dep-row-mid">
+                    <div class="dep-node dep-coding">log-autoresearch</div>
+                    <div class="dep-node dep-coding">log-eoh</div>
+                    <div class="dep-node dep-coding">log-memory</div>
+                    <div class="dep-node dep-coding">log-rag</div>
                 </div>
                 <div class="dep-row dep-row-bottom">
-                    <div class="dep-node dep-core">agent-core</div>
-                    <div class="dep-node dep-core">agent-protocol</div>
+                    <div class="dep-node dep-core">log-core</div>
+                    <div class="dep-node dep-core">log-protocol</div>
                 </div>
             </div>
 
             <ul class="dep-list reveal reveal-d2">
-                <li><code>agent-protocol</code> has zero dependencies — the versioned, dependency-free
-                    client protocol every runtime and client speaks.</li>
-                <li><code>agent-core</code> depends only on <code>agent-protocol</code>. It's the runtime
-                    foundation: loop, harness, hooks, compaction, tool registry, context engine.</li>
-                <li><code>agent-blocks</code>, <code>autoresearch</code>, and <code>eoh</code> each build on
-                    <code>agent-core</code>; <code>agent-blocks</code> also depends on <code>rag</code> for
-                    retrieval-backed tools.</li>
-                <li><code>memory</code>, <code>rag</code>, and <code>agent-eval</code> stand alone — no
-                    internal <code>@logician/*</code> dependencies of their own.</li>
-                <li><code>tui</code> sits on top of everything: <code>agent-core</code>,
-                    <code>agent-blocks</code>, <code>agent-protocol</code>, <code>autoresearch</code>, and
-                    <code>memory</code>.</li>
+                <li><code>log-protocol</code> and <code>log-core</code> are two independent foundations —
+                    each has zero dependencies on the other, or on anything else in the workspace.
+                    <code>log-protocol</code> is the versioned, dependency-free client protocol every
+                    runtime and client speaks; <code>log-core</code> is the loop, harness, hooks,
+                    compaction, and tool registry.</li>
+                <li><code>log-autoresearch</code> and <code>log-eoh</code> each depend only on
+                    <code>log-core</code>, to drive their own experiment/evolution loops.</li>
+                <li><code>log-memory</code>, <code>log-rag</code>, and <code>log-eval</code> stand alone —
+                    no internal <code>@logician/*</code> dependencies of their own.</li>
+                <li><code>log-runtime</code> is the composition point: it depends on <code>log-core</code>,
+                    <code>log-protocol</code>, <code>log-autoresearch</code>, <code>log-eoh</code>,
+                    <code>log-memory</code>, and <code>log-rag</code>, and hosts every optional capability
+                    (reasoning, delegation, tasks, ask-user, RAG tools, and more) as one folder each under
+                    <code>capabilities/</code>.</li>
+                <li><code>tui</code> sits on top of everything it needs directly:
+                    <code>log-core</code>, <code>log-protocol</code>, <code>log-runtime</code>,
+                    <code>log-autoresearch</code>, and <code>log-memory</code> — reaching <code>log-rag</code>
+                    and <code>log-eoh</code> indirectly through <code>log-runtime</code>.</li>
             </ul>
         </div>
     </section>
@@ -156,65 +168,77 @@
                 <div class="pkg-card" style="--accent:#34d399">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/agent-protocol</code>
+                        <code class="pkg-name">@logician/log-protocol</code>
                     </div>
                     <div class="pkg-desc">The dependency-free client protocol. Zero internal
-                        dependencies — the true foundation.</div>
+                        dependencies — one of two true foundations.</div>
                     <ul class="pkg-facts">
                         <li>Versioned, UI-ready notification envelopes.</li>
                         <li>Internal provider, hook, and tool events are translated before crossing this
-                            seam — clients depend on this package, not core internals.</li>
+                            seam — clients depend on this package, not runtime internals.</li>
                     </ul>
                 </div>
 
                 <div class="pkg-card" style="--accent:#58a6ff">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/agent-core</code>
+                        <code class="pkg-name">@logician/log-core</code>
                     </div>
                     <div class="pkg-desc">Lean agent engine: loop, harness, hooks, compaction, tool
-                        registry. Depends only on <code>agent-protocol</code>.</div>
+                        registry. Zero internal dependencies — the other foundation, independent of
+                        <code>log-protocol</code>.</div>
                     <ul class="pkg-facts">
-                        <li><code>core/harness</code> and <code>core/execution</code> drive the turn loop:
-                            intake → model call → tool execution → hooks → next turn.</li>
-                        <li><code>core/hooks</code> — pre/post-tool hook chains, budget tracking, hook
+                        <li><code>runtime/harness</code> and <code>runtime/execution</code> drive the turn
+                            loop: intake → model call → tool execution → hooks → next turn.</li>
+                        <li><code>runtime/hooks</code> — pre/post-tool hook chains, budget tracking, hook
                             metrics.</li>
-                        <li><code>core/compaction</code> — context compaction, run checkpoints, and
+                        <li><code>runtime/compaction</code> — context compaction, run checkpoints, and
                             recovery when a session approaches its token budget.</li>
-                        <li><code>core/session</code> — the append-only thread ledger, file checkpoints, and
-                            cloud-sync exclusion markers.</li>
-                        <li><code>core/tools</code> — permissions, tool-call parsing, the tool registry.</li>
-                        <li>Internally layered <code>core → capabilities → infrastructure → adapters →
-                            application</code>; product composition lives at the application edge.</li>
+                        <li><code>capabilities/session</code> — the append-only thread ledger, file
+                            checkpoints, and cloud-sync exclusion markers.</li>
+                        <li><code>capabilities/tools</code> — permissions, tool-call parsing, the tool
+                            registry.</li>
+                        <li><code>control/</code> — guards and policy that enforce the loop; <code>system/types</code>
+                            holds the pure vocabulary (budgets, task ledger, acceptance config) both sides
+                            share without a circular dependency.</li>
                         <li>Backend abstraction over any OpenAI-compatible API, with typed, retryable
                             errors.</li>
                     </ul>
                 </div>
 
-                <div class="pkg-card" style="--accent:#22d3ee">
+                <div class="pkg-card pkg-card-wide" style="--accent:#22d3ee">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/agent-blocks</code>
+                        <code class="pkg-name">@logician/log-runtime</code>
                     </div>
-                    <div class="pkg-desc">Optional feature modules layered on <code>agent-core</code>: task
-                        tracking, user prompts, subagents, and reasoning strategies.</div>
-                    <ul class="pkg-facts">
-                        <li><code>tasks/</code> — todo tracking with status transitions.</li>
-                        <li><code>interaction/</code> — structured prompts back to the user mid-turn.</li>
-                        <li><code>delegation/</code> — child-agent spawning, isolated worktrees/context.</li>
-                        <li><code>reasoning/</code> — SSR, Tree of Thoughts, Graph of Thoughts, Reflexion,
-                            Best-of-N, Self-Consistency, Auto-CoT, In-Context CoT, plus a shared base +
-                            registry.</li>
-                        <li><code>rag/</code> — retrieval-backed tools, the one place this package depends
-                            on <code>@logician/rag</code>.</li>
-                        <li>Re-exports <code>@logician/eoh</code> as one more opt-in reasoning strategy.</li>
+                    <div class="pkg-desc">Composes <code>log-core</code> into a running agent and hosts
+                        every optional capability, one folder per capability under <code>capabilities/</code>.
+                        The only package that depends on every other feature package.</div>
+                    <ul class="pkg-facts pkg-facts-cols">
+                        <li><code>capabilities/reasoning/</code> — SSR, Tree of Thoughts, Graph of Thoughts,
+                            Reflexion, Best-of-N, Self-Consistency, Auto-CoT, In-Context CoT, plus a shared
+                            base and registry.</li>
+                        <li><code>capabilities/delegation/</code> — subagent spawning and definitions.</li>
+                        <li><code>capabilities/tasks/</code> — todo tracking with status transitions.</li>
+                        <li><code>capabilities/ask-user/</code> — structured prompts back to the user
+                            mid-turn.</li>
+                        <li><code>capabilities/rag/</code> — retrieval-backed tools, the one place this
+                            package depends on <code>@logician/log-rag</code>.</li>
+                        <li><code>capabilities/tools/</code> — the built-in tool registry, assembling tools
+                            from every capability above.</li>
+                        <li><code>capabilities/memory/</code>, <code>lsp/</code>, <code>mcp/</code>,
+                            <code>skills/</code>, <code>interactions/</code>, <code>extensions/</code> — the
+                            remaining capability seams.</li>
+                        <li><code>runtime/</code> — the orchestration layer on top: agent bridge, tool
+                            router, session/transcript handling, configuration.</li>
+                        <li>Wires in <code>@logician/log-eoh</code> as one more opt-in capability.</li>
                     </ul>
                 </div>
 
                 <div class="pkg-card" style="--accent:#fbbf24">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/eoh</code>
+                        <code class="pkg-name">@logician/log-eoh</code>
                     </div>
                     <div class="pkg-desc">Evolution of Heuristics (arXiv 2401.02051) — a standalone
                         evolutionary optimization engine.</div>
@@ -222,20 +246,20 @@
                         <li>Population management, evaluator, and compaction for evolving heuristics across
                             generations.</li>
                         <li>Own session logic, persistence, and dashboard.</li>
-                        <li>Wired directly into <code>agent-core</code>'s application layer, and re-exported
-                            by <code>agent-blocks</code>. Opt-in, not on the critical path.</li>
+                        <li>Depends only on <code>log-core</code>; wired in by <code>log-runtime</code> as
+                            one more capability. Opt-in, not on the critical path.</li>
                     </ul>
                 </div>
 
                 <div class="pkg-card" style="--accent:#f472b6">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/autoresearch</code>
+                        <code class="pkg-name">@logician/log-autoresearch</code>
                     </div>
                     <div class="pkg-desc">Measured experiment loops: run, evaluate, keep or discard against
                         a baseline.</div>
                     <ul class="pkg-facts">
-                        <li>Depends only on <code>agent-core</code> to drive experiment trials.</li>
+                        <li>Depends only on <code>log-core</code> to drive experiment trials.</li>
                         <li>Ported from <code>pi-autoresearch</code>; used for reproducible improvement
                             loops rather than one-off runs.</li>
                     </ul>
@@ -244,25 +268,25 @@
                 <div class="pkg-card" style="--accent:#f59e0b">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/memory</code>
+                        <code class="pkg-name">@logician/log-memory</code>
                     </div>
                     <div class="pkg-desc">Persistent, SQLite-backed memory. Stands alone — no internal
                         <code>@logician/*</code> dependencies.</div>
                     <ul class="pkg-facts">
                         <li>Observation capture, consolidation, and lexical + semantic retrieval.</li>
                         <li>Context injection back into the agent loop.</li>
-                        <li>Exposed to any MCP client via <code>@logician/memory-mcp</code>
-                            (<code>apps/memory-mcp</code>), independent of the TUI.</li>
+                        <li>Exposed to any MCP client via <code>@logician/log-memory-mcp</code>
+                            (<code>apps/log-memory-mcp</code>), independent of the TUI.</li>
                     </ul>
                 </div>
 
                 <div class="pkg-card" style="--accent:#38bdf8">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/rag</code>
+                        <code class="pkg-name">@logician/log-rag</code>
                     </div>
                     <div class="pkg-desc">Hybrid retrieval. Stands alone — consumed by
-                        <code>agent-blocks</code>, not the other way around.</div>
+                        <code>log-runtime</code>, not the other way around.</div>
                     <ul class="pkg-facts">
                         <li>Dense + BM25 hybrid search with structural chunking and cross-encoder
                             reranking.</li>
@@ -273,7 +297,7 @@
                 <div class="pkg-card" style="--accent:#fb7185">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/agent-eval</code>
+                        <code class="pkg-name">@logician/log-eval</code>
                     </div>
                     <div class="pkg-desc">Outcome-grounded evaluation runner for agent trials. Stands
                         alone.</div>
@@ -291,9 +315,9 @@
                         <span class="pkg-desc" style="margin:0 0 0 .5rem;">(<code>apps/tui</code>)</span>
                     </div>
                     <div class="pkg-desc">The terminal UI. Streams model output, tool traces, and reasoning
-                        live to any VT100-compatible terminal — local, SSH, or tmux. Composes
-                        <code>agent-core</code>, <code>agent-blocks</code>, <code>agent-protocol</code>,
-                        <code>autoresearch</code>, and <code>memory</code>.</div>
+                        live to any VT100-compatible terminal — local, SSH, or tmux. Depends directly on
+                        <code>log-core</code>, <code>log-protocol</code>, <code>log-runtime</code>,
+                        <code>log-autoresearch</code>, and <code>log-memory</code>.</div>
                     <ul class="pkg-facts">
                         <li><code>layers/presentation</code> — rendering pipeline.</li>
                         <li><code>layers/input</code> — keybindings, input bar, steering queue.</li>
@@ -326,7 +350,7 @@
             </div>
 
             <div class="diagram-frame reveal reveal-d1">
-                <img src="logician-harness-detail.svg" alt="Logician agent-core harness detail: task-scoped initialization; steering and follow-up queues; context transformation; provider request, payload, and response hooks; streaming model generation with retry and compaction recovery; ordered tool batches with per-call permissions and hooks; context accounting; continuation, acceptance, reflection, and structured run outcomes." />
+                <img src="logician-harness-detail.svg" alt="Logician log-core harness detail: task-scoped initialization; steering and follow-up queues; context transformation; provider request, payload, and response hooks; streaming model generation with retry and compaction recovery; ordered tool batches with per-call permissions and hooks; context accounting; continuation, acceptance, reflection, and structured run outcomes." />
             </div>
 
             <ul class="dep-list reveal reveal-d2">
@@ -371,7 +395,7 @@
                 </div>
                 <div class="ext-card">
                     <div class="ext-title">MCP servers</div>
-                    <div class="ext-sub">stdio and streamable-HTTP transports via <code>agent-core/capabilities/mcp</code>.
+                    <div class="ext-sub">stdio and streamable-HTTP transports via <code>log-runtime/capabilities/mcp</code>.
                     </div>
                 </div>
                 <div class="ext-card">

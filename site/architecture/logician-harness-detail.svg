@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1260" role="img"
   aria-labelledby="title description">
-  <title id="title">Logician agent-core harness loop</title>
+  <title id="title">Logician log-core harness loop</title>
   <desc id="description">Implementation-aligned flow of the Logician agent harness: task-scoped initialization, queued steering and follow-ups, context transformation, provider hooks and streaming, output recovery, ordered tool batches with per-call permissions and hooks, context accounting and compaction, continuation policies, acceptance verification, reflection, and structured outcomes.</desc>
 
   <defs>
@@ -55,7 +55,7 @@
 
   <g aria-label="Heading">
     <text id="title-text" x="800" y="50" text-anchor="middle" class="hero" fill="#60a5fa">HARNESS · AGENT LOOP</text>
-    <text x="800" y="76" text-anchor="middle" class="hero-sub" fill="#94a3b8">packages/agent-core · implementation flow</text>
+    <text x="800" y="76" text-anchor="middle" class="hero-sub" fill="#94a3b8">packages/log-core · implementation flow</text>
     <g transform="translate(561 94)">
       <rect width="140" height="24" rx="12" fill="#58a6ff" fill-opacity=".09" stroke="#58a6ff" stroke-opacity=".65"/>
       <text x="70" y="16" text-anchor="middle" class="chip" fill="#60a5fa">task-scoped</text>

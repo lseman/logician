@@ -43,8 +43,8 @@ The TUI connects to an OpenAI-compatible backend at `http://127.0.0.1:8080` by d
 
 ```mermaid
 graph LR
-  A[TUI Layer] --> B[Coding Agent]
-  B --> C[Agent Core]
+  A[TUI Layer] --> B[log-runtime]
+  B --> C[log-core]
   C --> D[LLM Backend]
   B --> E[Skills]
   B --> F[MCP Servers]
