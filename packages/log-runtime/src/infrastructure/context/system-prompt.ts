@@ -123,6 +123,7 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 		"",
 		"MCP-first tool workflow:",
 		`- MCP tools available: ${toolNames.join(", ")}.`,
+		"- Their full schemas aren't loaded yet — call search_tools with a keyword (e.g. the tool name or capability) to unlock one before calling it.",
 		"- Prefer the specialized MCP tool over grep/find/bash/git/web when it covers the same capability with server-owned context.",
 		...(contentSearchTools.length > 0
 			? [

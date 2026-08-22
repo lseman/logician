@@ -436,7 +436,8 @@ void test("/context renders request-time memory injection", () => {
 		context,
 		/Retrieved memory: ~\d+ tokens — request-time compact index/,
 	);
-	assert.match(context, /\[USER\]\n# Agent Context/);
+	assert.match(context, /\[SYSTEM\] Memory Context/);
+	assert.match(context, /# Memory Context/);
 	assert.match(context, new RegExp(memory.id));
 	assert.match(context, /Authentication retry policy/);
 	assert.match(context, /Call `memory_get` once/);

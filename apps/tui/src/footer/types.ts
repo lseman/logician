@@ -188,7 +188,7 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 			fill: "none",
 		},
 		reasoner: {
-			enabled: true,
+			enabled: false,
 			row: 0,
 			position: 1,
 			align: "middle",

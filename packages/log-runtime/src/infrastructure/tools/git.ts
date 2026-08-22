@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Tool } from "@logician/log-core";
+import { formatTruncationNotice } from "./utils/truncate.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -61,7 +62,14 @@ export const git: Tool = {
 				killSignal: "SIGKILL",
 			});
 			const trimmed = stdout.trim().slice(0, maxOutput);
-			return trimmed + (stdout.length > maxOutput ? "\n... [truncated]" : "");
+			return (
+				trimmed +
+				(stdout.length > maxOutput
+					? formatTruncationNotice(
+							'add a path filter (e.g. "diff -- <path>") or a limit (e.g. "log -n 20") to narrow the output',
+						)
+					: "")
+			);
 		} catch (err: unknown) {
 			const error = err as {
 				name?: string;
@@ -72,7 +80,10 @@ export const git: Tool = {
 			if (error.name === "AbortError" || error.code === "ABORT_ERR") {
 				return "Error: Command aborted";
 			}
-			return `Error: ${error.message || error.stderr || "git command failed"}`;
+			const detail = (error.stderr || error.message || "").trim();
+			return detail
+				? `Error: git ${command} failed: ${detail}`
+				: `Error: git ${command} failed with no output. Check that the command and arguments are valid for this repository.`;
 		}
 	},
 };

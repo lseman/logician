@@ -330,20 +330,25 @@ async function runAgentLoopInternal(
 				pendingMessages = [];
 			}
 
+			// transformContext is request-scoped only (ExtensionHooks, not
+			// RunControlHooks) — its result must build this turn's outgoing
+			// payload and nothing else. It must never be folded back onto the
+			// canonical `messages`, or a transient injection (e.g. memory
+			// retrieval context) silently becomes part of durable history.
+			// Persistent edits belong in prepareNextTurn/beforeAgentStart instead.
 			const transformResult = await config.hooks?.transformContext?.({
 				messages: messages as AgentMessage[],
 				iteration,
 				signal: config.signal,
 			});
-			const transformed = transformResult?.messages;
-			if (transformed) {
-				messages = transformed as Message[];
-				if (contextWasCompacted) config.onContextCompacted?.(messages);
-			}
+			const requestMessages = transformResult?.messages as
+				| Message[]
+				| undefined;
 
 			const turnResult = await requestAssistantTurn({
 				state: providerTurnState,
 				messages,
+				presentationMessages: requestMessages,
 				config,
 				settings,
 				registry,

@@ -54,6 +54,10 @@ export async function runHeadlessExec(
 	let lastError: string | undefined;
 	let contextTokens: number | undefined;
 	let maxContextTokens: number | undefined;
+	let toolCalls = 0;
+	let permissionRequests = 0;
+	let compactions = 0;
+	let retries = 0;
 	const toolStarts = new Map<string, number>();
 
 	const emit = (record: StreamRecord): void => {
@@ -76,6 +80,7 @@ export async function runHeadlessExec(
 				else options.stdout.write(event.token);
 				break;
 			case "tool_execution_start": {
+				toolCalls++;
 				const id = event.toolCallId ?? `${event.toolName}:${toolStarts.size}`;
 				toolStarts.set(id, now());
 				emit({
@@ -110,9 +115,23 @@ export async function runHeadlessExec(
 				maxContextTokens = event.maxTokens;
 				break;
 			case "permission_request":
+				permissionRequests++;
 				lastError = `Headless execution denied interactive permission for ${event.toolName}`;
 				bridge.respondToPermission(event.toolCallId, "deny");
 				emit({ type: "error", error: lastError });
+				break;
+			case "compaction":
+				compactions++;
+				emit({
+					type: "compaction",
+					reason: event.reason,
+					tokens_before: event.tokensBefore,
+					tokens_after: event.tokensAfter,
+				});
+				break;
+			case "agent_retry_start":
+				retries++;
+				emit({ type: "agent_retry_start", reason: event.reason });
 				break;
 			case "question_request":
 				lastError = "Headless execution cannot answer an interactive question";
@@ -165,6 +184,10 @@ export async function runHeadlessExec(
 			prompt_sha256: sha256(options.prompt),
 			visible_final_answer_chars: [...output].length,
 			status: lastError ? "failed" : "completed",
+			tool_calls: toolCalls,
+			permission_requests: permissionRequests,
+			compactions,
+			retries,
 			...(lastError ? { error: lastError } : {}),
 			...(contextTokens === undefined ? {} : { context_tokens: contextTokens }),
 			...(maxContextTokens === undefined

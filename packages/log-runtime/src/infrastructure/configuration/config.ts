@@ -8,6 +8,7 @@ import {
 	type ThinkingLevel,
 	type TruncationConfig,
 } from "@logician/log-core";
+import { getReasonerIds } from "@logician/log-blocks/reasoning";
 
 /** Validated configuration with warnings collected during load. */
 export interface ResolvedLogicianConfig {
@@ -100,18 +101,8 @@ const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(["tool", "assistant", "default"]);
 
 const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
 const MEMORY_EXTRACTOR_KEYS = new Set(["baseUrl", "model"]);
-const REASONER_IDS = new Set([
-	"none",
-	"ssr",
-	"tot",
-	"got",
-	"reflexion",
-	"self_consistency",
-	"best_of_n",
-	"auto_cot",
-	"in_context_cot",
-	"cover",
-]);
+/** Sourced from log-blocks' own reasoner registry so this can't drift from the real set. */
+const REASONER_IDS = new Set(getReasonerIds());
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
 
 /** Validate a URL string (non-empty, starts with http:// or https://). */

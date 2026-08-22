@@ -35,12 +35,12 @@ export function reportMarkdown(report: EvalReport): string {
 		`Environment-graded pass rate: **${report.summary.passed}/${report.trials.length} (${(report.summary.passRate * 100).toFixed(1)}%)**`,
 		`Median duration: **${report.summary.medianDurationMs} ms**`,
 		"",
-		"| Task | Trial | Environment | Agent declaration | Duration |",
-		"|---|---|---:|---:|---:|",
+		"| Task | Trial | Environment | Agent declaration | Duration | Model |",
+		"|---|---|---:|---:|---:|---|",
 	];
 	for (const trial of report.trials) {
 		lines.push(
-			`| ${trial.taskId} | ${trial.trialId} | ${trial.environmentGradedPass ? "pass" : "fail"} | ${trial.agentDeclaredComplete === null ? "unknown" : trial.agentDeclaredComplete ? "complete" : "incomplete"} | ${trial.metrics.durationMs} ms |`,
+			`| ${trial.taskId} | ${trial.trialId} | ${trial.environmentGradedPass ? "pass" : "fail"} | ${trial.agentDeclaredComplete === null ? "unknown" : trial.agentDeclaredComplete ? "complete" : "incomplete"} | ${trial.metrics.durationMs} ms | ${trial.harnessConfig?.model ?? "unknown"} |`,
 		);
 	}
 	return `${lines.join("\n")}\n`;

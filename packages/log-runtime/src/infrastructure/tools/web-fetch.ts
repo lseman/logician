@@ -2,7 +2,11 @@
 // Fetch and extract readable content from a web page.
 
 import type { Tool, ToolContext } from "@logician/log-core";
-import { DEFAULT_MAX_BYTES, truncateTail } from "./utils/truncate.ts";
+import {
+	DEFAULT_MAX_BYTES,
+	formatTruncationNotice,
+	truncateTail,
+} from "./utils/truncate.ts";
 
 export const web_fetch: Tool = {
 	readOnly: true,
@@ -86,9 +90,9 @@ export const web_fetch: Tool = {
 		} catch (err: unknown) {
 			const error = err as Error;
 			if (error.name === "AbortError") {
-				return `Error: Request timed out after ${timeout}ms`;
+				return `Error: Request timed out after ${timeout}ms. Retry with a larger timeout, or the site may be unreachable.`;
 			}
-			return `Error: ${error.message || String(err)}`;
+			return `Error: Failed to fetch ${url}: ${error.message || String(err)}`;
 		}
 	},
 };
@@ -159,6 +163,8 @@ function extractTextFromHtml(html: string, maxLength: number): string {
 	const body = parts.join("\n");
 	const t = truncateTail(body, { maxBytes: maxLength });
 	return t.truncated
-		? `${t.content}\n... [truncated, ${body.length} chars total]`
+		? `${t.content}${formatTruncationNotice(
+				`page had ${body.length} chars total — pass a larger max_length to see more`,
+			)}`
 		: body;
 }

@@ -458,22 +458,34 @@ export function createMemoryHooks(
 				);
 				if (!sessionContext) return undefined;
 
-				const messages = [
-					...ctx.messages.filter(
-						message =>
-							!(
-								message?.role === "system" &&
-								typeof message.content === "string" &&
-								message.content.startsWith("# Agent Context\n")
-							),
-					),
-					{
-						role: "system" as const,
-						content: sessionContext,
-					},
-				];
+				const messages = ctx.messages.filter(
+					message =>
+						!(
+							message?.role === "system" &&
+							typeof message.content === "string" &&
+							message.content.startsWith("# Memory Context\n")
+						),
+				);
 
-				return { messages };
+				const systemIndex = messages.findIndex(
+					message => message.role === "system",
+				);
+
+				const systemMessage = {
+					role: "system" as const,
+					content: sessionContext,
+				};
+
+				const inserted =
+					systemIndex >= 0
+						? [
+								...messages.slice(0, systemIndex + 1),
+								systemMessage,
+								...messages.slice(systemIndex + 1),
+							]
+						: [systemMessage, ...messages];
+
+				return { messages: inserted };
 			}
 		: undefined;
 

@@ -155,3 +155,65 @@ void test("interactive permission fails closed and still emits one done", async 
 	);
 	assert.equal(records.at(-2)?.meta.status, "failed");
 });
+
+void test("compaction, retries, and permission requests are counted and passed through", async () => {
+	const stdout = new MemoryWriter();
+	const bridge = new FakeBridge([
+		{
+			type: "tool_execution_start",
+			toolName: "read_file",
+			toolCallId: "tool-1",
+			args: {},
+		},
+		{
+			type: "tool_execution_end",
+			toolName: "read_file",
+			toolCallId: "tool-1",
+			result: "ok",
+		},
+		{ type: "compaction", reason: "context_limit", tokensBefore: 100, tokensAfter: 40 },
+		{
+			type: "agent_retry_start",
+			attempt: 1,
+			maxRetries: 3,
+			delayMs: 500,
+			error: "context overflow",
+			reason: "compaction",
+		},
+		{
+			type: "permission_request",
+			toolName: "bash",
+			toolCallId: "tool-2",
+			args: {},
+		},
+	]);
+
+	const exitCode = await runHeadlessExec(bridge, {
+		prompt: "do work",
+		jsonl: true,
+		cwd: "/workspace",
+		stdout,
+		stderr: new MemoryWriter(),
+		runId: "exec_test",
+		now: () => 100,
+	});
+
+	const records = stdout.value
+		.trim()
+		.split("\n")
+		.map(line => JSON.parse(line));
+
+	assert.equal(exitCode, 1);
+	const compactionRecord = records.find(record => record.type === "compaction");
+	assert.equal(compactionRecord?.reason, "context_limit");
+	assert.equal(compactionRecord?.tokens_before, 100);
+	assert.equal(compactionRecord?.tokens_after, 40);
+	const retryRecord = records.find(record => record.type === "agent_retry_start");
+	assert.equal(retryRecord?.reason, "compaction");
+
+	const meta = records.at(-2)?.meta;
+	assert.equal(meta.tool_calls, 1);
+	assert.equal(meta.permission_requests, 1);
+	assert.equal(meta.compactions, 1);
+	assert.equal(meta.retries, 1);
+});

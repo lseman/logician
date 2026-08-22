@@ -3316,7 +3316,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			: `_Semantic memory compact index: ${blocks.length} items; ~${tokenCount}/${budget} tokens._`;
 		const expansionNote =
 			"Each bracketed value is a stable ID. These entries are summaries, not complete records. Call `memory_get` once with the relevant IDs when full rationale, evidence, or details are needed.";
-		return `# Agent Context\n\n${retrievalNote}\n\n${expansionNote}\n\n${blocks.map(block => block.content).join("\n")}\n`;
+		return `# Memory Context\n\n${retrievalNote}\n\n${expansionNote}\n\n${blocks.map(block => block.content).join("\n")}\n`;
 	}
 
 	function retrieve(
