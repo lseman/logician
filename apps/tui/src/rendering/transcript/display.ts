@@ -728,6 +728,13 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			const w = visibleWidth(clipped);
 			return clipped + " ".repeat(Math.max(0, frameWidth - w));
 		};
+		// Right-aligns a line within frameWidth — chat-style, so YOU reads as
+		// the opposite side of the conversation from LOGICIAN's left-aligned lines.
+		const padRight = (line: string): string => {
+			const clipped = clampLineToWidth(line, frameWidth);
+			const w = visibleWidth(clipped);
+			return " ".repeat(Math.max(0, frameWidth - w)) + clipped;
+		};
 
 		// User or system message
 		if (turn.userMessage) {
@@ -747,8 +754,8 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					);
 			} else {
 				lines.push(
-					padToWidth(
-						`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userLabel")}${BOLD}YOU${RESET}`,
+					padRight(
+						`${theme.fgRaw("userLabel")}${BOLD}YOU${RESET} ${theme.fgRaw("separator")}‹${RESET}`,
 					),
 				);
 				const colored =
@@ -757,7 +764,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					RESET;
 				for (const rawLine of colored.split("\n")) {
 					for (const line of wrapText(rawLine, Math.max(1, contentWidth)))
-						lines.push(padToWidth(`  ${line}`));
+						lines.push(padRight(`${line}  `));
 				}
 			}
 		}
@@ -811,7 +818,22 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					continue;
 				}
 				flushContent();
-				if (chunk.type === "thinking") {
+				if (chunk.type === "user") {
+					lastThinkingSection = false;
+					lines.push(
+						padRight(
+							`${theme.fgRaw("userLabel")}${BOLD}YOU${RESET} ${theme.fgRaw("separator")}‹${RESET}`,
+						),
+					);
+					const colored =
+						theme.fgRaw("userText") +
+						truncateText(chunk.contentText || "", this.maxMessageLength) +
+						RESET;
+					for (const rawLine of colored.split("\n")) {
+						for (const line of wrapText(rawLine, Math.max(1, contentWidth)))
+							lines.push(padRight(`${line}  `));
+					}
+				} else if (chunk.type === "thinking") {
 					// Render thinking block
 					const thinkLines = renderThinkingChunk(
 						chunk,

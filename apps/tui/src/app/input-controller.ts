@@ -583,10 +583,17 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		}
 
 		// While a turn is running, a plain message steers it instead of
-		// starting a new run. The bridge emits a `steered` event that
-		// renders the message, so skip the normal turn/animation setup.
+		// starting a new run. It shows in the queue widget immediately, but
+		// only appears as a "YOU" line in the transcript once the runtime
+		// actually consumes it (a `steered` RuntimeEvent derived from the
+		// core message_end event) — not at submit time, so it lands exactly
+		// where it took effect instead of jumping ahead of the queue.
 		if (ctx.bridge.isActive()) {
-			const label = intent === "steer-now" ? "Steering now…" : "Steering queued…";
+			const preview = oneLineSteerPreview(text);
+			const label =
+				intent === "steer-now"
+					? `Steering now: ${preview}`
+					: `Steering queued: ${preview}`;
 			ctx.notify(label, "info");
 			ctx.tui.requestRender(false, true);
 			setImmediate(() => {
@@ -596,7 +603,6 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 					} else {
 						ctx.bridge.steerQueue(text);
 					}
-					ctx.bridge.events.emit({ type: "steered", message: text });
 				} catch (err) {
 					ctx.bridge.events.reportError(err as Error);
 				}
@@ -635,4 +641,10 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 	ctx.inputBar.onCancel = () => {
 		void ctx.cancelActiveTurn();
 	};
+}
+
+/** Collapse whitespace and cap length for a one-line steer toast preview. */
+function oneLineSteerPreview(text: string, maxLength = 60): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length > maxLength ? `${flat.slice(0, maxLength)}…` : flat;
 }

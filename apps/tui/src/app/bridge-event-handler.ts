@@ -398,12 +398,12 @@ export function handleEvent(
 			break;
 		}
 		case "steered":
-			// Steering is part of the active run rather than a new turn, but it must
-			// remain visible after the transient queue widget drains. Otherwise a
-			// successfully queued user message looks as though it was discarded.
-			ctx.transcript.addSystemMessage(
-				`You steered the active turn:\n${String(event.message || "")}`,
-			);
+			// The current turn is still streaming, so this can't become a new
+			// turn (that would hijack currentTurnId away from the in-flight
+			// assistant message — see Transcript.addTurn). Render it inline as
+			// a normal user-message line at the point it landed, the same way
+			// Claude Code shows a steer arriving mid-turn.
+			ctx.transcript.addSteeredMessage(String(event.message || ""));
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			break;
 		default:

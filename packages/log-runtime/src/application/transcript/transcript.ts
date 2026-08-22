@@ -82,9 +82,9 @@ export interface SpawnTaskStatus {
 
 export interface AssistantChunk {
 	seq: number; // insertion sequence — defines display order
-	type: "thinking" | "content" | "tool" | "notice";
+	type: "thinking" | "content" | "tool" | "notice" | "user";
 	// per-type fields
-	contentText?: string; // for 'thinking' and 'content'
+	contentText?: string; // for 'thinking', 'content', and 'user'
 	tool?: ToolExecution; // for 'tool'
 	// for 'notice': a standalone status line (retry / error / model / stopped)
 	// rendered with its own icon + colour, not folded into assistant prose.
@@ -570,6 +570,28 @@ export class Transcript {
 			seq: msg.chunks.length,
 			type: "notice",
 			notice: { level: event.level, label: event.label, text: event.text },
+			isComplete: true,
+		});
+		this.bumpTurnRevision(turn);
+	}
+
+	/**
+	 * Record a message the user sent while a turn was already streaming
+	 * (steering). Rendered inline as an ordinary "YOU" line at the point it
+	 * landed, the same as Claude Code shows a mid-turn message — not as a
+	 * separate turn, which would hijack currentTurnId away from the
+	 * in-flight assistant message (see addTurn), and not as a system notice.
+	 */
+	addSteeredMessage(text: string): void {
+		const turn = this.getCurrentTurn();
+		if (!turn) return;
+		const msg = this.ensureAssistant(turn);
+		this.closeStreamingOfType("thinking", msg.chunks);
+		this.closeStreamingOfType("content", msg.chunks);
+		msg.chunks.push({
+			seq: msg.chunks.length,
+			type: "user",
+			contentText: text,
 			isComplete: true,
 		});
 		this.bumpTurnRevision(turn);
