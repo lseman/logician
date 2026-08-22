@@ -22,7 +22,7 @@ export function createMemorySearchTool(
 		promptSnippet:
 			"Search memory indexes for relevant IDs before expanding full records",
 		promptGuidelines: [
-			"Use memory_search when Agent Context does not contain enough relevant history.",
+			"Use memory_search when Memory Context does not contain enough relevant history.",
 			"Filter the compact results, then batch only the relevant IDs into one memory_get call.",
 		],
 		parameters: {
@@ -84,11 +84,11 @@ export function createMemoryGetTool(getStore: () => MemoryStore | null): Tool {
 		readOnly: true,
 		executionMode: "parallel",
 		description:
-			"Expand compact memory or observation IDs from Agent Context into their complete stored details.",
+			"Expand compact memory or observation IDs from Memory Context into their complete stored details.",
 		promptSnippet:
 			"Expand compact memory IDs when their full rationale or evidence is needed",
 		promptGuidelines: [
-			"Use memory_get only for relevant IDs shown by Agent Context or memory_search.",
+			"Use memory_get only for relevant IDs shown by Memory Context or memory_search.",
 			"Batch related IDs into one call; avoid expanding every result.",
 		],
 		parameters: {

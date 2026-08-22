@@ -440,6 +440,15 @@ export class OutputAccumulator {
 
 // ── Binary sanitization ───────────────────────────────────────────────────────
 
+/**
+ * Format a consistent "truncated, here's how to get more" notice. Centralizes
+ * the phrasing so every tool's truncation notice reads the same way and
+ * always tells the model a concrete next step instead of just stating a size.
+ */
+export function formatTruncationNotice(hint: string): string {
+	return `\n... [truncated — ${hint}]`;
+}
+
 /** Remove non-printable binary characters. Keeps tab, LF, CR. */
 export function sanitizeBinaryOutput(str: string): string {
 	return Array.from(str)

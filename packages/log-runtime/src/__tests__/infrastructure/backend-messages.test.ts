@@ -20,13 +20,13 @@ void test("trailing system messages are re-roled to user, leading kept", () => {
 		{ role: "system", content: "base" },
 		{ role: "user", content: "hi" },
 		{ role: "assistant", content: "yo" },
-		{ role: "system", content: "# Agent Context\n..." },
+		{ role: "system", content: "# Memory Context\n..." },
 		{ role: "system", content: "# Runtime Context\n..." },
 	]);
 	assert.equal(out[0].role, "system");
 	assert.equal(out[0].content, "base");
 	assert.equal(out[3].role, "user");
-	assert.equal(out[3].content, "# Agent Context\n...");
+	assert.equal(out[3].content, "# Memory Context\n...");
 	assert.equal(out[4].role, "user");
 	assert.equal(out[4].content, "# Runtime Context\n...");
 });

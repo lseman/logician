@@ -9,10 +9,51 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { grade } from "./graders.ts";
 import { runProcess } from "./process.ts";
-import { EVAL_SCHEMA_VERSION, type EvalTask, type EvalTrial } from "./types.ts";
+import {
+	EVAL_SCHEMA_VERSION,
+	type EvalTask,
+	type EvalTrial,
+	type HarnessConfigSnapshot,
+} from "./types.ts";
+
+/**
+ * Snapshot the settings the agent subprocess will actually read from disk.
+ * Best-effort: the eval runner doesn't control this file, so a missing or
+ * unparsable config yields an empty snapshot rather than failing the trial.
+ */
+function readHarnessConfigSnapshot(): HarnessConfigSnapshot {
+	try {
+		const settingsPath = path.join(homedir(), ".logician", "settings.json");
+		const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<
+			string,
+			unknown
+		>;
+		const mcpServers = raw.mcpServers;
+		return {
+			model: typeof raw.model === "string" ? raw.model : undefined,
+			permissionMode:
+				typeof raw.permissionMode === "string" ? raw.permissionMode : undefined,
+			toolExecution:
+				typeof raw.toolExecution === "string" ? raw.toolExecution : undefined,
+			maxIterations:
+				typeof raw.maxIterations === "number" ? raw.maxIterations : undefined,
+			compaction:
+				raw.compaction && typeof raw.compaction === "object"
+					? (raw.compaction as Record<string, unknown>)
+					: undefined,
+			mcpServerNames:
+				mcpServers && typeof mcpServers === "object"
+					? Object.keys(mcpServers)
+					: undefined,
+		};
+	} catch {
+		return {};
+	}
+}
 
 export function fixtureDigest(root: string): string {
 	const hash = createHash("sha256");
@@ -103,6 +144,14 @@ function changedFileCount(workspace: string): Promise<number> {
 	);
 }
 
+/**
+ * Read the agent's own completion claim from the terminal `metadata` record's
+ * `meta.status` field (see apps/tui/src/app/headless-exec.ts). A prior
+ * version of this function checked `entry.status` on the bare `{type: "done"}`
+ * record that follows `metadata` in the real stream — a field that record
+ * never carries — so this always evaluated to `true` (not failed), silently
+ * reporting every real run as agent-declared-complete regardless of outcome.
+ */
 function readAgentDeclaration(
 	trajectoryPath: string | undefined,
 	agentOutput = "",
@@ -115,15 +164,10 @@ function readAgentDeclaration(
 		const lines = content.trim().split("\n");
 		for (const line of lines.reverse()) {
 			const entry = JSON.parse(line) as {
-				event?: { type?: string; status?: string };
-				payload?: { type?: string; status?: string };
 				type?: string;
-				status?: string;
+				meta?: { status?: string };
 			};
-			const event = entry.event ?? entry.payload ?? entry;
-			if (event?.type === "run_finished" || event?.type === "agent_end")
-				return event.status === "completed";
-			if (event?.type === "done") return entry.status !== "failed";
+			if (entry.type === "metadata") return entry.meta?.status === "completed";
 		}
 	} catch {
 		return null;
@@ -131,6 +175,16 @@ function readAgentDeclaration(
 	return null;
 }
 
+/**
+ * Read metrics from the terminal `metadata` record the exec stream always
+ * emits last (see apps/tui/src/app/headless-exec.ts). Counters are tallied by
+ * the harness itself as events happen, rather than re-derived here by
+ * pattern-matching event type strings against the JSONL stream — a prior
+ * version of this function matched several event names
+ * (`tool_execution_start`, bare `compaction`/`agent_retry_start` records)
+ * that the exec stream never actually emits, so those counters were silently
+ * always zero.
+ */
 function outputMetrics(
 	output: string,
 ): Pick<
@@ -141,56 +195,34 @@ function outputMetrics(
 	| "permissionRequests"
 	| "compactions"
 	| "retries"
-	| "timeToFirstToolMs"
 > {
-	let toolCalls = 0;
-	let permissionRequests = 0;
-	let compactions = 0;
-	let retries = 0;
-	let contextTokens: number | undefined;
-	let model: string | undefined;
-	let firstTimestamp: number | undefined;
-	let firstToolTimestamp: number | undefined;
-	for (const line of output.split("\n")) {
+	for (const line of output.split("\n").reverse()) {
 		try {
 			const entry = JSON.parse(line) as {
 				type?: string;
-				ts?: number;
-				timestamp?: number;
-				event?: { type?: string; ts?: number };
-				meta?: { context_tokens?: number; model?: string };
+				meta?: {
+					context_tokens?: number;
+					model?: string;
+					tool_calls?: number;
+					permission_requests?: number;
+					compactions?: number;
+					retries?: number;
+				};
 			};
-			const type = entry.event?.type ?? entry.type;
-			const timestamp = entry.event?.ts ?? entry.ts ?? entry.timestamp;
-			if (timestamp !== undefined && firstTimestamp === undefined)
-				firstTimestamp = timestamp;
-			if (type === "tool_use" || type === "tool_execution_start") {
-				toolCalls++;
-				if (firstToolTimestamp === undefined) firstToolTimestamp = timestamp;
-			}
-			if (type === "permission_request") permissionRequests++;
-			if (type === "compaction") compactions++;
-			if (type === "agent_retry_start") retries++;
-			if (type === "metadata") {
-				contextTokens = entry.meta?.context_tokens;
-				model = entry.meta?.model;
-			}
+			if (entry.type !== "metadata") continue;
+			return {
+				toolCalls: entry.meta?.tool_calls,
+				contextTokens: entry.meta?.context_tokens,
+				model: entry.meta?.model,
+				permissionRequests: entry.meta?.permission_requests,
+				compactions: entry.meta?.compactions,
+				retries: entry.meta?.retries,
+			};
 		} catch {
 			// Non-JSON diagnostics are retained in the artifact but not projected.
 		}
 	}
-	return {
-		toolCalls,
-		contextTokens,
-		model,
-		permissionRequests,
-		compactions,
-		retries,
-		timeToFirstToolMs:
-			firstTimestamp !== undefined && firstToolTimestamp !== undefined
-				? Math.max(0, firstToolTimestamp - firstTimestamp)
-				: undefined,
-	};
+	return {};
 }
 
 /** Re-grade a recorded trajectory against the current deterministic graders. */
@@ -231,6 +263,7 @@ export async function runTrial(
 	await verifyFixture(task, workspace);
 	const startedAt = new Date().toISOString();
 	const started = performance.now();
+	const harnessConfig = readHarnessConfigSnapshot();
 	const logicianRoot = path.resolve(import.meta.dirname, "../../../");
 	const expand = (value: string) =>
 		value
@@ -250,6 +283,7 @@ export async function runTrial(
 	);
 	const graders = [];
 	for (const spec of task.graders) graders.push(await grade(spec, workspace));
+	const metrics = outputMetrics(agent.stdout);
 	const trial: EvalTrial = {
 		schemaVersion: EVAL_SCHEMA_VERSION,
 		taskId: task.id,
@@ -270,8 +304,12 @@ export async function runTrial(
 			exitCode: agent.exitCode,
 			timedOut: agent.timedOut,
 			changedFiles: await changedFileCount(workspace),
-			...outputMetrics(agent.stdout),
+			...metrics,
 		},
+		// The trajectory's own reported model is ground truth for what actually
+		// ran; the settings-file snapshot only fills in what the stream didn't
+		// report (e.g. when metadata.model is absent).
+		harnessConfig: { ...harnessConfig, model: metrics.model ?? harnessConfig.model },
 		trajectoryPath: options.trajectoryPath,
 		agentOutput: `${agent.stdout}${agent.stderr}`.slice(-200_000),
 	};

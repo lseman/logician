@@ -501,6 +501,117 @@ void test("context-full retry compacts and publishes the live transcript", async
 	);
 });
 
+void test("transformContext output is request-scoped only, never persisted or leaked forward", async () => {
+	const seenByCall: Record<string, unknown>[][] = [];
+	const backend = new FakeBackend([
+		messages => {
+			seenByCall.push(messages);
+			return {
+				content: "",
+				toolCalls: [{ id: "noop", name: "noop", arguments: "{}" }],
+				stopReason: "stop",
+			};
+		},
+		messages => {
+			seenByCall.push(messages);
+			return textResponse("done");
+		},
+	]);
+
+	const newMessages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig(),
+			backend,
+			hooks: {
+				transformContext: ctx => {
+					// Mirrors memory-hooks.ts's own assumption: strip any prior
+					// injection before adding a fresh one, i.e. never expect to see
+					// our own previous output — proving no forward leakage.
+					assert.ok(
+						!ctx.messages.some(m =>
+							String(m && "content" in m ? m.content : "").includes(
+								"injected-memory-context",
+							),
+						),
+						"transformContext must never see its own prior output leak forward",
+					);
+					return {
+						messages: [
+							...ctx.messages,
+							{ role: "system", content: "injected-memory-context" },
+						],
+					};
+				},
+			},
+		},
+		() => {},
+	);
+
+	assert.equal(seenByCall.length, 2);
+	for (const messages of seenByCall) {
+		assert.ok(
+			messages.some(m => m.content === "injected-memory-context"),
+			"the injected message must reach the outgoing provider payload",
+		);
+	}
+	assert.ok(
+		!newMessages.some(m =>
+			String(m.content).includes("injected-memory-context"),
+		),
+		"the injected message must never appear in the loop's returned newMessages",
+	);
+});
+
+void test("transformContext does not trigger a stale onContextCompacted echo", async () => {
+	const history: Message[] = Array.from({ length: 12 }, (_, index) =>
+		user(`old message ${index} ${"x".repeat(2000)}`),
+	);
+	let compactedCallCount = 0;
+	const backend = new FakeBackend([
+		() => {
+			throw new BackendError({ category: "context_full", message: "too long" });
+		},
+		() => ({
+			content: "",
+			toolCalls: [{ id: "noop", name: "noop", arguments: "{}" }],
+			stopReason: "stop",
+		}),
+		() => textResponse("done"),
+	]);
+
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: history, tools: [noop] },
+		[user("current prompt")],
+		{
+			...makeConfig({ contextWindowTokens: 4096 }),
+			backend,
+			outputGuard: new OutputGuard(),
+			onContextCompacted: () => {
+				compactedCallCount++;
+			},
+			hooks: {
+				// Runs again on the follow-up turn, well after compaction already
+				// happened once — must not re-trigger onContextCompacted.
+				transformContext: ctx => ({
+					messages: [
+						...ctx.messages,
+						{ role: "system", content: "transient-context" },
+					],
+				}),
+			},
+		},
+		() => {},
+	);
+
+	assert.equal(
+		compactedCallCount,
+		1,
+		"onContextCompacted must fire only for the real compaction, not for later transformContext calls",
+	);
+});
+
 void test("retry proceeds without delay after abort signal during retry_start", async () => {
 	const controller = new AbortController();
 	const events: AgentEvent[] = [];

@@ -64,6 +64,13 @@ export type ProviderTurnConfig = AgentLoopConfig;
 export interface RequestAssistantTurnInput {
 	state: ProviderTurnState;
 	messages: Message[];
+	/**
+	 * Request-scoped rendering of `messages` (e.g. with transient
+	 * transformContext output like memory-retrieval context spliced in). Used
+	 * only to build this one outgoing payload — never persisted, never
+	 * compacted. Falls back to `messages` when absent.
+	 */
+	presentationMessages?: Message[];
 	config: ProviderTurnConfig;
 	settings: AgentSettings;
 	registry: { toToolDefinitions(): Record<string, unknown>[] };
@@ -92,6 +99,10 @@ export async function requestAssistantTurn(
 ): Promise<ProviderTurnResult> {
 	const { config, state } = input;
 	let messages = input.messages;
+	// Only valid for the first attempt — built from the pre-compaction canonical
+	// array, so a retry after compact_then_retry must fall back to the (now
+	// compacted) canonical `messages` instead of this now-stale rendering.
+	let presentationMessages = input.presentationMessages;
 	let contextWasCompacted = input.contextWasCompacted;
 	let activeRetryAttempt = 0;
 
@@ -105,7 +116,9 @@ export async function requestAssistantTurn(
 			// retain its settlement so terminal events cannot overtake deltas.
 			providerEvents.push(Promise.resolve(input.emit(event)));
 		};
-		const llmMessages = input.convertToLlm(messages as AgentMessage[]);
+		const llmMessages = input.convertToLlm(
+			(presentationMessages ?? messages) as AgentMessage[],
+		);
 		const chatMessages = convertToChatFormat(llmMessages);
 
 		let requestHeaders = config.streamOptions?.headers;
@@ -294,6 +307,9 @@ export async function requestAssistantTurn(
 					};
 				}
 				messages = compacted.messages as unknown as Message[];
+				// Stale now — it was rendered from the pre-compaction canonical
+				// array. The retry must send the compacted canonical messages.
+				presentationMessages = undefined;
 				contextWasCompacted = true;
 				config.onContextCompacted?.(messages);
 				await input.emit({

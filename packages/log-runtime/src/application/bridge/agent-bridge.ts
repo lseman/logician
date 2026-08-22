@@ -1478,11 +1478,33 @@ export class AgentRuntime {
 				`- ${zone.name}: ~${zone.tokens} tokens${zone.detail ? ` — ${zone.detail}` : ""}`,
 		);
 		const lines: string[] = ["## Prompt source map", "", ...sourceLines, ""];
-		lines.push("## Conversation", "");
-		if (!msgs.length) lines.push("No messages yet.");
+		lines.push("## Effective context", "");
 
+		// System prompt zone (the static identity + tool instructions).
+		// Session history filters out system messages, so we pull the current
+		// config system prompt and show it at the top of the context dump.
+		const systemPrompt = this.config.systemPrompt || "";
+		if (!msgs.length && !systemPrompt && !memoryContext) lines.push("No messages yet.");
+		if (systemPrompt) {
+			lines.push("[SYSTEM] system prompt");
+			lines.push(systemPrompt);
+			lines.push("");
+		}
+
+		// Memory retrieval is a request-time context block, injected between
+		// the system prompt and conversation turns. Show it in the correct
+		// position so /context reflects the effective provider payload.
+		if (memoryContext) {
+			lines.push("[SYSTEM] Memory Context");
+			lines.push(memoryContext);
+			lines.push("");
+		}
+
+		// Conversation turns (user / assistant / tool messages).
+		// System messages are already shown separately above, so skip them here.
 		for (const msg of msgs) {
 			if (!msg) continue;
+			if (msg.role === "system") continue;
 			const role = msg.role.toUpperCase();
 			const ts = msg.timestamp ? new Date(msg.timestamp).toISOString() : "";
 			const header = `[${role}]${ts ? ` ${ts}` : ""}`;
@@ -1511,15 +1533,6 @@ export class AgentRuntime {
 				lines.push(`${header}\n${msg.content || ""}`);
 			}
 			lines.push("");
-		}
-
-		// Memory retrieval is a request-time context block, not persistent
-		// conversation history. Include the same synthetic block here so /context
-		// displays the effective provider payload instead of only the harness log.
-		// The backend re-roles these trailing system messages to `user` for chat
-		// templates that require a system message at position 0.
-		if (memoryContext) {
-			lines.push("[USER]", memoryContext, "");
 		}
 
 		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;

@@ -2,7 +2,11 @@
 // Search the web via SearXNG (self-hosted privacy-respecting metasearch engine).
 
 import type { Tool, ToolContext, WebSearchConfig } from "@logician/log-core";
-import { DEFAULT_MAX_BYTES, truncateTail } from "./utils/truncate.ts";
+import {
+	DEFAULT_MAX_BYTES,
+	formatTruncationNotice,
+	truncateTail,
+} from "./utils/truncate.ts";
 
 type FetchLike = (
 	input: string | URL | Request,
@@ -113,7 +117,7 @@ export function createWebSearchTool(
 
 				if (!response.ok) {
 					const text = await response.text();
-					return `Error: SearXNG request failed (${response.status}): ${text.slice(0, 500)}`;
+					return `Error: SearXNG request failed (${response.status}) for query "${query}": ${text.slice(0, 500) || "no response body"}`;
 				}
 
 				const data = (await response.json()) as {
@@ -157,11 +161,13 @@ export function createWebSearchTool(
 				const body = [...prefix, ...lines, ...suffix].join("\n\n");
 				const t = truncateTail(body, { maxBytes: DEFAULT_MAX_BYTES });
 				return t.truncated
-					? `${t.content}\n... [truncated, ${results.length} total results]`
+					? `${t.content}${formatTruncationNotice(
+							`${results.length} total results — narrow with a more specific query, or page/time_range to see a different slice`,
+						)}`
 					: body;
 			} catch (err: unknown) {
 				const error = err as Error;
-				return `Error: ${error.message || String(err)}`;
+				return `Error: Search failed for query "${query}": ${error.message || String(err)}`;
 			}
 		},
 	};

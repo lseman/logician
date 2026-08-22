@@ -236,3 +236,80 @@ void test("provider tool definitions normalize external JSON Schema dialects", (
 		required: ["url"],
 	});
 });
+
+void test("MCP-origin tools are withheld from provider definitions until resolved", () => {
+	const registry = new ToolRegistry();
+	registry.register(makeTool({ name: "read_file" }));
+	registry.register(
+		makeTool({
+			name: "github_search_issues",
+			description: "Search GitHub issues and pull requests",
+			origin: { kind: "mcp", server: "github", tool: "search_issues" },
+		}),
+	);
+
+	const names = registry.toToolDefinitions().map(def => {
+		const fn = def.function as { name: string };
+		return fn.name;
+	});
+	assert.ok(names.includes("read_file"));
+	assert.ok(names.includes("search_tools"), "search_tools should auto-register");
+	assert.ok(
+		!names.includes("github_search_issues"),
+		"deferred MCP tool should be withheld until resolved",
+	);
+});
+
+void test("search_tools resolves matching deferred tools by keyword", async () => {
+	const registry = new ToolRegistry();
+	registry.register(
+		makeTool({
+			name: "github_search_issues",
+			description: "Search GitHub issues and pull requests",
+			origin: { kind: "mcp", server: "github", tool: "search_issues" },
+		}),
+	);
+	registry.register(
+		makeTool({
+			name: "playwright_screenshot",
+			description: "Take a screenshot of the current page",
+			origin: { kind: "mcp", server: "playwright", tool: "screenshot" },
+		}),
+	);
+
+	const before = registry
+		.toToolDefinitions()
+		.map(def => (def.function as { name: string }).name);
+	assert.ok(!before.includes("github_search_issues"));
+	assert.ok(!before.includes("playwright_screenshot"));
+
+	const result = await registry.execute(call("search_tools", { query: "github" }));
+	assert.match(result.content, /github_search_issues/);
+	assert.doesNotMatch(result.content, /playwright_screenshot/);
+
+	const after = registry
+		.toToolDefinitions()
+		.map(def => (def.function as { name: string }).name);
+	assert.ok(after.includes("github_search_issues"), "resolved tool should now be included");
+	assert.ok(
+		!after.includes("playwright_screenshot"),
+		"non-matching tool should remain withheld",
+	);
+});
+
+void test("search_tools with no match reports remaining available tools", async () => {
+	const registry = new ToolRegistry();
+	registry.register(
+		makeTool({
+			name: "playwright_screenshot",
+			description: "Take a screenshot of the current page",
+			origin: { kind: "mcp", server: "playwright", tool: "screenshot" },
+		}),
+	);
+
+	const result = await registry.execute(
+		call("search_tools", { query: "nonexistent_capability_xyz" }),
+	);
+	assert.match(result.content, /No matching tools/);
+	assert.match(result.content, /playwright_screenshot/);
+});

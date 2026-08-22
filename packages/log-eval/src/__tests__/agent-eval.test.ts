@@ -6,7 +6,7 @@ import path from "node:path";
 import { grade } from "../graders.ts";
 import { runProcess } from "../process.ts";
 import { buildReport } from "../report.ts";
-import { replayTrial } from "../runner.ts";
+import { replayTrial, runTrial } from "../runner.ts";
 import { validateCorpus } from "../schema.ts";
 
 describe("agent eval", () => {
@@ -123,16 +123,113 @@ describe("agent eval", () => {
 			],
 		};
 		const trajectory = [
-			JSON.stringify({ type: "agent_start", ts: 100 }),
-			JSON.stringify({ type: "tool_execution_start", ts: 140 }),
-			JSON.stringify({ type: "permission_request", ts: 141 }),
-			JSON.stringify({ type: "agent_end", status: "completed", ts: 180 }),
+			JSON.stringify({ type: "tool_use", id: "tool-1", name: "read_file" }),
+			JSON.stringify({ type: "error", error: "denied interactive permission" }),
+			JSON.stringify({
+				type: "metadata",
+				meta: {
+					status: "completed",
+					model: "test-model",
+					tool_calls: 1,
+					permission_requests: 1,
+					compactions: 0,
+					retries: 0,
+				},
+			}),
+			JSON.stringify({ type: "done" }),
 		].join("\n");
 		const trial = await replayTrial(task, workspace, trajectory);
 		expect(trial.environmentGradedPass).toBe(true);
 		expect(trial.agentDeclaredComplete).toBe(true);
 		expect(trial.metrics.toolCalls).toBe(1);
 		expect(trial.metrics.permissionRequests).toBe(1);
-		expect(trial.metrics.timeToFirstToolMs).toBe(40);
+		expect(trial.metrics.model).toBe("test-model");
+	});
+
+	test("agentDeclaredComplete reflects a failed run, not just stream presence", async () => {
+		const workspace = mkdtempSync(path.join(tmpdir(), "logician-replay-fail-"));
+		writeFileSync(path.join(workspace, "result.txt"), "unverified\n");
+		execFileSync("git", ["init", "-q"], { cwd: workspace });
+		execFileSync("git", ["add", "."], { cwd: workspace });
+		execFileSync(
+			"git",
+			[
+				"-c",
+				"user.name=Eval",
+				"-c",
+				"user.email=eval@localhost",
+				"commit",
+				"-qm",
+				"baseline",
+			],
+			{ cwd: workspace },
+		);
+		const task = {
+			schemaVersion: 1 as const,
+			id: "replay-fail",
+			title: "Replay fail",
+			kind: "bugfix" as const,
+			prompt: "verify",
+			fixture: { repository: workspace, revision: "HEAD" },
+			agent: { command: "true" },
+			graders: [
+				{
+					id: "result",
+					type: "file_contains" as const,
+					path: "result.txt",
+					pattern: "verified",
+				},
+			],
+		};
+		const trajectory = [
+			JSON.stringify({ type: "error", error: "denied interactive permission" }),
+			JSON.stringify({
+				type: "metadata",
+				meta: { status: "failed", error: "denied interactive permission" },
+			}),
+			JSON.stringify({ type: "done" }),
+		].join("\n");
+		const trial = await replayTrial(task, workspace, trajectory);
+		expect(trial.agentDeclaredComplete).toBe(false);
+	});
+
+	test("runTrial always attaches a harness config snapshot, even without a real agent", async () => {
+		const workspace = mkdtempSync(path.join(tmpdir(), "logician-harness-"));
+		writeFileSync(path.join(workspace, "result.txt"), "verified\n");
+		execFileSync("git", ["init", "-q"], { cwd: workspace });
+		execFileSync("git", ["add", "."], { cwd: workspace });
+		execFileSync(
+			"git",
+			[
+				"-c",
+				"user.name=Eval",
+				"-c",
+				"user.email=eval@localhost",
+				"commit",
+				"-qm",
+				"baseline",
+			],
+			{ cwd: workspace },
+		);
+		const task = {
+			schemaVersion: 1 as const,
+			id: "harness-snapshot",
+			title: "Harness snapshot",
+			kind: "bugfix" as const,
+			prompt: "noop",
+			fixture: { repository: workspace, revision: "HEAD" },
+			agent: { command: "true" },
+			graders: [
+				{
+					id: "result",
+					type: "file_contains" as const,
+					path: "result.txt",
+					pattern: "verified",
+				},
+			],
+		};
+		const trial = await runTrial(task, workspace);
+		expect(trial.harnessConfig).toBeDefined();
+		expect(typeof trial.harnessConfig).toBe("object");
 	});
 });

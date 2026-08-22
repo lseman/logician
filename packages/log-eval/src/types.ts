@@ -73,7 +73,23 @@ export interface TrialMetrics {
 	permissionRequests?: number;
 	compactions?: number;
 	retries?: number;
-	timeToFirstToolMs?: number;
+}
+
+/**
+ * Snapshot of the harness config in effect for a trial, read from
+ * ~/.logician/settings.json at the moment the trial ran. The agent runs as a
+ * subprocess that inherits process.env and reads its own config from disk —
+ * the eval runner doesn't control these settings, so this snapshot exists
+ * purely so a report can be traced back to what config produced it, rather
+ * than assuming it matches whatever the config file holds today.
+ */
+export interface HarnessConfigSnapshot {
+	model?: string;
+	permissionMode?: string;
+	toolExecution?: string;
+	maxIterations?: number;
+	compaction?: Record<string, unknown>;
+	mcpServerNames?: string[];
 }
 
 export interface EvalTrial {
@@ -86,6 +102,7 @@ export interface EvalTrial {
 	environmentGradedPass: boolean;
 	graders: GraderResult[];
 	metrics: TrialMetrics;
+	harnessConfig?: HarnessConfigSnapshot;
 	trajectoryPath?: string;
 	/** Internal until the CLI persists it as a trajectory artifact. */
 	agentOutput?: string;
