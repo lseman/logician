@@ -1,11 +1,5 @@
 import type { Message } from "../../system/types/types-messages.ts";
-
-export type RunOutcomeStatus =
-	| "completed"
-	| "needs_input"
-	| "blocked"
-	| "failed"
-	| "cancelled";
+import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 
 export interface StopPolicyContext {
 	/** Full active transcript, including the system message. */

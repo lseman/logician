@@ -1,4 +1,4 @@
-import type { AcceptanceConfig } from "../../control/guards/acceptance-contract.ts";
+import type { AcceptanceConfig } from "../../system/types/acceptance.ts";
 import type { OutputGuard } from "../../control/guards/output-guard.ts";
 import type { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
 import type { AgentRunController } from "../../control/policy/run-controller.ts";

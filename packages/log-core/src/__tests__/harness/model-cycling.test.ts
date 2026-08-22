@@ -1,7 +1,7 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import { AgentHarness } from "../../runtime/harness/agent-harness.ts";
-import { clampThinkingLevel } from "../../runtime/harness/runtime/model.ts";
+import { clampThinkingLevel } from "../../runtime/harness/live/model.ts";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import type { AgentEvent } from "../../system/types/types-messages.ts";
 

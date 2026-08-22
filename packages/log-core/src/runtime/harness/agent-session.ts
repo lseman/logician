@@ -70,17 +70,17 @@ import { HarnessModelController } from "./internal/model-controller.ts";
 import { HarnessObservation } from "./internal/observation.ts";
 import { HarnessQueueController } from "./internal/queue-controller.ts";
 import { HarnessTurnController } from "./internal/turn-controller.ts";
-import type { ExtensionRuntimeDeps } from "./runtime/extension-runtime.ts";
+import type { ExtensionRuntimeDeps } from "./live/extension-runtime.ts";
 import {
 	resolveRuntimeTools,
 	runExtensionBeforeAgentStart as runExtensionBeforeAgentStartHelper,
 	withExtensionRuntime as withExtensionRuntimeHelper,
-} from "./runtime/extension-runtime.ts";
+} from "./live/extension-runtime.ts";
 import {
 	assertIdlePhase,
 	assertPhaseTransition,
 	HarnessBusyError,
-} from "./runtime/phase.ts";
+} from "./live/phase.ts";
 import { summarizeAndMergeBranch } from "./session/branching.ts";
 import { ConversationState } from "./session/conversation-state.ts";
 import {
@@ -109,7 +109,7 @@ export type {
 	AgentRuntimeState,
 	HarnessPhase,
 } from "../state/runtime-state.ts";
-export { HarnessBusyError } from "./runtime/phase.ts";
+export { HarnessBusyError } from "./live/phase.ts";
 export type {
 	AbortResult,
 	AgentHarnessOptions,

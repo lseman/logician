@@ -30,26 +30,22 @@ import {
 	createProviderTurnState,
 	requestAssistantTurn,
 } from "../loop/provider-turn.ts";
-import {
-	type RunOutcomeStatus,
-	resolveExecutionPolicy,
-} from "../../control/policy/execution-policy.ts";
+import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
+import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import { checkBudget } from "../../control/policy/exit-path.ts";
 import {
 	HarnessInterventionController,
 	type InterventionInput,
 } from "../../control/policy/intervention-controller.ts";
-import {
-	RunBudgetController,
-	type RunBudgetDecision,
-} from "../../control/policy/run-budget.ts";
+import { RunBudgetController } from "../../control/policy/run-budget.ts";
+import type { RunBudgetDecision } from "../../system/types/run-budget.ts";
 import { AgentRunController } from "../../control/policy/run-controller.ts";
 import {
 	createSystemMessage,
 	convertToLlm as defaultConvertToLlm,
 	estimateChatPayloadTokens,
 } from "../../capabilities/provider/messages.ts";
-import { ToolResultCache } from "../state/tool-cache.ts";
+import { ToolResultCache } from "../../capabilities/tools/tool-result-cache.ts";
 import { ToolRegistry } from "../../capabilities/tools/registry.ts";
 import type {
 	AgentEventSink,

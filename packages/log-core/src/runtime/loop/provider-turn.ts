@@ -12,7 +12,7 @@
 import { compactToFit } from "../compaction/engine.ts";
 import type { AgentSettings } from "../../control/configuration/agent-settings.ts";
 import type { OutputGuard } from "../../control/guards/output-guard.ts";
-import type { RunOutcomeStatus } from "../../control/policy/execution-policy.ts";
+import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import type { InterventionInput } from "../../control/policy/intervention-controller.ts";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import { convertToChatFormat } from "../../capabilities/provider/messages.ts";

@@ -7,7 +7,7 @@
 
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { ToolResultCache } from "../../runtime/state/tool-cache.ts";
+import { ToolResultCache } from "./tool-result-cache.ts";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AskUserContext,

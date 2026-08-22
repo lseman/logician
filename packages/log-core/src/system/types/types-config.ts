@@ -1,13 +1,13 @@
 /** Configuration, inference, queue, truncation, and agent error contracts. */
 
-import type { AcceptanceConfig } from "../../control/guards/acceptance-contract.ts";
+import type { AcceptanceConfig } from "./acceptance.ts";
 import type {
 	AgentStopPolicy,
 	ExecutionProfile,
 } from "../../control/policy/execution-policy.ts";
-import type { RunBudgetLimits } from "../../control/policy/run-budget.ts";
-import type { TaskLedger } from "../../control/policy/task-ledger.ts";
-import type { PermissionManager } from "../../capabilities/tools/permissions.ts";
+import type { RunBudgetLimits } from "./run-budget.ts";
+import type { TaskLedger } from "./task-ledger.ts";
+import type { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import type { AgentHooks, EventHandler, Tool } from "./types-messages.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
@@ -340,7 +340,7 @@ export interface AgentConfig {
 	webSearch?: WebSearchConfig;
 	cacheSize?: number;
 	cacheTtlMs?: number;
-	permissions?: PermissionManager;
+	permissions?: PermissionPolicy;
 	onPermissionRequest?: (ctx: {
 		toolName: string;
 		toolCallId: string;

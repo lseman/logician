@@ -13,7 +13,7 @@ import { decideAutonomousContinuation } from "../../../control/policy/autonomy-p
 import { resolveExecutionPolicy } from "../../../control/policy/execution-policy.ts";
 import { HarnessInterventionController } from "../../../control/policy/intervention-controller.ts";
 import { ProgressTracker } from "../../../control/policy/progress-tracker.ts";
-import { EMPTY_TASK_LEDGER } from "../../../control/policy/task-ledger.ts";
+import { EMPTY_TASK_LEDGER } from "../../../system/types/task-ledger.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,

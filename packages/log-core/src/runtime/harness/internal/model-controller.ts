@@ -6,7 +6,7 @@ import type {
 	ThinkingLevel,
 } from "../../../system/types/types-config.ts";
 import type { AgentEvent } from "../../../system/types/types-messages.ts";
-import { cycleModel, resolveModelUrl } from "../runtime/model.ts";
+import { cycleModel, resolveModelUrl } from "../live/model.ts";
 
 export interface HarnessModelControllerOptions {
 	backend: LLMBackend;

@@ -1,7 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
-	type AcceptanceConfig,
 	formatAcceptancePrompt,
 	parseAcceptanceReport,
 	resolveEffectiveAcceptance,
@@ -9,6 +8,7 @@ import {
 	stripAcceptanceReport,
 	validateAcceptanceInput,
 } from "../../control/guards/acceptance-contract.ts";
+import type { AcceptanceConfig } from "../../system/types/acceptance.ts";
 
 function reportFence(report: Record<string, unknown>): string {
 	const bt = "`";

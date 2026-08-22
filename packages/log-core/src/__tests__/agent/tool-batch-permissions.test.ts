@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { executeToolBatch } from "../../runtime/execution/tool-batch-controller.ts";
-import { PermissionManager } from "../../capabilities/tools/permissions.ts";
+import { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import { ToolRegistry } from "../../capabilities/tools/registry.ts";
 import type {
 	AgentEvent,
@@ -33,7 +33,7 @@ function callFor(command: string): ToolCall {
 async function run(
 	registry: ToolRegistry,
 	call: ToolCall,
-	permissions: PermissionManager,
+	permissions: PermissionPolicy,
 	onPermissionRequest?: Parameters<
 		typeof executeToolBatch
 	>[0]["onPermissionRequest"],
@@ -56,7 +56,7 @@ async function run(
 }
 
 void test("permissions evaluate rewritten tool arguments", async () => {
-	const permissions = new PermissionManager({
+	const permissions = new PermissionPolicy({
 		mode: "acceptAll",
 		rules: { deny: ["bash(rm *)"] },
 	});
@@ -83,7 +83,7 @@ void test("permissions evaluate rewritten tool arguments", async () => {
 
 void test("denied tool call short-circuits without executing", async () => {
 	const registry = registryWithBash();
-	const permissions = new PermissionManager({
+	const permissions = new PermissionPolicy({
 		mode: "acceptAll",
 		rules: { deny: ["bash(rm *)"] },
 	});
@@ -97,7 +97,7 @@ void test("denied tool call short-circuits without executing", async () => {
 
 void test("plan mode denies write tools with the plan-mode reason", async () => {
 	const registry = registryWithBash();
-	const permissions = new PermissionManager({ mode: "plan" });
+	const permissions = new PermissionPolicy({ mode: "plan" });
 	const batch = await run(registry, callFor("make build"), permissions);
 	const content = batch.messages[0].content as string;
 	assert.match(content, /Tool call denied/);
@@ -106,7 +106,7 @@ void test("plan mode denies write tools with the plan-mode reason", async () => 
 
 void test("ask verdict with no handler fails closed (denied, not silently executed)", async () => {
 	const registry = registryWithBash();
-	const permissions = new PermissionManager({ mode: "ask" });
+	const permissions = new PermissionPolicy({ mode: "ask" });
 	const batch = await run(registry, callFor("make build"), permissions);
 	const content = batch.messages[0].content as string;
 	assert.match(content, /Tool call denied/);
@@ -115,7 +115,7 @@ void test("ask verdict with no handler fails closed (denied, not silently execut
 
 void test("ask verdict resolved 'allow' by the handler executes the tool", async () => {
 	const registry = registryWithBash();
-	const permissions = new PermissionManager({ mode: "ask" });
+	const permissions = new PermissionPolicy({ mode: "ask" });
 	const batch = await run(
 		registry,
 		callFor("make build"),
@@ -129,7 +129,7 @@ void test("ask verdict resolved 'allow' by the handler executes the tool", async
 
 void test("ask verdict resolved 'deny' by the handler blocks the tool", async () => {
 	const registry = registryWithBash();
-	const permissions = new PermissionManager({ mode: "ask" });
+	const permissions = new PermissionPolicy({ mode: "ask" });
 	const batch = await run(
 		registry,
 		callFor("make build"),
@@ -143,7 +143,7 @@ void test("ask verdict resolved 'deny' by the handler blocks the tool", async ()
 
 void test("ask verdict resolved 'always' persists a session allow for later calls", async () => {
 	const registry = registryWithBash();
-	const permissions = new PermissionManager({ mode: "ask" });
+	const permissions = new PermissionPolicy({ mode: "ask" });
 	let asked = 0;
 	const onPermissionRequest = async () => {
 		asked++;
@@ -180,7 +180,7 @@ void test("ask verdict resolved 'always' persists a session allow for later call
 
 void test("acceptAll mode never invokes the permission handler", async () => {
 	const registry = registryWithBash();
-	const permissions = new PermissionManager({ mode: "acceptAll" });
+	const permissions = new PermissionPolicy({ mode: "acceptAll" });
 	let asked = false;
 	const batch = await run(
 		registry,
@@ -199,7 +199,7 @@ void test("permission decisions are attributed before execution", async () => {
 	const { events } = await run(
 		registryWithBash(),
 		callFor("make build"),
-		new PermissionManager({ mode: "ask" }),
+		new PermissionPolicy({ mode: "ask" }),
 		async () => "always",
 	);
 	const decisions = events.filter(e => e.type === "tool_permission_decision");

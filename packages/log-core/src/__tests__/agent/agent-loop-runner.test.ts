@@ -12,7 +12,7 @@ import {
 import { OutputGuard } from "../../control/guards/output-guard.ts";
 import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
 import { BackendError } from "../../capabilities/provider/backend.ts";
-import { PermissionManager } from "../../capabilities/tools/permissions.ts";
+import { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import type { AgentConfig } from "../../system/types/types-config.ts";
 import type {
 	AgentEvent,
@@ -152,7 +152,7 @@ void test("three consecutive permission denials pause autonomous execution", asy
 		{
 			...makeConfig({
 				tools: [bash],
-				permissions: new PermissionManager({ mode: "plan" }),
+				permissions: new PermissionPolicy({ mode: "plan" }),
 				maxIterations: 5,
 			}),
 			backend,

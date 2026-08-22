@@ -85,7 +85,7 @@ export function primaryArgString(args: Record<string, unknown>): string {
 	return primaryArgStrings(args).join("\n");
 }
 
-export class PermissionManager {
+export class PermissionPolicy {
 	private mode: PermissionMode;
 	private allowRules: ParsedRule[];
 	private denyRules: ParsedRule[];

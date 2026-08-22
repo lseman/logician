@@ -1,4 +1,4 @@
-import type { RunOutcomeStatus } from "../../control/policy/execution-policy.ts";
+import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import type { AgentEvent, Message } from "../../system/types/types-messages.ts";
 
 export type HarnessPhase = "idle" | "turn" | "compaction" | "branch_summary";

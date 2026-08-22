@@ -6,11 +6,9 @@ export {
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
 } from "./runtime/execution/agent-loop-runner.ts";
-export type {
-	AcceptanceConfig,
-	AcceptanceLedger,
-} from "./control/guards/acceptance-contract.ts";
+export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
 export { stripAcceptanceReport } from "./control/guards/acceptance-contract.ts";
+export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export type {
 	BackendErrorCategory,
 	GenerateOptions,

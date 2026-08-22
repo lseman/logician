@@ -200,7 +200,7 @@ const META_FILE = "meta.json";
 // ── Session class ───────────────────────────────────────────────────────
 // Append-only JSONL conversation tree for one harness session. Execution state
 // belongs exclusively to the Run Kernel. Also the sole persistence layer for
-// TUI conversation history and its session browser — see SessionManager below.
+// TUI conversation history and its session browser — see SessionRegistry below.
 
 export class Session {
 	private readonly dir: string;
@@ -660,7 +660,7 @@ export class Session {
 // creating, forking, renaming, deleting — the sole backing store for the
 // TUI's session browser (project-scoped by cwd).
 
-export class SessionManager {
+export class SessionRegistry {
 	private baseDir: string;
 
 	constructor(config?: SessionConfig) {

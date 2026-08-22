@@ -1,6 +1,6 @@
 /** Messages, tools, hooks, and execution events shared by the core runtime. */
 
-import type { RunOutcomeStatus } from "../../control/policy/execution-policy.ts";
+import type { RunOutcomeStatus } from "./execution-policy.ts";
 
 // ── Message types ─────────────────────────────────────────────────────────
 
@@ -180,7 +180,7 @@ export interface ToolContext {
 
 // ── Event types ───────────────────────────────────────────────────────────
 
-import type { HarnessIntervention } from "../../control/policy/intervention-controller.ts";
+import type { HarnessIntervention } from "./intervention.ts";
 import type { AgentConfig, AgentHarnessStreamOptions } from "./types-config.ts";
 
 /**

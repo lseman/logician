@@ -3,41 +3,14 @@
 // Deterministic commands are authoritative; the final report supplies evidence
 // for criteria that cannot be checked mechanically.
 
-export type EvidenceKind =
-	| "changed-files"
-	| "tests-added"
-	| "commands-run"
-	| "validation-output"
-	| "residual-risks"
-	| "no-staged-files"
-	| "diff-summary"
-	| "manual-notes";
-
-export type CriterionSeverity = "required" | "recommended";
+import type {
+	AcceptanceConfig,
+	AcceptanceCriterion,
+	AcceptanceVerification,
+	EvidenceKind,
+} from "../../system/types/acceptance.ts";
 
 export type AcceptanceLevel = "none" | "checked" | "verified";
-
-export interface AcceptanceCriterion {
-	id: string;
-	must: string;
-	evidence?: EvidenceKind[];
-	severity?: CriterionSeverity;
-}
-
-export interface AcceptanceVerification {
-	id: string;
-	command: string;
-	cwd?: string;
-	timeoutMs?: number;
-	allowFailure?: boolean;
-}
-
-export interface AcceptanceConfig {
-	criteria?: string[] | AcceptanceCriterion[];
-	evidence?: EvidenceKind[];
-	verify?: AcceptanceVerification[];
-	stopRules?: string[];
-}
 
 export interface ResolvedAcceptance {
 	level: AcceptanceLevel;

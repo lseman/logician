@@ -1,5 +1,5 @@
 import { createToolResultMessage } from "../../capabilities/provider/messages.ts";
-import type { PermissionManager } from "../../capabilities/tools/permissions.ts";
+import type { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import type { ToolRegistry } from "../../capabilities/tools/registry.ts";
 import type {
 	AgentEvent,
@@ -23,7 +23,7 @@ export interface ToolBatchControllerOptions {
 	iteration: number;
 	signal?: AbortSignal;
 	hooks?: AgentHooks;
-	permissions?: PermissionManager;
+	permissions?: PermissionPolicy;
 	onPermissionRequest?: OnPermissionRequest;
 	emit: Emit;
 }
@@ -49,7 +49,7 @@ const CANCELLED_TOOL_RESULT =
  * rather than silently executing.
  */
 async function evaluatePermission(
-	permissions: PermissionManager,
+	permissions: PermissionPolicy,
 	onPermissionRequest: OnPermissionRequest | undefined,
 	call: ToolCall,
 	args: Record<string, unknown>,
