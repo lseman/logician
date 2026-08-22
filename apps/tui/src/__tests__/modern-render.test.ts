@@ -77,7 +77,7 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 	const lines = display.render(80);
 	const output = plain(lines.join("\n"));
 
-	assert.match(output, /› YOU/);
+	assert.match(output, /YOU ‹/);
 	assert.ok(
 		lines.some(line => line.includes(`${theme.fgRaw("userLabel")}\x1b[1mYOU`)),
 	);

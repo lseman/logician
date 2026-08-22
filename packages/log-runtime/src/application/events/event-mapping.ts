@@ -15,9 +15,19 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 		case "message_start":
 		case "text_start":
 		case "text_end":
-		case "message_end":
 		case "agent_settled":
 		case "session_delete":
+			return null;
+		case "message_end":
+			// turn_0 carries the initial prompt, already shown as the turn's
+			// own userMessage — only a later turnId is a steering message
+			// spliced into an already-running turn. Surface it only now, at
+			// the moment drainSteering() actually applies it (not when the
+			// user submits it), so it appears exactly as it leaves the queue,
+			// alongside the tool call/response it landed next to.
+			if (event.turnId !== "turn_0" && event.message?.role === "user") {
+				return { type: "steered", message: event.message.content ?? "" };
+			}
 			return null;
 		case "text_delta":
 			return { type: "token", token: event.delta };
@@ -347,6 +357,13 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				level: "warn",
 				label: `Guard: ${event.guard}`,
 				text: event.message,
+			};
+		case "queue_update":
+			return {
+				type: "queue_update",
+				steering: [...event.steering],
+				followUp: [...event.followUp],
+				nextTurn: event.nextTurn ? [...event.nextTurn] : undefined,
 			};
 		case "harness_intervention":
 			return {
