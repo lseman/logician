@@ -12,16 +12,16 @@ import {
 	createSpawnAgentTool,
 	createSubagentConcurrencyLimiter,
 	type SpawnAgentDeps,
-} from "./delegation/definitions.ts";
-import { ask_user } from "./interaction/ask-user/index.ts";
-import { rag_tools } from "./rag/index.ts";
-import { todo_tool } from "./tasks/todo.ts";
+} from "../delegation/definitions.ts";
+import { ask_user } from "../ask-user/index.ts";
+import { rag_tools } from "../rag/index.ts";
+import { todo_tool } from "../tasks/todo.ts";
 
 export interface SubagentToolDeps {
 	config: () => AgentConfig;
 	backend: LLMBackend;
 	cwd: string;
-	agents: () => import("./delegation/definitions.ts").AgentDefinition[];
+	agents: () => import("../delegation/definitions.ts").AgentDefinition[];
 	emit: (event: AgentEvent) => void;
 	/** Max concurrent subagent executions (default: 4). */
 	maxParallelAgents?: number;

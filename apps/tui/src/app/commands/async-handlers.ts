@@ -1,6 +1,6 @@
 // ── Async slash-command helpers ────────────────────────────────────────────
 
-import { getReasonerMeta } from "@logician/log-blocks/reasoning";
+import { getReasonerMeta } from "@logician/log-runtime/reasoning";
 import { saveConfigField } from "@logician/log-runtime/configuration";
 import { formatContextSize } from "@logician/log-runtime/formatting";
 import {

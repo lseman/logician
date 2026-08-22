@@ -1,4 +1,4 @@
-import { getBuiltInTools } from "@logician/log-blocks/tools";
+import { getBuiltInTools } from "./builtin-blocks.ts";
 import type { Tool, WebSearchConfig } from "@logician/log-core";
 import { ariadne } from "./ariadne.ts";
 import { bash } from "./bash.ts";

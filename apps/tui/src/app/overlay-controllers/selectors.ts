@@ -4,7 +4,7 @@ import {
 	getReasonerIds,
 	getReasonerMeta,
 	type ReasonerMeta,
-} from "@logician/log-blocks/reasoning";
+} from "@logician/log-runtime/reasoning";
 import type { ThinkingLevel } from "@logician/log-core";
 import { saveConfigField } from "@logician/log-runtime/configuration";
 import { listProjectFiles } from "@logician/log-runtime/context";

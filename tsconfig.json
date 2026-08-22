@@ -3,7 +3,6 @@
 	"references": [
 		{ "path": "packages/log-protocol" },
 		{ "path": "packages/log-core" },
-		{ "path": "packages/log-blocks" },
 		{ "path": "packages/log-eval" },
 		{ "path": "packages/log-autoresearch" },
 		{ "path": "packages/log-eoh" },

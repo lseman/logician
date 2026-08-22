@@ -12,8 +12,8 @@ import {
 	createSpawnAgentsTool,
 	createSpawnAgentTool,
 	createSubagentConcurrencyLimiter,
-} from "../delegation/definitions.ts";
-import { runDelegatedAgent } from "../delegation/runtime.ts";
+} from "../../capabilities/delegation/definitions.ts";
+import { runDelegatedAgent } from "../../capabilities/delegation/runtime.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake";

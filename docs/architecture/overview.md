@@ -19,7 +19,7 @@ graph LR
   end
   subgraph Runtime
     C["@logician/log-core"]
-    D["@logician/log-blocks"]
+    D["@logician/log-runtime"]
     H["@logician/log-eoh"]
   end
   subgraph DataAndEvaluation["Data and evaluation"]

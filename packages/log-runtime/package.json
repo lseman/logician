@@ -15,6 +15,7 @@
 		"./context": "./src/runtime/context/index.ts",
 		"./developer-tools": "./src/developer-tools.ts",
 		"./formatting": "./src/formatting.ts",
+		"./reasoning": "./src/capabilities/reasoning/index.ts",
 		"./sessions": "./src/runtime/session/index.ts",
 		"./skills": "./src/capabilities/skills/loader.ts",
 		"./tools": "./src/tools.ts",
@@ -25,12 +26,12 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@logician/log-blocks": "0.2.0",
 		"@logician/log-core": "0.2.0",
 		"@logician/log-protocol": "0.1.0",
 		"@logician/log-autoresearch": "0.2.0",
 		"@logician/log-eoh": "0.1.0",
 		"@logician/log-memory": "0.1.0",
+		"@logician/log-rag": "0.2.0",
 		"emphasize": "^7.0.0",
 		"ignore": "^7.0.5",
 		"yaml": "^2.9.0"

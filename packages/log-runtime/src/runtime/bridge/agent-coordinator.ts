@@ -4,7 +4,7 @@ import {
 	get_reasoner,
 	getReasonerMeta,
 	type ReasonerConfig,
-} from "@logician/log-blocks/reasoning";
+} from "../../capabilities/reasoning/index.ts";
 import type { LLMBackend, Tool } from "@logician/log-core";
 import type { AgentSession } from "@logician/log-core/harness";
 import type { RuntimeEvent } from "@logician/log-protocol";

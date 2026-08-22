@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { ask_user } from "../interaction/ask-user/index.ts";
+import { ask_user } from "../../capabilities/ask-user/index.ts";
 
 void test("ask_user sends canonical multi-question requests", async () => {
 	const result = await ask_user.execute(

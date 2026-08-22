@@ -102,7 +102,7 @@ resume cannot lower, with starts rejected above a cap — a concrete safety rail
 recursive delegation. A `report` channel distinct from the return value, letting a continuable child
 proactively push content back to steer its parent.
 
-**Relevance:** worth comparing against `log-blocks/delegation/` — specifically, does our delegation
+**Relevance:** worth comparing against `log-runtime/capabilities/delegation/` — specifically, does our delegation
 mechanism have any cap on recursive depth? That's a cheap, valuable safety property regardless of
 whether we adopt the rest of their model (which is heavier than we likely need — see below).
 

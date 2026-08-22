@@ -1,6 +1,6 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
-import { getTasks, onTodosChanged } from "@logician/log-blocks/tasks/todo.ts";
+import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type {
 	AgentConfig,
 	AgentEvent,

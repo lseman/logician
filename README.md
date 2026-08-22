@@ -177,7 +177,7 @@ flowchart LR
 | `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
 | `@logician/log-protocol` | Dependency-free, versioned client notifications shared by the runtime and presentation layers |
 | `@logician/log-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, config, sessions, and application orchestration |
-| `@logician/log-blocks` | Delegation, reasoning strategies, tasks, user interaction, and optional agent features |
+| `@logician/log-runtime` | Runtime composition: capabilities (delegation, reasoning strategies, tasks, user interaction, tools, memory, LSP, MCP, skills) and orchestration |
 | `@logician/log-memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
 | `@logician/log-memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |
 | `@logician/log-rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |

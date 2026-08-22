@@ -1,4 +1,4 @@
-import type { ReasonerConfig } from "@logician/log-blocks/reasoning";
+import type { ReasonerConfig } from "../../capabilities/reasoning/index.ts";
 import type {
 	AgentConfig,
 	AgentModelConfig,

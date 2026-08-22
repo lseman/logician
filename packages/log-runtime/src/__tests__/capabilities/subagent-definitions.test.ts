@@ -18,7 +18,7 @@ import {
 	createSpawnAgentTool,
 	createSubagentConcurrencyLimiter,
 	loadAgentDefinitions,
-} from "../delegation/definitions.ts";
+} from "../../capabilities/delegation/definitions.ts";
 
 function mkAgentDir(): string {
 	return mkdtempSync(path.join(tmpdir(), "logician-agents-"));

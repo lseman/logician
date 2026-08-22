@@ -1,4 +1,4 @@
-export { ask_user } from "@logician/log-blocks/interaction/ask-user/index.ts";
+export { ask_user } from "./capabilities/ask-user/index.ts";
 export { stripTextToolCalls } from "@logician/log-core";
 export { parseFrontmatter } from "@logician/log-core/frontmatter";
 export {

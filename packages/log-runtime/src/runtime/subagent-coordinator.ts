@@ -9,11 +9,11 @@ import path from "node:path";
 import {
 	type AgentDefinition,
 	loadAgentDefinitions,
-} from "@logician/log-blocks/delegation/definitions.ts";
+} from "../capabilities/delegation/definitions.ts";
 import {
 	getBuiltInSubagentTools,
 	type SubagentToolDeps,
-} from "@logician/log-blocks/tools";
+} from "../capabilities/tools/builtin-blocks.ts";
 import type {
 	AgentConfig,
 	LLMBackend,
