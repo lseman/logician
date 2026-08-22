@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
 	generateDiffString,
 	syntheticUnifiedDiff,
-} from "../../infrastructure/tools/utils/diff-utils.ts";
+} from "../../capabilities/tools/support/utils/diff-utils.ts";
 
 void test("disjoint edits produce separate hunks, untouched lines stay context", () => {
 	const before = [

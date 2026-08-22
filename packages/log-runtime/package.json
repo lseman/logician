@@ -8,17 +8,17 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./adapters/claude-code": "./src/adapters/claude-code/index.ts",
-		"./application": "./src/application/index.ts",
+		"./application": "./src/runtime/index.ts",
 		"./commands": "./src/capabilities/commands/index.ts",
-		"./configuration": "./src/infrastructure/configuration/index.ts",
-		"./configuration/runtime": "./src/application/configuration/runtime-config.ts",
-		"./context": "./src/infrastructure/context/index.ts",
+		"./configuration": "./src/runtime/configuration/index.ts",
+		"./configuration/runtime": "./src/runtime/configuration/runtime-config.ts",
+		"./context": "./src/runtime/context/index.ts",
 		"./developer-tools": "./src/developer-tools.ts",
 		"./formatting": "./src/formatting.ts",
-		"./sessions": "./src/application/session/index.ts",
+		"./sessions": "./src/runtime/session/index.ts",
 		"./skills": "./src/capabilities/skills/loader.ts",
 		"./tools": "./src/tools.ts",
-		"./trust": "./src/infrastructure/trust/index.ts"
+		"./trust": "./src/runtime/trust/index.ts"
 	},
 	"scripts": {
 		"test": "bun test $(find src -name '*.test.ts' -type f -print)",

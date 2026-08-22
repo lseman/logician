@@ -7,7 +7,7 @@ import {
 	getDefaultSandboxProfile,
 	sandbox,
 	setDefaultSandboxProfile,
-} from "../../infrastructure/tools/sandbox.ts";
+} from "../../capabilities/tools/sandbox.ts";
 
 void test("detects bwrap on Linux when present on PATH", () => {
 	if (process.platform !== "linux") return;

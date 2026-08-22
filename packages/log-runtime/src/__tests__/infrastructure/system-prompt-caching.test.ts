@@ -5,7 +5,7 @@ import {
 	buildDynamicSystemContext,
 	buildStaticSystemPromptPrefix,
 	buildSystemPrompt,
-} from "../../infrastructure/context/system-prompt.ts";
+} from "../../runtime/context/system-prompt.ts";
 import type { Tool } from "@logician/log-core";
 
 void test("buildStaticSystemPromptPrefix generates a deterministic cacheable prefix across different times", () => {

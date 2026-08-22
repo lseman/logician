@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ensureTool } from "../../infrastructure/tools/external-tools.ts";
-import { grep } from "../../infrastructure/tools/search.ts";
+import { ensureTool } from "../../capabilities/tools/external-tools.ts";
+import { grep } from "../../capabilities/tools/search.ts";
 
 const rgTest = (await ensureTool("rg")) ? test : test.skip;
 

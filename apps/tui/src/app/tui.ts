@@ -269,11 +269,11 @@ export class LogicianTUI {
 	) {
 		this.workflowMode =
 			runtimeConfig.source.workflowMode ??
-			(runtimeConfig.bridge.permissionMode === "plan" ? "plan" : "act");
+			(runtimeConfig.bridge.permissions?.mode === "plan" ? "plan" : "act");
 		this.normalPermissionMode =
-			runtimeConfig.bridge.permissionMode === "acceptAll" ||
-			runtimeConfig.bridge.permissionMode === "ask"
-				? runtimeConfig.bridge.permissionMode
+			runtimeConfig.bridge.permissions?.mode === "acceptAll" ||
+			runtimeConfig.bridge.permissions?.mode === "ask"
+				? runtimeConfig.bridge.permissions.mode
 				: "acceptEdits";
 		this.configPath = runtimeConfig.configPath;
 		this.thinkingLevel = runtimeConfig.bridge.thinkingLevel ?? "off";
@@ -455,13 +455,13 @@ export class LogicianTUI {
 			contextTokens: 0,
 			reasoner: this.bridge.getReasonerStatus(),
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
-			permissionMode: runtimeConfig.bridge.permissionMode ?? "acceptEdits",
+			permissionMode: runtimeConfig.bridge.permissions?.mode ?? "acceptEdits",
 			workflowMode: this.workflowMode,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "minimal",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
 			ariadneEnabled: runtimeConfig.bridge.ariadneEnabled ?? true,
 			fffgrepEnabled: runtimeConfig.bridge.fffgrepEnabled ?? true,
-			memoryEnabled: runtimeConfig.bridge.memoryEnabled ?? false,
+			memoryEnabled: runtimeConfig.bridge.memory?.enabled ?? false,
 			// MCP discovery starts in the background the moment the bridge is
 			// constructed (ToolRouter's constructor), so it's typically already
 			// in flight by the time this status line renders. The "MCP" notice

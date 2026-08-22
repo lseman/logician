@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resolveRuntimeConfig } from "../../application/configuration/runtime-config.ts";
+import { resolveRuntimeConfig } from "../../runtime/configuration/runtime-config.ts";
 
 function configuredWorkspace(): string {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-config-"));
@@ -67,7 +67,7 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.configPath, resolved.configPath);
 	assert.equal(resolved.bridge.runtimeHooksEnabled, false);
 	assert.equal(resolved.bridge.toolExecution, "sequential");
-	assert.equal(resolved.bridge.permissionMode, "ask");
+	assert.equal(resolved.bridge.permissions?.mode, "ask");
 	assert.equal(resolved.bridge.rtkProxyEnabled, true);
 	assert.equal(resolved.bridge.ariadneEnabled, false);
 	assert.equal(resolved.bridge.fffgrepEnabled, false);
@@ -78,14 +78,14 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.cacheSize, 64);
 	assert.equal(resolved.bridge.cacheTtlMs, 2000);
 	assert.equal(
-		resolved.bridge.memoryExtractorBaseUrl,
+		resolved.bridge.memory?.extractorBaseUrl,
 		"http://memory.test:8081",
 	);
-	assert.equal(resolved.bridge.memoryExtractorModel, "small-extractor");
-	assert.equal(resolved.bridge.memoryViewerEnabled, false);
-	assert.equal(resolved.bridge.memoryViewerPort, 4321);
-	assert.equal(resolved.bridge.memoryEmbeddingsEnabled, true);
-	assert.equal(resolved.bridge.memoryEmbeddingModel, "local/test-embedder");
+	assert.equal(resolved.bridge.memory?.extractorModel, "small-extractor");
+	assert.equal(resolved.bridge.memory?.viewerEnabled, false);
+	assert.equal(resolved.bridge.memory?.viewerPort, 4321);
+	assert.equal(resolved.bridge.memory?.embeddingsEnabled, true);
+	assert.equal(resolved.bridge.memory?.embeddingModel, "local/test-embedder");
 	assert.equal(resolved.bridge.reasoner, "reflexion");
 	assert.deepEqual(resolved.bridge.reasonerConfig, { maxTrials: 2 });
 });
@@ -94,7 +94,7 @@ void test("reasoners are disabled by default", () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-defaults-"));
 	const resolved = resolveRuntimeConfig(cwd, {});
 	assert.equal(resolved.bridge.reasoner, "none");
-	assert.equal(resolved.bridge.memoryEmbeddingsEnabled, false);
+	assert.equal(resolved.bridge.memory?.embeddingsEnabled, false);
 });
 
 void test("untrusted runtime resolution ignores project configuration", () => {
@@ -120,7 +120,7 @@ void test("untrusted runtime resolution ignores project configuration", () => {
 	assert.equal(resolved.source.model, "global-model");
 	assert.equal(resolved.bridge.model, "global-model");
 	assert.equal(resolved.bridge.baseUrl, "http://global.test:7000");
-	assert.equal(resolved.bridge.permissionMode, "acceptEdits");
+	assert.equal(resolved.bridge.permissions?.mode, "acceptEdits");
 	assert.equal(resolved.bridge.projectTrusted, false);
 });
 
@@ -162,7 +162,7 @@ void test("trusted runtime resolution overlays project config on global settings
 	assert.equal(resolved.configPath, path.join(workspace, ".logician.json"));
 	assert.equal(resolved.bridge.model, "global-model");
 	assert.equal(resolved.bridge.baseUrl, "http://global.test:7000");
-	assert.equal(resolved.bridge.permissionMode, "acceptEdits");
+	assert.equal(resolved.bridge.permissions?.mode, "acceptEdits");
 	assert.deepEqual(resolved.source.mcpServers, {
 		project: { command: "project-mcp" },
 	});

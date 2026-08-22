@@ -7,7 +7,7 @@ import type { Tool } from "@logician/log-core";
 import {
 	buildDefaultSystemPrompt,
 	buildSystemPrompt,
-} from "../../infrastructure/context/system-prompt.ts";
+} from "../../runtime/context/system-prompt.ts";
 
 void test("system prompt makes MCP the primary tool-selection workflow", () => {
 	const fullDescription =

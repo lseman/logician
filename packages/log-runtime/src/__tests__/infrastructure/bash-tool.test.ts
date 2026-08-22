@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bash } from "../../infrastructure/tools/bash.ts";
+import { bash } from "../../capabilities/tools/bash.ts";
 
 void test("bash includes output and exit code for non-zero commands", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-bash-"));
