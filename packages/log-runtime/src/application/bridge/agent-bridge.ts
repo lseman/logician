@@ -741,6 +741,16 @@ export class AgentRuntime {
 		this.session?.steer(message);
 	}
 
+	/** Queue steering for after the current turn (never interrupts). */
+	steerQueue(message: string): void {
+		this.session?.steerQueue(message);
+	}
+
+	/** Immediately interrupt and apply steering (always forces abort). */
+	steerNow(message: string): void {
+		this.session?.steerNow(message);
+	}
+
 	followUp(message: string): void {
 		this.session?.followUp(message);
 	}

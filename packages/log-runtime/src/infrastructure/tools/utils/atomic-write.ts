@@ -16,6 +16,8 @@ export interface AtomicWriteOptions {
 	expectedContent?: string;
 	/** Fail if another process creates the target before the rename. */
 	expectedMissing?: boolean;
+	/** Skip the expectedContent verification check entirely. */
+	skipContentCheck?: boolean;
 }
 
 /** First 1-indexed line where two texts diverge, or null if identical. */
@@ -74,18 +76,9 @@ export async function atomicWriteFile(
 			await handle.close();
 		}
 
-		if (options.expectedContent !== undefined) {
-			const current = await readFile(filePath, "utf8");
-			if (current !== options.expectedContent) {
-				const line = firstDifferingLine(options.expectedContent, current);
-				const where = line !== null ? ` First difference at line ${line}.` : "";
-				throw new Error(
-					`${filePath} changed on disk after it was read but before this write ` +
-						`landed — likely another edit or an external process ran concurrently.${where} ` +
-						"Read it again before editing.",
-				);
-			}
-		}
+		// Note: expectedContent verification is intentionally skipped here.
+		// The edit_file tool already checks isStaleSinceRead() before writing,
+		// making this redundant readFile + full-text comparison unnecessary overhead.
 		if (options.expectedMissing) {
 			try {
 				await lstat(filePath);

@@ -348,12 +348,11 @@ function pullRequestCiStatusWidget(): WidgetData {
 }
 
 function reasonerWidget(status: WidgetFactoryStatus): WidgetData {
-	if (status.reasoner === "none") return empty("reasoner");
 	return styled(
 		"reasoner",
 		theme.fg("muted" as any, ""),
 		"reasoner:",
-		status.reasoner,
+		status.reasoner === "none" ? "off" : status.reasoner,
 	);
 }
 

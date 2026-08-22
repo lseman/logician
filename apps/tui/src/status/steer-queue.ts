@@ -2,7 +2,9 @@
 // Pinned display of pending steering / follow-up / next-turn messages shown
 // directly above the input bar. Renders nothing when all three queues are
 // empty, so it only takes vertical space while there's something queued.
-// Mirrors Pi's updatePendingMessagesDisplay() pattern.
+//
+// Clickable: clicking any queued steering message immediately steers with it.
+// Ctrl+Q opens the queue manager for full management.
 
 import {
 	type Component,
@@ -22,19 +24,20 @@ const KIND_META: Record<
 	nextTurn: { mark: "↷", label: "NEXT", color: "muted", textColor: "muted" },
 };
 
-// New rows play a brief arrival pulse instead of appearing at full brightness
-// instantly — same easing feel as TodoBar's status transitions, scoped to
-// "just landed" rather than a status change (queue entries don't have states).
-const ARRIVAL_FRAMES = ["◦", "◔", "◑", "◕"];
-const ARRIVAL_TICKS = ARRIVAL_FRAMES.length;
-const ARRIVAL_INTERVAL_MS = 70;
-
 const MAX_ROWS = 6;
 
 interface Row {
 	kind: QueueKind;
 	key: string;
 	msg: string;
+}
+
+export type SteerQueueAction =
+	| { type: "steerNow"; message: string }
+	| { type: "openManager" };
+
+export interface SteerQueueCallbacks {
+	onAction?: (action: SteerQueueAction) => void;
 }
 
 export class SteerQueue implements Component {
@@ -45,11 +48,15 @@ export class SteerQueue implements Component {
 	private cachedLines: string[] | null = null;
 	private cachedKey = "";
 
-	// Arrival animation state, keyed by "kind:message" (stable across re-renders
-	// as long as the message text and its queue don't change).
-	private seen = new Set<string>();
-	private arrivalFrame = new Map<string, number>();
-	private timer: ReturnType<typeof setInterval> | null = null;
+	// Number of body rows for hit-testing. Body rows are rendered at
+	// content-relative y = 2 .. 1 + bodyRowCount.
+	private bodyRowCount = 0;
+
+	private callbacks: SteerQueueCallbacks = {};
+
+	setCallbacks(cb: SteerQueueCallbacks): void {
+		this.callbacks = cb;
+	}
 
 	setOnInvalidate(cb: () => void): void {
 		this.onInvalidate = cb;
@@ -63,22 +70,6 @@ export class SteerQueue implements Component {
 		this.steering = steering;
 		this.followUp = followUp;
 		this.nextTurn = nextTurn;
-
-		const liveKeys = new Set<string>();
-		let anyArrival = false;
-		for (const row of this.rows()) {
-			liveKeys.add(row.key);
-			if (!this.seen.has(row.key)) {
-				this.arrivalFrame.set(row.key, 0);
-				anyArrival = true;
-			}
-		}
-		this.seen = liveKeys;
-		for (const key of this.arrivalFrame.keys()) {
-			if (!liveKeys.has(key)) this.arrivalFrame.delete(key);
-		}
-		if (anyArrival) this.startAnimation();
-
 		this.cachedLines = null;
 		this.onInvalidate?.();
 	}
@@ -102,61 +93,57 @@ export class SteerQueue implements Component {
 		return rows;
 	}
 
-	private startAnimation(): void {
-		if (this.timer) return;
-		this.timer = setInterval(() => {
-			let stillRunning = false;
-			for (const [key, frame] of this.arrivalFrame) {
-				const next = frame + 1;
-				if (next >= ARRIVAL_TICKS) {
-					this.arrivalFrame.delete(key);
-				} else {
-					this.arrivalFrame.set(key, next);
-					stillRunning = true;
-				}
-			}
-			this.cachedLines = null;
-			this.onInvalidate?.();
-			if (!stillRunning) this.stopAnimation();
-		}, ARRIVAL_INTERVAL_MS);
-	}
+	// ── Mouse hit-testing ─────────────────────────────────────────────────
 
-	private stopAnimation(): void {
-		if (this.timer) {
-			clearInterval(this.timer);
-			this.timer = null;
+	/**
+	 * Handle a mouse click. `row` is content-relative (0-indexed line within
+	 * this component's rendered output). Returns true if the click was handled.
+	 *
+	 * Layout: blank(0) | header(1) | body(2..2+N-1) | footer(2+N)
+	 * Body rows are 2 through 1+bodyRowCount (inclusive).
+	 */
+	handleMouse(_column: number, row: number): boolean {
+		const bodyStart = 2;
+		const bodyEnd = bodyStart + this.bodyRowCount - 1;
+		if (row >= bodyStart && row <= bodyEnd && this.bodyRowCount > 0) {
+			const allRows = this.rows();
+			const clickedRow = allRows[row - bodyStart];
+			if (clickedRow && clickedRow.kind === "steering") {
+				this.callbacks.onAction?.({ type: "steerNow", message: clickedRow.msg });
+				return true;
+			}
 		}
+		// Footer row — open queue manager
+		const totalLines = 1 + 1 + this.bodyRowCount + 1; // blank + header + body + footer
+		if (row === totalLines - 1) {
+			this.callbacks.onAction?.({ type: "openManager" });
+			return true;
+		}
+		return false;
 	}
 
 	render(width: number): string[] {
 		const rows = this.rows();
-		const key = `${width}:${rows.map(r => r.key).join("")}`;
-		if (
-			this.cachedLines !== null &&
-			this.cachedKey === key &&
-			this.arrivalFrame.size === 0
-		) {
+		const key = `${width}:${rows.map(r => r.key).join("\x01")}`;
+		if (this.cachedLines !== null && this.cachedKey === key) {
 			return this.cachedLines;
 		}
 		this.cachedKey = key;
-		this.cachedLines = renderRows(rows, width, this.arrivalFrame);
-		return this.cachedLines;
+		const rendered = renderRows(rows, width);
+		this.bodyRowCount = Math.min(rows.length, MAX_ROWS);
+		return rendered;
 	}
 }
 
 // ── Render (pure function) ──────────────────────────────────────────────────
 
-function renderRows(
-	rows: Row[],
-	width: number,
-	arrivalFrame: Map<string, number>,
-): string[] {
+function renderRows(rows: Row[], width: number): string[] {
 	if (rows.length === 0) return [];
 
 	const lines: string[] = [];
-	lines.push(""); // blank spacer before the block
+	lines.push(""); // blank spacer
 
-	// Header: "STEERING  2 queued · 1 follow-up · 1 next turn"
+	// Header: "◈ Queue · 2 queued · 1 follow-up"
 	const steeringCount = rows.filter(r => r.kind === "steering").length;
 	const followUpCount = rows.filter(r => r.kind === "followUp").length;
 	const nextTurnCount = rows.filter(r => r.kind === "nextTurn").length;
@@ -164,17 +151,33 @@ function renderRows(
 	if (steeringCount > 0) parts.push(`${steeringCount} queued`);
 	if (followUpCount > 0) parts.push(`${followUpCount} follow-up`);
 	if (nextTurnCount > 0) parts.push(`${nextTurnCount} next turn`);
-	const header = `${theme.fg("muted", "STEERING")}  ${theme.fg("dim", parts.join(" · "))}`;
+
+	const headerIcon = theme.fg("accent", "◈");
+	const headerLabel = theme.bold(theme.fg("muted", "QUEUE"));
+	const headerCount = parts.length ? theme.fg("dim", ` · ${parts.join(" · ")}`) : "";
+	const header = `${headerIcon} ${headerLabel}${headerCount}`;
 	lines.push(pad(clampLineToWidth(header, width), width));
 
 	const shown = rows.slice(0, MAX_ROWS);
 	shown.forEach((row, i) => {
 		const meta = KIND_META[row.kind];
-		const frame = arrivalFrame.get(row.key);
-		const mark = arrivalMark(meta, frame);
-		const n = theme.fg("muted", `${i + 1}.`);
-		const label = theme.fg("dim", meta.label);
-		const text = `${mark} ${n} ${label}  ${theme.fg(meta.textColor, oneLine(row.msg))}`;
+		const isSteering = row.kind === "steering";
+
+		// Steering rows get a clickable ▶ indicator.
+		const clickable = isSteering
+			? theme.fg("accent", "▶")
+			: theme.fg("dim", "·");
+
+		const msgText = oneLine(row.msg);
+		const msgStyled = theme.fg(meta.textColor, msgText);
+
+		// First steering row gets "steer now" affordance.
+		const isFirstSteering = isSteering && i === 0;
+		const affordance = isFirstSteering
+			? ` ${theme.fg("accent", "steer now")}`
+			: "";
+
+		const text = `${clickable} ${meta.mark} ${msgStyled}${affordance}`;
 		lines.push(pad(clampLineToWidth(text, width), width));
 	});
 
@@ -182,16 +185,20 @@ function renderRows(
 	if (hidden > 0) {
 		lines.push(
 			pad(
-				clampLineToWidth(`   ${theme.fg("dim", `… ${hidden} more`)}`, width),
+				clampLineToWidth(
+					`   ${theme.fg("dim", `… ${hidden} more — click to steer`)}`,
+					width,
+				),
 				width,
 			),
 		);
 	}
 
+	// Footer: action hints
 	lines.push(
 		pad(
 			clampLineToWidth(
-				`   ${theme.dim("Enter queue · Ctrl+Enter steer now · /queue manage")}`,
+				`${theme.fg("dim", "click to steer")}  ${theme.fg("dim", "Ctrl+Enter")} ${theme.fg("muted", "steer now")}  ${theme.fg("dim", "Ctrl+Q")} ${theme.fg("muted", "manage")}`,
 				width,
 			),
 			width,
@@ -199,14 +206,6 @@ function renderRows(
 	);
 
 	return lines;
-}
-
-function arrivalMark(
-	meta: (typeof KIND_META)[QueueKind],
-	frame: number | undefined,
-): string {
-	const glyph = frame === undefined ? meta.mark : ARRIVAL_FRAMES[frame];
-	return ` ${theme.fg(meta.color, glyph)}`;
 }
 
 /** Collapse newlines/whitespace runs so each queued message is one row. */

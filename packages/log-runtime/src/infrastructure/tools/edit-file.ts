@@ -41,13 +41,27 @@ export interface ApplyEditsResult {
 	newContent: string;
 }
 
+// ── Lookup table for fast normalizeChar ────────────────────────────────────────
+// Replaces per-char regex tests with O(1) table lookup. Built once at module load.
+const _NORM: Record<number, string> = {
+	// Left/right/single/double low-9 quotes → '
+	0x2018: "'", 0x2019: "'", 0x201a: "'", 0x201b: "'",
+	// Left/right double/pointing double quotes → "
+	0x201c: '"', 0x201d: '"', 0x201e: '"', 0x201f: '"',
+	// Hyphen/dash variants → -
+	0x2010: "-", 0x2011: "-", 0x2012: "-", 0x2013: "-",
+	0x2014: "-", 0x2015: "-", 0x2212: "-",
+	// Various spaces → regular space
+	0x00a0: " ", 0x2002: " ", 0x2003: " ", 0x2004: " ",
+	0x2005: " ", 0x2006: " ", 0x2007: " ", 0x2008: " ",
+	0x2009: " ", 0x200a: " ", 0x202f: " ", 0x205f: " ",
+	0x3000: " ",
+};
+
 /** Map smart quotes/dashes and uncommon Unicode spaces to their ASCII forms. */
 function normalizeChar(ch: string): string {
-	if (/[\u2018\u2019\u201A\u201B]/.test(ch)) return "'";
-	if (/[\u201C\u201D\u201E\u201F]/.test(ch)) return '"';
-	if (/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/.test(ch)) return "-";
-	if (/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/.test(ch)) return " ";
-	return ch;
+	const mapped = _NORM[ch.charCodeAt(0)];
+	return mapped !== undefined ? mapped : ch;
 }
 
 /**
@@ -384,8 +398,10 @@ export function applyEditsToNormalizedContent(
 		}
 	}
 
-	const normCache = buildNormalizedWithMap(normalizedContent);
 	const spans: ResolvedSpan[] = [];
+
+	// Build normalized cache lazily — only if tier 1 fails for any edit.
+	let normCache: NormalizedContent | undefined;
 
 	for (let i = 0; i < normalizedEdits.length; i++) {
 		const edit = normalizedEdits[i];
@@ -399,12 +415,18 @@ export function applyEditsToNormalizedContent(
 			}));
 
 		// Tier 2: normalized match, positions mapped back to the original content.
+		// Skip if tier 1 already found matches — avoids building the expensive
+		// normalized+map structure when exact matching suffices.
 		if (matches.length === 0) {
 			const normOld = normalizeForFuzzyMatch(edit.oldText);
 			if (normOld.trim() !== "") {
+				if (!normCache) {
+					normCache = buildNormalizedWithMap(normalizedContent);
+				}
+				// normCache is guaranteed to be initialized above.
 				matches = indexOfAll(normCache.norm, normOld).map(start => ({
-					start: normCache.map[start],
-					end: normCache.map[start + normOld.length - 1] + 1,
+					start: normCache!.map[start],
+					end: normCache!.map[start + normOld.length - 1] + 1,
 					newText: edit.newText,
 				}));
 			}
@@ -651,16 +673,23 @@ export const edit_file: Tool = {
 			});
 			refreshAfterWrite(resolved);
 
-			const { diff, firstChangedLine } = generateDiffString(
-				baseContent,
-				newContent,
-			);
-			const patch = generateUnifiedPatch(path, baseContent, newContent);
+			// Generate diff only if content actually changed (already guaranteed by
+			// applyEditsToNormalizedContent throwing on no-change, but keep the
+			// early-exit for clarity and to avoid unnecessary work).
+			let diff = "";
+			let firstChangedLine: number | undefined;
+			let patch = "";
+			if (baseContent !== newContent) {
+				const diffResult = generateDiffString(baseContent, newContent);
+				diff = diffResult.diff;
+				firstChangedLine = diffResult.firstChangedLine;
+				patch = generateUnifiedPatch(path, baseContent, newContent);
+			}
 
 			return {
 				content:
 					`Successfully replaced ${edits.length} block(s) in ${path}.\n` +
-					`\nDiff:\n${diff}`,
+					(diff ? `\nDiff:\n${diff}` : ""),
 				details: {
 					diff,
 					patch,

@@ -1021,9 +1021,9 @@ void test("steering queue distinguishes queued and later delivery", () => {
 	const lines = queue.render(72);
 	const rendered = plain(lines.join("\n"));
 
-	assert.match(rendered, /STEERING\s+1 queued · 1 follow-up/);
-	assert.match(rendered, /QUEUE\s+inspect the parser/);
-	assert.match(rendered, /LATER\s+run the complete test suite/);
+	assert.match(rendered, /QUEUE.*1 queued.*1 follow-up/);
+	assert.match(rendered, /inspect the parser/);
+	assert.match(rendered, /run the complete test suite/);
 	assert.match(rendered, /Ctrl\+Enter steer now/);
 	assert.ok(lines.every(line => visibleWidth(line) <= 72));
 });

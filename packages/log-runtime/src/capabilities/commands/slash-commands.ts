@@ -190,11 +190,13 @@ export function createSlashCommands(
 		}),
 		cmd(
 			"/queue",
-			"Show queued steering and follow-up messages",
-			"bridge",
+			"Open the interactive message queue manager",
+			"local",
 			false,
-			{
-				category: "agent",
+			{ category: "agent", examples: ["/queue"] },
+			() => {
+				localHandlers.openQueueManager?.();
+				return undefined;
 			},
 		),
 		cmd("/queue-drop", "Remove one queued message by number", "bridge", true, {

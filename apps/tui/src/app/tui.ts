@@ -47,6 +47,10 @@ import {
 	PluginManagerOverlay,
 } from "../overlays/plugin-manager.ts";
 import {
+	type QueueManagerAction,
+	QueueManagerOverlay,
+} from "../overlays/queue-manager.ts";
+import {
 	type ReasonerSelectorAction,
 	ReasonerSelectorOverlay,
 } from "../overlays/reasoner-selector.ts";
@@ -73,7 +77,7 @@ import {
 	type NotificationLevel,
 } from "../status/notification-center.ts";
 import { ResearchWidget } from "../status/research-widget.ts";
-import { SteerQueue } from "../status/steer-queue.ts";
+import { type SteerQueueAction, SteerQueue } from "../status/steer-queue.ts";
 import { TodoBar } from "../status/todo-bar.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { Container, TUI } from "../terminal/core.ts";
@@ -102,6 +106,7 @@ import {
 	handleMcpManagerAction as handleMcpManagerActionImpl,
 	handleModelSelectorAction as handleModelSelectorActionImpl,
 	handlePluginManagerAction as handlePluginManagerActionImpl,
+	handleQueueManagerAction as handleQueueManagerActionImpl,
 	handleReasonerSelectorAction as handleReasonerSelectorActionImpl,
 	handleSettingsSelectorAction as handleSettingsSelectorActionImpl,
 	handleThemeSelectorAction as handleThemeSelectorActionImpl,
@@ -111,6 +116,7 @@ import {
 	openMcpManager as openMcpManagerImpl,
 	openModelSelector as openModelSelectorImpl,
 	openPluginManager as openPluginManagerImpl,
+	openQueueManager as openQueueManagerImpl,
 	openReasonerSelector as openReasonerSelectorImpl,
 	openSettingsSelector as openSettingsSelectorImpl,
 	openThemeSelector as openThemeSelectorImpl,
@@ -156,6 +162,7 @@ export class LogicianTUI {
 	autoresearchDashboard: AutoresearchDashboardOverlay;
 	mcpManager: McpManagerOverlay;
 	reasonerSelector: ReasonerSelectorOverlay;
+	queueManager: QueueManagerOverlay;
 	modelSelector: ModelSelectorOverlay;
 	inferenceModeSelector: InferenceModeSelector;
 	thinkingLevelSelector: ThinkingLevelSelectorOverlay;
@@ -306,6 +313,7 @@ export class LogicianTUI {
 		);
 		this.mcpManager = new McpManagerOverlay();
 		this.reasonerSelector = new ReasonerSelectorOverlay();
+		this.queueManager = new QueueManagerOverlay();
 		this.modelSelector = new ModelSelectorOverlay();
 		this.inferenceModeSelector = new InferenceModeSelector();
 		this.themeSelector = new ThemeSelectorOverlay();
@@ -544,6 +552,9 @@ export class LogicianTUI {
 		pinnedContainer.addChild(this.workSurface);
 		pinnedContainer.addChild(this.researchWidget);
 		pinnedContainer.addChild(this.steerQueue);
+		this.steerQueue.setCallbacks({
+			onAction: (action) => this.handleSteerQueueAction(action),
+		});
 
 		// Interactive pickers join the fixed composer stack. They consume layout
 		// space above the input like the TODO/queue region instead of floating
@@ -660,6 +671,29 @@ export class LogicianTUI {
 
 	handleReasonerSelectorAction(action: ReasonerSelectorAction): void {
 		handleReasonerSelectorActionImpl(this, action);
+	}
+
+	// ── Queue manager ─────────────────────────────────────────────────────
+
+	openQueueManager(): void {
+		openQueueManagerImpl(this);
+	}
+
+	handleQueueManagerAction(action: QueueManagerAction): void {
+		handleQueueManagerActionImpl(this, action);
+	}
+
+	handleSteerQueueAction(action: SteerQueueAction): void {
+		if (action.type === "openManager") {
+			this.openQueueManager();
+			return;
+		}
+		// action.type === "steerNow"
+		if (this.bridge.isActive()) {
+			this.bridge.steerNow(action.message);
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.tui.requestRender();
+		}
 	}
 
 	// ── File mention autocomplete ────────────────────────────────────────

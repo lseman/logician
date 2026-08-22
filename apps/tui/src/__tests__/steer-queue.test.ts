@@ -19,10 +19,10 @@ void test("SteerQueue shows queued, follow-up, and next-turn rows", () => {
 	queue.setItems(["fix the bug"], ["run the tests"], ["ship the release"]);
 	const rendered = plain(queue.render(80).join("\n"));
 
-	assert.match(rendered, /STEERING\s+1 queued · 1 follow-up · 1 next turn/);
-	assert.match(rendered, /QUEUE\s+fix the bug/);
-	assert.match(rendered, /LATER\s+run the tests/);
-	assert.match(rendered, /NEXT\s+ship the release/);
+	assert.match(rendered, /QUEUE\s+.*queued.*follow-up.*next/);
+	assert.match(rendered, /fix the bug/);
+	assert.match(rendered, /run the tests/);
+	assert.match(rendered, /ship the release/);
 });
 
 void test("SteerQueue renders clean lines (no borders)", () => {
@@ -52,37 +52,30 @@ void test("SteerQueue shows a hidden count past MAX_ROWS", () => {
 	assert.match(rendered, /1 more/);
 });
 
-void test("SteerQueue plays an arrival animation for newly queued rows", async () => {
+void test("SteerQueue shows steer-now affordance on first steering row", () => {
 	const queue = new SteerQueue();
-	let invalidations = 0;
-	queue.setOnInvalidate(() => {
-		invalidations++;
-	});
-
 	queue.setItems(["first message"]);
-	// The arrival frame starts at 0 immediately — first render already differs
-	// from the settled glyph.
-	const firstFrame = plain(queue.render(80).join("\n"));
-
-	await new Promise(resolve => setTimeout(resolve, 400));
-
-	const settled = plain(queue.render(80).join("\n"));
-	assert.ok(invalidations > 0, "animation should invalidate on each tick");
-	assert.match(settled, /QUEUE\s+first message/);
-	// Both frames render the same message text; only the leading glyph differs
-	// mid-animation, so this just confirms the render didn't get stuck empty.
-	assert.match(firstFrame, /first message/);
+	const rendered = plain(queue.render(80).join("\n"));
+	assert.match(rendered, /first message/);
+	assert.match(rendered, /steer now/);
+	// First steering row should have the ▶ clickable indicator
+	assert.match(rendered, /▶.*first message/);
 });
 
-void test("SteerQueue keys arrival state by queue + message, not position", () => {
+void test("SteerQueue shows clickable indicators on steering rows", () => {
 	const queue = new SteerQueue();
-	queue.setItems(["already here"]);
-	queue.render(80); // settle the first item (no longer "new")
-
-	// Adding a second steering item shouldn't restart the first item's
-	// arrival animation — both rows must still render correctly either way.
-	queue.setItems(["already here", "brand new"]);
+	queue.setItems(["steer this"], ["follow later"]);
 	const rendered = plain(queue.render(80).join("\n"));
-	assert.match(rendered, /QUEUE\s+already here/);
-	assert.match(rendered, /QUEUE\s+brand new/);
+	// Steering rows get ▶, follow-up rows get ·
+	assert.match(rendered, /▶.*steer this/);
+	assert.match(rendered, /·.*follow later/);
+});
+
+void test("SteerQueue footer has action hints", () => {
+	const queue = new SteerQueue();
+	queue.setItems(["msg"]);
+	const rendered = plain(queue.render(80).join("\n"));
+	assert.match(rendered, /click to steer/);
+	assert.match(rendered, /Ctrl\+Enter/);
+	assert.match(rendered, /Ctrl\+Q/);
 });

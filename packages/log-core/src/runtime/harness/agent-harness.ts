@@ -718,6 +718,31 @@ export class AgentHarness {
 		);
 	}
 
+	/** Queue steering for after the current turn (never interrupts).
+	 * Adds to the steering queue so the agent loop's drainSteering()
+	 * picks it up after tool calls finish but before the next provider
+	 * request. The harness publishes the queue update so the TUI shows
+	 * the message. */
+	steerQueue(text: string): void {
+		if (this._phase !== "turn") {
+			throw new HarnessBusyError("steer", this._phase, "turn");
+		}
+		this.queue.steer(text, false, () => {});
+	}
+
+	/** Immediately interrupt and apply steering (always forces abort).
+	 * Adds to nextTurn so the message survives the abort (clearCurrentTurn()
+	 * only wipes steering/followUp), then aborts the provider call. The
+	 * auto-continue path in runMessage() detects nextTurn > 0 and starts a
+	 * new turn that consumes the message. */
+	steerNow(text: string): void {
+		if (this._phase !== "turn") {
+			throw new HarnessBusyError("steerNow", this._phase, "turn");
+		}
+		this.queue.nextTurn(text);
+		this.turn.abort(createSteeringInterruptReason());
+	}
+
 	/** Promote queued steering into the immediate next turn and interrupt the current step. */
 	flushSteeringNow(): number {
 		if (this._phase !== "turn") {
