@@ -228,7 +228,12 @@ void describe("StatusBar", () => {
 
 	it("shows reasoner when not none", () => {
 		setupTheme();
-		const bar = new StatusBar(createDefaultConfig());
+		// DEFAULT_WIDGET_LAYOUTS.reasoner.enabled = false by default,
+		// so we need to explicitly enable it in the config.
+		const bar = new StatusBar({
+			...createDefaultConfig(),
+			widgets: { reasoner: { enabled: true } },
+		});
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -236,9 +241,11 @@ void describe("StatusBar", () => {
 			contextMaxTokens: 100000,
 			reasoner: "loop-detector",
 		});
-		const lines = bar.render(120);
-		assert.ok(lines[0].includes("reasoner:"));
-		assert.ok(lines[0].includes("loop-detector"));
+		const lines = bar.render(300);
+		// Debug: log the rendered line
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		assert.ok(lines[0].includes("reasoner:"), `Expected line to include "reasoner:", got: ${plain}`);
+		assert.ok(lines[0].includes("loop-detector"), `Expected line to include "loop-detector", got: ${plain}`);
 	});
 
 	it("omits reasoner when none", () => {

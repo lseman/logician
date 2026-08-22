@@ -60,7 +60,14 @@ export class MemoryManager {
 
 	constructor(cwd: string, sessionId: string, opts: MemoryManagerOptions) {
 		this.cwd = cwd;
-		this.dbPath = opts.memoryDbPath || `${cwd}/.logician/memory.db`;
+		// When no explicit path is given and we're in a test environment,
+		// use an in-memory SQLite DB to avoid polluting the production
+		// database or hitting WAL/lock errors. Otherwise fall through to
+		// the caller's supplied memoryDbPath (if any) or the default.
+		const resolved =
+			opts.memoryDbPath ||
+			(process.env.NODE_ENV === "test" ? ":memory:" : null);
+		this.dbPath = resolved || `${cwd}/.logician/memory.db`;
 		this.extractorModel = opts.memoryExtractorModel || opts.model;
 		this.extractorBaseUrl = opts.memoryExtractorBaseUrl;
 
