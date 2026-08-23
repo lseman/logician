@@ -754,29 +754,38 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					);
 			} else if (/^\[continuation-nudge:/i.test(content)) {
 				// Render continuation nudges as NOTICE blocks instead of "YOU" messages.
-				const n = { level: "warn" as const, label: "Continuation", text: content };
+				// The nudge text contains a reason tag like [continuation-nudge:length]
+				// that is extracted and displayed as an accent-colored reason.
+				const reasonMatch = /^\[continuation-nudge:(?<reason>[^\]]+)\]/i.exec(content);
+				const reason = reasonMatch
+					? reasonMatch.groups.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_")
+					: "";
+				const label = reason ? `Guard: continuation_${reason}` : "Guard: continuation";
+				const n = { level: "warn" as const, label, text: content };
 				const icon = "⚠";
 				const levelColor = theme.fgRaw("warning");
 				const labelColor = theme.fgRaw("toolTitle");
-				const labelText = n.label;
 				const noticePrefix = `${icon} NOTICE `;
 				const bodyIndent = " ".repeat(visibleWidth(noticePrefix));
 				const bodyColor = theme.fgRaw("muted");
 				const bodyLines = n.text.split("\n");
 				const firstLineBody = bodyLines[0] ?? "";
 				const continuationLines = bodyLines.slice(1);
-				let renderedFirst = renderMarkdownLine(firstLineBody, bodyColor);
-				const reasonMatch = /^\((?<reason>[a-z_]+)\)(?:\s+|$)/.exec(firstLineBody);
-				if (reasonMatch?.groups?.reason) {
-					const reason = reasonMatch.groups.reason;
+				// Extract the reason from the nudge text for accent coloring.
+				const reasonTagMatch = /^\[continuation-nudge:[^\]]+\]/i.exec(firstLineBody);
+				let renderedFirst: string;
+				if (reasonTagMatch) {
+					const reasonTag = reasonTagMatch[0];
 					const bodyAfterReason = firstLineBody
-						.slice(reasonMatch[0].length)
+						.slice(reasonTagMatch[0].length)
 						.trimStart();
-					renderedFirst = `${theme.fg("accent", reason)} ${renderMarkdownLine(bodyAfterReason, bodyColor)}`;
+					renderedFirst = `${theme.fg("accent", reasonTag)} ${renderMarkdownLine(bodyAfterReason, bodyColor)}`;
+				} else {
+					renderedFirst = renderMarkdownLine(firstLineBody, bodyColor);
 				}
 				lines.push(
 					padToWidth(
-						`${levelColor}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(labelText, labelColor)}${RESET}`,
+						`${levelColor}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(label, labelColor)}${RESET}`,
 					),
 				);
 				const maxBodyWidth = Math.max(

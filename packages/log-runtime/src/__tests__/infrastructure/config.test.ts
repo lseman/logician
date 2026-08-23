@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test, beforeAll, afterAll } from "bun:test";
 import assert from "node:assert/strict";
 import {
 	mkdirSync,
@@ -20,6 +20,18 @@ import {
 	saveConfigNestedField,
 	validateConfig,
 } from "../../runtime/configuration/index.ts";
+
+// Opt in to config persistence for tests that exercise saveConfigField.
+// Without this, updateGlobalConfig returns false in test mode to protect
+// the user's real ~/.logician/settings.json from test writes.
+const prevPersist = process.env.LOGICIAN_PERSIST_CONFIG;
+beforeAll(() => {
+	process.env.LOGICIAN_PERSIST_CONFIG = "1";
+});
+afterAll(() => {
+	if (prevPersist === undefined) delete process.env.LOGICIAN_PERSIST_CONFIG;
+	else process.env.LOGICIAN_PERSIST_CONFIG = prevPersist;
+});
 
 // ── validateConfig ───────────────────────────────────────────────────────
 

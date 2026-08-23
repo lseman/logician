@@ -343,6 +343,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				message: decision.message,
 				iteration,
 			});
+			// Return the nudge so the model sees it in its prompt.
+			// The TUI display layer special-cases it as a NOTICE block
+			// (rendered below in display.ts), not as a "YOU" message.
 			return [{ role: "user", content: decision.message }];
 		};
 	}
