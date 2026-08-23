@@ -16,6 +16,6 @@
 		"noEmit": true,
 		"types": ["node", "bun-types"]
 	},
-	"include": ["src/**/*", "../../packages/log-memory/src/**/*"],
+	"include": ["src/**/*", "../../packages/blocks/log-memory/src/**/*"],
 	"exclude": ["node_modules", "dist"]
 }

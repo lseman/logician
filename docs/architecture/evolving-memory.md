@@ -56,7 +56,7 @@ to let a learned policy control prompts.
 
 ## Evaluation
 
-Run `bun run --cwd packages/log-memory eval` for retrieval relevance, obsolete
+Run `bun run --cwd packages/blocks/log-memory eval` for retrieval relevance, obsolete
 fact rejection, abstention, poisoning quarantine, and shadow non-interference.
 The memory unit suite additionally mutates a predicate-backed file to verify
 targeted stale invalidation and tests probationary promotion. End-to-end agent
