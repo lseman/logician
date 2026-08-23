@@ -90,6 +90,14 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/blocks/log-rag": {
+      "name": "@logician/log-rag",
+      "version": "0.2.0",
+      "dependencies": {
+        "@huggingface/transformers": "^4.2.0",
+        "usearch": "^2.26.0",
+      },
+    },
     "packages/log-core": {
       "name": "@logician/log-core",
       "version": "0.2.0",
@@ -124,14 +132,6 @@
         "@types/node": "^22.0.0",
         "bun-types": "^1.3.14",
         "typescript": "^7.0.2",
-      },
-    },
-    "packages/log-rag": {
-      "name": "@logician/log-rag",
-      "version": "0.2.0",
-      "dependencies": {
-        "@huggingface/transformers": "^4.2.0",
-        "usearch": "^2.26.0",
       },
     },
     "packages/log-runtime": {
@@ -323,7 +323,7 @@
 
     "@logician/log-protocol": ["@logician/log-protocol@workspace:packages/log-protocol"],
 
-    "@logician/log-rag": ["@logician/log-rag@workspace:packages/log-rag"],
+    "@logician/log-rag": ["@logician/log-rag@workspace:packages/blocks/log-rag"],
 
     "@logician/log-runtime": ["@logician/log-runtime@workspace:packages/log-runtime"],
 

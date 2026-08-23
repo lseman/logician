@@ -6,7 +6,7 @@
 		{ "path": "packages/log-eval" },
 		{ "path": "packages/blocks/log-autoresearch" },
 		{ "path": "packages/blocks/log-eoh" },
-		{ "path": "packages/log-rag" },
+		{ "path": "packages/blocks/log-rag" },
 		{ "path": "packages/blocks/log-memory" },
 		{ "path": "packages/log-runtime" },
 		{ "path": "apps/log-memory-mcp" },
