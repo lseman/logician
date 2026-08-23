@@ -2,7 +2,7 @@
 // Create or overwrite a complete file. Creates parent directories. Overwriting an
 // existing file requires it to have been read first (and not modified since), so the
 // model can never blind-clobber content. Returns the new content with syntax
-// highlighting and line numbers.
+// highlighting and line numbers (truncated for large files).
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -15,8 +15,13 @@ import {
 } from "./support/read-tracker.ts";
 import { atomicWriteFile } from "./support/utils/atomic-write.ts";
 import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	formatSize,
+	truncateHead,
+} from "./support/utils/truncate.ts";
+import {
 	ensureInsideCwd,
-	readUtf8IfExists,
 	resolvePath,
 } from "./support/utils/path-utils.ts";
 import { highlightAuto } from "./support/utils/syntax-highlighter.ts";
@@ -29,6 +34,8 @@ export const write_file: Tool = {
 	description:
 		"Create or overwrite a complete file. Creates parent directories. " +
 		"Overwriting an existing file requires reading it with read_file first. " +
+		"Output is truncated to ${DEFAULT_MAX_LINES} lines or " +
+		`${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first). ` +
 		"For very large files, use write_file_append in chunks instead.",
 	promptSnippet:
 		"Create or overwrite files; automatically create parent directories",
@@ -60,8 +67,8 @@ export const write_file: Tool = {
 		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 
 		return withFileMutationQueue(resolved, async () => {
-			const before = readUtf8IfExists(resolved);
-			if (before !== null) {
+			const fileExists = fs.existsSync(resolved);
+			if (fileExists) {
 				if (!hasBeenRead(resolved)) {
 					return (
 						`${resolved} already exists but has not been read. ` +
@@ -75,28 +82,47 @@ export const write_file: Tool = {
 					);
 				}
 			}
-			if (before === content) {
-				return `No changes made: ${resolved}`;
-			}
 
 			fs.mkdirSync(path.dirname(resolved), { recursive: true });
 			await atomicWriteFile(resolved, content, {
-				expectedContent: before ?? undefined,
-				expectedMissing: before === null,
+				expectedMissing: !fileExists,
 			});
 			refreshAfterWrite(resolved);
 
 			const lineCount = content === "" ? 0 : content.split("\n").length;
 			const byteLen = Buffer.byteLength(content, "utf-8");
-			if (before === null) {
+			if (!fileExists) {
 				return `Created ${resolved} (${lineCount} lines, ${byteLen} bytes)`;
 			}
 
 			const highlighted = highlightAuto(content);
-			const hlLines = highlighted.value.split("\n");
+			const t = truncateHead(highlighted.value);
+
+			if (t.firstLineExceedsLimit) {
+				const firstLineBytes = Buffer.byteLength(
+					(highlighted.value.split("\n")[0] ?? ""),
+					"utf-8",
+				);
+				return (
+					`[First line is ${formatSize(firstLineBytes)}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. ` +
+					`Use bash: head -c ${DEFAULT_MAX_BYTES} ${filePath}]`
+				);
+			}
+			if (t.truncated) {
+				const endDisplay = t.outputLines;
+				const nextOffset = endDisplay + 1;
+				return (
+					`${t.content}\n\n` +
+					`[Wrote ${resolved} (${lineCount} lines, ${formatSize(byteLen)}). ` +
+					`Showing lines 1-${endDisplay}. ` +
+					`Use offset=${nextOffset} to continue.]`
+				);
+			}
+
 			const gutterWidth = String(lineCount).length + 1;
 			const header = `Wrote ${resolved} (${lineCount} lines, ${byteLen} bytes)`;
 			const out: string[] = [header];
+			const hlLines = t.content.split("\n");
 			for (let i = 0; i < hlLines.length; i++) {
 				const num = String(i + 1).padStart(gutterWidth, " ");
 				out.push(`${num}|${hlLines[i]}`);

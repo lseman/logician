@@ -16,7 +16,6 @@ import {
 import { appendToFile } from "./support/utils/atomic-write.ts";
 import {
 	ensureInsideCwd,
-	readUtf8IfExists,
 	resolvePath,
 } from "./support/utils/path-utils.ts";
 
@@ -59,8 +58,8 @@ export const write_file_append: Tool = {
 		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 
 		return withFileMutationQueue(resolved, async () => {
-			const before = readUtf8IfExists(resolved);
-			if (before !== null) {
+			const fileExists = fs.existsSync(resolved);
+			if (fileExists) {
 				if (!hasBeenRead(resolved)) {
 					return (
 						`${resolved} already exists but has not been read. ` +
@@ -76,19 +75,16 @@ export const write_file_append: Tool = {
 			}
 
 			fs.mkdirSync(path.dirname(resolved), { recursive: true });
-			const beforeBytes =
-				before === null ? 0 : Buffer.byteLength(before, "utf-8");
+			const fileStat = fileExists ? fs.statSync(resolved) : null;
 			const { newSize } = await appendToFile(resolved, content, {
-				expectedSizeBefore: beforeBytes,
+				expectedSizeBefore: fileStat?.size,
 			});
 			refreshAfterWrite(resolved);
 
 			const chunkBytes = Buffer.byteLength(content, "utf-8");
-			const totalLines = fs.readFileSync(resolved, "utf-8").split("\n").length;
-			const verb = before === null ? "Created" : "Appended to";
-			const lineInfo = totalLines > 0 ? ` · ${totalLines} lines total` : "";
+			const verb = fileStat === null ? "Created" : "Appended to";
 			return (
-				`${verb} ${resolved} (+${chunkBytes} bytes, ${newSize} bytes total${lineInfo}). ` +
+				`${verb} ${resolved} (+${chunkBytes} bytes, ${newSize} bytes total). ` +
 				"Call write_file_append again with the next chunk, or stop if this was the last one."
 			);
 		});
