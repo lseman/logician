@@ -752,7 +752,51 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					lines.push(
 						padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`),
 					);
+			} else if (/^\[continuation-nudge:/i.test(content)) {
+				// Render continuation nudges as NOTICE blocks instead of "YOU" messages.
+				const n = { level: "warn" as const, label: "Continuation", text: content };
+				const icon = "⚠";
+				const levelColor = theme.fgRaw("warning");
+				const labelColor = theme.fgRaw("toolTitle");
+				const labelText = n.label;
+				const noticePrefix = `${icon} NOTICE `;
+				const bodyIndent = " ".repeat(visibleWidth(noticePrefix));
+				const bodyColor = theme.fgRaw("muted");
+				const bodyLines = n.text.split("\n");
+				const firstLineBody = bodyLines[0] ?? "";
+				const continuationLines = bodyLines.slice(1);
+				let renderedFirst = renderMarkdownLine(firstLineBody, bodyColor);
+				const reasonMatch = /^\((?<reason>[a-z_]+)\)(?:\s+|$)/.exec(firstLineBody);
+				if (reasonMatch?.groups?.reason) {
+					const reason = reasonMatch.groups.reason;
+					const bodyAfterReason = firstLineBody
+						.slice(reasonMatch[0].length)
+						.trimStart();
+					renderedFirst = `${theme.fg("accent", reason)} ${renderMarkdownLine(bodyAfterReason, bodyColor)}`;
+				}
+				lines.push(
+					padToWidth(
+						`${levelColor}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(labelText, labelColor)}${RESET}`,
+					),
+				);
+				const maxBodyWidth = Math.max(
+					1,
+					contentWidth - visibleWidth(bodyIndent),
+				);
+				const allBodyRendered: string[] = [renderedFirst];
+				for (let ci = 0; ci < continuationLines.length; ci++) {
+					allBodyRendered.push(
+						renderMarkdownLine(continuationLines[ci], bodyColor),
+					);
+				}
+				for (const rendered of allBodyRendered) {
+					const wrapped = wrapText(rendered, maxBodyWidth);
+					for (const wl of wrapped) {
+						lines.push(padToWidth(`${bodyIndent}${wl}`));
+					}
+				}
 			} else {
+				// Regular user message
 				lines.push(
 					padRight(
 						`${theme.fgRaw("userLabel")}${BOLD}YOU${RESET} ${theme.fgRaw("separator")}‹${RESET}`,
