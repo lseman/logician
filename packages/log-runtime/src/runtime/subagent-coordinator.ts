@@ -19,7 +19,7 @@ import {
 	createToolResultMessage,
 	createUserMessage,
 } from "@logician/log-core/runtime";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	type AgentDefinition,
 	loadAgentDefinitions,

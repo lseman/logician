@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {
 	type AgentProtocolNotification,
 	createNotification,
-	type RuntimeEvent,
-} from "@logician/log-protocol";
+} from "@logician/log-core/protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	EXEC_STREAM_SCHEMA,
 	type ExecBridge,

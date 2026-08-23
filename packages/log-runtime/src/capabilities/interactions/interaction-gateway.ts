@@ -4,7 +4,7 @@ import {
 	PermissionPolicy,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 
 export type PermissionDecision = "allow" | "deny" | "always";
 

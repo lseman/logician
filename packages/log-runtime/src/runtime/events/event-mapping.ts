@@ -2,7 +2,7 @@
 
 import type { AgentEvent } from "@logician/log-core";
 import { STEERING_INTERRUPT_SUMMARY } from "@logician/log-core";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 
 // Translates core AgentEvent variants to their RuntimeEvent equivalent.
 // Not the sole producer of RuntimeEvent: AgentRuntime also emits

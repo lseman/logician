@@ -3,7 +3,7 @@
 import path from "node:path";
 import { EohEngine, type EohProgressEvent } from "@logician/log-eoh/engine";
 import { populationStats } from "@logician/log-eoh/population";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	applyEohCandidate,
 	type EohFileTarget,

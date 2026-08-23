@@ -9,7 +9,7 @@ import type {
 	PermissionMode,
 	PermissionRules,
 } from "@logician/log-core/permissions";
-import type { AgentProtocolNotification } from "@logician/log-protocol";
+import type { AgentProtocolNotification } from "@logician/log-core/protocol";
 import type { ReasonerConfig } from "../../capabilities/reasoning/index.ts";
 
 export type ProtocolCallback = (

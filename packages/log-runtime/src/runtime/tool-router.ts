@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Tool } from "@logician/log-core";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import { runPluginBackend } from "../adapters/claude-code/plugin-runtime.ts";
 import {
 	McpServerRegistry,

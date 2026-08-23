@@ -44,17 +44,25 @@ describe("core architecture boundaries", () => {
 		expect(offenders).toEqual([]);
 	});
 
-	test("client protocol remains independent", async () => {
+	test("protocol types are self-contained (no workspace deps)", async () => {
 		const sourceRoot = path.resolve(import.meta.dir, "../");
-		const protocolRoot = path.resolve(sourceRoot, "../../log-protocol/src");
-		const protocolOffenders: string[] = [];
-		for (const file of await sourceFiles(protocolRoot)) {
+		const protocolFile = path.resolve(
+			sourceRoot,
+			"system/types/types-protocol.ts",
+		);
+		const eventFile = path.resolve(
+			sourceRoot,
+			"system/types/types-events.ts",
+		);
+		const protocolSources = [protocolFile, eventFile];
+		const offenders: string[] = [];
+		for (const file of protocolSources) {
 			const source = await readFile(file, "utf8");
 			if (/from\s+["']@logician\//.test(source)) {
-				protocolOffenders.push(path.relative(protocolRoot, file));
+				offenders.push(path.relative(sourceRoot, file));
 			}
 		}
-		expect(protocolOffenders).toEqual([]);
+		expect(offenders).toEqual([]);
 	});
 
 	test("every public export resolves to a source file", async () => {
@@ -79,7 +87,6 @@ describe("core architecture boundaries", () => {
 		const packageJson = JSON.parse(
 			await readFile(path.join(packageRoot, "package.json"), "utf8"),
 		) as { exports?: Record<string, string> };
-		expect(packageJson.exports?.["./events"]).toBeUndefined();
 		expect(packageJson.exports?.["./adapters/pi"]).toBeUndefined();
 
 		const offenders: string[] = [];

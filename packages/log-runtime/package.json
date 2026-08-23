@@ -27,7 +27,6 @@
 	},
 	"dependencies": {
 		"@logician/log-core": "0.2.0",
-		"@logician/log-protocol": "0.1.0",
 		"@logician/log-autoresearch": "0.2.0",
 		"@logician/log-eoh": "0.1.0",
 		"@logician/log-memory": "0.1.0",

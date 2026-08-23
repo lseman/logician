@@ -2,7 +2,7 @@
 
 import type { LLMBackend, Tool } from "@logician/log-core";
 import type { AgentSession } from "@logician/log-core/harness";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	get_reasoner,
 	getReasonerMeta,

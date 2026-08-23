@@ -14,7 +14,7 @@ import {
 	setSessionId,
 	startViewerServer,
 } from "@logician/log-memory";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 
 export interface MemoryManagerOptions {
 	memoryEnabled?: boolean;

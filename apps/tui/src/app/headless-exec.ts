@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Writable } from "node:stream";
-import type { AgentProtocolNotification } from "@logician/log-protocol";
+import type { AgentProtocolNotification } from "@logician/log-core/protocol";
 
 export const EXEC_STREAM_SCHEMA = "logician.exec-stream";
 export const EXEC_STREAM_SCHEMA_VERSION = 1;

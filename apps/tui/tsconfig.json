@@ -16,14 +16,15 @@
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"paths": {
-			"@logician/log-protocol": ["../../packages/log-protocol/src/index.ts"]
+			"@logician/log-core": ["../../packages/log-core/src/index.ts"],
+			"@logician/log-core/events": ["../../packages/log-core/src/system/types/types-events.ts"],
+			"@logician/log-core/protocol": ["../../packages/log-core/src/system/types/types-protocol.ts"]
 		},
 		"types": ["node", "bun-types"]
 	},
 	"include": [
 		"src/**/*",
-		"../../packages/log-core/src/**/*",
-		"../../packages/log-protocol/src/**/*"
+		"../../packages/log-core/src/**/*"
 	],
 	"exclude": ["node_modules", "dist"]
 }

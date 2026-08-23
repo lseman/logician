@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "./events.ts";
+import type { RuntimeEvent } from "./types-events.ts";
 
 export const AGENT_PROTOCOL_VERSION = 1 as const;
 

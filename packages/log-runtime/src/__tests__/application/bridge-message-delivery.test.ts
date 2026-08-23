@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import { AgentRuntime } from "../../runtime/bridge/agent-bridge.ts";
 
 void test("bridge publishes ordered versioned protocol notifications", () => {

@@ -16,7 +16,7 @@ import {
 	estimateTokens,
 	type ToolRegistry,
 } from "@logician/log-core/runtime";
-import type { RuntimeEvent } from "@logician/log-protocol";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	claudeToolMatcherName,
 	createClaudeCodeHookLayer,
