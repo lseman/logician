@@ -194,10 +194,9 @@ export async function diagnoseEditedFile(
 	const source = await readFile(resolved, "utf8");
 	if (Buffer.byteLength(source, "utf8") > MAX_SOURCE_BYTES) return [];
 	if (extension === ".json") return collectJsonDiagnostics(source);
-	const projectDiagnostics = await collectProjectDiagnostics(cwd, resolved);
-	return projectDiagnostics.length > 0
-		? projectDiagnostics
-		: collectTypeScriptDiagnostics(resolved, source);
+	// Only check the single edited file — skip full project tsc -p which
+	// can take 10-30s on large projects and blocks the tool result.
+	return collectTypeScriptDiagnostics(resolved, source);
 }
 
 function formatDiagnostics(
