@@ -28,6 +28,7 @@ import {
 import { createReadSkillTool } from "../capabilities/skills/read-skill-tool.ts";
 import { ariadne } from "../capabilities/tools/ariadne.ts";
 import { createDefaultTools } from "../capabilities/tools/default-tools.ts";
+import { isFffGrepTool } from "../capabilities/tools/registry.ts";
 import {
 	getDefaultSandboxProfile,
 	type SandboxProfile,
@@ -76,14 +77,6 @@ export interface ToolRouterStatus {
 	skillsVisible: boolean;
 	loadedSkills: Skill[];
 	enabledPluginRoots: Array<{ name: string; installPath: string }>;
-}
-
-function isFffGrepTool(tool: Tool): boolean {
-	return (
-		tool.origin?.kind === "mcp" &&
-		tool.origin.server.toLowerCase() === "fff" &&
-		tool.origin.tool.toLowerCase() === "grep"
-	);
 }
 
 // ── Tool providers ───────────────────────────────────────────────────────

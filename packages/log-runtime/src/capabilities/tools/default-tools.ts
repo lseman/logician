@@ -1,5 +1,4 @@
 import type { Tool, WebSearchConfig } from "@logician/log-core";
-import { ariadne } from "./ariadne.ts";
 import { bash } from "./bash.ts";
 import { getBuiltInTools } from "./builtin-blocks.ts";
 import { edit_file } from "./edit-file.ts";
@@ -8,6 +7,7 @@ import { find } from "./find.ts";
 import { git } from "./git.ts";
 import { list_files } from "./list-files.ts";
 import { read_file } from "./read-file.ts";
+import { OPTIONAL_CAPABILITIES } from "./registry.ts";
 import { sandbox } from "./sandbox.ts";
 import { grep } from "./search.ts";
 import { web_fetch } from "./web-fetch.ts";
@@ -25,10 +25,16 @@ export interface DefaultToolsOptions {
 
 export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 	const webSearch = opts.webSearch ?? { baseUrl: DEFAULT_SEARXNG_URL };
+	const enabled: Record<string, boolean | undefined> = {
+		ariadne: opts.ariadneEnabled,
+	};
+	const optionalTools = OPTIONAL_CAPABILITIES.filter(
+		cap => (enabled[cap.id] ?? cap.enabledByDefault) !== false,
+	).map(cap => cap.tool);
 	const tools: Tool[] = [
 		list_files,
 		find,
-		...(opts.ariadneEnabled !== false ? [ariadne] : []),
+		...optionalTools,
 		read_file,
 		grep,
 		edit_file,
