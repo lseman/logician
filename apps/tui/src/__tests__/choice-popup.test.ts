@@ -132,7 +132,7 @@ void test("settings and selectors share the same dialog frame and focus style", 
 	settings.show();
 
 	const themes = new ThemeSelectorOverlay();
-	themes.setThemes([
+	themes.setItems([
 		{
 			name: "Dark",
 			description: "Low-light terminal palette",

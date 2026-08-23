@@ -50,10 +50,7 @@ describe("core architecture boundaries", () => {
 			sourceRoot,
 			"system/types/types-protocol.ts",
 		);
-		const eventFile = path.resolve(
-			sourceRoot,
-			"system/types/types-events.ts",
-		);
+		const eventFile = path.resolve(sourceRoot, "system/types/types-events.ts");
 		const protocolSources = [protocolFile, eventFile];
 		const offenders: string[] = [];
 		for (const file of protocolSources) {

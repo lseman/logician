@@ -161,12 +161,12 @@ export class LogicianTUI {
 	pluginManager: PluginManagerOverlay;
 	autoresearchDashboard: AutoresearchDashboardOverlay;
 	mcpManager: McpManagerOverlay;
-	reasonerSelector: ReasonerSelectorOverlay;
+	reasonerSelector: InstanceType<typeof ReasonerSelectorOverlay>;
 	queueManager: QueueManagerOverlay;
-	modelSelector: ModelSelectorOverlay;
-	inferenceModeSelector: InferenceModeSelector;
-	thinkingLevelSelector: ThinkingLevelSelectorOverlay;
-	themeSelector: ThemeSelectorOverlay;
+	modelSelector: InstanceType<typeof ModelSelectorOverlay>;
+	inferenceModeSelector: InstanceType<typeof InferenceModeSelector>;
+	thinkingLevelSelector: InstanceType<typeof ThinkingLevelSelectorOverlay>;
+	themeSelector: InstanceType<typeof ThemeSelectorOverlay>;
 	settingsSelector: SettingsSelectorOverlay;
 	transcriptDisplay: TranscriptDisplay;
 	sessionManager: SessionBrowserOverlay;

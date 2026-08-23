@@ -3,7 +3,8 @@
 // Supports hex (#rrggbb), 256-color (0-255), variable references, and default ("").
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ── Color token names ─────────────────────────────────────────────────────────
 
@@ -338,6 +339,15 @@ function getThemesDir(): string {
 	return join(home, ".logician", "themes");
 }
 
+// Themes bundled with the package, used when a theme isn't found under the
+// user's ~/.logician/themes (fresh installs, CI, sandboxed HOME dirs).
+const BUNDLED_THEMES_DIR = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"..",
+	"..",
+	"themes",
+);
+
 function loadThemeJson(_name: string, path: string): ThemeJson {
 	const content = readFileSync(path, "utf-8");
 	let json: unknown;
@@ -472,32 +482,37 @@ function buildThemeFromJson(
 export function getAvailableThemes(): string[] {
 	const themes: string[] = [];
 	const seen = new Set<string>();
-	const themesDir = getThemesDir();
 
-	try {
-		if (existsSync(themesDir)) {
-			for (const file of readdirSync(themesDir)) {
-				if (file.endsWith(".json")) {
-					const name = file.replace(".json", "");
-					if (!seen.has(name)) {
-						seen.add(name);
-						themes.push(name);
+	for (const dir of [getThemesDir(), BUNDLED_THEMES_DIR]) {
+		try {
+			if (existsSync(dir)) {
+				for (const file of readdirSync(dir)) {
+					if (file.endsWith(".json")) {
+						const name = file.replace(".json", "");
+						if (!seen.has(name)) {
+							seen.add(name);
+							themes.push(name);
+						}
 					}
 				}
 			}
+		} catch (_e: unknown) {
+			// themes dir doesn't exist
 		}
-	} catch (_e: unknown) {
-		// themes dir doesn't exist
 	}
 
 	return themes.sort();
 }
 
 function loadTheme(name: string): Theme {
-	const themesDir = getThemesDir();
-	const path = join(themesDir, `${name}.json`);
+	const userPath = join(getThemesDir(), `${name}.json`);
+	const path = existsSync(userPath)
+		? userPath
+		: join(BUNDLED_THEMES_DIR, `${name}.json`);
 	if (!existsSync(path)) {
-		throw new Error(`Theme not found: ${name} (looked in ${themesDir})`);
+		throw new Error(
+			`Theme not found: ${name} (looked in ${getThemesDir()} and ${BUNDLED_THEMES_DIR})`,
+		);
 	}
 	const json = loadThemeJson(name, path);
 	const mode = detectColorMode();

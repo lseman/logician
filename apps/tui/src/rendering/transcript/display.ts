@@ -756,11 +756,15 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				// Render continuation nudges as NOTICE blocks instead of "YOU" messages.
 				// The nudge text contains a reason tag like [continuation-nudge:length]
 				// that is extracted and displayed as an accent-colored reason.
-				const reasonMatch = /^\[continuation-nudge:(?<reason>[^\]]+)\]/i.exec(content);
+				const reasonMatch = /^\[continuation-nudge:(?<reason>[^\]]+)\]/i.exec(
+					content,
+				);
 				const reason = reasonMatch
-					? reasonMatch.groups.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_")
+					? reasonMatch.groups?.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_")
 					: "";
-				const label = reason ? `Guard: continuation_${reason}` : "Guard: continuation";
+				const label = reason
+					? `Guard: continuation_${reason}`
+					: "Guard: continuation";
 				const n = { level: "warn" as const, label, text: content };
 				const icon = "⚠";
 				const levelColor = theme.fgRaw("warning");
@@ -772,7 +776,9 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				const firstLineBody = bodyLines[0] ?? "";
 				const continuationLines = bodyLines.slice(1);
 				// Extract the reason from the nudge text for accent coloring.
-				const reasonTagMatch = /^\[continuation-nudge:[^\]]+\]/i.exec(firstLineBody);
+				const reasonTagMatch = /^\[continuation-nudge:[^\]]+\]/i.exec(
+					firstLineBody,
+				);
 				let renderedFirst: string;
 				if (reasonTagMatch) {
 					const reasonTag = reasonTagMatch[0];

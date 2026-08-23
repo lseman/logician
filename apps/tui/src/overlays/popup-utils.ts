@@ -382,7 +382,21 @@ export interface ListSelectorConfig<T> {
 	/** Shown as the bottom-bar text whenever no transient message (e.g. "Switching to X...") is set. */
 	defaultMessage: string;
 	maxRows?: number;
-	toItem: (item: T, index: number, selectedIndex: number) => ListItem;
+	toItem: (
+		this: ListSelectorOverlay<T>,
+		item: T,
+		index: number,
+		selectedIndex: number,
+	) => ListItem;
+}
+
+/** Shared helper: find the index of the first item whose active flag is true. */
+export function findActiveIndex<T>(
+	items: T[],
+	active: (item: T) => boolean,
+): number {
+	const idx = items.findIndex(active);
+	return idx >= 0 ? idx : 0;
 }
 
 export class ListSelectorOverlay<T> implements Component {
@@ -390,6 +404,8 @@ export class ListSelectorOverlay<T> implements Component {
 	protected items: T[] = [];
 	protected selection = new SelectorController();
 	protected message = "";
+	/** Set to mark a specific item as "current" (shown with a ✓). Read by `toItem` via `this`. */
+	activeId: string | undefined;
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
 
@@ -460,7 +476,7 @@ export class ListSelectorOverlay<T> implements Component {
 			this.config.maxRows ?? 10,
 			(item, i) =>
 				renderListItem(
-					this.config.toItem(item, i, this.selection.index),
+					this.config.toItem.call(this, item, i, this.selection.index),
 					innerWidth,
 				),
 			this.config.emptyText,
@@ -486,4 +502,46 @@ export class ListSelectorOverlay<T> implements Component {
 		this.selection.move(delta, n);
 		this.invalidate();
 	}
+}
+
+// ── List-selector factory ────────────────────────────────────────────────────
+// Creates a typed list-selector overlay with a narrowed `handleInput` return
+// type. Each selector passes its config and an action-key; the factory produces
+// a class whose handleInput wraps the base SelectAction into a typed variant.
+
+export type ListSelectorAction<T> =
+	| { type: "select"; item: T }
+	| { type: "close" };
+
+/** Constructor signature for list-selector overlays created by `createListSelector`. */
+export interface ListSelectorCtor<T> {
+	new (): ListSelectorOverlay<T> & {
+		handleInput(data: string): ListSelectorAction<T> | null;
+	};
+	prototype: ListSelectorOverlay<T> & {
+		handleInput(data: string): ListSelectorAction<T> | null;
+	};
+}
+
+/**
+ * Creates a list-selector overlay constructor with a narrowed `handleInput` return
+ * type. The returned class extends `ListSelectorOverlay<T>` and overrides
+ * `handleInput` to return `ListSelectorAction<T> | null` instead of the
+ * base `SelectAction<T> | null`.
+ */
+export function createListSelector<T>(
+	config: ListSelectorConfig<T>,
+): ListSelectorCtor<T> {
+	return class ListSelector extends ListSelectorOverlay<T> {
+		constructor() {
+			super(config);
+		}
+		handleInput(data: string): ListSelectorAction<T> | null {
+			const action = this.handleListInput(data);
+			if (!action) return null;
+			return action.type === "select"
+				? { type: "select", item: action.item }
+				: { type: "close" };
+		}
+	} as unknown as ListSelectorCtor<T>;
 }

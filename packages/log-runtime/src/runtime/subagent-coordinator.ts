@@ -13,13 +13,13 @@ import type {
 	Tool,
 	ToolContext,
 } from "@logician/log-core";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import type { AgentSession } from "@logician/log-core/harness";
 import {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
 } from "@logician/log-core/runtime";
-import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	type AgentDefinition,
 	loadAgentDefinitions,

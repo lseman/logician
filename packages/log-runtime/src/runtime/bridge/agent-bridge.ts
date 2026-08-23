@@ -8,6 +8,7 @@ import type {
 	Tool,
 } from "@logician/log-core";
 import { OpenAIBackend } from "@logician/log-core";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import { AgentSession } from "@logician/log-core/harness";
 import type { PermissionMode } from "@logician/log-core/permissions";
 import type { AbortResult, Session } from "@logician/log-core/runtime";
@@ -16,7 +17,6 @@ import {
 	estimateTokens,
 	type ToolRegistry,
 } from "@logician/log-core/runtime";
-import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	claudeToolMatcherName,
 	createClaudeCodeHookLayer,

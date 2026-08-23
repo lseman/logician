@@ -1,4 +1,4 @@
-import { test, beforeAll, afterAll } from "bun:test";
+import { afterAll, beforeAll, test } from "bun:test";
 import assert from "node:assert/strict";
 import {
 	mkdirSync,

@@ -4,7 +4,10 @@
 // permission/question requests.
 
 import type { AutoresearchSession } from "@logician/log-autoresearch";
-import { isTranscriptEvent, type RuntimeEvent } from "@logician/log-core/events";
+import {
+	isTranscriptEvent,
+	type RuntimeEvent,
+} from "@logician/log-core/events";
 import type {
 	AgentRuntime,
 	GoalState,

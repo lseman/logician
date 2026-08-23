@@ -1,10 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	type AgentProtocolNotification,
 	createNotification,
 } from "@logician/log-core/protocol";
-import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	EXEC_STREAM_SCHEMA,
 	type ExecBridge,

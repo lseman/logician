@@ -158,7 +158,8 @@
 .pkg-head {
 	display: flex;
 	align-items: center;
-	gap: 0.6rem;
+	flex-wrap: wrap;
+	gap: 0.4rem 0.6rem;
 	margin-bottom: 0.7rem;
 }
 
@@ -176,6 +177,13 @@
 	font-size: 0.86rem;
 	font-weight: 600;
 	color: var(--text);
+}
+
+.pkg-path {
+	font-family: "JetBrains Mono", monospace;
+	font-size: 0.74rem;
+	color: var(--muted);
+	opacity: 0.75;
 }
 
 .pkg-desc {

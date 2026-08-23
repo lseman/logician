@@ -1,8 +1,8 @@
 /** Coordinates optional reasoners, subagents, and heuristic evolution. */
 
 import type { LLMBackend, Tool } from "@logician/log-core";
-import type { AgentSession } from "@logician/log-core/harness";
 import type { RuntimeEvent } from "@logician/log-core/events";
+import type { AgentSession } from "@logician/log-core/harness";
 import {
 	get_reasoner,
 	getReasonerMeta,

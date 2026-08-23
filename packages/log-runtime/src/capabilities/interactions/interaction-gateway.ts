@@ -1,10 +1,10 @@
 import type { AskUserContext } from "@logician/log-core";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	type PermissionMode,
 	PermissionPolicy,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
-import type { RuntimeEvent } from "@logician/log-core/events";
 
 export type PermissionDecision = "allow" | "deny" | "always";
 

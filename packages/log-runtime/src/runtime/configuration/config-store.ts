@@ -143,7 +143,10 @@ function updateGlobalConfig(
 	// code-paths (settings overlay, inference-mode cycling, etc.) from
 	// silently overwriting the user's ~/.logician/settings.json, while
 	// still letting the config-store unit tests write to their temp HOME.
-	if (process.env.NODE_ENV === "test" && process.env.LOGICIAN_PERSIST_CONFIG !== "1") {
+	if (
+		process.env.NODE_ENV === "test" &&
+		process.env.LOGICIAN_PERSIST_CONFIG !== "1"
+	) {
 		return false;
 	}
 	const home = process.env.HOME || "";

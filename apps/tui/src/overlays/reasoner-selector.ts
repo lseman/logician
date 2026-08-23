@@ -2,7 +2,7 @@
 // Overlay for selecting an active reasoning mode.
 // Reasoner selection applies to the next turn (never mutates an in-flight run).
 
-import { type ListItem, ListSelectorOverlay } from "./popup-utils.ts";
+import { createListSelector, type ListSelectorOverlay } from "./popup-utils.ts";
 
 export interface ReasonerInfo {
 	id: string;
@@ -12,33 +12,24 @@ export interface ReasonerInfo {
 }
 
 export type ReasonerSelectorAction =
-	| { type: "select"; reasoner: ReasonerInfo }
+	| { type: "select"; item: ReasonerInfo }
 	| { type: "close" };
 
-export class ReasonerSelectorOverlay extends ListSelectorOverlay<ReasonerInfo> {
-	constructor() {
-		super({
-			title: "Reasoning Mode",
-			emptyText: "No reasoning modes available.",
-			defaultMessage: "Select a reasoning mode for the next turn.",
-			toItem: (r, i, selectedIndex): ListItem => ({
-				label: r.name,
-				metadata: r.active ? `${r.description}  active` : r.description,
-				selected: i === selectedIndex,
-				statusDot: r.active ? "active" : undefined,
-			}),
-		});
-	}
-
-	setReasoners(reasoners: ReasonerInfo[]): void {
-		this.setItems(reasoners);
-	}
-
-	handleInput(data: string): ReasonerSelectorAction | null {
-		const action = this.handleListInput(data);
-		if (!action) return null;
-		return action.type === "select"
-			? { type: "select", reasoner: action.item }
-			: action;
-	}
-}
+export const ReasonerSelectorOverlay = createListSelector<ReasonerInfo>({
+	title: "Reasoning Mode",
+	emptyText: "No reasoning modes available.",
+	defaultMessage: "Select a reasoning mode for the next turn.",
+	toItem: function (
+		this: ListSelectorOverlay<ReasonerInfo>,
+		r,
+		i,
+		selectedIndex,
+	) {
+		return {
+			label: r.name,
+			metadata: r.active ? `${r.description}  active` : r.description,
+			selected: i === selectedIndex,
+			statusDot: r.active ? "active" : undefined,
+		};
+	},
+});

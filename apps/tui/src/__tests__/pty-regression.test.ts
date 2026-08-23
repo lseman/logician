@@ -213,6 +213,7 @@ void test("Ctrl+I changes and persists the execution profile", async () => {
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
 			LOGICIAN_MODEL: "test-model",
+			LOGICIAN_PERSIST_CONFIG: "1",
 		},
 		actions: [
 			{ afterMs: 100, send: "s\n" },
@@ -248,6 +249,7 @@ void test("Ctrl+P changes and persists act/plan mode", async () => {
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
 			LOGICIAN_MODEL: "test-model",
+			LOGICIAN_PERSIST_CONFIG: "1",
 		},
 		actions: [
 			{ afterMs: 100, send: "s\n" },

@@ -1,5 +1,5 @@
-import { createNotification } from "@logician/log-core/protocol";
 import type { RuntimeEvent } from "@logician/log-core/events";
+import { createNotification } from "@logician/log-core/protocol";
 import type { ErrorCallback, ProtocolCallback } from "../bridge/types.ts";
 
 /** Ordered runtime notifications and asynchronous error delivery. */

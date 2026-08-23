@@ -1,7 +1,7 @@
 // ── ThinkingLevelSelectorOverlay ─────────────────────────────────────────────
 // Overlay for selecting a thinking (reasoning) level.
 
-import { type ListItem, ListSelectorOverlay } from "./popup-utils.ts";
+import { createListSelector, type ListSelectorOverlay } from "./popup-utils.ts";
 
 export interface ThinkingLevelInfo {
 	id: string;
@@ -11,37 +11,25 @@ export interface ThinkingLevelInfo {
 }
 
 export type ThinkingLevelSelectorAction =
-	| { type: "select"; level: ThinkingLevelInfo }
+	| { type: "select"; item: ThinkingLevelInfo }
 	| { type: "close" };
 
-export class ThinkingLevelSelectorOverlay extends ListSelectorOverlay<ThinkingLevelInfo> {
-	constructor() {
-		super({
-			title: "Thinking Level",
-			emptyText: "No thinking levels available.",
-			defaultMessage: "Select a thinking level for the next turn.",
-			toItem: (l, i, selectedIndex): ListItem => ({
+export const ThinkingLevelSelectorOverlay =
+	createListSelector<ThinkingLevelInfo>({
+		title: "Thinking Level",
+		emptyText: "No thinking levels available.",
+		defaultMessage: "Select a thinking level for the next turn.",
+		toItem: function (
+			this: ListSelectorOverlay<ThinkingLevelInfo>,
+			l,
+			i,
+			selectedIndex,
+		) {
+			return {
 				label: l.label,
 				metadata: l.description,
 				selected: i === selectedIndex,
 				statusDot: l.active ? "active" : undefined,
-			}),
-		});
-	}
-
-	setLevels(levels: ThinkingLevelInfo[]): void {
-		const activeIndex = levels.findIndex(l => l.active);
-		this.setItems(
-			levels,
-			activeIndex >= 0 ? activeIndex : this.selection.index,
-		);
-	}
-
-	handleInput(data: string): ThinkingLevelSelectorAction | null {
-		const action = this.handleListInput(data);
-		if (!action) return null;
-		return action.type === "select"
-			? { type: "select", level: action.item }
-			: action;
-	}
-}
+			};
+		},
+	});

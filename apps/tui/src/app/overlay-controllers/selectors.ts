@@ -8,10 +8,8 @@ import {
 	getReasonerMeta,
 	type ReasonerMeta,
 } from "@logician/log-runtime/reasoning";
-import type {
-	InferenceModeInfo,
-	InferenceModeSelectorAction,
-} from "../../overlays/inference-mode-selector.ts";
+import type { InferenceModeSelectorAction } from "../../overlays/inference-mode-selector.ts";
+import { INFERENCE_MODES } from "../../overlays/inference-mode-selector.ts";
 import type {
 	ModelInfo,
 	ModelSelectorAction,
@@ -37,33 +35,62 @@ import {
 import type { InferenceMode } from "../inference-settings.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
 
-// ── Reasoner selector ───────────────────────────────────────────────────
+// ── Generic list-selector open helper ──────────────────────────────────────
+// Shared by all list-selector opens: get data, set items, show overlay.
 
-export async function openReasonerSelector(
+function openListSelector<T>(
 	ctx: OverlayHandlersCtx,
-): Promise<void> {
-	ctx.statusPanel.update({ phase: "reasoner" });
-	const currentId = ctx.bridge.getReasonerStatus();
-	const reasoners: ReasonerInfo[] = getReasonerIds().map(id => {
-		const meta = getReasonerMeta(id) as ReasonerMeta;
-		return {
-			id,
-			name: meta.name,
-			description: meta.description,
-			active: id === currentId,
-		};
-	});
-	ctx.reasonerSelector.setReasoners(reasoners);
-	ctx.reasonerSelector.setMessage(
-		"Enter selects reasoning mode for the next turn.",
-	);
-	ctx.reasonerSelector.show();
-	const overlay = ctx.tui.showOverlay(ctx.reasonerSelector, {
+	items: T[],
+	overlay: {
+		setItems(items: T[], preferredIndex?: number): void;
+		setMessage(msg: string): void;
+		show(): void;
+		render(width: number): string[];
+	},
+	statusPhase: string,
+	message: string,
+): void {
+	ctx.statusPanel.update({ phase: statusPhase });
+	overlay.setItems(items);
+	overlay.setMessage(message);
+	overlay.show();
+	const o = ctx.tui.showOverlay(overlay, {
 		anchor: "aboveInput",
 		align: "left",
 		maxHeight: 18,
 	});
-	overlay.focus();
+	o.focus();
+}
+
+// ── Generic list-selector close helper ─────────────────────────────────────
+// Shared by all close handlers: remove overlay, reset status, refresh transcript.
+
+function closeListSelector(
+	ctx: OverlayHandlersCtx,
+	overlay: { hide(): void; render(width: number): string[] },
+): void {
+	ctx.tui.removeOverlay(overlay);
+	ctx.statusPanel.update({ phase: "ready" });
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+}
+
+// ── Reasoner selector ───────────────────────────────────────────────────
+
+export function openReasonerSelector(ctx: OverlayHandlersCtx): void {
+	const currentId = ctx.bridge.getReasonerStatus();
+	const reasoners: ReasonerInfo[] = getReasonerIds().map(id => ({
+		id,
+		name: (getReasonerMeta(id) as ReasonerMeta).name,
+		description: (getReasonerMeta(id) as ReasonerMeta).description,
+		active: id === currentId,
+	}));
+	openListSelector(
+		ctx,
+		reasoners,
+		ctx.reasonerSelector,
+		"reasoner",
+		"Enter selects reasoning mode for the next turn.",
+	);
 }
 
 export function handleReasonerSelectorAction(
@@ -71,20 +98,17 @@ export function handleReasonerSelectorAction(
 	action: ReasonerSelectorAction,
 ): void {
 	if (action.type === "close") {
-		ctx.tui.removeOverlay(ctx.reasonerSelector);
-		ctx.statusPanel.update({ phase: "ready" });
-		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		closeListSelector(ctx, ctx.reasonerSelector);
 		return;
 	}
-	const reasoner = action.reasoner;
-	ctx.reasonerSelector.setMessage(`Setting: ${reasoner.name}...`);
+	const selected = action.item;
+	ctx.reasonerSelector.setMessage(`Setting: ${selected.name}...`);
 	ctx.tui.requestRender();
-	ctx.bridge.updateSettings({ reasonerId: reasoner.id });
-	saveConfigField("reasoner", reasoner.id);
-	ctx.tui.removeOverlay(ctx.reasonerSelector);
-	ctx.statusPanel.update({ phase: "ready" });
-	ctx.statusPanel.update({ reasoner: reasoner.id });
-	ctx.notify(`Reasoning mode: ${reasoner.name}`, "success");
+	ctx.bridge.updateSettings({ reasonerId: selected.id });
+	saveConfigField("reasoner", selected.id);
+	closeListSelector(ctx, ctx.reasonerSelector);
+	ctx.statusPanel.update({ reasoner: selected.id });
+	ctx.notify(`Reasoning mode: ${selected.name}`, "success");
 	ctx.tui.requestRender();
 }
 
@@ -118,22 +142,19 @@ export async function updateFileMentionPopup(
 // ── Model selector ───────────────────────────────────────────────────
 
 export function openModelSelector(ctx: OverlayHandlersCtx): void {
-	ctx.statusPanel.update({ phase: "model" });
 	const modelInfos: ModelInfo[] = ctx.bridge.models.options().map(option => ({
 		id: option.key,
 		name: option.name,
 		active: option.active,
 		url: `${option.model} · ${option.url}`,
 	}));
-	ctx.modelSelector.setModels(modelInfos);
-	ctx.modelSelector.setMessage("Enter selects model for the current session.");
-	ctx.modelSelector.show();
-	const overlay = ctx.tui.showOverlay(ctx.modelSelector, {
-		anchor: "aboveInput",
-		align: "left",
-		maxHeight: 18,
-	});
-	overlay.focus();
+	openListSelector(
+		ctx,
+		modelInfos,
+		ctx.modelSelector,
+		"model",
+		"Enter selects model for the current session.",
+	);
 }
 
 export function handleModelSelectorAction(
@@ -141,22 +162,17 @@ export function handleModelSelectorAction(
 	action: ModelSelectorAction,
 ): void {
 	if (action.type === "close") {
-		ctx.tui.removeOverlay(ctx.modelSelector);
-		ctx.statusPanel.update({ phase: "ready" });
-		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		closeListSelector(ctx, ctx.modelSelector);
 		return;
 	}
-	const selected = action.model;
+	const selected = action.item;
 	ctx.modelSelector.setMessage(`Switching to ${selected.name}...`);
 	ctx.tui.requestRender();
-	// Switch the model via the bridge (handles url switching too)
 	const applied = ctx.bridge.models.selectOption(selected.id);
 	if (!applied) return;
-	// Save to global settings
 	saveConfigField("model", applied.model);
 	saveConfigField("baseUrl", applied.url);
-	// Update status
-	ctx.tui.removeOverlay(ctx.modelSelector);
+	closeListSelector(ctx, ctx.modelSelector);
 	ctx.statusPanel.update({ phase: "ready", model: applied.model });
 	ctx.notify(`Model: ${selected.name}`, "success");
 	ctx.tui.requestRender();
@@ -164,9 +180,7 @@ export function handleModelSelectorAction(
 
 // ── Theme selector ───────────────────────────────────────────────────
 
-export async function openThemeSelector(
-	ctx: OverlayHandlersCtx,
-): Promise<void> {
+export function openThemeSelector(ctx: OverlayHandlersCtx): void {
 	const available = getAvailableThemes();
 	const current = getCurrentThemeName();
 	const themes: ThemeInfo[] = available.map(name => ({
@@ -174,15 +188,13 @@ export async function openThemeSelector(
 		description: `${name.charAt(0).toUpperCase() + name.slice(1)} theme`,
 		active: name === current,
 	}));
-	ctx.themeSelector.setThemes(themes);
-	ctx.themeSelector.setMessage("Enter selects a color theme.");
-	ctx.themeSelector.show();
-	const overlay = ctx.tui.showOverlay(ctx.themeSelector, {
-		anchor: "aboveInput",
-		align: "left",
-		maxHeight: 18,
-	});
-	overlay.focus();
+	openListSelector(
+		ctx,
+		themes,
+		ctx.themeSelector,
+		"theme",
+		"Enter selects a color theme.",
+	);
 }
 
 export function handleThemeSelectorAction(
@@ -190,21 +202,19 @@ export function handleThemeSelectorAction(
 	action: ThemeSelectorAction,
 ): void {
 	if (action.type === "close") {
-		ctx.tui.removeOverlay(ctx.themeSelector);
-		ctx.statusPanel.update({ phase: "ready" });
-		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		closeListSelector(ctx, ctx.themeSelector);
 		return;
 	}
-	const themeInfo = action.theme;
-	ctx.themeSelector.setMessage(`Setting: ${themeInfo.name}...`);
+	const selected = action.item;
+	ctx.themeSelector.setMessage(`Setting: ${selected.name}...`);
 	ctx.tui.requestRender();
-	const ok = setThemeByName(themeInfo.name);
-	ctx.tui.removeOverlay(ctx.themeSelector);
+	const ok = setThemeByName(selected.name);
+	closeListSelector(ctx, ctx.themeSelector);
 	ctx.statusPanel.update({ phase: "ready" });
 	if (ok) {
-		ctx.notify(`Theme: ${themeInfo.name}`, "success");
+		ctx.notify(`Theme: ${selected.name}`, "success");
 	} else {
-		ctx.notify(`Unknown theme: ${themeInfo.name}`, "error");
+		ctx.notify(`Unknown theme: ${selected.name}`, "error");
 	}
 	ctx.tui.requestRender();
 }
@@ -220,160 +230,8 @@ export function setThemeByName(name: string): boolean {
 // ── Inference mode selector ──────────────────────────────────────────
 
 export function openInferenceModeSelector(ctx: OverlayHandlersCtx): void {
-	const inferenceModes: InferenceModeInfo[] = [
-		{
-			id: "auto",
-			label: "Auto",
-			description: "Auto-select from task phase",
-			thinking: true,
-			useProviderDefaults: false,
-			params: {
-				temperature: 0.7,
-				top_p: 0.8,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 1.0,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "none",
-			label: "Provider",
-			description: "Let the provider use its own defaults",
-			thinking: false,
-			useProviderDefaults: true,
-			params: {
-				temperature: 0.7,
-				top_p: 0.8,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 0.0,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "thinking-general",
-			label: "Think Gen",
-			description: "General thinking — high creativity",
-			thinking: true,
-			useProviderDefaults: false,
-			params: {
-				temperature: 1.0,
-				top_p: 0.95,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 1.5,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "thinking-coding",
-			label: "Think Code",
-			description: "Precise coding — lower temp",
-			thinking: true,
-			useProviderDefaults: false,
-			params: {
-				temperature: 0.6,
-				top_p: 0.95,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 0.0,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "instruct-general",
-			label: "Instruct",
-			description: "Non-thinking — balanced",
-			thinking: false,
-			useProviderDefaults: false,
-			params: {
-				temperature: 0.7,
-				top_p: 0.8,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 1.5,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "instruct-reasoning",
-			label: "Reason",
-			description: "Non-thinking — high temp",
-			thinking: false,
-			useProviderDefaults: false,
-			params: {
-				temperature: 1.0,
-				top_p: 0.95,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 1.5,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "instruct-coding",
-			label: "Code",
-			description: "Non-thinking — precise output",
-			thinking: false,
-			useProviderDefaults: false,
-			params: {
-				temperature: 0.3,
-				top_p: 0.9,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 0.0,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "deterministic",
-			label: "Exact",
-			description: "Near-zero temp — reproducible",
-			thinking: false,
-			useProviderDefaults: false,
-			params: {
-				temperature: 0.0,
-				top_p: 0.0,
-				top_k: 1,
-				min_p: 0.0,
-				presence_penalty: 0.0,
-				repetition_penalty: 1.0,
-			},
-		},
-		{
-			id: "creative",
-			label: "Creative",
-			description: "Ultra-high temp — brainstorm",
-			thinking: false,
-			useProviderDefaults: false,
-			params: {
-				temperature: 1.3,
-				top_p: 0.99,
-				top_k: 40,
-				min_p: 0.0,
-				presence_penalty: 2.0,
-				repetition_penalty: 0.9,
-			},
-		},
-		{
-			id: "analytical",
-			label: "Analyze",
-			description: "Low temp — code review",
-			thinking: false,
-			useProviderDefaults: false,
-			params: {
-				temperature: 0.2,
-				top_p: 0.7,
-				top_k: 20,
-				min_p: 0.0,
-				presence_penalty: 0.5,
-				repetition_penalty: 1.1,
-			},
-		},
-	];
-
-	ctx.inferenceModeSelector.setModes(inferenceModes, ctx.inferenceMode);
+	ctx.inferenceModeSelector.setItems(INFERENCE_MODES);
+	ctx.inferenceModeSelector.activeId = ctx.inferenceMode;
 	ctx.inferenceModeSelector.setMessage(
 		"Enter selects inference mode for this session.",
 	);
@@ -389,7 +247,7 @@ export function openInferenceModeSelector(ctx: OverlayHandlersCtx): void {
 // ── Thinking level selector ──────────────────────────────────────────
 
 export function openThinkingLevelSelector(ctx: OverlayHandlersCtx): void {
-	const thinkingLevels: ThinkingLevelInfo[] = [
+	const levels: ThinkingLevelInfo[] = [
 		{
 			id: "off",
 			label: "Off",
@@ -427,18 +285,13 @@ export function openThinkingLevelSelector(ctx: OverlayHandlersCtx): void {
 			active: ctx.thinkingLevel === "xhigh",
 		},
 	];
-
-	ctx.thinkingLevelSelector.setLevels(thinkingLevels);
-	ctx.thinkingLevelSelector.setMessage(
+	openListSelector(
+		ctx,
+		levels,
+		ctx.thinkingLevelSelector,
+		"thinking",
 		"Enter selects thinking level for the next turn.",
 	);
-	ctx.thinkingLevelSelector.show();
-	const overlay = ctx.tui.showOverlay(ctx.thinkingLevelSelector, {
-		anchor: "aboveInput",
-		align: "left",
-		maxHeight: 18,
-	});
-	overlay.focus();
 }
 
 export function handleThinkingLevelSelectorAction(
@@ -446,21 +299,17 @@ export function handleThinkingLevelSelectorAction(
 	action: ThinkingLevelSelectorAction,
 ): void {
 	if (action.type === "close") {
-		ctx.tui.removeOverlay(ctx.thinkingLevelSelector);
-		ctx.statusPanel.update({ phase: "ready" });
-		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		closeListSelector(ctx, ctx.thinkingLevelSelector);
 		return;
 	}
-	const selected = action.level;
+	const selected = action.item;
 	ctx.thinkingLevelSelector.setMessage(`Setting: ${selected.label}...`);
 	ctx.tui.requestRender();
-	ctx.bridge.updateSettings({
-		thinkingLevel: selected.id as ThinkingLevel,
-	});
+	ctx.bridge.updateSettings({ thinkingLevel: selected.id as ThinkingLevel });
 	saveConfigField("thinkingLevel", selected.id);
 	ctx.thinkingLevel = selected.id as ThinkingLevel;
+	closeListSelector(ctx, ctx.thinkingLevelSelector);
 	ctx.statusPanel.update({ phase: "ready", thinkingLevel: selected.id });
-	ctx.tui.removeOverlay(ctx.thinkingLevelSelector);
 	ctx.notify(`Thinking level: ${selected.label}`, "success");
 	ctx.tui.requestRender();
 }
@@ -473,12 +322,10 @@ export function handleInferenceModeSelectorAction(
 		ctx.tui.removeOverlay(ctx.inferenceModeSelector);
 		return;
 	}
-	const selected = action.mode;
+	const selected = action.item;
 	ctx.inferenceModeSelector.setMessage(`Setting: ${selected.label}...`);
 	ctx.tui.requestRender();
-	ctx.bridge.updateSettings({
-		inferenceMode: selected.id as InferenceMode,
-	});
+	ctx.bridge.updateSettings({ inferenceMode: selected.id as InferenceMode });
 	saveConfigField("inferenceMode", selected.id);
 	ctx.tui.removeOverlay(ctx.inferenceModeSelector);
 	ctx.statusPanel.update({ inferenceMode: selected.id });

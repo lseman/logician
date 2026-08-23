@@ -51,7 +51,7 @@ try:
         else:
             os.write(master, action.get("send", "").encode("utf-8"))
     remaining = max(0.1, timeout - (time.monotonic() - start))
-    drain(master, output, min(remaining, 1.0))
+    drain(master, output, remaining)
 finally:
     try:
         os.kill(pid, signal.SIGTERM)

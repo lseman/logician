@@ -365,15 +365,19 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				followUp: [...event.followUp],
 				nextTurn: event.nextTurn ? [...event.nextTurn] : undefined,
 			};
-		case "harness_intervention":
+		case "harness_intervention": {
 			// Continuation nudges: render with a clean label and text,
 			// stripping attempt/incident metadata and using the nudge
 			// reason as part of the label so the TUI displays them as
 			// NOTICE blocks rather than user messages.
 			const summary = event.evidence.summary ?? "";
-			const nudgeMatch = /^\[(?<prefix>[^\]]+):(?<reason>[^\]]+)\]/i.exec(summary);
+			const nudgeMatch = /^\[(?<prefix>[^\]]+):(?<reason>[^\]]+)\]/i.exec(
+				summary,
+			);
 			if (event.kind === "continuation" && nudgeMatch) {
-				const reason = nudgeMatch.groups.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+				const reason = nudgeMatch.groups?.reason
+					.toLowerCase()
+					.replace(/[^a-z0-9_]/g, "_");
 				return {
 					type: "notice",
 					level: event.severity === "error" ? "error" : "warn",
@@ -392,6 +396,7 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				label: `${event.kind}: ${event.action}`,
 				text: `${event.evidence.summary} (attempt ${event.attempt}, incident ${event.id})${event.nextAction ? ` Next: ${event.nextAction}` : ""}`,
 			};
+		}
 		// ── Acceptance observability ─────────────────────────────────────
 		case "acceptance_start":
 			return {
