@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentConfig } from "@logician/log-core";
 import {
-	SettingsGateway,
 	type RuntimeToggleKey,
+	SettingsGateway,
 } from "../../runtime/settings-gateway.ts";
 
 describe("SettingsGateway", () => {

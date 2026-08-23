@@ -3,16 +3,16 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BackendError } from "../../capabilities/provider/backend.ts";
+import { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
+import { OutputGuard } from "../../control/guards/output-guard.ts";
+import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
 import {
 	createSteeringInterruptReason,
 	type RunAgentLoopConfig,
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
 } from "../../runtime/execution/agent-loop-runner.ts";
-import { OutputGuard } from "../../control/guards/output-guard.ts";
-import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
-import { BackendError } from "../../capabilities/provider/backend.ts";
-import { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import type { AgentConfig } from "../../system/types/types-config.ts";
 import type {
 	AgentEvent,

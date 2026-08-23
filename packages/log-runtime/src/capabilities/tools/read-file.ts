@@ -4,7 +4,10 @@
 import * as fs from "node:fs";
 import type { Tool } from "@logician/log-core";
 import { recordRead } from "./support/read-tracker.ts";
-import { ensureInsideCwd, resolveReadPath } from "./support/utils/path-utils.ts";
+import {
+	ensureInsideCwd,
+	resolveReadPath,
+} from "./support/utils/path-utils.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

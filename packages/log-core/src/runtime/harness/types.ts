@@ -1,6 +1,5 @@
-import type { ExtensionRunner } from "../../system/extension/runner.ts";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
-import type { HarnessPhase } from "../state/runtime-state.ts";
+import type { ExtensionRunner } from "../../system/extension/runner.ts";
 import type {
 	AgentConfig,
 	AgentHarnessStreamOptions,
@@ -11,6 +10,7 @@ import type {
 	Message,
 	Tool,
 } from "../../system/types/types-messages.ts";
+import type { HarnessPhase } from "../state/runtime-state.ts";
 
 export interface HarnessObserver {
 	event?: EventHandler;

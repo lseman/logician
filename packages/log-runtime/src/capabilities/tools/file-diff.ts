@@ -6,7 +6,10 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import type { Tool } from "@logician/log-core";
 import { summarizeDiff } from "./support/utils/diff-utils.ts";
-import { ensureInsideCwd, resolveReadPath } from "./support/utils/path-utils.ts";
+import {
+	ensureInsideCwd,
+	resolveReadPath,
+} from "./support/utils/path-utils.ts";
 
 const execFileAsync = promisify(execFile);
 

@@ -1,14 +1,17 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { compactToFit, pruneHistoricalToolOutputs } from "../../runtime/compaction/engine.ts";
-import { serializeConversation } from "../../runtime/compaction/serialization.ts";
-import type { CompactableMessage } from "../../system/types/types-messages.ts";
 import {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
 } from "../../capabilities/provider/messages.ts";
+import {
+	compactToFit,
+	pruneHistoricalToolOutputs,
+} from "../../runtime/compaction/engine.ts";
+import { serializeConversation } from "../../runtime/compaction/serialization.ts";
+import type { CompactableMessage } from "../../system/types/types-messages.ts";
 
 void test("conversation serialization tolerates null and malformed content", () => {
 	assert.equal(
@@ -95,15 +98,22 @@ void test("context compaction never leaves an orphaned tool result", async () =>
 });
 
 void test("pruneHistoricalToolOutputs trims old verbose tool results while preserving recent turns", () => {
-	const largeLog = Array.from({ length: 50 }, (_, i) => `log line ${i}: build output detail`).join("\n");
+	const largeLog = Array.from(
+		{ length: 50 },
+		(_, i) => `log line ${i}: build output detail`,
+	).join("\n");
 
 	const messages: CompactableMessage[] = [
 		createUserMessage("First turn: build project"),
-		createAssistantMessage("", [{ id: "call_1", name: "bash", arguments: "{}" }]),
+		createAssistantMessage("", [
+			{ id: "call_1", name: "bash", arguments: "{}" },
+		]),
 		createToolResultMessage("call_1", "bash", largeLog, false),
 		createAssistantMessage("Build completed, now running tests."),
 		createUserMessage("Second turn: fix tests"),
-		createAssistantMessage("", [{ id: "call_2", name: "bash", arguments: "{}" }]),
+		createAssistantMessage("", [
+			{ id: "call_2", name: "bash", arguments: "{}" },
+		]),
 		createToolResultMessage("call_2", "bash", "test result: passed", false),
 		createAssistantMessage("All tests passing!"),
 	];
@@ -130,4 +140,3 @@ void test("pruneHistoricalToolOutputs trims old verbose tool results while prese
 	const recentResult = pruned.messages[6] as { content: string };
 	assert.equal(recentResult.content, "test result: passed");
 });
-

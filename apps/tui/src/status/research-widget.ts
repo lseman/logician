@@ -5,7 +5,10 @@
 // Renders zero lines whenever there's nothing to show — see
 // AutoresearchSession.getWidgetSummary().
 
-import { type AutoresearchSession, formatNum } from "@logician/log-autoresearch";
+import {
+	type AutoresearchSession,
+	formatNum,
+} from "@logician/log-autoresearch";
 import {
 	type Component,
 	clampLineToWidth,

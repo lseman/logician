@@ -159,8 +159,7 @@ export function persistObservationClaims(
 				claim.status === "verified" &&
 				claim.confidence >= contradiction.confidence;
 			if (claim.status === "invalidated" || trustedRevision) {
-				operation =
-					claim.status === "invalidated" ? "INVALIDATE" : "SUPERSEDE";
+				operation = claim.status === "invalidated" ? "INVALIDATE" : "SUPERSEDE";
 				supersedesClaimId = contradiction.id;
 				claimToClose = contradiction.id;
 			} else contestClaim.run(contradiction.id);
@@ -170,8 +169,7 @@ export function persistObservationClaims(
 				? "quarantined"
 				: claim.status === "invalidated"
 					? "stale"
-					: provenance.source === "deterministic" &&
-							claim.status === "verified"
+					: provenance.source === "deterministic" && claim.status === "verified"
 						? "durable"
 						: contradiction && !claimToClose
 							? "contested"
@@ -239,16 +237,12 @@ export function observe(
 		claims: parseObservationClaims(generated.claims).map(claim => ({
 			...claim,
 			text: sanitizeString(claim.text).slice(0, 1000),
-			evidenceEventIds: claim.evidenceEventIds
-				.map(sanitizeString)
-				.slice(0, 12),
+			evidenceEventIds: claim.evidenceEventIds.map(sanitizeString).slice(0, 12),
 		})),
 		provenance: parseObservationProvenance(generated.provenance),
 	};
 	// Derive workspace from observation data or current workspace
-	const obsWorkspace = normalizeWorkspacePath(
-		raw.workspace || getWorkspace(),
-	);
+	const obsWorkspace = normalizeWorkspacePath(raw.workspace || getWorkspace());
 	// Direct callers may capture evidence before explicitly registering the
 	// session. Materialize the owning session so foreign-key enforcement does
 	// not turn robust capture into a startup-order dependency.
@@ -454,8 +448,7 @@ export function rowToClaim(db: Database, row: any): MemoryClaim {
 		validityPredicates: (safeParseJson(row.validity_predicates || "[]") ||
 			[]) as MemoryClaim["validityPredicates"],
 		evidenceCertificate: {
-			extractorVersion:
-				certificate?.extractorVersion || row.extractor_version,
+			extractorVersion: certificate?.extractorVersion || row.extractor_version,
 			schemaVersion: certificate?.schemaVersion || row.schema_version,
 			evidenceEventIds: certificate?.evidenceEventIds || evidenceEventIds,
 			issuedAt: certificate?.issuedAt || row.transaction_time,
@@ -473,7 +466,7 @@ export function promoteClaim(
 		includeSuperseded: true,
 		limit: 1_000,
 	}).find(candidate => candidate.id === claimId);
-	if (!claim || claim.lifecycle !== "probationary") return null;
+	if (claim?.lifecycle !== "probationary") return null;
 	const corroborated = new Set([
 		...claim.evidenceEventIds,
 		...evidenceEventIds.map(sanitizeString),
@@ -531,11 +524,7 @@ export function searchObservations(
       LIMIT ?
     `,
 		)
-		.all(
-			ftsQuery,
-			getWorkspace(),
-			Math.max(1, Math.min(limit, 1000)),
-		) as any[];
+		.all(ftsQuery, getWorkspace(), Math.max(1, Math.min(limit, 1000))) as any[];
 
 	return rows.map(r => ({
 		observation: {

@@ -1,3 +1,4 @@
+import type { AgentBridgeOptions } from "../bridge/agent-bridge.ts";
 import {
 	configBool,
 	configNumber,
@@ -8,7 +9,6 @@ import {
 	loadGlobalLogicianConfig,
 	loadLogicianConfig,
 } from "./config-store.ts";
-import type { AgentBridgeOptions } from "../bridge/agent-bridge.ts";
 
 export interface ResolvedRuntimeConfig {
 	configPath?: string;

@@ -1,8 +1,8 @@
 import {
 	microCompactCompactableMessages,
-	pruneHistoricalToolOutputs,
 	type PrunedToolOutputsResult,
 	type PruneHistoricalToolOutputsOptions,
+	pruneHistoricalToolOutputs,
 } from "../../runtime/compaction/engine.ts";
 import type {
 	AgentMessage,
@@ -374,7 +374,7 @@ export function microCompactMessages(messages: Message[]): CompactionResult {
 }
 
 export {
-	pruneHistoricalToolOutputs,
 	type PrunedToolOutputsResult,
 	type PruneHistoricalToolOutputsOptions,
+	pruneHistoricalToolOutputs,
 };

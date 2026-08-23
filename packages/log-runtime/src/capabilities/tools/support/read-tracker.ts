@@ -52,9 +52,7 @@ export function isStaleSinceRead(absolutePath: string): boolean {
 	if (recorded === undefined) return false;
 	try {
 		const info = statSync(absolutePath);
-		return (
-			info.mtimeMs !== recorded.mtimeMs || info.size !== recorded.size
-		);
+		return info.mtimeMs !== recorded.mtimeMs || info.size !== recorded.size;
 	} catch (_e: unknown) {
 		return false;
 	}

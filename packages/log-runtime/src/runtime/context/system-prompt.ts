@@ -274,7 +274,10 @@ Workflow:
 /**
  * Builds the dynamic runtime context (working directory, date) appended after the static prefix.
  */
-export function buildDynamicSystemContext(options: { cwd: string; date?: string }): string {
+export function buildDynamicSystemContext(options: {
+	cwd: string;
+	date?: string;
+}): string {
 	const promptCwd = options.cwd.replace(/\\/g, "/");
 	const now = new Date();
 	const date =

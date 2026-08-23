@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { constants, access as fsAccess } from "node:fs/promises";
 
 import type { Tool, ToolResult } from "@logician/log-core";
-import { defaultPersistentTerminalManager } from "./support/utils/terminal-pool.ts";
+import { defaultTaskManager } from "./support/utils/background-task-registry.ts";
 import {
 	getShellConfig,
 	getShellEnv,
@@ -14,7 +14,7 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "./support/utils/shell.ts";
-import { defaultTaskManager } from "./support/utils/background-task-registry.ts";
+import { defaultPersistentTerminalManager } from "./support/utils/terminal-pool.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

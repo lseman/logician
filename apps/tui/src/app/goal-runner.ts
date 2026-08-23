@@ -5,8 +5,8 @@
 
 import {
 	type AgentRuntime,
-	GoalTracker,
 	type GoalState,
+	GoalTracker,
 } from "@logician/log-runtime/application";
 import type { Transcript } from "@logician/log-runtime/sessions";
 import type { TranscriptDisplay } from "../rendering/transcript/display.ts";

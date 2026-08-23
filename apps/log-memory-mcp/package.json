@@ -9,7 +9,7 @@
 	},
 	"scripts": {
 		"start": "bun run src/index.ts",
-		"test": "bun test src",
+		"test": "find src -name '*.test.ts' -type f -print0 | xargs -0 -r bun test",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

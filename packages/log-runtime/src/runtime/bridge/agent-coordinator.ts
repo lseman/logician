@@ -1,13 +1,13 @@
 /** Coordinates optional reasoners, subagents, and heuristic evolution. */
 
+import type { LLMBackend, Tool } from "@logician/log-core";
+import type { AgentSession } from "@logician/log-core/harness";
+import type { RuntimeEvent } from "@logician/log-protocol";
 import {
 	get_reasoner,
 	getReasonerMeta,
 	type ReasonerConfig,
 } from "../../capabilities/reasoning/index.ts";
-import type { LLMBackend, Tool } from "@logician/log-core";
-import type { AgentSession } from "@logician/log-core/harness";
-import type { RuntimeEvent } from "@logician/log-protocol";
 import { EohController } from "../eoh/controller.ts";
 import { SubagentCoordinator } from "../subagent-coordinator.ts";
 

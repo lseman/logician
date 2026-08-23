@@ -1,5 +1,5 @@
-import type { Message } from "../../system/types/types-messages.ts";
 import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
+import type { Message } from "../../system/types/types-messages.ts";
 
 export interface StopPolicyContext {
 	/** Full active transcript, including the system message. */

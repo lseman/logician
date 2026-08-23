@@ -23,7 +23,12 @@ import {
 	retrieve,
 } from "./context-injection.ts";
 import { dedupCheck, dedupRecord } from "./dedup.ts";
-import { hasEmbedding, searchEmbeddings, upsertEmbedding } from "./embeddings.ts";
+import {
+	hasEmbedding,
+	searchEmbeddings,
+	upsertEmbedding,
+} from "./embeddings.ts";
+import { exportData, importData } from "./export-import.ts";
 import {
 	claimExtractionJob,
 	completeExtractionJob,
@@ -32,15 +37,11 @@ import {
 	listExtractionJobs,
 	renewExtractionJob,
 } from "./extraction-queue.ts";
-import { exportData, importData } from "./export-import.ts";
-import { getFileContext, getFilesContext, rebuildFileIndex } from "./file-context-index.ts";
 import {
-	evolve,
-	getRelatedMemories,
-	getRelations,
-	relate,
-	removeRelation,
-} from "./memory-relations.ts";
+	getFileContext,
+	getFilesContext,
+	rebuildFileIndex,
+} from "./file-context-index.ts";
 import {
 	clearMemories,
 	create,
@@ -51,6 +52,13 @@ import {
 	recall,
 	update,
 } from "./memories.ts";
+import {
+	evolve,
+	getRelatedMemories,
+	getRelations,
+	relate,
+	removeRelation,
+} from "./memory-relations.ts";
 import { normalizeWorkspacePath } from "./module-helpers.ts";
 import {
 	clearObservations,
@@ -63,7 +71,11 @@ import {
 	promoteClaim,
 	searchObservations,
 } from "./observations.ts";
-import { computeRetentionScore, listByRetentionScore, rescoreAll } from "./retention-scoring.ts";
+import {
+	computeRetentionScore,
+	listByRetentionScore,
+	rescoreAll,
+} from "./retention-scoring.ts";
 import { initMemoryStoreSchema } from "./schema.ts";
 import {
 	clearSessions,
@@ -132,11 +144,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		getSession: id => getSession(db, id),
 		listSessions: query => listSessions(db, getWorkspace, query),
 		updateSession: (id, updates) => updateSession(db, id, updates),
-		clearSessions: keepSessionId => clearSessions(db, getWorkspace, keepSessionId),
+		clearSessions: keepSessionId =>
+			clearSessions(db, getWorkspace, keepSessionId),
 		discardEmptySession: id => discardEmptySession(db, id),
 		observe: (raw, compressed) => observe(db, getWorkspace, raw, compressed),
 		getObservation: (id, sessionId) => getObservation(db, id, sessionId),
-		listObservations: (sessionId, limit) => listObservations(db, sessionId, limit),
+		listObservations: (sessionId, limit) =>
+			listObservations(db, sessionId, limit),
 		listRecentObservations: (limit, type) =>
 			listRecentObservations(db, getWorkspace, limit, type),
 		listClaims: options => listClaims(db, getWorkspace, options),
@@ -157,7 +171,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		consolidate: sessionId => consolidate(db, getWorkspace, sessionId),
 		enqueueExtractionJob: (sessionId, workspace, payload) =>
 			enqueueExtractionJob(db, sessionId, workspace, payload),
-		claimExtractionJob: leaseMs => claimExtractionJob(db, getWorkspace, leaseMs),
+		claimExtractionJob: leaseMs =>
+			claimExtractionJob(db, getWorkspace, leaseMs),
 		renewExtractionJob: (id, leaseMs) => renewExtractionJob(db, id, leaseMs),
 		completeExtractionJob: id => completeExtractionJob(db, id),
 		failExtractionJob: (id, error, retryDelayMs) =>
@@ -168,12 +183,14 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		retrieve: (sessionId, budget, query) =>
 			retrieve(db, getWorkspace, sessionId, budget, query),
 		listRetrievalTraces: limit => listRetrievalTraces(db, getWorkspace, limit),
-		recordOutcomeReceipt: input => recordOutcomeReceipt(db, getWorkspace, input),
+		recordOutcomeReceipt: input =>
+			recordOutcomeReceipt(db, getWorkspace, input),
 		listOutcomeReceipts: limit => listOutcomeReceipts(db, getWorkspace, limit),
 		getShadowPolicy: () => getShadowPolicy(db, getWorkspace),
 		upsertEmbedding: (id, kind, vector, sessionId, metadata) =>
 			upsertEmbedding(db, getWorkspace, id, kind, vector, sessionId, metadata),
-		hasEmbedding: (id, metadata) => hasEmbedding(db, getWorkspace, id, metadata),
+		hasEmbedding: (id, metadata) =>
+			hasEmbedding(db, getWorkspace, id, metadata),
 		searchEmbeddings: (vector, limit) =>
 			searchEmbeddings(db, getWorkspace, vector, limit),
 		setCurrentSessionId,
@@ -196,7 +213,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		getAccessStats: entityId => getAccessStats(db, getWorkspace, entityId),
 
 		// Working Memory Tiers
-		getWorkingMemoryTier: entityId => getWorkingMemoryTier(db, getWorkspace, entityId),
+		getWorkingMemoryTier: entityId =>
+			getWorkingMemoryTier(db, getWorkspace, entityId),
 		setWorkingMemoryTier: (entityId, tier) =>
 			setWorkingMemoryTier(db, getWorkspace, entityId, tier),
 		autoTierMemories: config => autoTierMemories(db, getWorkspace, config),

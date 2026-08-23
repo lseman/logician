@@ -1,4 +1,3 @@
-import type { ReasonerConfig } from "../../capabilities/reasoning/index.ts";
 import type {
 	AgentConfig,
 	AgentModelConfig,
@@ -11,6 +10,7 @@ import type {
 	PermissionRules,
 } from "@logician/log-core/permissions";
 import type { AgentProtocolNotification } from "@logician/log-protocol";
+import type { ReasonerConfig } from "../../capabilities/reasoning/index.ts";
 
 export type ProtocolCallback = (
 	notification: AgentProtocolNotification,

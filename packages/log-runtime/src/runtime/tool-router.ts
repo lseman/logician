@@ -14,6 +14,11 @@ import type { Tool } from "@logician/log-core";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import type { RuntimeEvent } from "@logician/log-protocol";
 import { runPluginBackend } from "../adapters/claude-code/plugin-runtime.ts";
+import {
+	McpServerRegistry,
+	type McpSnapshotResult,
+	type McpToggleResult,
+} from "../capabilities/mcp/mcp-server-registry.ts";
 import { loadPrompts, type Prompt } from "../capabilities/prompts/loader.ts";
 import {
 	formatSkillCatalog,
@@ -29,11 +34,6 @@ import {
 	setDefaultSandboxProfile,
 } from "../capabilities/tools/sandbox.ts";
 import { resolveWebSearchConfig } from "./bridge/environment.ts";
-import {
-	McpServerRegistry,
-	type McpSnapshotResult,
-	type McpToggleResult,
-} from "../capabilities/mcp/mcp-server-registry.ts";
 import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,

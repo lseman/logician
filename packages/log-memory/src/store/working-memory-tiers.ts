@@ -11,9 +11,7 @@ export function getWorkingMemoryTier(
 	entityId: string,
 ): WorkingMemoryTier {
 	const row = db
-		.prepare(
-			"SELECT working_tier FROM memories WHERE id = ? AND workspace = ?",
-		)
+		.prepare("SELECT working_tier FROM memories WHERE id = ? AND workspace = ?")
 		.get(entityId, getWorkspace()) as { working_tier: string } | undefined;
 	return (row?.working_tier as WorkingMemoryTier) || "cold";
 }

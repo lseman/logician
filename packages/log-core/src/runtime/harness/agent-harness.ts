@@ -4,24 +4,6 @@
 // nextTurn queues drained at save points.
 //
 
-import type { CompactionSettings } from "../compaction/engine.ts";
-import {
-	runCompaction,
-	shouldAutoCompact,
-} from "../compaction/orchestration.ts";
-import { validateAgentConfig } from "../../control/configuration/config-validator.ts";
-import { ConfigurationStore } from "../../control/configuration/configuration-store.ts";
-import { ContextEngine } from "../../system/context/context-engine.ts";
-import {
-	createSteeringInterruptReason,
-	type RunAgentLoopConfig,
-	runAgentLoop,
-} from "../execution/agent-loop-runner.ts";
-import type { ExtensionRunner } from "../../system/extension/runner.ts";
-import { LoopDetector } from "../../control/guards/loop-detector.ts";
-import { OutputGuard } from "../../control/guards/output-guard.ts";
-import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
-import { AgentRunController } from "../../control/policy/run-controller.ts";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import {
 	createUserMessage,
@@ -33,14 +15,19 @@ import type {
 	BranchSummaryData,
 } from "../../capabilities/session/summaries/types.ts";
 import type { ThreadItem } from "../../capabilities/session/thread-ledger.ts";
-import {
-	type AgentRuntimeState,
-	createRuntimeState,
-	type HarnessPhase,
-	reduceRuntimeState,
-} from "../state/runtime-state.ts";
 import { ToolRegistry } from "../../capabilities/tools/registry.ts";
-import type { AgentConfig, QueueMode } from "../../system/types/types-config.ts";
+import { validateAgentConfig } from "../../control/configuration/config-validator.ts";
+import { ConfigurationStore } from "../../control/configuration/configuration-store.ts";
+import { LoopDetector } from "../../control/guards/loop-detector.ts";
+import { OutputGuard } from "../../control/guards/output-guard.ts";
+import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
+import { AgentRunController } from "../../control/policy/run-controller.ts";
+import { ContextEngine } from "../../system/context/context-engine.ts";
+import type { ExtensionRunner } from "../../system/extension/runner.ts";
+import type {
+	AgentConfig,
+	QueueMode,
+} from "../../system/types/types-config.ts";
 import type {
 	AgentEvent,
 	AgentHooks,
@@ -49,6 +36,22 @@ import type {
 	Message,
 	Tool,
 } from "../../system/types/types-messages.ts";
+import type { CompactionSettings } from "../compaction/engine.ts";
+import {
+	runCompaction,
+	shouldAutoCompact,
+} from "../compaction/orchestration.ts";
+import {
+	createSteeringInterruptReason,
+	type RunAgentLoopConfig,
+	runAgentLoop,
+} from "../execution/agent-loop-runner.ts";
+import {
+	type AgentRuntimeState,
+	createRuntimeState,
+	type HarnessPhase,
+	reduceRuntimeState,
+} from "../state/runtime-state.ts";
 import {
 	composeHarnessConfig,
 	HarnessConfigurationError,

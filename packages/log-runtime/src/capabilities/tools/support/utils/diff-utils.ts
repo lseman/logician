@@ -194,17 +194,28 @@ export interface EditDiffResult {
 	firstChangedLine: number | undefined;
 }
 
-/** Generate a unified diff string with first-line tracking. */
-export function generateDiffString(
+/**
+ * Generate the display diff and the unified patch from a single LCS pass.
+ * Both formats are derived from the same before/after pair on every
+ * edit_file call, so computing diffOps once and rendering it twice avoids
+ * doubling the O(a*b) LCS cost for no benefit.
+ */
+export function generateEditDiffs(
+	filePath: string,
 	before: string,
 	after: string,
-): EditDiffResult {
+): EditDiffResult & { patch: string } {
 	if (before === after) {
-		return { diff: "", firstChangedLine: undefined };
+		return { diff: "", firstChangedLine: undefined, patch: "" };
 	}
 
 	const ops = diffOps(before.split("\n"), after.split("\n"));
 	const diff = renderUnified("a/edit", "b/edit", ops);
+	const patch = renderUnified(
+		`a/${path.basename(filePath)}`,
+		`b/${path.basename(filePath)}`,
+		ops,
+	);
 
 	// First changed line, numbered in the AFTER content.
 	let firstChangedLine: number | undefined;
@@ -217,17 +228,7 @@ export function generateDiffString(
 		newLine++;
 	}
 
-	return { diff, firstChangedLine };
-}
-
-/** Generate a unified patch format string. */
-export function generateUnifiedPatch(
-	filePath: string,
-	before: string,
-	after: string,
-): string {
-	if (before === after) return "";
-	return syntheticUnifiedDiff(filePath, before, after);
+	return { diff, firstChangedLine, patch };
 }
 
 /** Generate a unified diff between two file states (multi-hunk, 3 context lines). */

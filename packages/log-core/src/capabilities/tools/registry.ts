@@ -7,7 +7,6 @@
 
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { ToolResultCache } from "./tool-result-cache.ts";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AskUserContext,
@@ -19,6 +18,7 @@ import type {
 import { withTimeout } from "./internal/async.ts";
 import { parseToolInput } from "./internal/parser.ts";
 import { normalizeProviderToolSchema } from "./provider-schema.ts";
+import { ToolResultCache } from "./tool-result-cache.ts";
 
 /** Default cap on tool execution time. Tools can override via timeoutMs. */
 const DEFAULT_TOOL_TIMEOUT_MS = 600_000;
@@ -53,11 +53,13 @@ function truncateResultMiddle(text: string, maxChars: number): string {
 
 /** Common OS error codes translated into an actionable next step for the model. */
 const ERROR_CODE_HINTS: Record<string, string> = {
-	ENOENT: "the path doesn't exist — double-check it, e.g. with list_files or find.",
+	ENOENT:
+		"the path doesn't exist — double-check it, e.g. with list_files or find.",
 	EACCES: "permission denied — check the path is within an allowed directory.",
 	EISDIR: "that path is a directory, not a file.",
 	ENOTDIR: "a parent segment of that path is a file, not a directory.",
-	ETIMEDOUT: "the operation timed out — retry, or narrow the scope of the request.",
+	ETIMEDOUT:
+		"the operation timed out — retry, or narrow the scope of the request.",
 	ABORT_ERR: "the operation was aborted.",
 };
 
@@ -209,9 +211,7 @@ export class ToolRegistry {
 		const matches = this.deferredTools().filter(tool => {
 			const haystack =
 				`${tool.name} ${tool.label ?? ""} ${tool.description}`.toLowerCase();
-			return (
-				terms.length === 0 || terms.some(term => haystack.includes(term))
-			);
+			return terms.length === 0 || terms.some(term => haystack.includes(term));
 		});
 		for (const tool of matches) this.resolvedDeferred.add(tool.name);
 		return matches;

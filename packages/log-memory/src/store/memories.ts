@@ -11,8 +11,17 @@ import type {
 	WorkingMemoryTier,
 } from "../types.js";
 import { safeParseJsonArray } from "./db-helpers.ts";
-import { generateId, normalizeWorkspacePath, now, toFtsQuery } from "./module-helpers.ts";
-import { assignStrength, extractConcepts, extractFiles } from "./text-helpers.ts";
+import {
+	generateId,
+	normalizeWorkspacePath,
+	now,
+	toFtsQuery,
+} from "./module-helpers.ts";
+import {
+	assignStrength,
+	extractConcepts,
+	extractFiles,
+} from "./text-helpers.ts";
 
 export function rowToMemory(row: any): Memory {
 	return {
@@ -144,9 +153,7 @@ export function list(
 	getWorkspace: () => string,
 	query: MemoryQuery = {},
 ): Memory[] {
-	const workspace = normalizeWorkspacePath(
-		query.workspace || getWorkspace(),
-	);
+	const workspace = normalizeWorkspacePath(query.workspace || getWorkspace());
 	const conditions: string[] = [];
 	const params: any[] = [];
 	const ftsQuery = query.search ? toFtsQuery(query.search) : "";
@@ -238,7 +245,10 @@ export function deleteEntry(
 	return result.changes > 0;
 }
 
-export function clearMemories(db: Database, getWorkspace: () => string): number {
+export function clearMemories(
+	db: Database,
+	getWorkspace: () => string,
+): number {
 	const workspace = getWorkspace();
 	const ids = db
 		.prepare("SELECT id FROM memories WHERE workspace = ?")

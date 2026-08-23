@@ -16,9 +16,7 @@ export function createSession(
 	const sessionCwd = data.cwd
 		? normalizeWorkspacePath(data.cwd)
 		: getWorkspace();
-	const sessionWorkspace = normalizeWorkspacePath(
-		data.workspace || sessionCwd,
-	);
+	const sessionWorkspace = normalizeWorkspacePath(data.workspace || sessionCwd);
 	db.prepare(
 		`
       INSERT OR IGNORE INTO sessions (id, name, project, cwd, workspace, started_at, status, observation_count,
@@ -56,9 +54,7 @@ export function createSession(
 }
 
 export function getSession(db: Database, id: string): Session | null {
-	const row = db
-		.prepare(`SELECT * FROM sessions WHERE id = ?`)
-		.get(id) as any;
+	const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as any;
 	if (!row) return null;
 	return {
 		id: row.id,

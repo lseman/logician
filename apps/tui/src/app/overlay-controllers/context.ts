@@ -1,6 +1,6 @@
+import type { AutoresearchSession } from "@logician/log-autoresearch";
 import type { AgentRuntime } from "@logician/log-runtime/application";
 import type { Transcript } from "@logician/log-runtime/sessions";
-import type { AutoresearchSession } from "@logician/log-autoresearch";
 import type { InputBar } from "../../input/input-bar.ts";
 import type { AutoresearchDashboardOverlay } from "../../overlays/autoresearch-dashboard.ts";
 import type { FileMentionPopup } from "../../overlays/file-mention-popup.ts";

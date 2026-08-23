@@ -149,9 +149,7 @@ export function renderTool(
 					)?.[1]
 				: undefined);
 		if (!path) return "";
-		if (
-			["write_file", "write_file_append", "edit_file"].includes(tool.tool_name)
-		) {
+		if (tool.tool_name === "write_file" || tool.tool_name === "edit_file") {
 			return path;
 		}
 		return "";
@@ -352,10 +350,7 @@ export function getSanitizationMetrics(ctx: RenderCtx): {
 }
 
 export function collapsedToolPreview(tool: ToolExecution): string {
-	if (
-		tool.tool_name === "write_file" ||
-		tool.tool_name === "write_file_append"
-	) {
+	if (tool.tool_name === "write_file") {
 		return "";
 	}
 	const raw = tool.streamOutput || tool.result || "";
@@ -411,17 +406,18 @@ export function detailSectionFile(path: string): string {
 	return `${theme.fg("active", "── ")}${BOLD}FILE${RESET}  ${hyperlinkedFilePath(path, `${DIM}${path}${RESET}`)}`;
 }
 
+function isAppendMode(tool: ToolExecution): boolean {
+	const args = tool.args || {};
+	return Boolean(args.append);
+}
+
 export function toolSummary(tool: ToolExecution): string {
 	const args = tool.args || {};
 	const path = stringArg(args, "path") || stringArg(args, "file_path");
-	if (
-		tool.tool_name === "write_file" ||
-		tool.tool_name === "write_file_append"
-	) {
+	if (tool.tool_name === "write_file") {
 		const content = writeFileContent(tool) || "";
 		const lineCount = content ? content.split("\n").length : 0;
-		const verb =
-			tool.tool_name === "write_file_append" ? "appended" : "written";
+		const verb = isAppendMode(tool) ? "appended" : "written";
 		return `${lineCount} line${lineCount === 1 ? "" : "s"} ${verb}${
 			tool.isComplete ? "" : " so far"
 		}`;
@@ -478,10 +474,7 @@ export function toolDetailLines(
 		return lines;
 	}
 
-	if (
-		tool.tool_name === "write_file" ||
-		tool.tool_name === "write_file_append"
-	) {
+	if (tool.tool_name === "write_file") {
 		lines.push(...renderWriteDetails(ctx, tool, width, expanded));
 	} else if (tool.tool_name === "edit_file") {
 		lines.push(...renderEditDetails(ctx, tool, width, expanded));
@@ -501,13 +494,9 @@ export function toolDetailLines(
 
 	if (
 		result &&
-		![
-			"write_file",
-			"write_file_append",
-			"edit_file",
-			"file_diff",
-			"bash",
-		].includes(tool.tool_name) &&
+		!["write_file", "edit_file", "file_diff", "bash"].includes(
+			tool.tool_name,
+		) &&
 		!tool.tool_name.startsWith("mcp__")
 	) {
 		lines.push(detailSection(tool.isError ? "error" : "result"));

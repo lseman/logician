@@ -2,7 +2,13 @@
 // Pi-style loop contract for Logician's current backend/tool adapter:
 // context + prompts + config + emit => new messages.
 
-import { compactToFit } from "../compaction/engine.ts";
+import {
+	createSystemMessage,
+	convertToLlm as defaultConvertToLlm,
+	estimateChatPayloadTokens,
+} from "../../capabilities/provider/messages.ts";
+import { ToolRegistry } from "../../capabilities/tools/registry.ts";
+import { ToolResultCache } from "../../capabilities/tools/tool-result-cache.ts";
 import { resolveAgentSettings } from "../../control/configuration/agent-settings.ts";
 import {
 	evaluateAcceptanceReport,
@@ -13,6 +19,25 @@ import {
 	shouldRunAcceptanceFinalization,
 	verifyAcceptanceCommands,
 } from "../../control/guards/acceptance-contract.ts";
+import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
+import { checkBudget } from "../../control/policy/exit-path.ts";
+import {
+	HarnessInterventionController,
+	type InterventionInput,
+} from "../../control/policy/intervention-controller.ts";
+import { RunBudgetController } from "../../control/policy/run-budget.ts";
+import { AgentRunController } from "../../control/policy/run-controller.ts";
+import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
+import type { RunBudgetDecision } from "../../system/types/run-budget.ts";
+import type {
+	AgentEventSink,
+	AgentMessage,
+	CompactableMessage,
+	Message,
+	Tool,
+	ToolCall,
+} from "../../system/types/types-messages.ts";
+import { compactToFit } from "../compaction/engine.ts";
 import {
 	isToolFailureResult,
 	taskObjectiveFromMessages,
@@ -30,31 +55,6 @@ import {
 	createProviderTurnState,
 	requestAssistantTurn,
 } from "../loop/provider-turn.ts";
-import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
-import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
-import { checkBudget } from "../../control/policy/exit-path.ts";
-import {
-	HarnessInterventionController,
-	type InterventionInput,
-} from "../../control/policy/intervention-controller.ts";
-import { RunBudgetController } from "../../control/policy/run-budget.ts";
-import type { RunBudgetDecision } from "../../system/types/run-budget.ts";
-import { AgentRunController } from "../../control/policy/run-controller.ts";
-import {
-	createSystemMessage,
-	convertToLlm as defaultConvertToLlm,
-	estimateChatPayloadTokens,
-} from "../../capabilities/provider/messages.ts";
-import { ToolResultCache } from "../../capabilities/tools/tool-result-cache.ts";
-import { ToolRegistry } from "../../capabilities/tools/registry.ts";
-import type {
-	AgentEventSink,
-	AgentMessage,
-	CompactableMessage,
-	Message,
-	Tool,
-	ToolCall,
-} from "../../system/types/types-messages.ts";
 import { executeToolBatch } from "./tool-batch-controller.ts";
 
 // A steering interrupt cancels the in-flight provider call to redirect the

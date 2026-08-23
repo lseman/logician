@@ -3,8 +3,8 @@
  * current workspace scope. */
 
 import type { Database } from "bun:sqlite";
-import { getSession } from "./sessions.ts";
 import { normalizeWorkspacePath } from "./module-helpers.ts";
+import { getSession } from "./sessions.ts";
 
 export function slidingWindowCap(
 	db: Database,
@@ -13,10 +13,7 @@ export function slidingWindowCap(
 	cap: number = 200,
 ): number {
 	const session = getSession(db, sessionId);
-	if (
-		!session ||
-		normalizeWorkspacePath(session.workspace) !== getWorkspace()
-	)
+	if (!session || normalizeWorkspacePath(session.workspace) !== getWorkspace())
 		return 0;
 	const excess = db
 		.prepare(

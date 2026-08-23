@@ -31,13 +31,13 @@ import { ensureParentDir } from "./paths.ts";
 import { populationStats } from "./population.ts";
 import {
 	createEohState,
+	type EohState,
 	eohJsonlPath,
 	eohPromptPath,
-	type EohState,
 	reconstructState,
 } from "./state-reconstruction.ts";
 
-export type { NotifyLevel, NotifyFn } from "./dashboard-server.ts";
+export type { NotifyFn, NotifyLevel } from "./dashboard-server.ts";
 
 interface EohRunResult {
 	thought: string;
@@ -386,7 +386,7 @@ export class EohSession {
 
 	/** Run one generation of evolution: apply all 5 operators, evaluate, select next population. */
 	async runGeneration(
-		params: Record<string, unknown> = {},
+		_params: Record<string, unknown> = {},
 	): Promise<EohResult> {
 		const workDir = this.getWorkDir();
 		const state = this.runtime.state;

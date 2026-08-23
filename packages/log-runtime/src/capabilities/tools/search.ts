@@ -10,7 +10,11 @@ import { createInterface } from "node:readline";
 import type { Tool, ToolResult } from "@logician/log-core";
 import { ensureTool } from "./external-tools.ts";
 import { ensureInsideCwd, resolvePath } from "./support/utils/path-utils.ts";
-import { formatSize, truncateHead, truncateLine } from "./support/utils/truncate.ts";
+import {
+	formatSize,
+	truncateHead,
+	truncateLine,
+} from "./support/utils/truncate.ts";
 
 const grepSchema = {
 	type: "object",

@@ -13,7 +13,6 @@
  * The runner decides how to handle failures (return finish vs continue).
  */
 
-import type { OutputGuard } from "../../control/guards/output-guard.ts";
 import type { LLMResponse } from "../../capabilities/provider/backend.ts";
 import {
 	createAssistantMessage,
@@ -24,6 +23,7 @@ import {
 	stripTextToolCalls,
 } from "../../capabilities/provider/text-tool-calls.ts";
 import type { ToolRegistry } from "../../capabilities/tools/registry.ts";
+import type { OutputGuard } from "../../control/guards/output-guard.ts";
 import type {
 	AgentEventSink,
 	AgentMessage,

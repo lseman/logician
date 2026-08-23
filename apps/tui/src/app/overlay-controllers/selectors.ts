@@ -1,13 +1,13 @@
 // ── Selector and file-mention controllers ──────────────────────────────────
 
+import type { ThinkingLevel } from "@logician/log-core";
+import { saveConfigField } from "@logician/log-runtime/configuration";
+import { listProjectFiles } from "@logician/log-runtime/context";
 import {
 	getReasonerIds,
 	getReasonerMeta,
 	type ReasonerMeta,
 } from "@logician/log-runtime/reasoning";
-import type { ThinkingLevel } from "@logician/log-core";
-import { saveConfigField } from "@logician/log-runtime/configuration";
-import { listProjectFiles } from "@logician/log-runtime/context";
 import type {
 	InferenceModeInfo,
 	InferenceModeSelectorAction,

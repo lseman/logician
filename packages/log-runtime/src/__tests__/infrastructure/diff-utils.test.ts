@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
-	generateDiffString,
+	generateEditDiffs,
 	syntheticUnifiedDiff,
 } from "../../capabilities/tools/support/utils/diff-utils.ts";
 
@@ -17,7 +17,7 @@ void test("disjoint edits produce separate hunks, untouched lines stay context",
 		.replace("line 2 old", "line 2 new")
 		.replace("line 33 old", "line 33 new");
 
-	const { diff, firstChangedLine } = generateDiffString(before, after);
+	const { diff, firstChangedLine } = generateEditDiffs("edit", before, after);
 
 	assert.equal(firstChangedLine, 2);
 	// Two hunks — the untouched middle must not appear at all.
@@ -40,7 +40,7 @@ void test("replaceAll-style scattered changes never mark untouched lines removed
 	).join("\n");
 	const after = before.replaceAll("foo", "bar");
 
-	const { diff } = generateDiffString(before, after);
+	const { diff } = generateEditDiffs("edit", before, after);
 	const removed = diff
 		.split("\n")
 		.filter(l => l.startsWith("-") && !l.startsWith("---"));
@@ -51,7 +51,7 @@ void test("replaceAll-style scattered changes never mark untouched lines removed
 void test("hunk headers carry correct line numbers", () => {
 	const before = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj";
 	const after = "a\nb\nc\nd\nE\nf\ng\nh\ni\nj";
-	const { diff } = generateDiffString(before, after);
+	const { diff } = generateEditDiffs("edit", before, after);
 	assert.match(diff, /@@ -2,7 \+2,7 @@/);
 });
 
@@ -63,7 +63,11 @@ void test("new-file diff is all additions from /dev/null", () => {
 });
 
 void test("identical content yields empty diff", () => {
-	const { diff, firstChangedLine } = generateDiffString("same\n", "same\n");
+	const { diff, firstChangedLine } = generateEditDiffs(
+		"edit",
+		"same\n",
+		"same\n",
+	);
 	assert.equal(diff, "");
 	assert.equal(firstChangedLine, undefined);
 });

@@ -6,7 +6,6 @@
 // createHooks() once at construction.
 
 import type { AgentConfig, OpenAIBackend } from "@logician/log-core";
-import type { RuntimeEvent } from "@logician/log-protocol";
 import {
 	createMemoryHooks,
 	createMemoryStore,
@@ -15,6 +14,7 @@ import {
 	setSessionId,
 	startViewerServer,
 } from "@logician/log-memory";
+import type { RuntimeEvent } from "@logician/log-protocol";
 
 export interface MemoryManagerOptions {
 	memoryEnabled?: boolean;

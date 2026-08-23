@@ -2,7 +2,7 @@
 // Maintains long-lived interactive shell sessions so that environment variables,
 // working directory changes, and shell functions persist across tool calls.
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
 	getShellConfig,
@@ -11,13 +11,7 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "./shell.ts";
-import {
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
-	OutputAccumulator,
-	type OutputSnapshot,
-	type TruncationResult,
-} from "./truncate.ts";
+import { OutputAccumulator } from "./truncate.ts";
 
 export interface PersistentTerminalSession {
 	id: string;
@@ -45,12 +39,13 @@ export class TerminalPool {
 		return this.terminals.get(id);
 	}
 
-	getOrCreate(
-		id = "default",
-		cwd?: string,
-	): PersistentTerminalSession {
+	getOrCreate(id = "default", cwd?: string): PersistentTerminalSession {
 		const existing = this.terminals.get(id);
-		if (existing && !existing.child.killed && existing.child.exitCode === null) {
+		if (
+			existing &&
+			!existing.child.killed &&
+			existing.child.exitCode === null
+		) {
 			return existing;
 		}
 
@@ -130,7 +125,7 @@ export class TerminalPool {
 		return new Promise<PersistentExecutionResult>(resolve => {
 			let settled = false;
 			let timeoutHandle: NodeJS.Timeout | undefined;
-			let timedOut = false;
+			let _timedOut = false;
 
 			const cleanup = () => {
 				session.busy = false;
@@ -193,7 +188,7 @@ export class TerminalPool {
 
 			if (options.timeout && options.timeout > 0) {
 				timeoutHandle = setTimeout(() => {
-					timedOut = true;
+					_timedOut = true;
 					try {
 						session.child.stdin?.write("\x03\n");
 					} catch {
@@ -297,5 +292,4 @@ export class TerminalPool {
 }
 
 /** Global default TerminalPool instance. */
-export const defaultPersistentTerminalManager =
-	new TerminalPool();
+export const defaultPersistentTerminalManager = new TerminalPool();

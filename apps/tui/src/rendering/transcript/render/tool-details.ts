@@ -37,7 +37,7 @@ export function renderWriteDetails(
 		streamedStringArg(tool.partialResult, "file_path");
 	const content = writeFileContent(tool);
 	const streaming = !tool.isComplete;
-	const appending = tool.tool_name === "write_file_append";
+	const appending = Boolean(args.append);
 
 	if (path) lines.push(detailSectionFile(path));
 

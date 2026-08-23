@@ -45,7 +45,7 @@ const baseConfig: AgentConfig = {
 	tools: [],
 };
 
-function report(status: "satisfied" | "failed", answer: string): LLMResponse {
+function _report(status: "satisfied" | "failed", answer: string): LLMResponse {
 	return {
 		content: `${answer}\n\n\`\`\`acceptance-report\n{"criteriaSatisfied":[{"id":"criterion-1","status":"${status}","evidence":"checked"}]}\n\`\`\``,
 		toolCalls: [],

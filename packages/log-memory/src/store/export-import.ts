@@ -21,7 +21,10 @@ import { normalizeWorkspacePath, now } from "./module-helpers.ts";
 import { persistObservationClaims, rowToClaim } from "./observations.ts";
 import { listSessions } from "./sessions.ts";
 
-export function exportData(db: Database, getWorkspace: () => string): ExportData {
+export function exportData(
+	db: Database,
+	getWorkspace: () => string,
+): ExportData {
 	const workspace = getWorkspace();
 	const sessions = listSessions(db, getWorkspace);
 	const memories = db
@@ -397,9 +400,7 @@ export function importData(
 					normalizedScope(endpoints.source_workspace) !==
 						normalizedScope(endpoints.target_workspace)
 				) {
-					throw new Error(
-						"relation endpoints are missing or cross-workspace",
-					);
+					throw new Error("relation endpoints are missing or cross-workspace");
 				}
 				const existing = db
 					.prepare("SELECT id FROM relations WHERE id = ?")

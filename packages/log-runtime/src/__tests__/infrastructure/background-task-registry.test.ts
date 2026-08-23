@@ -12,9 +12,13 @@ void test("BackgroundTaskRegistry registers, tracks, lists and gets status of a 
 	const manager = new BackgroundTaskRegistry(logDir);
 	const { shell, args } = getShellConfig();
 
-	const child = spawn(shell, [...args, "echo 'hello task'; sleep 0.2; echo 'done task'"], {
-		stdio: ["pipe", "pipe", "pipe"],
-	});
+	const child = spawn(
+		shell,
+		[...args, "echo 'hello task'; sleep 0.2; echo 'done task'"],
+		{
+			stdio: ["pipe", "pipe", "pipe"],
+		},
+	);
 
 	const entry = manager.registerTask({
 		command: "echo 'hello task'; sleep 0.2; echo 'done task'",

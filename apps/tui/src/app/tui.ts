@@ -1,10 +1,11 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
 
+import { AutoresearchSession } from "@logician/log-autoresearch";
 import {
 	AgentRuntime,
-	GoalTracker,
 	type GoalState,
+	GoalTracker,
 	LoopRunner,
 } from "@logician/log-runtime/application";
 import { createSlashCommands } from "@logician/log-runtime/commands";
@@ -18,7 +19,6 @@ import {
 	createAutoresearchTools,
 	getVirtualEnvPythonVersion,
 } from "@logician/log-runtime/tools";
-import { AutoresearchSession } from "@logician/log-autoresearch";
 import { StatusBar } from "../footer/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";
@@ -77,7 +77,7 @@ import {
 	type NotificationLevel,
 } from "../status/notification-center.ts";
 import { ResearchWidget } from "../status/research-widget.ts";
-import { type SteerQueueAction, SteerQueue } from "../status/steer-queue.ts";
+import { SteerQueue, type SteerQueueAction } from "../status/steer-queue.ts";
 import { TodoBar } from "../status/todo-bar.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { Container, TUI } from "../terminal/core.ts";
@@ -553,7 +553,7 @@ export class LogicianTUI {
 		pinnedContainer.addChild(this.researchWidget);
 		pinnedContainer.addChild(this.steerQueue);
 		this.steerQueue.setCallbacks({
-			onAction: (action) => this.handleSteerQueueAction(action),
+			onAction: action => this.handleSteerQueueAction(action),
 		});
 
 		// Interactive pickers join the fixed composer stack. They consume layout

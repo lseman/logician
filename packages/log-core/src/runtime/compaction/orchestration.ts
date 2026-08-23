@@ -8,7 +8,10 @@ import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import { estimateChatPayloadTokens } from "../../capabilities/provider/messages.ts";
 import { generateCompactionSummary } from "../../capabilities/session/summaries/summary-generation.ts";
 import type { ThinkingLevel } from "../../system/types/types-config.ts";
-import type { CompactableMessage, Message } from "../../system/types/types-messages.ts";
+import type {
+	CompactableMessage,
+	Message,
+} from "../../system/types/types-messages.ts";
 import { type CompactionSettings, compactToFit } from "./engine.ts";
 
 export interface CompactionOutcome {

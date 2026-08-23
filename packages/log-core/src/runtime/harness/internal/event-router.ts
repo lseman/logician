@@ -1,8 +1,8 @@
+import type { ExtensionRunner } from "../../../system/extension/runner.ts";
 import {
 	isExtensionLifecycleEvent,
 	type RuntimeEvent,
 } from "../../events/contracts.ts";
-import type { ExtensionRunner } from "../../../system/extension/runner.ts";
 
 export interface HarnessEventRouterDeps {
 	reduce(event: RuntimeEvent): void;

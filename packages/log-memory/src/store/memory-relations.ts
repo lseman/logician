@@ -4,8 +4,8 @@
 
 import type { Database } from "bun:sqlite";
 import type { Memory, MemoryRelation, MemoryRelationType } from "../types.js";
-import { generateId, now } from "./module-helpers.ts";
 import { get, rowToMemory } from "./memories.ts";
+import { generateId, now } from "./module-helpers.ts";
 
 export function relate(
 	db: Database,
@@ -24,10 +24,7 @@ export function relate(
 	const ts = now();
 	const clampedConf = Math.max(
 		0,
-		Math.min(
-			1,
-			confidence || computeRelationConfidence(source, target, type),
-		),
+		Math.min(1, confidence || computeRelationConfidence(source, target, type)),
 	);
 
 	db.prepare(
@@ -183,11 +180,8 @@ export function getRelatedMemories(
 		.all(workspace, workspace) as any[];
 
 	const visited = new Set<string>([memoryId]);
-	const result: Array<{ memory: Memory; hop: number; confidence: number }> =
-		[];
-	const queue: Array<{ id: string; hop: number }> = [
-		{ id: memoryId, hop: 0 },
-	];
+	const result: Array<{ memory: Memory; hop: number; confidence: number }> = [];
+	const queue: Array<{ id: string; hop: number }> = [{ id: memoryId, hop: 0 }];
 	const MAX_VISITED = 500;
 
 	while (queue.length > 0 && visited.size < MAX_VISITED) {
@@ -260,9 +254,7 @@ export function evolve(
 	// The partial unique index permits only one latest row per title, so the
 	// old row must be retired before inserting a same-title revision.
 	const applyEvolution = db.transaction(() => {
-		db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(
-			memoryId,
-		);
+		db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(memoryId);
 		db.prepare(
 			`
       INSERT INTO memories (id, created_at, updated_at, type, title, content,

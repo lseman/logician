@@ -9,7 +9,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Tool, ToolResult } from "@logician/log-core";
-import { getShellConfig, getShellEnv, killProcessTree } from "./support/utils/shell.ts";
+import {
+	getShellConfig,
+	getShellEnv,
+	killProcessTree,
+} from "./support/utils/shell.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

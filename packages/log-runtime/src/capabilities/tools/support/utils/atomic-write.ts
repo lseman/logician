@@ -4,7 +4,6 @@ import {
 	chmod,
 	lstat,
 	open,
-	readFile,
 	rename,
 	stat,
 	unlink,
@@ -21,7 +20,7 @@ export interface AtomicWriteOptions {
 }
 
 /** First 1-indexed line where two texts diverge, or null if identical. */
-function firstDifferingLine(expected: string, actual: string): number | null {
+function _firstDifferingLine(expected: string, actual: string): number | null {
 	const a = expected.split("\n");
 	const b = actual.split("\n");
 	const max = Math.max(a.length, b.length);

@@ -9,8 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { McpServerRegistry } from "../../capabilities/mcp/mcp-server-registry.ts";
 import type { McpClient } from "../../capabilities/mcp/client.ts";
+import { McpServerRegistry } from "../../capabilities/mcp/mcp-server-registry.ts";
 
 function withIsolatedMcpEnvironment(
 	run: (home: string, workspace: string) => Promise<void>,

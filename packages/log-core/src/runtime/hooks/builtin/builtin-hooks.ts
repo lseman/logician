@@ -6,14 +6,6 @@
 // the harness's single live instance.
 
 import { execFile } from "node:child_process";
-import { compactToFit } from "../../compaction/engine.ts";
-import { resetToRunCheckpoint } from "../../compaction/run-checkpoint.ts";
-import type { LoopDetector } from "../../../control/guards/loop-detector.ts";
-import { decideAutonomousContinuation } from "../../../control/policy/autonomy-policy.ts";
-import { resolveExecutionPolicy } from "../../../control/policy/execution-policy.ts";
-import { HarnessInterventionController } from "../../../control/policy/intervention-controller.ts";
-import { ProgressTracker } from "../../../control/policy/progress-tracker.ts";
-import { EMPTY_TASK_LEDGER } from "../../../system/types/task-ledger.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
@@ -24,12 +16,20 @@ import {
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
 } from "../../../capabilities/session/file-checkpoints.ts";
+import type { LoopDetector } from "../../../control/guards/loop-detector.ts";
+import { decideAutonomousContinuation } from "../../../control/policy/autonomy-policy.ts";
+import { resolveExecutionPolicy } from "../../../control/policy/execution-policy.ts";
+import { HarnessInterventionController } from "../../../control/policy/intervention-controller.ts";
+import { ProgressTracker } from "../../../control/policy/progress-tracker.ts";
+import { EMPTY_TASK_LEDGER } from "../../../system/types/task-ledger.ts";
 import type { AgentConfig } from "../../../system/types/types-config.ts";
 import type {
 	AgentHooks,
 	CompactableMessage,
 	Message,
 } from "../../../system/types/types-messages.ts";
+import { compactToFit } from "../../compaction/engine.ts";
+import { resetToRunCheckpoint } from "../../compaction/run-checkpoint.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
 // context window (higher than the post-compaction target so it fires before the

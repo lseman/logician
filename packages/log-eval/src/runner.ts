@@ -309,7 +309,10 @@ export async function runTrial(
 		// The trajectory's own reported model is ground truth for what actually
 		// ran; the settings-file snapshot only fills in what the stream didn't
 		// report (e.g. when metadata.model is absent).
-		harnessConfig: { ...harnessConfig, model: metrics.model ?? harnessConfig.model },
+		harnessConfig: {
+			...harnessConfig,
+			model: metrics.model ?? harnessConfig.model,
+		},
 		trajectoryPath: options.trajectoryPath,
 		agentOutput: `${agent.stdout}${agent.stderr}`.slice(-200_000),
 	};

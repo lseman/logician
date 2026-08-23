@@ -1,5 +1,5 @@
-import type { ConfigurationStore } from "../../../control/configuration/configuration-store.ts";
 import type { LLMBackend } from "../../../capabilities/provider/backend.ts";
+import type { ConfigurationStore } from "../../../control/configuration/configuration-store.ts";
 import type {
 	AgentConfig,
 	AgentModelConfig,

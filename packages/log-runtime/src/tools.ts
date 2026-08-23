@@ -1,9 +1,8 @@
-export { ask_user } from "./capabilities/ask-user/index.ts";
 export { stripTextToolCalls } from "@logician/log-core";
 export { parseFrontmatter } from "@logician/log-core/frontmatter";
 export {
-	PermissionPolicy,
 	type PermissionMode,
+	PermissionPolicy,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
 export { ToolRegistry } from "@logician/log-core/runtime";
@@ -14,6 +13,7 @@ export {
 	runSessionStartHooks,
 	splitPluginArgs,
 } from "./adapters/claude-code/plugin-runtime.ts";
+export { ask_user } from "./capabilities/ask-user/index.ts";
 export { createReadSkillTool } from "./capabilities/skills/read-skill-tool.ts";
 export { ariadne } from "./capabilities/tools/ariadne.ts";
 export { createAutoresearchTools } from "./capabilities/tools/autoresearch.ts";
@@ -86,4 +86,3 @@ export {
 export { web_fetch } from "./capabilities/tools/web-fetch.ts";
 export { createWebSearchTool } from "./capabilities/tools/web-search.ts";
 export { write_file } from "./capabilities/tools/write-file.ts";
-export { write_file_append } from "./capabilities/tools/write-file-append.ts";

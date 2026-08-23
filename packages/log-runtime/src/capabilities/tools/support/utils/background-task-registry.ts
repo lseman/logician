@@ -69,8 +69,7 @@ export class BackgroundTaskRegistry {
 	private baseLogDir: string;
 
 	constructor(customLogDir?: string) {
-		this.baseLogDir =
-			customLogDir ?? join(tmpdir(), "logician-tasks");
+		this.baseLogDir = customLogDir ?? join(tmpdir(), "logician-tasks");
 		if (!existsSync(this.baseLogDir)) {
 			try {
 				mkdirSync(this.baseLogDir, { recursive: true });
@@ -100,11 +99,9 @@ export class BackgroundTaskRegistry {
 		startTime?: number;
 	}): TaskEntry {
 		const id = options.id ?? this.createTaskId();
-		const logFilePath =
-			options.logFilePath ?? this.getLogPathForTask(id);
+		const logFilePath = options.logFilePath ?? this.getLogPathForTask(id);
 		const output =
-			options.output ??
-			new OutputAccumulator({ tempFilePrefix: `task-${id}` });
+			options.output ?? new OutputAccumulator({ tempFilePrefix: `task-${id}` });
 
 		let logStream: WriteStream | undefined;
 		try {
@@ -158,7 +155,11 @@ export class BackgroundTaskRegistry {
 				// Ignore if output accumulator finished
 			}
 
-			if (entry.logStream && !entry.logStream.destroyed && entry.logStream.writable) {
+			if (
+				entry.logStream &&
+				!entry.logStream.destroyed &&
+				entry.logStream.writable
+			) {
 				try {
 					entry.logStream.write(buf);
 				} catch {
@@ -225,10 +226,7 @@ export class BackgroundTaskRegistry {
 		});
 	}
 
-	getTaskStatus(
-		id: string,
-		maxLines = 50,
-	): BackgroundTaskStatusDetails | null {
+	getTaskStatus(id: string, maxLines = 50): BackgroundTaskStatusDetails | null {
 		const entry = this.tasks.get(id);
 		if (!entry) return null;
 
@@ -284,10 +282,7 @@ export class BackgroundTaskRegistry {
 		};
 	}
 
-	sendInput(
-		id: string,
-		input: string,
-	): { success: boolean; message: string } {
+	sendInput(id: string, input: string): { success: boolean; message: string } {
 		const entry = this.tasks.get(id);
 		if (!entry) {
 			return { success: false, message: `Task "${id}" not found.` };

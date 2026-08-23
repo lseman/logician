@@ -1,8 +1,8 @@
 export { stripTextToolCalls } from "@logician/log-core";
 export { parseFrontmatter } from "@logician/log-core/frontmatter";
 export {
-	PermissionPolicy,
 	type PermissionMode,
+	PermissionPolicy,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
 export { ToolRegistry } from "@logician/log-core/runtime";
@@ -74,4 +74,3 @@ export {
 export { web_fetch } from "./web-fetch.ts";
 export { createWebSearchTool } from "./web-search.ts";
 export { write_file } from "./write-file.ts";
-export { write_file_append } from "./write-file-append.ts";

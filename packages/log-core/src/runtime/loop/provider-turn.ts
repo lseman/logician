@@ -9,13 +9,12 @@
  * terminal outcome.
  */
 
-import { compactToFit } from "../compaction/engine.ts";
-import type { AgentSettings } from "../../control/configuration/agent-settings.ts";
-import type { OutputGuard } from "../../control/guards/output-guard.ts";
-import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
-import type { InterventionInput } from "../../control/policy/intervention-controller.ts";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import { convertToChatFormat } from "../../capabilities/provider/messages.ts";
+import type { AgentSettings } from "../../control/configuration/agent-settings.ts";
+import type { OutputGuard } from "../../control/guards/output-guard.ts";
+import type { InterventionInput } from "../../control/policy/intervention-controller.ts";
+import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import { getInferenceMode } from "../../system/types/types-config.ts";
 import type {
 	AgentEvent,
@@ -24,6 +23,7 @@ import type {
 	CompactableMessage,
 	Message,
 } from "../../system/types/types-messages.ts";
+import { compactToFit } from "../compaction/engine.ts";
 import { selectAdaptiveMode } from "./adaptive-mode.ts";
 import { applyHeaderPatch } from "./callbacks.ts";
 import type { AgentLoopConfig } from "./config.ts";

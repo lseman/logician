@@ -10,13 +10,13 @@
 // arbitrary shell commands and log_experiment runs git commit/checkout, so
 // both go through the same permission prompts as any other mutating tool.
 
-import type { Tool, ToolResult } from "@logician/log-core";
 import {
 	type AutoresearchSession,
 	INIT_EXPERIMENT_PARAMETERS,
 	LOG_EXPERIMENT_PARAMETERS,
 	RUN_EXPERIMENT_PARAMETERS,
 } from "@logician/log-autoresearch";
+import type { Tool, ToolResult } from "@logician/log-core";
 
 export function createAutoresearchTools(session: AutoresearchSession): Tool[] {
 	const init_experiment: Tool = {

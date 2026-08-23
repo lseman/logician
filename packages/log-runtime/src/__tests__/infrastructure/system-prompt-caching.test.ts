@@ -1,12 +1,11 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import type { Tool } from "@logician/log-core";
 import {
-	buildDefaultSystemPrompt,
 	buildDynamicSystemContext,
 	buildStaticSystemPromptPrefix,
 	buildSystemPrompt,
 } from "../../runtime/context/system-prompt.ts";
-import type { Tool } from "@logician/log-core";
 
 void test("buildStaticSystemPromptPrefix generates a deterministic cacheable prefix across different times", () => {
 	const toolA: Tool = {
@@ -45,7 +44,10 @@ void test("buildDynamicSystemContext formats dynamic runtime metadata cleanly", 
 	});
 
 	assert.match(dynamicContext, /Current date: 2026-08-21/);
-	assert.match(dynamicContext, /Current working directory: \/workspace\/my-app/);
+	assert.match(
+		dynamicContext,
+		/Current working directory: \/workspace\/my-app/,
+	);
 });
 
 void test("buildSystemPrompt integrates static prefix and dynamic context seamlessly", () => {

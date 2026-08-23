@@ -1,8 +1,8 @@
-import type { AcceptanceConfig } from "../../system/types/acceptance.ts";
+import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import type { OutputGuard } from "../../control/guards/output-guard.ts";
 import type { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
 import type { AgentRunController } from "../../control/policy/run-controller.ts";
-import type { LLMBackend } from "../../capabilities/provider/backend.ts";
+import type { AcceptanceConfig } from "../../system/types/acceptance.ts";
 import type { AgentConfig } from "../../system/types/types-config.ts";
 import type { Message } from "../../system/types/types-messages.ts";
 

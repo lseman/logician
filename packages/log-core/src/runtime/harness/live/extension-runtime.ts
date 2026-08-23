@@ -5,14 +5,11 @@
 // caller-supplied hooks (in that override order). Mirrors queue-ops.ts's
 // Deps pattern — the harness owns the mutable fields and supplies them here.
 
-import type { ExtensionRunner } from "../../../system/extension/runner.ts";
-import type { RegisteredTool } from "../../../system/extension/types.ts";
 import type { LoopDetector } from "../../../control/guards/loop-detector.ts";
-import { buildBuiltinHooks } from "../../hooks/builtin/builtin-hooks.ts";
-import { extensionHooks, runControlHooks } from "../../hooks/contracts.ts";
-import { HookBus } from "../../hooks/hook-bus.ts";
 import type { HarnessInterventionController } from "../../../control/policy/intervention-controller.ts";
 import type { AgentRunController } from "../../../control/policy/run-controller.ts";
+import type { ExtensionRunner } from "../../../system/extension/runner.ts";
+import type { RegisteredTool } from "../../../system/extension/types.ts";
 import type { AgentConfig } from "../../../system/types/types-config.ts";
 import type {
 	AgentEvent,
@@ -20,6 +17,9 @@ import type {
 	Message,
 	Tool,
 } from "../../../system/types/types-messages.ts";
+import { buildBuiltinHooks } from "../../hooks/builtin/builtin-hooks.ts";
+import { extensionHooks, runControlHooks } from "../../hooks/contracts.ts";
+import { HookBus } from "../../hooks/hook-bus.ts";
 
 export interface ExtensionRuntimeDeps {
 	getExtensionRunner: () => ExtensionRunner | undefined;

@@ -45,7 +45,9 @@ function inferType(payload: unknown, hookType: string): ObservationType {
 	return "other";
 }
 
-export function buildSyntheticCompression(raw: RawObservation): CompressedObservation {
+export function buildSyntheticCompression(
+	raw: RawObservation,
+): CompressedObservation {
 	const { id, sessionId, timestamp, hookType, raw: data } = raw;
 	let type = inferType(data, hookType);
 

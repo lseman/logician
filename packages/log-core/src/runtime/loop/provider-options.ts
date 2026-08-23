@@ -6,9 +6,12 @@
  * and hook-mutated request metadata (headers, timeout, retries, etc.).
  */
 
-import type { AgentSettings } from "../../control/configuration/agent-settings.ts";
 import type { GenerateOptions } from "../../capabilities/provider/backend.ts";
-import type { InferenceModeDef, ThinkingLevel } from "../../system/types/types-config.ts";
+import type { AgentSettings } from "../../control/configuration/agent-settings.ts";
+import type {
+	InferenceModeDef,
+	ThinkingLevel,
+} from "../../system/types/types-config.ts";
 import type { AgentHooks } from "../../system/types/types-messages.ts";
 import type { AgentLoopConfig } from "./config.ts";
 

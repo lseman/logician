@@ -139,7 +139,7 @@ export async function executeToolBatch(
 			const text =
 				call.name === "write_file"
 					? `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. ` +
-						"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
+						"The content is too large for a single call. Split it into smaller chunks and use write_file with append: true repeatedly (same path, in order) instead of retrying write_file with the full content."
 					: `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
 			await emit({
 				type: "tool_call_end",

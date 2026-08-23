@@ -1,13 +1,13 @@
 /** Configuration, inference, queue, truncation, and agent error contracts. */
 
-import type { AcceptanceConfig } from "./acceptance.ts";
+import type { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import type {
 	AgentStopPolicy,
 	ExecutionProfile,
 } from "../../control/policy/execution-policy.ts";
+import type { AcceptanceConfig } from "./acceptance.ts";
 import type { RunBudgetLimits } from "./run-budget.ts";
 import type { TaskLedger } from "./task-ledger.ts";
-import type { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import type { AgentHooks, EventHandler, Tool } from "./types-messages.ts";
 
 export type QueueMode = "all" | "one-at-a-time";

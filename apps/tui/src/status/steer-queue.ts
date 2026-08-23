@@ -109,7 +109,10 @@ export class SteerQueue implements Component {
 			const allRows = this.rows();
 			const clickedRow = allRows[row - bodyStart];
 			if (clickedRow && clickedRow.kind === "steering") {
-				this.callbacks.onAction?.({ type: "steerNow", message: clickedRow.msg });
+				this.callbacks.onAction?.({
+					type: "steerNow",
+					message: clickedRow.msg,
+				});
 				return true;
 			}
 		}
@@ -154,7 +157,9 @@ function renderRows(rows: Row[], width: number): string[] {
 
 	const headerIcon = theme.fg("accent", "◈");
 	const headerLabel = theme.bold(theme.fg("muted", "QUEUE"));
-	const headerCount = parts.length ? theme.fg("dim", ` · ${parts.join(" · ")}`) : "";
+	const headerCount = parts.length
+		? theme.fg("dim", ` · ${parts.join(" · ")}`)
+		: "";
 	const header = `${headerIcon} ${headerLabel}${headerCount}`;
 	lines.push(pad(clampLineToWidth(header, width), width));
 

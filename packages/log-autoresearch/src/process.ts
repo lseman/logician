@@ -6,7 +6,10 @@
 
 import { spawn } from "node:child_process";
 
-export function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
+export function killTree(
+	pid: number,
+	signal: NodeJS.Signals = "SIGTERM",
+): void {
 	try {
 		process.kill(-pid, signal);
 	} catch {

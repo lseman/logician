@@ -1,8 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { Tool } from "@logician/log-core";
-import { microCompactCompactableMessages } from "../../runtime/compaction/engine.ts";
 import { ToolRegistry } from "../../capabilities/tools/registry.ts";
+import { microCompactCompactableMessages } from "../../runtime/compaction/engine.ts";
 
 function makeTool(overrides: Partial<Tool> & { name: string }): Tool {
 	return {
@@ -253,7 +253,10 @@ void test("MCP-origin tools are withheld from provider definitions until resolve
 		return fn.name;
 	});
 	assert.ok(names.includes("read_file"));
-	assert.ok(names.includes("search_tools"), "search_tools should auto-register");
+	assert.ok(
+		names.includes("search_tools"),
+		"search_tools should auto-register",
+	);
 	assert.ok(
 		!names.includes("github_search_issues"),
 		"deferred MCP tool should be withheld until resolved",
@@ -283,14 +286,19 @@ void test("search_tools resolves matching deferred tools by keyword", async () =
 	assert.ok(!before.includes("github_search_issues"));
 	assert.ok(!before.includes("playwright_screenshot"));
 
-	const result = await registry.execute(call("search_tools", { query: "github" }));
+	const result = await registry.execute(
+		call("search_tools", { query: "github" }),
+	);
 	assert.match(result.content, /github_search_issues/);
 	assert.doesNotMatch(result.content, /playwright_screenshot/);
 
 	const after = registry
 		.toToolDefinitions()
 		.map(def => (def.function as { name: string }).name);
-	assert.ok(after.includes("github_search_issues"), "resolved tool should now be included");
+	assert.ok(
+		after.includes("github_search_issues"),
+		"resolved tool should now be included",
+	);
 	assert.ok(
 		!after.includes("playwright_screenshot"),
 		"non-matching tool should remain withheld",

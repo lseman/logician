@@ -1,14 +1,5 @@
 /** Public contracts required to embed and extend the agent loop. */
 
-export {
-	type RunAgentLoopConfig,
-	type RunAgentLoopContext,
-	runAgentLoop,
-	STEERING_INTERRUPT_SUMMARY,
-} from "./runtime/execution/agent-loop-runner.ts";
-export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
-export { stripAcceptanceReport } from "./control/guards/acceptance-contract.ts";
-export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export type {
 	BackendErrorCategory,
 	GenerateOptions,
@@ -28,6 +19,15 @@ export {
 	parseTextToolCalls,
 	stripTextToolCalls,
 } from "./capabilities/provider/text-tool-calls.ts";
+export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
+export { stripAcceptanceReport } from "./control/guards/acceptance-contract.ts";
+export {
+	type RunAgentLoopConfig,
+	type RunAgentLoopContext,
+	runAgentLoop,
+	STEERING_INTERRUPT_SUMMARY,
+} from "./runtime/execution/agent-loop-runner.ts";
+export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export {
 	type AgentConfig,
 	type AgentModelConfig,

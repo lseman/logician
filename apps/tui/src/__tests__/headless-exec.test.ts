@@ -171,7 +171,12 @@ void test("compaction, retries, and permission requests are counted and passed t
 			toolCallId: "tool-1",
 			result: "ok",
 		},
-		{ type: "compaction", reason: "context_limit", tokensBefore: 100, tokensAfter: 40 },
+		{
+			type: "compaction",
+			reason: "context_limit",
+			tokensBefore: 100,
+			tokensAfter: 40,
+		},
 		{
 			type: "agent_retry_start",
 			attempt: 1,
@@ -208,7 +213,9 @@ void test("compaction, retries, and permission requests are counted and passed t
 	assert.equal(compactionRecord?.reason, "context_limit");
 	assert.equal(compactionRecord?.tokens_before, 100);
 	assert.equal(compactionRecord?.tokens_after, 40);
-	const retryRecord = records.find(record => record.type === "agent_retry_start");
+	const retryRecord = records.find(
+		record => record.type === "agent_retry_start",
+	);
 	assert.equal(retryRecord?.reason, "compaction");
 
 	const meta = records.at(-2)?.meta;

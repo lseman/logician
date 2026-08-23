@@ -136,15 +136,31 @@ export function reduceTurnState(
 				settledAt: now,
 			};
 		case "notice":
-			return event.level === "error"
-				? {
-						...state,
-						phase: "failed",
-						runningTools: 0,
-						runningToolIds: [],
-						settledAt: now,
-					}
-				: state;
+			if (event.level === "error") {
+				return {
+					...state,
+					phase: "failed",
+					runningTools: 0,
+					runningToolIds: [],
+					settledAt: now,
+				};
+			}
+			// A steerNow abort never gets a turn_end for the interrupted turn
+			// (event-mapping.ts suppresses agent_end and surfaces this notice
+			// instead, so a real completion notice doesn't also show). Without
+			// this, phase stays stuck at "streaming"/"thinking" with the
+			// animation still running until some later turn_end happens to
+			// arrive — settle it here instead.
+			if (event.label === "Steering") {
+				return {
+					...state,
+					phase: "complete",
+					runningTools: 0,
+					runningToolIds: [],
+					settledAt: now,
+				};
+			}
+			return state;
 		case "agent_error":
 			return {
 				...state,

@@ -24,8 +24,8 @@
 import type { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
 import type { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
 import type { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
-import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import type { MemoryHost } from "../../capabilities/memory/memory.ts";
+import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 
 interface RuntimeContextSlots {
 	repositoryMap: RepositoryMap | undefined;

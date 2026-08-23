@@ -232,7 +232,15 @@ void describe("StatusBar", () => {
 		// so we need to explicitly enable it in the config.
 		const bar = new StatusBar({
 			...createDefaultConfig(),
-			widgets: { reasoner: { enabled: true } },
+			widgets: {
+				reasoner: {
+					enabled: true,
+					row: 0,
+					position: 1,
+					align: "middle",
+					fill: "none",
+				},
+			},
 		});
 		bar.update({
 			phase: "ready",
@@ -244,8 +252,14 @@ void describe("StatusBar", () => {
 		const lines = bar.render(300);
 		// Debug: log the rendered line
 		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-		assert.ok(lines[0].includes("reasoner:"), `Expected line to include "reasoner:", got: ${plain}`);
-		assert.ok(lines[0].includes("loop-detector"), `Expected line to include "loop-detector", got: ${plain}`);
+		assert.ok(
+			lines[0].includes("reasoner:"),
+			`Expected line to include "reasoner:", got: ${plain}`,
+		);
+		assert.ok(
+			lines[0].includes("loop-detector"),
+			`Expected line to include "loop-detector", got: ${plain}`,
+		);
 	});
 
 	it("omits reasoner when none", () => {

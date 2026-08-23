@@ -3,15 +3,15 @@
 // bridge-event handling with overlay-opening side effects for
 // permission/question requests.
 
+import type { AutoresearchSession } from "@logician/log-autoresearch";
 import { isTranscriptEvent, type RuntimeEvent } from "@logician/log-protocol";
 import type {
 	AgentRuntime,
-	GoalTracker,
 	GoalState,
+	GoalTracker,
 } from "@logician/log-runtime/application";
 import { formatContextSize } from "@logician/log-runtime/formatting";
 import type { Transcript } from "@logician/log-runtime/sessions";
-import type { AutoresearchSession } from "@logician/log-autoresearch";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";
 import type { PermissionPopup } from "../overlays/permission-popup.ts";
 import type { SlashPopup } from "../overlays/slash-popup.ts";
@@ -231,13 +231,7 @@ export function handleEvent(
 			);
 			if (
 				!event.isError &&
-				[
-					"edit_file",
-					"write_file",
-					"write_file_append",
-					"git",
-					"bash",
-				].includes(event.toolName)
+				["edit_file", "write_file", "git", "bash"].includes(event.toolName)
 			) {
 				updateGitFooter(ctx);
 			}

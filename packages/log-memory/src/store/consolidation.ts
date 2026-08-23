@@ -9,8 +9,8 @@ import {
 	parseObservationProvenance,
 	safeParseJsonArray,
 } from "./db-helpers.ts";
-import { detectContradictions } from "./memory-relations.ts";
 import { rowToMemory } from "./memories.ts";
+import { detectContradictions } from "./memory-relations.ts";
 import { generateId, now } from "./module-helpers.ts";
 
 export function consolidate(

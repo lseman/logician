@@ -3,7 +3,10 @@
 // Actions: list, status, send_input, kill.
 
 import type { Tool, ToolResult } from "@logician/log-core";
-import { defaultTaskManager, type BackgroundTaskRegistry } from "./support/utils/background-task-registry.ts";
+import {
+	type BackgroundTaskRegistry,
+	defaultTaskManager,
+} from "./support/utils/background-task-registry.ts";
 
 const manageTaskSchema = {
 	type: "object",
@@ -16,15 +19,18 @@ const manageTaskSchema = {
 		},
 		taskId: {
 			type: "string",
-			description: "The task ID to manage. Required for 'status', 'kill', and 'send_input'.",
+			description:
+				"The task ID to manage. Required for 'status', 'kill', and 'send_input'.",
 		},
 		input: {
 			type: "string",
-			description: "The input string to send to the task stdin. Required when action is 'send_input'.",
+			description:
+				"The input string to send to the task stdin. Required when action is 'send_input'.",
 		},
 		maxLines: {
 			type: "number",
-			description: "Maximum number of recent log lines to include for 'status' (default: 50).",
+			description:
+				"Maximum number of recent log lines to include for 'status' (default: 50).",
 		},
 	},
 	required: ["action"],
@@ -46,8 +52,7 @@ export function createManageTaskTool(
 		hookAliases: ["ManageTask", "Task"],
 		description:
 			"Manage background tasks. List running tasks, inspect logs and exit status, send input to stdin, or terminate background processes.",
-		promptSnippet:
-			"Manage background tasks (list, status, send_input, kill)",
+		promptSnippet: "Manage background tasks (list, status, send_input, kill)",
 		promptGuidelines: [
 			"Use manage_task with action='list' to inspect all background jobs",
 			"Use manage_task with action='status' to read recent task logs and exit codes",

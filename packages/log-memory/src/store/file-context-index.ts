@@ -59,7 +59,10 @@ export function getFilesContext(
 		.filter((e): e is FileContextEntry => e !== null);
 }
 
-export function rebuildFileIndex(db: Database, getWorkspace: () => string): number {
+export function rebuildFileIndex(
+	db: Database,
+	getWorkspace: () => string,
+): number {
 	// Count observations with non-empty files array
 	// Since JSON arrays like ["a"] are > 4 chars while [] is exactly 2 chars
 	const count = db

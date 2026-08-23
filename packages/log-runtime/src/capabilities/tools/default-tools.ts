@@ -1,7 +1,7 @@
-import { getBuiltInTools } from "./builtin-blocks.ts";
 import type { Tool, WebSearchConfig } from "@logician/log-core";
 import { ariadne } from "./ariadne.ts";
 import { bash } from "./bash.ts";
+import { getBuiltInTools } from "./builtin-blocks.ts";
 import { edit_file } from "./edit-file.ts";
 import { file_diff } from "./file-diff.ts";
 import { find } from "./find.ts";
@@ -13,7 +13,6 @@ import { grep } from "./search.ts";
 import { web_fetch } from "./web-fetch.ts";
 import { createWebSearchTool } from "./web-search.ts";
 import { write_file } from "./write-file.ts";
-import { write_file_append } from "./write-file-append.ts";
 
 // Default SearXNG instance assumed for local development.
 export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
@@ -34,7 +33,6 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		grep,
 		edit_file,
 		write_file,
-		write_file_append,
 		file_diff,
 		bash,
 		sandbox,

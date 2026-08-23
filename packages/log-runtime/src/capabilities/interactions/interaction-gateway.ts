@@ -1,7 +1,7 @@
 import type { AskUserContext } from "@logician/log-core";
 import {
-	PermissionPolicy,
 	type PermissionMode,
+	PermissionPolicy,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
 import type { RuntimeEvent } from "@logician/log-protocol";

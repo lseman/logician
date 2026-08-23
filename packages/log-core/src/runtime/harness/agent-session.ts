@@ -1,6 +1,6 @@
 // ── AgentSession ────────────────────────────────────────────────────────────
 // Unified session orchestrator: merges AgentHarness (core loop, phases,
-// compaction, branching, queue drains, events) 
+// compaction, branching, queue drains, events)
 // (queue operations, continuation logic, phase mapping, slash commands).
 //
 // This is the single entry point for the agent's interactive session:
@@ -16,24 +16,6 @@
 // Optional `onEvent` callback emits UI-level events (queue updates, phase
 // changes) so the host (AgentRuntime) can map them to RuntimeEvent.
 
-import type { CompactionSettings } from "../compaction/engine.ts";
-import {
-	runCompaction,
-	shouldAutoCompact,
-} from "../compaction/orchestration.ts";
-import { validateAgentConfig } from "../../control/configuration/config-validator.ts";
-import { ConfigurationStore } from "../../control/configuration/configuration-store.ts";
-import { ContextEngine } from "../../system/context/context-engine.ts";
-import {
-	createSteeringInterruptReason,
-	type RunAgentLoopConfig,
-	runAgentLoop,
-} from "../execution/agent-loop-runner.ts";
-import type { ExtensionRunner } from "../../system/extension/runner.ts";
-import { LoopDetector } from "../../control/guards/loop-detector.ts";
-import { OutputGuard } from "../../control/guards/output-guard.ts";
-import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
-import { AgentRunController } from "../../control/policy/run-controller.ts";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import {
 	createUserMessage,
@@ -45,14 +27,19 @@ import type {
 	BranchSummaryData,
 } from "../../capabilities/session/summaries/types.ts";
 import type { ThreadItem } from "../../capabilities/session/thread-ledger.ts";
-import {
-	type AgentRuntimeState,
-	createRuntimeState,
-	type HarnessPhase,
-	reduceRuntimeState,
-} from "../state/runtime-state.ts";
 import { ToolRegistry } from "../../capabilities/tools/registry.ts";
-import type { AgentConfig, QueueMode } from "../../system/types/types-config.ts";
+import { validateAgentConfig } from "../../control/configuration/config-validator.ts";
+import { ConfigurationStore } from "../../control/configuration/configuration-store.ts";
+import { LoopDetector } from "../../control/guards/loop-detector.ts";
+import { OutputGuard } from "../../control/guards/output-guard.ts";
+import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
+import { AgentRunController } from "../../control/policy/run-controller.ts";
+import { ContextEngine } from "../../system/context/context-engine.ts";
+import type { ExtensionRunner } from "../../system/extension/runner.ts";
+import type {
+	AgentConfig,
+	QueueMode,
+} from "../../system/types/types-config.ts";
 import type {
 	AgentEvent,
 	AgentHooks,
@@ -61,6 +48,22 @@ import type {
 	Message,
 	Tool,
 } from "../../system/types/types-messages.ts";
+import type { CompactionSettings } from "../compaction/engine.ts";
+import {
+	runCompaction,
+	shouldAutoCompact,
+} from "../compaction/orchestration.ts";
+import {
+	createSteeringInterruptReason,
+	type RunAgentLoopConfig,
+	runAgentLoop,
+} from "../execution/agent-loop-runner.ts";
+import {
+	type AgentRuntimeState,
+	createRuntimeState,
+	type HarnessPhase,
+	reduceRuntimeState,
+} from "../state/runtime-state.ts";
 import {
 	composeHarnessConfig,
 	HarnessConfigurationError,
@@ -126,7 +129,7 @@ export { HarnessConfigurationError };
 /** Minimal event shape for the host (AgentRuntime) to map to RuntimeEvent. */
 export interface AgentSessionEvent {
 	type: string;
-	[ key: string ]: unknown;
+	[key: string]: unknown;
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -195,7 +198,11 @@ export class AgentSession {
 	// ── UI event callback  ─────────────────────
 	private onEvent?: (event: AgentSessionEvent) => void;
 
-	constructor(options: AgentHarnessOptions & { onEvent?: (event: AgentSessionEvent) => void }) {
+	constructor(
+		options: AgentHarnessOptions & {
+			onEvent?: (event: AgentSessionEvent) => void;
+		},
+	) {
 		const config = composeHarnessConfig(options.modules ?? [], options.config);
 		this.configuration = new ConfigurationStore(config, {
 			clone: AgentSession.cloneConfig,
@@ -391,7 +398,9 @@ export class AgentSession {
 		// If continuation was pending, trigger it.
 		if (this.pendingContinuation) {
 			this.pendingContinuation = false;
-			void this.runQueuedContinuation(this.activeRepositoryQuery).catch(() => {});
+			void this.runQueuedContinuation(this.activeRepositoryQuery).catch(
+				() => {},
+			);
 		}
 	}
 
@@ -439,10 +448,13 @@ export class AgentSession {
 		repositoryQuery?: string,
 	): Promise<Message[]> {
 		this.assertIdle("continue with next-turn guidance");
-		return this.runTurn({ kind: "prompt", text: "" }, {
-			continuationContext: context,
-			repositoryQuery,
-		});
+		return this.runTurn(
+			{ kind: "prompt", text: "" },
+			{
+				continuationContext: context,
+				repositoryQuery,
+			},
+		);
 	}
 
 	/**
@@ -1282,7 +1294,9 @@ export class AgentSession {
 			// Check if another continuation is pending (recursive).
 			if (this.pendingContinuation) {
 				this.pendingContinuation = false;
-				void this.runQueuedContinuation(context, repositoryQuery).catch(() => {});
+				void this.runQueuedContinuation(context, repositoryQuery).catch(
+					() => {},
+				);
 			}
 		}
 	}
@@ -1321,14 +1335,19 @@ export class AgentSession {
 	/**
 	 * Handle queue-related slash commands. Returns true if the command was handled.
 	 */
-	handleQueueSlashCommand(trimmed: string): { handled: boolean; text?: string; level?: "info" | "warn" } {
+	handleQueueSlashCommand(trimmed: string): {
+		handled: boolean;
+		text?: string;
+		level?: "info" | "warn";
+	} {
 		if (trimmed === "/steer-now") {
 			const count = this.flushSteeringNow();
 			return {
 				handled: true,
-				text: count > 0
-					? `Processing ${count} queued steering message${count === 1 ? "" : "s"} now.`
-					: "No queued steering messages to process.",
+				text:
+					count > 0
+						? `Processing ${count} queued steering message${count === 1 ? "" : "s"} now.`
+						: "No queued steering messages to process.",
 				level: count > 0 ? "info" : "warn",
 			};
 		}
@@ -1337,7 +1356,9 @@ export class AgentSession {
 			const followUp = this.getQueues().followUp;
 			const rows = [
 				...steering.map((message, i) => `${i + 1}. ▸ ${message}`),
-				...followUp.map((message, i) => `${steering.length + i + 1}. ↳ ${message}`),
+				...followUp.map(
+					(message, i) => `${steering.length + i + 1}. ↳ ${message}`,
+				),
 			];
 			return {
 				handled: true,
@@ -1405,7 +1426,6 @@ export class AgentSession {
 		};
 	}
 }
-
 
 // ── Backward compatibility ──────────────────────────────────────────────
 // AgentHarness was renamed to AgentSession. This alias maintains compatibility

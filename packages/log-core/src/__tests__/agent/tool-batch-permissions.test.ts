@@ -1,8 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { executeToolBatch } from "../../runtime/execution/tool-batch-controller.ts";
 import { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import { ToolRegistry } from "../../capabilities/tools/registry.ts";
+import { executeToolBatch } from "../../runtime/execution/tool-batch-controller.ts";
 import type {
 	AgentEvent,
 	AgentHooks,

@@ -598,7 +598,7 @@ void test("click-expanded write_file shows every line without a Ctrl+O hint", ()
 	assert.doesNotMatch(expanded, /more lines · ctrl\+o to expand/);
 });
 
-void test("write_file_append streams live line counts and expanded content", () => {
+void test("write_file with append mode streams live line counts and expanded content", () => {
 	const display = new TranscriptDisplay();
 	display.setTurns([
 		{
@@ -612,9 +612,9 @@ void test("write_file_append streams live line counts and expanded content", () 
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool_name: "write_file_append",
+							tool_name: "write_file",
 							tool_call_id: "live-append",
-							args: {},
+							args: { append: true },
 							partialResult:
 								'{"path":"src/live.ts","content":"const four = 4;\\nconst five = 5;\\nconst six',
 							isComplete: false,
@@ -629,7 +629,7 @@ void test("write_file_append streams live line counts and expanded content", () 
 	]);
 
 	const collapsed = plain(display.render(100).join("\n"));
-	assert.match(collapsed, /write_file_append src\/live\.ts streaming/);
+	assert.match(collapsed, /write_file src\/live\.ts streaming/);
 	assert.match(collapsed, /3 lines appended so far/);
 	assert.doesNotMatch(collapsed, /const four = 4/);
 	assert.doesNotMatch(collapsed, /"content"/);
@@ -642,7 +642,7 @@ void test("write_file_append streams live line counts and expanded content", () 
 	assert.match(expanded, /const six/);
 });
 
-void test("click-expanded write_file_append shows every appended line", () => {
+void test("click-expanded write_file with append mode shows every appended line", () => {
 	const content = Array.from(
 		{ length: 24 },
 		(_, index) => `appended-${index + 1}`,
@@ -660,11 +660,11 @@ void test("click-expanded write_file_append shows every appended line", () => {
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool_name: "write_file_append",
+							tool_name: "write_file",
 							tool_call_id: "large-append",
-							args: { path: "fixture.txt", content },
+							args: { path: "fixture.txt", content, append: true },
 							result:
-								"Appended to fixture.txt (+279 bytes, 558 bytes total · 48 lines total).",
+								"Appended to fixture.txt (+279 bytes, 558 bytes total). Call write_file with the next chunk, or stop if this was the last one.",
 							isComplete: true,
 							isError: false,
 						},
@@ -678,7 +678,7 @@ void test("click-expanded write_file_append shows every appended line", () => {
 
 	const collapsed = display.render(100);
 	const toolRow = collapsed.findIndex(line =>
-		plain(line).includes("write_file_append fixture.txt"),
+		plain(line).includes("write_file fixture.txt"),
 	);
 	assert.notEqual(toolRow, -1);
 	assert.match(plain(collapsed.join("\n")), /24 lines appended/);

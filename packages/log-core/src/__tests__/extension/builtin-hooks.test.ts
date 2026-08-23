@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { LoopDetector } from "../../control/guards/loop-detector.ts";
 import { awaitsUserInput } from "../../control/guards/response-patterns.ts";
+import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
+import { ProgressTracker } from "../../control/policy/progress-tracker.ts";
 import {
 	buildBuiltinHooks,
 	COMPACTION_COOLDOWN_TURNS,
 	rewriteCommandWithRtk,
 } from "../../runtime/hooks/builtin/builtin-hooks.ts";
-import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
-import { ProgressTracker } from "../../control/policy/progress-tracker.ts";
 
 // Capture the real PATH once at module load so cleanup always restores the
 // true original value, even when other tests mutate process.env.PATH.

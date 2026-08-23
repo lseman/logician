@@ -4,6 +4,7 @@
  * a retrieval trace per call and folds outcome receipts into the shadow
  * ranking policy. */
 
+import type { Database } from "bun:sqlite";
 import {
 	initialShadowPolicy,
 	learnShadowPolicy,
@@ -12,7 +13,6 @@ import {
 } from "../evolution/shadow-policy.js";
 import { predicatesAreValid } from "../evolution/validity.js";
 import { selectContextCandidates } from "../retrieval/context-selector.js";
-import type { Database } from "bun:sqlite";
 import type {
 	CompressedObservation,
 	ContextBlock,
@@ -25,10 +25,19 @@ import type {
 } from "../types.js";
 import { trackAccess } from "./access-tracker.ts";
 import { safeParseJson, safeParseJsonArray } from "./db-helpers.ts";
-import { list, rowToMemory } from "./memories.ts";
-import { generateId, now, sanitizeString, toFtsAnyQuery } from "./module-helpers.ts";
-import { listClaims, listRecentObservations, rowToObservation } from "./observations.ts";
 import { searchEmbeddings } from "./embeddings.ts";
+import { list, rowToMemory } from "./memories.ts";
+import {
+	generateId,
+	now,
+	sanitizeString,
+	toFtsAnyQuery,
+} from "./module-helpers.ts";
+import {
+	listClaims,
+	listRecentObservations,
+	rowToObservation,
+} from "./observations.ts";
 import { getSession } from "./sessions.ts";
 import { getWorkingMemoryTier } from "./working-memory-tiers.ts";
 
@@ -133,10 +142,7 @@ export function getContext(
 	const candidates: Candidate[] = [];
 	const episodicFallbackCandidates: Candidate[] = [];
 	let claimCandidateCount = 0;
-	const briefDescription = (
-		value: string,
-		maxLength: number = 220,
-	): string => {
+	const briefDescription = (value: string, maxLength: number = 220): string => {
 		const normalized = value.replace(/\s+/g, " ").trim();
 		if (normalized.length <= maxLength) return normalized;
 		const slice = normalized.slice(0, maxLength - 1);
@@ -148,11 +154,9 @@ export function getContext(
 		if (!queryTokens.size) return 0;
 		const candidateTokens = contextTokens(text);
 		let overlap = 0;
-		for (const token of queryTokens)
-			if (candidateTokens.has(token)) overlap++;
+		for (const token of queryTokens) if (candidateTokens.has(token)) overlap++;
 		return (
-			overlap /
-			Math.sqrt(Math.max(1, queryTokens.size * candidateTokens.size))
+			overlap / Math.sqrt(Math.max(1, queryTokens.size * candidateTokens.size))
 		);
 	};
 	const fileScore = (files: string[] | undefined, text: string): number => {
@@ -513,8 +517,7 @@ export function getContext(
 		budget,
 		tokens: tokenCount,
 		abstained: blocks.length === 0,
-		reason:
-			blocks.length === 0 ? "no-relevant-trusted-candidates" : undefined,
+		reason: blocks.length === 0 ? "no-relevant-trusted-candidates" : undefined,
 		candidateCounts,
 		selected: blocks.map(block => ({
 			id: block.id,
@@ -607,8 +610,7 @@ export function listRetrievalTraces(
 			string,
 			number
 		>,
-		selected: (safeParseJson(row.selected) ||
-			[]) as RetrievalTrace["selected"],
+		selected: (safeParseJson(row.selected) || []) as RetrievalTrace["selected"],
 	}));
 }
 
@@ -627,9 +629,7 @@ export function recordOutcomeReceipt(
 		candidate => candidate.id === input.retrievalTraceId,
 	);
 	if (!trace)
-		throw new Error(
-			"Retrieval trace does not exist in the current workspace",
-		);
+		throw new Error("Retrieval trace does not exist in the current workspace");
 	const policy = getShadowPolicy(db, getWorkspace);
 	const reward = Math.max(
 		-2,

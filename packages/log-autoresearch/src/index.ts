@@ -17,9 +17,21 @@ import { execFile as execFileCb, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import { autoresearchSummaryPathsFor, buildAutoresearchCompactionSummary } from "./compaction.ts";
-import { readMaxExperiments, resolveWorkDir, validateWorkDir } from "./config.ts";
-import { broadcastDashboardUpdate, exportDashboard, type NotifyFn, stopDashboardServer } from "./dashboard-server.ts";
+import {
+	autoresearchSummaryPathsFor,
+	buildAutoresearchCompactionSummary,
+} from "./compaction.ts";
+import {
+	readMaxExperiments,
+	resolveWorkDir,
+	validateWorkDir,
+} from "./config.ts";
+import {
+	broadcastDashboardUpdate,
+	exportDashboard,
+	type NotifyFn,
+	stopDashboardServer,
+} from "./dashboard-server.ts";
 import {
 	type ASI,
 	cloneExperimentState,
@@ -39,14 +51,16 @@ import {
 	type SessionSnapshot,
 	steerMessageFor,
 } from "./hooks.ts";
-import {
-	extractAutoresearchSessionName,
-	isAutoresearchRunEntry,
-	parseJsonlEntry,
-} from "./jsonl.ts";
+import { isAutoresearchRunEntry, parseJsonlEntry } from "./jsonl.ts";
 import { parseMetricLines } from "./metrics.ts";
 import { AUTO_DIR, ensureParentDir, sessionFileCandidates } from "./paths.ts";
-import { appendOutputTail, formatSize, killTree, runScript, truncateTail } from "./process.ts";
+import {
+	appendOutputTail,
+	formatSize,
+	killTree,
+	runScript,
+	truncateTail,
+} from "./process.ts";
 import {
 	autoresearchChecksPath,
 	autoresearchJsonlPath,
@@ -57,7 +71,7 @@ import {
 
 const execFile = promisify(execFileCb);
 
-export type { NotifyLevel, NotifyFn } from "./dashboard-server.ts";
+export type { NotifyFn, NotifyLevel } from "./dashboard-server.ts";
 
 /** Result returned by every AutoresearchSession method — mirrors the real
  * agent-core ToolResult shape (content/details/isError) so callers can pass

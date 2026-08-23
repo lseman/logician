@@ -137,12 +137,20 @@ export class QueueManagerOverlay implements Component {
 		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 
 		const bodyLines = this.entries.length
-			? this.entries.map((entry, i) => renderEntry(entry, i, innerWidth, this._selection.index))
+			? this.entries.map((entry, i) =>
+					renderEntry(entry, i, innerWidth, this._selection.index),
+				)
 			: [renderStatusLine("Queue is empty.", innerWidth)];
 
-		const steeringCount = this.entries.filter(e => e.kind === "steering").length;
-		const followUpCount = this.entries.filter(e => e.kind === "followUp").length;
-		const nextTurnCount = this.entries.filter(e => e.kind === "nextTurn").length;
+		const steeringCount = this.entries.filter(
+			e => e.kind === "steering",
+		).length;
+		const followUpCount = this.entries.filter(
+			e => e.kind === "followUp",
+		).length;
+		const nextTurnCount = this.entries.filter(
+			e => e.kind === "nextTurn",
+		).length;
 		const parts: string[] = [];
 		if (steeringCount) parts.push(`${steeringCount} queued`);
 		if (followUpCount) parts.push(`${followUpCount} follow-up`);

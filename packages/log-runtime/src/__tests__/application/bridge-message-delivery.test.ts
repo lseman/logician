@@ -200,9 +200,10 @@ void test("MCP discovery never blocks the first turn — it loads in the backgro
 	internal.startupHooksRan = true;
 	let resolveLoad!: () => void;
 	internal.toolRouter.isMcpLoaded = () => false;
-	internal.toolRouter.loadMcpToolsOnce = () => new Promise<void>(resolve => {
-		resolveLoad = resolve;
-	});
+	internal.toolRouter.loadMcpToolsOnce = () =>
+		new Promise<void>(resolve => {
+			resolveLoad = resolve;
+		});
 	let delivered = false;
 	internal.session = {
 		messages: [],
@@ -581,7 +582,7 @@ void test("core iterations reconcile output without completing the UI turn early
 	internal.toolRouter.isMcpLoaded = () => true;
 
 	// Mock session to simulate provider events
-	const eventEmissions: Array<{ type: string }> = [];
+	const _eventEmissions: Array<{ type: string }> = [];
 	internal.session = {
 		messages: [],
 		configure: () => {},

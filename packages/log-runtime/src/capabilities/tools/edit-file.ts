@@ -13,10 +13,7 @@ import {
 	refreshAfterWrite,
 } from "./support/read-tracker.ts";
 import { atomicWriteFile } from "./support/utils/atomic-write.ts";
-import {
-	generateDiffString,
-	generateUnifiedPatch,
-} from "./support/utils/diff-utils.ts";
+import { generateEditDiffs } from "./support/utils/diff-utils.ts";
 import {
 	defaultEditOperations,
 	detectLineEnding,
@@ -24,7 +21,10 @@ import {
 	restoreLineEndings,
 	stripBom,
 } from "./support/utils/helpers.ts";
-import { ensureInsideCwd, resolveReadPath } from "./support/utils/path-utils.ts";
+import {
+	ensureInsideCwd,
+	resolveReadPath,
+} from "./support/utils/path-utils.ts";
 
 // ============================================================================
 // Fuzzy matching
@@ -45,21 +45,41 @@ export interface ApplyEditsResult {
 // Replaces per-char regex tests with O(1) table lookup. Built once at module load.
 const _NORM: Record<number, string> = {
 	// Left/right/single/double low-9 quotes → '
-	0x2018: "'", 0x2019: "'", 0x201a: "'", 0x201b: "'",
+	8216: "'",
+	8217: "'",
+	8218: "'",
+	8219: "'",
 	// Left/right double/pointing double quotes → "
-	0x201c: '"', 0x201d: '"', 0x201e: '"', 0x201f: '"',
+	8220: '"',
+	8221: '"',
+	8222: '"',
+	8223: '"',
 	// Hyphen/dash variants → -
-	0x2010: "-", 0x2011: "-", 0x2012: "-", 0x2013: "-",
-	0x2014: "-", 0x2015: "-", 0x2212: "-",
+	8208: "-",
+	8209: "-",
+	8210: "-",
+	8211: "-",
+	8212: "-",
+	8213: "-",
+	8722: "-",
 	// Various spaces → regular space
-	0x00a0: " ", 0x2002: " ", 0x2003: " ", 0x2004: " ",
-	0x2005: " ", 0x2006: " ", 0x2007: " ", 0x2008: " ",
-	0x2009: " ", 0x200a: " ", 0x202f: " ", 0x205f: " ",
-	0x3000: " ",
+	160: " ",
+	8194: " ",
+	8195: " ",
+	8196: " ",
+	8197: " ",
+	8198: " ",
+	8199: " ",
+	8200: " ",
+	8201: " ",
+	8202: " ",
+	8239: " ",
+	8287: " ",
+	12288: " ",
 };
 
 /** Map smart quotes/dashes and uncommon Unicode spaces to their ASCII forms. */
-function normalizeChar(ch: string): string {
+function _normalizeChar(ch: string): string {
 	const mapped = _NORM[ch.charCodeAt(0)];
 	return mapped !== undefined ? mapped : ch;
 }
@@ -83,7 +103,7 @@ export function normalizeForFuzzyMatch(text: string): string {
 		return text.replace(/[ \t]+$/gm, "");
 	}
 	return text
-		.replace(/[‘’‚‛]/g, "'")   // smart single quotes
+		.replace(/[‘’‚‛]/g, "'") // smart single quotes
 		.replace(/[“”„‟]/g, '"') // smart double quotes
 		.replace(/[‐‑‒–—―−]/g, "-") // dashes
 		.replace(/[            　]/g, " ") // spaces
@@ -714,15 +734,17 @@ export const edit_file: Tool = {
 
 			// Generate diff only if content actually changed (already guaranteed by
 			// applyEditsToNormalizedContent throwing on no-change, but keep the
-			// early-exit for clarity and to avoid unnecessary work).
+			// early-exit for clarity and to avoid unnecessary work). The display
+			// diff and the unified patch are derived from one LCS pass instead of
+			// two, since both cover the same before/after pair.
 			let diff = "";
 			let firstChangedLine: number | undefined;
 			let patch = "";
 			if (baseContent !== newContent) {
-				const diffResult = generateDiffString(baseContent, newContent);
+				const diffResult = generateEditDiffs(path, baseContent, newContent);
 				diff = diffResult.diff;
 				firstChangedLine = diffResult.firstChangedLine;
-				patch = generateUnifiedPatch(path, baseContent, newContent);
+				patch = diffResult.patch;
 			}
 
 			return {

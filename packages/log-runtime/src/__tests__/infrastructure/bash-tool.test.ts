@@ -131,7 +131,11 @@ void test("bash waitMsBeforeAsync moves long-running command to background task"
 void test("bash runPersistent executes inside persistent shell session", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-bash-persist-"));
 	const res1 = await bash.execute(
-		{ command: "export MY_VAR='foo123'", runPersistent: true, terminalId: "unit-term" },
+		{
+			command: "export MY_VAR='foo123'",
+			runPersistent: true,
+			terminalId: "unit-term",
+		},
 		{ cwd },
 	);
 	assert.equal(typeof res1, "object");
@@ -144,4 +148,3 @@ void test("bash runPersistent executes inside persistent shell session", async (
 	if (typeof res2 === "string") return;
 	assert.match(res2.content, /foo123/);
 });
-

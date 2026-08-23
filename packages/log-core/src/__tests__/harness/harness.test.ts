@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BackendError } from "../../capabilities/provider/backend.ts";
+import { Session } from "../../capabilities/session/session.ts";
 import {
 	AgentHarness,
 	defineHarnessModule,
 	HarnessBusyError,
 	HarnessConfigurationError,
 } from "../../runtime/harness/agent-harness.ts";
-import { BackendError } from "../../capabilities/provider/backend.ts";
-import { Session } from "../../capabilities/session/session.ts";
 import type { AgentConfig } from "../../system/types/types-config.ts";
 import { FakeBackend, textResponse } from "../fake-backend.ts";
 

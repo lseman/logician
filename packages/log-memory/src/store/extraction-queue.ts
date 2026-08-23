@@ -93,9 +93,7 @@ export function claimExtractionJob(
 	leaseMs: number = DEFAULT_EXTRACTION_LEASE_MS,
 ): ExtractionJob | null {
 	const timestamp = now();
-	const leaseUntil = new Date(
-		Date.now() + Math.max(0, leaseMs),
-	).toISOString();
+	const leaseUntil = new Date(Date.now() + Math.max(0, leaseMs)).toISOString();
 	const row = db
 		.prepare(
 			`UPDATE extraction_jobs
@@ -133,9 +131,7 @@ export function renewExtractionJob(
 	leaseMs: number = DEFAULT_EXTRACTION_LEASE_MS,
 ): boolean {
 	const timestamp = now();
-	const leaseUntil = new Date(
-		Date.now() + Math.max(1, leaseMs),
-	).toISOString();
+	const leaseUntil = new Date(Date.now() + Math.max(1, leaseMs)).toISOString();
 	const updated = db
 		.prepare(
 			`UPDATE extraction_jobs

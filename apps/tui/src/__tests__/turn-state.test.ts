@@ -141,6 +141,49 @@ void test("approval and failures are explicit states", () => {
 	);
 });
 
+void test("a steerNow abort settles a mid-stream turn instead of leaving it streaming", () => {
+	let state = reduceTurnState(
+		INITIAL_TURN_STATE,
+		event({ type: "turn_start", turnId: "turn-1" }),
+		1,
+	);
+	state = reduceTurnState(state, event({ type: "token", token: "a" }), 2);
+	assert.equal(state.phase, "streaming");
+
+	// steerNow aborts the turn; the runner suppresses turn_end/agent_end for
+	// this case and the mapping layer surfaces a "Steering" notice instead.
+	state = reduceTurnState(
+		state,
+		event({
+			type: "notice",
+			level: "info",
+			label: "Steering",
+			text: "Steering the agent...",
+		}),
+		3,
+	);
+	assert.equal(state.phase, "complete");
+	assert.equal(state.settledAt, 3);
+
+	// An unrelated info notice must not be treated as terminal.
+	const restarted = reduceTurnState(
+		state,
+		event({ type: "turn_start", turnId: "turn-2" }),
+		4,
+	);
+	const streaming = reduceTurnState(
+		restarted,
+		event({ type: "token", token: "b" }),
+		5,
+	);
+	const afterOtherNotice = reduceTurnState(
+		streaming,
+		event({ type: "notice", level: "info", label: "MCP", text: "Loaded" }),
+		6,
+	);
+	assert.equal(afterOtherNotice.phase, "streaming");
+});
+
 void test("duplicate provider and execution starts count one running tool", () => {
 	const started = reduceTurnState(
 		INITIAL_TURN_STATE,

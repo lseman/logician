@@ -1,6 +1,5 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
-import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -15,7 +14,7 @@ import type { AbortResult, Session } from "@logician/log-core/runtime";
 import {
 	estimateChatPayloadTokens,
 	estimateTokens,
-	ToolRegistry,
+	type ToolRegistry,
 } from "@logician/log-core/runtime";
 import type { RuntimeEvent } from "@logician/log-protocol";
 import {
@@ -30,10 +29,24 @@ import {
 	runSessionStartHooks,
 	splitPluginArgs,
 } from "../../adapters/claude-code/plugin-runtime.ts";
+import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
+import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
+import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
+import type {
+	McpSnapshotResult,
+	McpToggleResult,
+} from "../../capabilities/mcp/mcp-server-registry.ts";
+import { MemoryHost } from "../../capabilities/memory/memory.ts";
+import {
+	createMemoryGetTool,
+	createMemorySearchTool,
+} from "../../capabilities/memory/memory-tools.ts";
 import {
 	findPromptByName,
 	type Prompt,
 } from "../../capabilities/prompts/loader.ts";
+import { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import {
 	formatActivatedSkills,
 	formatSkillActivationNotice,
@@ -44,29 +57,15 @@ import {
 	formatSkillInvocation,
 	type Skill,
 } from "../../capabilities/skills/loader.ts";
-import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
-import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
-import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
-import {
-	createMemoryGetTool,
-	createMemorySearchTool,
-} from "../../capabilities/memory/memory-tools.ts";
+import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type { SandboxProfile } from "../../capabilities/tools/sandbox.ts";
 import { killAllTrackedChildren } from "../../capabilities/tools/support/utils/shell.ts";
-import type {
-	McpSnapshotResult,
-	McpToggleResult,
-} from "../../capabilities/mcp/mcp-server-registry.ts";
+import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { mapAgentEvent } from "../events/event-mapping.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
-import { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
-import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
 import { ModelSelector } from "../model-selector.ts";
-import {
-	SettingsGateway,
-	type RuntimeToggleKey,
-} from "../settings-gateway.ts";
 import { buildToolRegistry } from "../runtime-context.ts";
+import { type RuntimeToggleKey, SettingsGateway } from "../settings-gateway.ts";
 import { ToolRouter } from "../tool-router.ts";
 import { AgentCoordinator } from "./agent-coordinator.ts";
 import { RuntimeContext } from "./capability-context.ts";
@@ -77,10 +76,7 @@ import {
 	eventLogPathFor,
 	resolveWebSearchConfig,
 } from "./environment.ts";
-import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
-import { MemoryHost } from "../../capabilities/memory/memory.ts";
 import { formatPluginResult } from "./plugin-result-formatter.ts";
-
 
 export { findJbPrompt } from "./project-prompt.ts";
 
@@ -327,12 +323,8 @@ export class AgentRuntime {
 			? [
 					...(opts.memory?.enabled !== false
 						? [
-								createMemorySearchTool(
-									() => this.memory?.getStore() ?? null,
-								),
-								createMemoryGetTool(
-									() => this.memory?.getStore() ?? null,
-								),
+								createMemorySearchTool(() => this.memory?.getStore() ?? null),
+								createMemoryGetTool(() => this.memory?.getStore() ?? null),
 							]
 						: []),
 					...opts.extraTools,
@@ -508,8 +500,6 @@ export class AgentRuntime {
 			opts.reasoner,
 			opts.reasonerConfig,
 		);
-
-
 	}
 
 	/**
@@ -638,7 +628,10 @@ export class AgentRuntime {
 			this.emit({ type: "turn_end", turnId });
 			// Keep the harness alive to retain history across turns.
 			this.emit({ type: "phase", state: "ready" });
-			if (turnSucceeded && (this.session?.getQueues().nextTurn.length ?? 0) > 0) {
+			if (
+				turnSucceeded &&
+				(this.session?.getQueues().nextTurn.length ?? 0) > 0
+			) {
 				this.running = true;
 				const repoQuery = this.repositoryMap
 					? await this.repositoryMap.render("")
@@ -651,17 +644,16 @@ export class AgentRuntime {
 
 	// ── Continuation ───────────────────────────────────────────────────────
 
-	private async runContinuation(activations: ReturnType<typeof selectSkillsForPrompt>): Promise<void> {
+	private async runContinuation(
+		activations: ReturnType<typeof selectSkillsForPrompt>,
+	): Promise<void> {
 		try {
 			const repoQuery = this.repositoryMap?.render("");
 			this.session?.setRepositoryQuery(repoQuery);
 			const context = activations.length
 				? formatActivatedSkills(activations)
 				: undefined;
-			await this.session?.runQueuedContinuation(
-				context,
-				repoQuery,
-			);
+			await this.session?.runQueuedContinuation(context, repoQuery);
 		} finally {
 			this.running = false;
 		}
@@ -1488,8 +1480,7 @@ export class AgentRuntime {
 		args: string,
 	): Promise<string | undefined> {
 		return (
-			this.extensions?.executeCommand(name, args) ??
-			Promise.resolve(undefined)
+			this.extensions?.executeCommand(name, args) ?? Promise.resolve(undefined)
 		);
 	}
 
@@ -1532,7 +1523,8 @@ export class AgentRuntime {
 		// Session history filters out system messages, so we pull the current
 		// config system prompt and show it at the top of the context dump.
 		const systemPrompt = this.config.systemPrompt || "";
-		if (!msgs.length && !systemPrompt && !memoryContext) lines.push("No messages yet.");
+		if (!msgs.length && !systemPrompt && !memoryContext)
+			lines.push("No messages yet.");
 		if (systemPrompt) {
 			lines.push("[SYSTEM] system prompt");
 			lines.push(systemPrompt);

@@ -6,14 +6,6 @@
 // lifecycle events.
 
 import path from "node:path";
-import {
-	type AgentDefinition,
-	loadAgentDefinitions,
-} from "../capabilities/delegation/definitions.ts";
-import {
-	getBuiltInSubagentTools,
-	type SubagentToolDeps,
-} from "../capabilities/tools/builtin-blocks.ts";
 import type {
 	AgentConfig,
 	LLMBackend,
@@ -28,6 +20,14 @@ import {
 	createUserMessage,
 } from "@logician/log-core/runtime";
 import type { RuntimeEvent } from "@logician/log-protocol";
+import {
+	type AgentDefinition,
+	loadAgentDefinitions,
+} from "../capabilities/delegation/definitions.ts";
+import {
+	getBuiltInSubagentTools,
+	type SubagentToolDeps,
+} from "../capabilities/tools/builtin-blocks.ts";
 
 export interface SubagentCoordinatorDeps {
 	config: () => AgentConfig;
