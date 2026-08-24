@@ -4,7 +4,7 @@
 // One Session per conversation, cwd-scoped listing, Turn[] persisted as
 // opaque entries via turn-entries.ts.
 
-import { type Session, SessionRegistry } from "@logician/log-core/runtime";
+import { SessionRegistry, type SessionStore } from "@logician/log-core/runtime";
 import type { Turn } from "../transcript/transcript.ts";
 import {
 	loadTurns as loadTurnsFromSession,
@@ -106,7 +106,7 @@ export class TuiSessionService {
 	// for the same id would go stale the moment either one appends an entry
 	// (branching, compaction, turn saves), so every accessor below must
 	// route through this cache rather than ask SessionRegistry fresh each time.
-	private openSessions = new Map<string, Session>();
+	private openSessions = new Map<string, SessionStore>();
 
 	constructor(cwd: string) {
 		this.cwd = cwd;
@@ -117,7 +117,7 @@ export class TuiSessionService {
 		return this.cwd;
 	}
 
-	private open(id: string): Session | null {
+	private open(id: string): SessionStore | null {
 		const cached = this.openSessions.get(id);
 		if (cached) return cached;
 		const session = this.manager.getSession(id);
@@ -150,12 +150,12 @@ export class TuiSessionService {
 
 	/**
 	 * Get the underlying Session instance for a conversation, so a caller
-	 * (e.g. AgentSession.attachSession) can use it as the durable
+	 * (e.g. AgentHarness.attachSession) can use it as the durable
 	 * branch/compaction/model journal for the same conversation this service
 	 * already persists Turns to. Always the same cached instance this service
 	 * itself reads/writes through — never a second Session for the same id.
 	 */
-	getRawSession(id: string): Session | null {
+	getRawSession(id: string): SessionStore | null {
 		return this.open(id);
 	}
 

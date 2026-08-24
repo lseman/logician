@@ -19,17 +19,6 @@ export interface AtomicWriteOptions {
 	skipContentCheck?: boolean;
 }
 
-/** First 1-indexed line where two texts diverge, or null if identical. */
-function _firstDifferingLine(expected: string, actual: string): number | null {
-	const a = expected.split("\n");
-	const b = actual.split("\n");
-	const max = Math.max(a.length, b.length);
-	for (let i = 0; i < max; i++) {
-		if (a[i] !== b[i]) return i + 1;
-	}
-	return null;
-}
-
 /**
  * Replace a regular file through a same-directory temporary file and rename.
  * Existing permissions are preserved. Symbolic links are rejected explicitly

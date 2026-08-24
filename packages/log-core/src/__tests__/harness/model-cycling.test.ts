@@ -1,7 +1,7 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
-import { AgentHarness } from "../../runtime/harness/agent-harness.ts";
+import { AgentSession } from "../../runtime/harness/agent-session.ts";
 import { clampThinkingLevel } from "../../runtime/harness/live/model.ts";
 import type { AgentEvent } from "../../system/types/types-messages.ts";
 
@@ -35,7 +35,7 @@ function makeHarness(overrides?: Record<string, unknown>) {
 		tools: [],
 		...overrides,
 	} as Record<string, unknown>;
-	return new AgentHarness({
+	return new AgentSession({
 		config: config as any,
 		backend: fakeBackend,
 		maxIterations: 5,

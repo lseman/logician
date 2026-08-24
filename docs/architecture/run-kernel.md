@@ -18,7 +18,7 @@ actually needs it (thread state, file state, run status).
 
 ## Continuation tracking
 
-The harness turn loop (`runtime/execution/agent-loop-runner.ts`) drives each
+The harness turn loop (`runtime/harness/agent-harness.ts`) drives each
 turn through intake, model call, tool execution, and hooks. In-memory runtime
 status — phase (`idle` / `turn` / `compaction` / `branch_summary`),
 streaming state, pending tool calls, retry attempts, and the last run

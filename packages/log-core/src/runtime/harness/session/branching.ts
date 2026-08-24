@@ -1,8 +1,8 @@
-// ── Branch/checkpoint operations for AgentHarness ─────────────────────────
+// ── Branch/checkpoint operations for AgentSession ─────────────────────────
 // Pure(ish) helpers operating on explicit state passed in by the harness.
 // The harness owns the mutable fields (history/branches/checkpoints) and
 // applies the returned results; these functions contain the logic that used
-// to live directly on the AgentHarness class.
+// to live directly on the AgentSession class.
 
 import type { LLMBackend } from "../../../capabilities/provider/backend.ts";
 import { collectMessagesForBranchSummary } from "../../../capabilities/session/summaries/branch-summarization.ts";

@@ -1,7 +1,7 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="logo/logician-banner-dark.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="logo/logician-logo-dark.svg">
   <img src="logo/logician-logo.svg" alt="Logician" width="800">
 </picture>
 

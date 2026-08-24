@@ -7,7 +7,8 @@
 	"main": "src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./harness": "./src/runtime/harness/agent-session.ts",
+		"./harness": "./src/runtime/harness/agent-harness.ts",
+		"./session": "./src/runtime/harness/agent-session.ts",
 		"./evaluation": "./src/system/evaluation/trajectory.ts",
 		"./extensions": "./src/extensions.ts",
 		"./frontmatter": "./src/frontmatter.ts",

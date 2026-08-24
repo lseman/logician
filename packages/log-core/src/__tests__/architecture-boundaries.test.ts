@@ -16,6 +16,12 @@ async function sourceFiles(root: string): Promise<string[]> {
 	).flat();
 }
 
+function relativeImports(source: string): string[] {
+	return [...source.matchAll(/(?:from\s+|import\s*)["'](\.[^"']+)["']/g)].map(
+		match => match[1],
+	);
+}
+
 describe("core architecture boundaries", () => {
 	test("source contains only foundational modules (flat layout)", async () => {
 		const sourceRoot = path.resolve(import.meta.dir, "../");
@@ -76,6 +82,47 @@ describe("core architecture boundaries", () => {
 			}
 		}
 		expect(missing).toEqual([]);
+	});
+
+	test("every production module is reachable from a public export", async () => {
+		const sourceRoot = path.resolve(import.meta.dir, "../");
+		const packageRoot = path.resolve(sourceRoot, "..");
+		const files = (await sourceFiles(sourceRoot)).filter(
+			file => !file.includes(`${path.sep}__tests__${path.sep}`),
+		);
+		const knownFiles = new Set(files);
+		const dependencies = new Map<string, string[]>();
+		for (const file of files) {
+			const imports = relativeImports(await readFile(file, "utf8"));
+			dependencies.set(
+				file,
+				imports
+					.map(specifier => {
+						const resolved = path.resolve(path.dirname(file), specifier);
+						return resolved.endsWith(".ts") ? resolved : `${resolved}.ts`;
+					})
+					.filter(candidate => knownFiles.has(candidate)),
+			);
+		}
+
+		const packageJson = JSON.parse(
+			await readFile(path.join(packageRoot, "package.json"), "utf8"),
+		) as { exports?: Record<string, string> };
+		const reachable = new Set<string>();
+		const visit = (file: string): void => {
+			if (reachable.has(file)) return;
+			reachable.add(file);
+			for (const dependency of dependencies.get(file) ?? []) visit(dependency);
+		};
+		for (const target of Object.values(packageJson.exports ?? {})) {
+			visit(path.resolve(packageRoot, target));
+		}
+
+		const unreachable = files
+			.filter(file => !reachable.has(file))
+			.map(file => path.relative(sourceRoot, file))
+			.sort();
+		expect(unreachable).toEqual([]);
 	});
 
 	test("removed compatibility seams cannot be reintroduced", async () => {

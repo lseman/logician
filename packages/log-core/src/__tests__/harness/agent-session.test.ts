@@ -4,17 +4,17 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BackendError } from "../../capabilities/provider/backend.ts";
-import { Session } from "../../capabilities/session/session.ts";
+import { SessionStore } from "../../capabilities/session/session-store.ts";
 import {
-	AgentHarness,
+	AgentSession,
 	defineHarnessModule,
 	HarnessBusyError,
 	HarnessConfigurationError,
-} from "../../runtime/harness/agent-harness.ts";
+} from "../../runtime/harness/agent-session.ts";
 import type { AgentConfig } from "../../system/types/types-config.ts";
 import { FakeBackend, textResponse } from "../fake-backend.ts";
 
-function makeHarness(backend: FakeBackend, cwd?: string): AgentHarness {
+function makeHarness(backend: FakeBackend, cwd?: string): AgentSession {
 	const config: AgentConfig = {
 		baseUrl: "http://fake",
 		model: "fake",
@@ -33,7 +33,7 @@ function makeHarness(backend: FakeBackend, cwd?: string): AgentHarness {
 			},
 		],
 	};
-	return new AgentHarness({ config, backend, cwd, maxIterations: 5 });
+	return new AgentSession({ config, backend, cwd, maxIterations: 5 });
 }
 
 void test("modules compose tools, defaults, and observers before construction", async () => {
@@ -49,7 +49,7 @@ void test("modules compose tools, defaults, and observers before construction", 
 		config: { temperature: 0.2, maxTokens: 321, tools: [moduleTool] },
 		observers: [{ phaseChange: phase => phases.push(phase) }],
 	});
-	const harness = new AgentHarness({
+	const harness = new AgentSession({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
@@ -83,7 +83,7 @@ void test("modules reject duplicate identities and tool names", () => {
 	};
 	assert.throws(
 		() =>
-			new AgentHarness({
+			new AgentSession({
 				...options,
 				modules: [{ name: "tools", config: { tools: [tool] } }],
 			}),
@@ -91,7 +91,7 @@ void test("modules reject duplicate identities and tool names", () => {
 	);
 	assert.throws(
 		() =>
-			new AgentHarness({
+			new AgentSession({
 				...options,
 				config: { baseUrl: "http://fake", model: "fake" },
 				modules: [{ name: "same" }, { name: "same" }],
@@ -164,7 +164,7 @@ void test("constructor stream options reach the first provider request", async (
 			return textResponse("done");
 		},
 	]);
-	const harness = new AgentHarness({
+	const harness = new AgentSession({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
@@ -192,7 +192,7 @@ void test("legacy turn timeout and disabled retries reach the provider", async (
 			return textResponse("done");
 		},
 	]);
-	const harness = new AgentHarness({
+	const harness = new AgentSession({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
@@ -215,7 +215,7 @@ void test("retryBaseDelayMs configures output-guard retry events", async () => {
 		},
 		() => textResponse("recovered"),
 	]);
-	const harness = new AgentHarness({
+	const harness = new AgentSession({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
@@ -257,7 +257,7 @@ void test("context-full recovery compacts inside an active turn and persists it"
 		continuationEnabled: false,
 		tools: [],
 	};
-	const harness = new AgentHarness({ config, backend, maxIterations: 1 });
+	const harness = new AgentSession({ config, backend, maxIterations: 1 });
 	harness.setHistory(
 		Array.from({ length: 12 }, (_, index) => ({
 			role: "user" as const,
@@ -276,7 +276,7 @@ void test("context-full recovery compacts inside an active turn and persists it"
 
 void test("runtimeState is canonical across streaming, tools, and settlement", async () => {
 	// eslint-disable-next-line prefer-const -- harness used in closures before assignment
-	let harness!: AgentHarness;
+	let harness!: AgentSession;
 	const phases: Array<[string, string]> = [];
 	const tool = {
 		name: "inspect",
@@ -301,7 +301,7 @@ void test("runtimeState is canonical across streaming, tools, and settlement", a
 		},
 		() => textResponse("done"),
 	]);
-	harness = new AgentHarness({
+	harness = new AgentSession({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
@@ -377,7 +377,7 @@ void test("steering with steeringInterrupt survives the abort and reaches the ne
 			},
 		],
 	};
-	const harness = new AgentHarness({ config, backend, maxIterations: 5 });
+	const harness = new AgentSession({ config, backend, maxIterations: 5 });
 	let settledNextTurnCount = 0;
 	harness.observe({
 		settled: count => {
@@ -466,7 +466,7 @@ void test("prompt hook messages remain adjacent to the prompt that produced them
 
 void test("nextTurn queued during a run waits for the following user prompt", async () => {
 	// eslint-disable-next-line prefer-const -- harness used in closures before assignment
-	let harness!: AgentHarness;
+	let harness!: AgentSession;
 	const backend = new FakeBackend([
 		() => {
 			harness.nextTurn("future guidance");
@@ -533,7 +533,10 @@ void test("fork + discardBranch restores the parent conversation", async () => {
 
 void test("fork/branchSummary/discardBranch keep an attached session's leaf pointer in sync", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-branch-session-"));
-	const session = new Session("branch-test", { baseDir: dir, enabled: true });
+	const session = new SessionStore("branch-test", {
+		baseDir: dir,
+		enabled: true,
+	});
 
 	const harness = makeHarness(new FakeBackend([() => textResponse("base")]));
 	harness.attachSession(session);
@@ -550,7 +553,7 @@ void test("fork/branchSummary/discardBranch keep an attached session's leaf poin
 
 void test("enabled session persists real turn messages without placeholders", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-session-"));
-	const session = new Session("persistence-test", {
+	const session = new SessionStore("persistence-test", {
 		baseDir: dir,
 		enabled: true,
 	});
@@ -561,7 +564,7 @@ void test("enabled session persists real turn messages without placeholders", as
 	harness.attachSession(session);
 	await harness.prompt("question");
 
-	const persisted = new Session("persistence-test", {
+	const persisted = new SessionStore("persistence-test", {
 		baseDir: dir,
 		enabled: true,
 	});
@@ -584,7 +587,7 @@ void test("continuation is gated by the in-memory provider-call budget", async (
 			return textResponse("must not run");
 		},
 	]);
-	const harness = new AgentHarness({
+	const harness = new AgentSession({
 		cwd,
 		config: {
 			baseUrl: "http://fake",
@@ -610,7 +613,7 @@ void test("continuation is gated by the in-memory provider-call budget", async (
 
 void test("token usage over budget stops the run", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-token-budget-"));
-	const harness = new AgentHarness({
+	const harness = new AgentSession({
 		cwd,
 		config: {
 			baseUrl: "http://fake",
@@ -639,7 +642,7 @@ void test("token usage over budget stops the run", async () => {
 
 void test("enabled sessions persist tool results across a resume", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-checkpoint-"));
-	const session = new Session("tool-result-test", {
+	const session = new SessionStore("tool-result-test", {
 		baseDir: dir,
 		enabled: true,
 	});
@@ -657,7 +660,7 @@ void test("enabled sessions persist tool results across a resume", async () => {
 	harness.attachSession(session);
 	await harness.prompt("run the tool");
 
-	const persisted = new Session("tool-result-test", {
+	const persisted = new SessionStore("tool-result-test", {
 		baseDir: dir,
 		enabled: true,
 	});
@@ -670,7 +673,7 @@ void test("enabled sessions persist tool results across a resume", async () => {
 
 void test("session typed entries build deterministic context", () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-session-tree-"));
-	const session = new Session("tree", { baseDir: dir, enabled: true });
+	const session = new SessionStore("tree", { baseDir: dir, enabled: true });
 	session.appendModelChange("model-a");
 	session.appendThinkingLevelChange("high");
 	session.appendActiveToolsChange(["read", "write"]);
@@ -699,7 +702,7 @@ void test("session typed entries build deterministic context", () => {
 
 void test("session active leaf makes branch checkout durable without truncation", () => {
 	const baseDir = mkdtempSync(join(tmpdir(), "logician-session-branch-"));
-	const session = new Session("tree-session", { baseDir, enabled: true });
+	const session = new SessionStore("tree-session", { baseDir, enabled: true });
 	session.append({ role: "user", content: "root", timestamp: 1 });
 	const root = session.getLeafEntryId();
 	assert.ok(root);
@@ -707,7 +710,7 @@ void test("session active leaf makes branch checkout durable without truncation"
 	session.checkout(root);
 	session.append({ role: "assistant", content: "selected", timestamp: 3 });
 
-	const restored = new Session("tree-session", { baseDir, enabled: true });
+	const restored = new SessionStore("tree-session", { baseDir, enabled: true });
 	assert.deepEqual(
 		restored.buildContext().messages.map(message => message.content),
 		["root", "selected"],

@@ -1,4 +1,4 @@
-// ── Compaction operations for AgentHarness ────────────────────────────────
+// ── Compaction operations for AgentSession ────────────────────────────────
 // Pulled out of harness.ts: manual compact(), auto-compaction threshold
 // check, and the shared before/after-compact event + hook plumbing.
 // Delegates to the single compaction engine (compactToFit) shared with the

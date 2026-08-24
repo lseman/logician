@@ -1,7 +1,18 @@
 /** Contracts used by hosts that embed the core engine. */
 
-export * from "./capabilities/provider/messages.ts";
-export * from "./capabilities/session/session.ts";
+export {
+	createAssistantMessage,
+	createToolResultMessage,
+	createUserMessage,
+	estimateChatPayloadTokens,
+	estimateTokens,
+} from "./capabilities/provider/messages.ts";
+export {
+	type CustomSessionEntry,
+	type SessionEntry,
+	SessionRegistry,
+	SessionStore,
+} from "./capabilities/session/session-store.ts";
 export { ToolRegistry } from "./capabilities/tools/registry.ts";
 export { resolveAgentSettings } from "./control/configuration/agent-settings.ts";
 export type { AbortResult } from "./runtime/harness/types.ts";

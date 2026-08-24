@@ -7,12 +7,12 @@ description: The core cycle of the Logician agent — from input to output.
 
 The agent loop is the core execution cycle that drives all agent behavior.
 
-## Harness composition
+## Session composition
 
-`AgentHarness` is available from `@logician/log-core/harness`. Applications can assemble reusable capability bundles with `defineHarnessModule()` instead of wrapping or subclassing the harness:
+Applications use `AgentSession` from `@logician/log-core/session`. It owns the interactive lifecycle and invokes the lower-level functional harness for each prepared turn. The harness has no session state or reverse dependency. Applications can assemble reusable capability bundles with `defineHarnessModule()` instead of wrapping or subclassing the session:
 
 ```ts
-import { AgentHarness, defineHarnessModule } from "@logician/log-core/harness";
+import { AgentSession, defineHarnessModule } from "@logician/log-core/session";
 
 const diagnostics = defineHarnessModule({
   name: "diagnostics",
@@ -23,19 +23,19 @@ const diagnostics = defineHarnessModule({
   observers: [{ event: event => telemetry.record(event) }],
 });
 
-const harness = new AgentHarness({
+const session = new AgentSession({
   backend,
   config: { baseUrl, model },
   modules: [diagnostics],
 });
 ```
 
-Modules are inert: construction composes their configuration, tools, and observers before any run begins. Direct harness configuration wins over module defaults. Tool and module names must be unique, so ambiguous installations fail immediately with `HarnessConfigurationError`.
+Modules are inert: construction composes their configuration, tools, and observers before any run begins. Direct session configuration wins over module defaults. Tool and module names must be unique, so ambiguous installations fail immediately with `HarnessConfigurationError`.
 
-Runtime configuration goes through `harness.configure(patch)`. Tool patches rebuild the live registry and emit the same durable/session notifications as other tool changes. Observation uses one multi-listener seam:
+Runtime configuration goes through `session.configure(patch)`. Tool patches rebuild the live registry and emit the same durable/session notifications as other tool changes. Observation uses one multi-listener seam:
 
 ```ts
-const unsubscribe = harness.observe({
+const unsubscribe = session.observe({
   phaseChange: (phase, previous) => {},
   queueChange: queues => {},
   settled: nextTurnCount => {},

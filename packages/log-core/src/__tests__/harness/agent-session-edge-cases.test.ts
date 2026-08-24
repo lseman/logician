@@ -1,16 +1,16 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
-	AgentHarness,
+	AgentSession,
 	HarnessBusyError,
-} from "../../runtime/harness/agent-harness.ts";
+} from "../../runtime/harness/agent-session.ts";
 import type { AgentConfig } from "../../system/types/types-config.ts";
 import { FakeBackend, textResponse } from "../fake-backend.ts";
 
 function makeHarness(
 	backend: FakeBackend,
 	configOverrides?: Partial<AgentConfig>,
-): AgentHarness {
+): AgentSession {
 	const config: AgentConfig = {
 		baseUrl: "http://fake",
 		model: "fake",
@@ -30,7 +30,7 @@ function makeHarness(
 		],
 		...configOverrides,
 	};
-	return new AgentHarness({ config, backend });
+	return new AgentSession({ config, backend });
 }
 
 void test("setTemperature takes effect on the next turn", async () => {
@@ -79,7 +79,7 @@ void test("setSystemPrompt takes effect on the next turn", async () => {
 
 void test("runtime config changes take effect at the next save point", async () => {
 	// eslint-disable-next-line prefer-const -- harness used in closures before assignment
-	let harness!: AgentHarness;
+	let harness!: AgentSession;
 	const temperatures: number[] = [];
 	const prompts: string[] = [];
 	const backend = new FakeBackend([

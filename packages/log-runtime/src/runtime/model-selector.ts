@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentModelConfig } from "@logician/log-core";
-import type { AgentSession } from "@logician/log-core/harness";
+import type { AgentSession } from "@logician/log-core/session";
 
 export interface ModelOption {
 	key: string;
@@ -13,11 +13,11 @@ export interface ModelOption {
 export class ModelSelector {
 	constructor(
 		private readonly config: () => AgentConfig,
-		private readonly harness: () => AgentSession | null,
+		private readonly session: () => AgentSession | null,
 	) {}
 
 	current(): string {
-		return this.harness()?.models.model ?? this.config().model ?? "";
+		return this.session()?.models.model ?? this.config().model ?? "";
 	}
 
 	baseUrl(): string {
@@ -61,21 +61,21 @@ export class ModelSelector {
 		if (!option) return null;
 		this.config().model = option.model;
 		this.config().baseUrl = option.url;
-		this.harness()?.models.setEndpoint(option.model, option.url);
+		this.session()?.models.setEndpoint(option.model, option.url);
 		return { model: option.model, url: option.url };
 	}
 
 	cycle(direction: "forward" | "backward" = "forward"): string | null {
-		return this.harness()?.models.cycle(direction) ?? null;
+		return this.session()?.models.cycle(direction) ?? null;
 	}
 
 	setAvailable(models: AgentModelConfig[]): void {
 		this.config().models = models;
-		this.harness()?.models.setModels(models);
+		this.session()?.models.setModels(models);
 	}
 
 	select(model: string): void {
 		this.config().model = model;
-		this.harness()?.models.setModel(model);
+		this.session()?.models.setModel(model);
 	}
 }

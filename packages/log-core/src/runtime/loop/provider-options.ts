@@ -16,7 +16,6 @@ import type { AgentHooks } from "../../system/types/types-messages.ts";
 import type { AgentLoopConfig } from "./config.ts";
 
 export interface ProviderOptionsContext {
-	chatMessages: Record<string, unknown>[];
 	toolDefinitions: Record<string, unknown>[];
 	settings: AgentSettings;
 	config: Pick<AgentLoopConfig, "maxTokens" | "model" | "temperature">;
@@ -42,7 +41,6 @@ export function buildProviderRequestOptions(
 	ctx: ProviderOptionsContext,
 ): GenerateOptions {
 	const {
-		chatMessages,
 		toolDefinitions,
 		settings,
 		config,

@@ -2,7 +2,7 @@
 
 import type { LLMBackend, Tool } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
-import type { AgentSession } from "@logician/log-core/harness";
+import type { AgentSession } from "@logician/log-core/session";
 import {
 	get_reasoner,
 	getReasonerMeta,
@@ -18,7 +18,6 @@ export interface AgentCoordinatorDeps {
 	getBackend: () => LLMBackend | null;
 	getBaseUrl: () => string;
 	getCurrentModel: () => string;
-	harness: AgentSession | null;
 	cwd: string;
 	projectTrusted: boolean;
 	maxParallelAgents?: number;

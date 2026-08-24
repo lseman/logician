@@ -12,7 +12,7 @@ import {
 	type RunAgentLoopConfig,
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
-} from "../../runtime/execution/agent-loop-runner.ts";
+} from "../../runtime/harness/agent-harness.ts";
 import type { AgentConfig } from "../../system/types/types-config.ts";
 import type {
 	AgentEvent,
@@ -26,15 +26,6 @@ const noop: Tool = {
 	description: "does nothing",
 	parameters: { type: "object", properties: {} },
 	execute: async () => "ok",
-};
-
-// Legacy fixture retained only by skipped regression cases documenting the
-// removed structured-conclusion protocol.
-const _task_status: Tool = {
-	name: "task_status",
-	description: "legacy test fixture",
-	parameters: { type: "object", properties: {} },
-	execute: async () => "recorded",
 };
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): RunAgentLoopConfig {

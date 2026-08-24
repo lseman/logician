@@ -22,7 +22,6 @@ export interface ExtensionManagerOptions {
 
 export class ExtensionRegistry {
 	private _runner: ExtensionRunner | null = null;
-	private extensionDirs?: { user?: string; paths?: string[] };
 	private loadPromise: Promise<void> = Promise.resolve();
 
 	constructor(private readonly opts: ExtensionManagerOptions) {}
@@ -51,8 +50,6 @@ export class ExtensionRegistry {
 			projectDir: this.opts.projectTrusted ? this.opts.cwd : undefined,
 			explicitPaths: this.opts.extensionDirs?.paths,
 		});
-
-		this.extensionDirs = this.opts.extensionDirs;
 
 		if (extResult.extensions.length > 0) {
 			this.loadPromise = this._runner

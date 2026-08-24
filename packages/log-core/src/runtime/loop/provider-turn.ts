@@ -179,7 +179,6 @@ export async function requestAssistantTurn(
 				? getInferenceMode(effectiveMode)
 				: undefined;
 			const requestOptions = buildProviderRequestOptions({
-				chatMessages,
 				toolDefinitions: input.registry.toToolDefinitions(),
 				settings: input.settings,
 				config,

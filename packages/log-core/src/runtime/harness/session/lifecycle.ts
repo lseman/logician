@@ -1,4 +1,4 @@
-// ── Session + hook lifecycle plumbing for AgentHarness ────────────────────
+// ── Session + hook lifecycle plumbing for AgentSession ────────────────────
 // SessionStart/SessionEnd/PreCompact/PostCompact hook emission and
 // session list/resume helpers. Failures here must never break a turn, so
 // every call swallows its own errors — matches prior harness behavior.

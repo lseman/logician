@@ -8,7 +8,7 @@
 
 import type {
 	CustomSessionEntry,
-	Session,
+	SessionStore,
 	SessionEntry,
 } from "@logician/log-core/runtime";
 import type { Turn } from "./transcript.ts";
@@ -22,12 +22,12 @@ function isTurnEntry(entry: SessionEntry): entry is TurnSessionEntry {
 }
 
 /** Persist a completed turn as one entry. Only call once `turn.isComplete`. */
-export function saveTurn(session: Session, turn: Turn): void {
+export function saveTurn(session: SessionStore, turn: Turn): void {
 	session.appendCustom(TURN_CUSTOM_TYPE, turn);
 }
 
 /** Reconstruct the turn list for a session from its entry tree (root→leaf path). */
-export function loadTurns(session: Session): Turn[] {
+export function loadTurns(session: SessionStore): Turn[] {
 	return session
 		.getPathToRootEntries()
 		.filter(isTurnEntry)

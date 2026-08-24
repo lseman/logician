@@ -26,7 +26,7 @@ export {
 	type RunAgentLoopContext,
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
-} from "./runtime/execution/agent-loop-runner.ts";
+} from "./runtime/harness/agent-harness.ts";
 export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export {
 	type AgentConfig,

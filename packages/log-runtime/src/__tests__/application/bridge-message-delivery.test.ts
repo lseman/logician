@@ -582,7 +582,6 @@ void test("core iterations reconcile output without completing the UI turn early
 	internal.toolRouter.isMcpLoaded = () => true;
 
 	// Mock session to simulate provider events
-	const _eventEmissions: Array<{ type: string }> = [];
 	internal.session = {
 		messages: [],
 		configure: () => {},

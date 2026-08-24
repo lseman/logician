@@ -1,14 +1,13 @@
 // ── ConversationState ────────────────────────────────────────────────────
 // Owns the active message history, rewind checkpoints, and branch stack for
-// one AgentHarness instance. File-frame coordination (beginFileFrame /
+// one AgentSession instance. File-frame coordination (beginFileFrame /
 // restoreFileFrame / clearFileFrames) is paired here so a conversation
 // checkpoint and its workspace snapshot can never drift apart — every method
 // that pushes/pops/clears history does the matching file-frame operation in
 // the same call.
 //
-// Session persistence (the durable on-disk log) is a separate concern owned
-// by the harness: it depends on hook-lifecycle state (session id, transcript
-// path) that has nothing to do with in-memory conversation shape.
+// Durable persistence is attached by AgentSession. ConversationState remains
+// storage-agnostic and only maintains the in-memory conversation shape.
 
 import {
 	beginFileFrame,

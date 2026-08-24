@@ -37,7 +37,6 @@ import type { AgentLoopConfig } from "./config.ts";
 export interface ProcessResponseResult {
 	success: boolean;
 	toolCalls: ToolCall[];
-	assistantContent: string;
 	stopReason: StopReason;
 	assistant: Message;
 	performedToolWork: boolean;
@@ -120,7 +119,6 @@ export function processProviderResponse(
 			return {
 				success: false,
 				toolCalls: [],
-				assistantContent: "",
 				stopReason: "error",
 				assistant: { role: "assistant", content: message } as Message,
 				performedToolWork: false,
@@ -154,7 +152,6 @@ export function processProviderResponse(
 		return {
 			success: false,
 			toolCalls,
-			assistantContent,
 			stopReason,
 			assistant,
 			performedToolWork,
@@ -165,7 +162,6 @@ export function processProviderResponse(
 	return {
 		success: true,
 		toolCalls,
-		assistantContent,
 		stopReason,
 		assistant,
 		performedToolWork,

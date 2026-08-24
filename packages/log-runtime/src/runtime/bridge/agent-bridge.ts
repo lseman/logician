@@ -9,14 +9,14 @@ import type {
 } from "@logician/log-core";
 import { OpenAIBackend } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
-import { AgentSession } from "@logician/log-core/harness";
 import type { PermissionMode } from "@logician/log-core/permissions";
-import type { AbortResult, Session } from "@logician/log-core/runtime";
+import type { AbortResult, SessionStore } from "@logician/log-core/runtime";
 import {
 	estimateChatPayloadTokens,
 	estimateTokens,
 	type ToolRegistry,
 } from "@logician/log-core/runtime";
+import { AgentSession } from "@logician/log-core/session";
 import {
 	claudeToolMatcherName,
 	createClaudeCodeHookLayer,
@@ -77,6 +77,7 @@ import {
 	resolveWebSearchConfig,
 } from "./environment.ts";
 import { formatPluginResult } from "./plugin-result-formatter.ts";
+import { runQueueCommand } from "./queue-command.ts";
 
 export { findJbPrompt } from "./project-prompt.ts";
 
@@ -95,7 +96,7 @@ export class AgentRuntime {
 	private config: AgentConfig;
 	private backend: OpenAIBackend;
 	private session: AgentSession | null = null;
-	private durableSession: Session | undefined;
+	private durableSession: SessionStore | undefined;
 	readonly events = new RuntimeEventBus();
 	readonly models: ModelSelector;
 	private running = false;
@@ -488,7 +489,6 @@ export class AgentRuntime {
 				getBackend: () => this.backend,
 				getBaseUrl: () => this.config.baseUrl,
 				getCurrentModel: () => this.models.current(),
-				harness: null, // set below via ensureSession
 				cwd: this.cwd,
 				projectTrusted: this.projectTrusted,
 				maxParallelAgents: opts.maxParallelAgents,
@@ -864,13 +864,13 @@ export class AgentRuntime {
 	/** Execute a slash command (sends as chat message to the agent). */
 	sendSlash(raw: string): void {
 		const trimmed = raw.trim();
-		const result = this.session?.handleQueueSlashCommand(trimmed);
-		if (result?.handled) {
+		const result = runQueueCommand(this.session, trimmed);
+		if (result) {
 			this.emit({
 				type: "notice",
-				level: result.level ?? "info",
+				level: result.level,
 				label: "Queue",
-				text: result.text ?? "",
+				text: result.text,
 			});
 			return;
 		}
@@ -1269,7 +1269,10 @@ export class AgentRuntime {
 	}
 
 	/** Use the user-facing conversation session as the hook and memory session. */
-	useConversationSession(sessionId: string, durableSession?: Session): void {
+	useConversationSession(
+		sessionId: string,
+		durableSession?: SessionStore,
+	): void {
 		if (!sessionId.trim()) return;
 		const provisionalSessionId = this.sessionId;
 		this.sessionId = sessionId;

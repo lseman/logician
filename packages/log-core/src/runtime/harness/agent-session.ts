@@ -1,7 +1,6 @@
 // ── AgentSession ────────────────────────────────────────────────────────────
-// Unified session orchestrator: merges AgentHarness (core loop, phases,
-// compaction, branching, queue drains, events)
-// (queue operations, continuation logic, phase mapping, slash commands).
+// Interactive coordination: conversation, queues, persistence, branching,
+// continuation, and lifecycle around a composed execution harness.
 //
 // This is the single entry point for the agent's interactive session:
 //   prompt(text)    — start a turn with a user message
@@ -21,7 +20,7 @@ import {
 	createUserMessage,
 	estimateChatPayloadTokens,
 } from "../../capabilities/provider/messages.ts";
-import type { Session } from "../../capabilities/session/session.ts";
+import type { SessionStore } from "../../capabilities/session/session-store.ts";
 import type {
 	BranchInfo,
 	BranchSummaryData,
@@ -54,16 +53,16 @@ import {
 	shouldAutoCompact,
 } from "../compaction/orchestration.ts";
 import {
-	createSteeringInterruptReason,
-	type RunAgentLoopConfig,
-	runAgentLoop,
-} from "../execution/agent-loop-runner.ts";
-import {
 	type AgentRuntimeState,
 	createRuntimeState,
 	type HarnessPhase,
 	reduceRuntimeState,
 } from "../state/runtime-state.ts";
+import {
+	createSteeringInterruptReason,
+	type RunAgentLoopConfig,
+	runAgentLoop,
+} from "./agent-harness.ts";
 import {
 	composeHarnessConfig,
 	HarnessConfigurationError,
@@ -71,7 +70,7 @@ import {
 import { HarnessEventRouter } from "./internal/event-router.ts";
 import { HarnessModelController } from "./internal/model-controller.ts";
 import { HarnessObservation } from "./internal/observation.ts";
-import { HarnessQueueController } from "./internal/queue-controller.ts";
+import { SessionState } from "./internal/session-state.ts";
 import { HarnessTurnController } from "./internal/turn-controller.ts";
 import type { ExtensionRuntimeDeps } from "./live/extension-runtime.ts";
 import {
@@ -85,7 +84,6 @@ import {
 	HarnessBusyError,
 } from "./live/phase.ts";
 import { summarizeAndMergeBranch } from "./session/branching.ts";
-import { ConversationState } from "./session/conversation-state.ts";
 import {
 	emitPostCompact as emitPostCompactHelper,
 	emitPreCompact as emitPreCompactHelper,
@@ -94,7 +92,7 @@ import {
 } from "./session/lifecycle.ts";
 import type {
 	AbortResult,
-	AgentHarnessOptions,
+	AgentSessionOptions,
 	HarnessObserver,
 	HarnessPluginHookFactory,
 	HarnessPluginHookLayer,
@@ -115,7 +113,7 @@ export type {
 export { HarnessBusyError } from "./live/phase.ts";
 export type {
 	AbortResult,
-	AgentHarnessOptions,
+	AgentSessionOptions,
 	HarnessModule,
 	HarnessObserver,
 	HarnessQueues,
@@ -149,11 +147,10 @@ export class AgentSession {
 	private idleTools: ToolRegistry;
 	private readonly turn = new HarnessTurnController();
 	private loopConfig: AgentConfig | null = null;
-	private conversation = new ConversationState();
+	private readonly session: SessionState;
 	private readonly contextEngine = new ContextEngine(messages =>
 		estimateChatPayloadTokens([...messages]),
 	);
-	private queue: HarnessQueueController;
 	private loopDetector: LoopDetector;
 	// Durable intervention history spans turns; run policy is reset per prompt.
 	private interventions: HarnessInterventionController =
@@ -171,10 +168,6 @@ export class AgentSession {
 	// ── Output Guard ─────────────────────────────────────────────────────
 	private outputGuard: OutputGuard;
 	private _hooksEnabled: boolean;
-	private _session?: Session;
-	private _sessionId?: string;
-	private _transcriptPath?: string;
-	private _hasStartedSession = false;
 	private durableBudgetState = {
 		providerCalls: 0,
 		toolCalls: 0,
@@ -191,18 +184,20 @@ export class AgentSession {
 		| { messages?: Message[]; systemPrompt?: string }
 		| undefined;
 
-	// ── Continuation state  ─────────────────────
-	private pendingContinuation = false;
-	private activeRepositoryQuery?: string;
-
 	// ── UI event callback  ─────────────────────
 	private onEvent?: (event: AgentSessionEvent) => void;
 
 	constructor(
-		options: AgentHarnessOptions & {
+		options: AgentSessionOptions & {
 			onEvent?: (event: AgentSessionEvent) => void;
 		},
 	) {
+		this.onEvent = options.onEvent;
+		this.session = new SessionState({
+			steeringMode: options.config.steeringQueueMode ?? "one-at-a-time",
+			followUpMode: options.config.followUpQueueMode ?? "one-at-a-time",
+			onQueueChange: queues => this.emitQueueChange(queues),
+		});
 		const config = composeHarnessConfig(options.modules ?? [], options.config);
 		this.configuration = new ConfigurationStore(config, {
 			clone: AgentSession.cloneConfig,
@@ -225,8 +220,9 @@ export class AgentSession {
 			backend: options.backend,
 			configuration: this.configuration,
 			emit: event => this.emitToSubscribers(event),
-			persistModel: model => this._session?.appendModelChange(model),
-			persistThinking: level => this._session?.appendThinkingLevelChange(level),
+			persistModel: model => this.session.store?.appendModelChange(model),
+			persistThinking: level =>
+				this.session.store?.appendThinkingLevelChange(level),
 		});
 		this.cwd = options.cwd;
 		this.maxIterations = options.maxIterations;
@@ -254,13 +250,6 @@ export class AgentSession {
 			},
 		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
-		this.queue = new HarnessQueueController(
-			{
-				steeringMode: options.config.steeringQueueMode ?? "one-at-a-time",
-				followUpMode: options.config.followUpQueueMode ?? "one-at-a-time",
-			},
-			queues => this.emitQueueChange(queues),
-		);
 		this.observation = new HarnessObservation(
 			(options.modules ?? []).flatMap(module => module.observers ?? []),
 		);
@@ -276,11 +265,10 @@ export class AgentSession {
 			},
 			getExtensionRunner: () => this._extensionRunner,
 			getExtensionContext: () => ({
-				sessionId: this._sessionId ?? "",
+				sessionId: this.session.id ?? "",
 				cwd: this.cwd ?? "",
 			}),
 		});
-		this.onEvent = options.onEvent;
 	}
 
 	private static cloneConfig(config: AgentConfig): AgentConfig {
@@ -321,7 +309,7 @@ export class AgentSession {
 
 	/** Append-only conversation provenance for persistence, replay, and clients. */
 	get threadItems(): readonly ThreadItem[] {
-		return this.conversation.items;
+		return this.session.threadItems;
 	}
 
 	/** Carries cumulative budget counters across turns in this session. */
@@ -391,14 +379,13 @@ export class AgentSession {
 	}
 
 	private endTurn(): void {
-		this.queue.clearCurrentTurn();
-		const nextTurnCount = this.queue.snapshot().nextTurn.length;
+		this.session.queue.clearCurrentTurn();
+		const nextTurnCount = this.session.queue.snapshot().nextTurn.length;
 		this.observation.settled(nextTurnCount);
 		this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 		// If continuation was pending, trigger it.
-		if (this.pendingContinuation) {
-			this.pendingContinuation = false;
-			void this.runQueuedContinuation(this.activeRepositoryQuery).catch(
+		if (this.session.takePendingContinuation()) {
+			void this.runQueuedContinuation(this.session.repositoryQuery).catch(
 				() => {},
 			);
 		}
@@ -425,7 +412,7 @@ export class AgentSession {
 	 */
 	async continue(): Promise<Message[]> {
 		this.assertIdle("continue");
-		const nonSystem = this.conversation.history.filter(
+		const nonSystem = this.session.conversation.history.filter(
 			(m): m is Message => m != null && m.role !== "system",
 		);
 		if (nonSystem.length === 0) {
@@ -496,9 +483,9 @@ export class AgentSession {
 	/** Task/checkpoint setup that must happen before a snapshot is created. */
 	private async beginTurn(_request: TurnRequest): Promise<void> {
 		this.runController = new AgentRunController();
-		this.conversation.checkpoint();
+		this.session.conversation.checkpoint();
 
-		if (!this._hasStartedSession) {
+		if (!this.session.hasStarted) {
 			await this.emitSessionStart("startup");
 		}
 	}
@@ -571,7 +558,7 @@ export class AgentSession {
 			),
 			...newMessages,
 		];
-		this.conversation.history = result;
+		this.session.conversation.history = result;
 		return result;
 	}
 
@@ -589,7 +576,7 @@ export class AgentSession {
 			repositoryQuery?: string;
 		},
 	): Promise<HarnessTurnSnapshot> {
-		let initialMessages: Message[] = [...this.conversation.history];
+		let initialMessages: Message[] = [...this.session.conversation.history];
 		let systemPrompt: string | undefined;
 		let pluginHookLayer: HarnessPluginHookLayer | undefined;
 
@@ -605,7 +592,7 @@ export class AgentSession {
 
 			// nextTurn guidance belongs to the next user-initiated prompt. Consume it
 			// exactly once here, never from an iteration of the currently active run.
-			const nextTurnMessages = this.queue
+			const nextTurnMessages = this.session.queue
 				.dequeueNextTurn()
 				.map(message => createUserMessage(message.content));
 			if (nextTurnMessages.length > 0) this.emitQueueChange();
@@ -674,8 +661,8 @@ export class AgentSession {
 		return {
 			getExtensionRunner: () => this._extensionRunner,
 			getHooksEnabled: () => this._hooksEnabled,
-			getSessionId: () => this._sessionId || "",
-			getTranscriptPath: () => this._transcriptPath || "",
+			getSessionId: () => this.session.id || "",
+			getTranscriptPath: () => this.session.transcriptPath || "",
 			getCwd: () => this.cwd || process.cwd(),
 			getConfigTools: () => this.config.tools,
 			loopDetector: this.loopDetector,
@@ -692,7 +679,7 @@ export class AgentSession {
 			this.extensionRuntimeDeps,
 			promptText,
 			this.config.systemPrompt ?? "",
-			this.conversation.history,
+			this.session.conversation.history,
 		);
 	}
 
@@ -700,8 +687,8 @@ export class AgentSession {
 		return (
 			this.pluginHookFactory?.({
 				enabled: this._hooksEnabled,
-				sessionId: this._sessionId ?? "",
-				transcriptPath: this._transcriptPath ?? "",
+				sessionId: this.session.id ?? "",
+				transcriptPath: this.session.transcriptPath ?? "",
 				cwd: this.cwd ?? process.cwd(),
 				tools: this.config.tools ?? [],
 			}) ?? {
@@ -731,17 +718,17 @@ export class AgentSession {
 		};
 		return {
 			getSteeringMessages: async () =>
-				inject(this.queue.afterTurn().map(message => message.content)),
+				inject(this.session.queue.afterTurn().map(message => message.content)),
 			getFollowUpMessages: async () =>
-				inject(this.queue.onIdle().map(message => message.content)),
+				inject(this.session.queue.onIdle().map(message => message.content)),
 		};
 	}
 
 	private persistTurnMessages(messages: Message[]): void {
-		if (!this._session) return;
+		if (!this.session.store) return;
 		for (const message of messages) {
 			try {
-				this._session.append({
+				this.session.store.append({
 					role: message.role,
 					content: message.content,
 					tool_call_id: message.tool_call_id,
@@ -764,7 +751,7 @@ export class AgentSession {
 		}
 		if (patch.tools === undefined) return;
 		this.idleTools = this.createToolRegistry(patch.tools);
-		this._session?.appendActiveToolsChange(patch.tools.map(t => t.name));
+		this.session.store?.appendActiveToolsChange(patch.tools.map(t => t.name));
 		this.emitToSubscribers({
 			type: "tools_update",
 			toolNames: patch.tools.map(t => t.name),
@@ -791,7 +778,7 @@ export class AgentSession {
 		if (this._phase !== "turn") {
 			throw new HarnessBusyError("steer", this._phase, "turn");
 		}
-		this.queue.steer(text, !!this.config.steeringInterrupt, () =>
+		this.session.steer(text, !!this.config.steeringInterrupt, () =>
 			this.turn.abort(createSteeringInterruptReason()),
 		);
 	}
@@ -805,7 +792,7 @@ export class AgentSession {
 		if (this._phase !== "turn") {
 			throw new HarnessBusyError("steer", this._phase, "turn");
 		}
-		this.queue.steer(text, false, () => {});
+		this.session.steer(text, false, () => {});
 	}
 
 	/** Immediately interrupt and apply steering (always forces abort).
@@ -817,7 +804,7 @@ export class AgentSession {
 		if (this._phase !== "turn") {
 			throw new HarnessBusyError("steerNow", this._phase, "turn");
 		}
-		this.queue.nextTurn(text);
+		this.session.nextTurn(text);
 		this.turn.abort(createSteeringInterruptReason());
 	}
 
@@ -826,25 +813,25 @@ export class AgentSession {
 		if (this._phase !== "turn") {
 			throw new HarnessBusyError("flush steering", this._phase, "turn");
 		}
-		return this.queue.flushSteering(() =>
+		return this.session.flushSteering(() =>
 			this.turn.abort(createSteeringInterruptReason()),
 		);
 	}
 
 	dropQueuedMessage(displayIndex: number): string | undefined {
-		return this.queue.drop(displayIndex);
+		return this.session.dropQueuedMessage(displayIndex);
 	}
 
 	followUp(text: string): void {
-		this.queue.followUp(text);
+		this.session.followUp(text);
 	}
 
 	nextTurn(text: string): void {
-		this.queue.nextTurn(text);
+		this.session.nextTurn(text);
 	}
 
 	async abort(): Promise<AbortResult> {
-		const result = this.queue.abortSnapshot();
+		const result = this.session.abortQueues();
 		this.runtime = { ...this.runtime, abortRequested: true };
 		this.turn.abort();
 		await this.waitForIdle();
@@ -856,11 +843,11 @@ export class AgentSession {
 	// ── Queue state ────────────────────────────────────────────────────────
 
 	getQueues(): HarnessQueues {
-		return this.queue.snapshot();
+		return this.session.getQueues();
 	}
 
 	clearQueues(): HarnessQueues {
-		return this.queue.clear();
+		return this.session.clearQueues();
 	}
 
 	private emitQueueChange(queues: HarnessQueues = this.getQueues()): void {
@@ -880,7 +867,7 @@ export class AgentSession {
 		void this._extensionRunner?.emit({
 			type: "queue_update",
 			context: {
-				sessionId: this._sessionId || "",
+				sessionId: this.session.id || "",
 				cwd: this.cwd || "",
 				...queues,
 			},
@@ -888,25 +875,25 @@ export class AgentSession {
 	}
 
 	setSteeringMode(mode: QueueMode): void {
-		this.queue.setMode("steering", mode);
+		this.session.setQueueMode("steering", mode);
 	}
 
 	getSteeringMode(): QueueMode {
-		return this.queue.getMode("steering");
+		return this.session.getQueueMode("steering");
 	}
 
 	setFollowUpMode(mode: QueueMode): void {
-		this.queue.setMode("followUp", mode);
+		this.session.setQueueMode("followUp", mode);
 	}
 
 	getFollowUpMode(): QueueMode {
-		return this.queue.getMode("followUp");
+		return this.session.getQueueMode("followUp");
 	}
 
 	// ── Plugin lifecycle hooks ─────────────────────────────────────────────
 
 	setSessionId(id: string): void {
-		this._sessionId = id;
+		this.session.setId(id);
 		this.configuration.update({ hookSessionId: id });
 	}
 
@@ -916,8 +903,8 @@ export class AgentSession {
 		cwd: string;
 	} {
 		return {
-			sessionId: this._sessionId || "",
-			transcriptPath: this._transcriptPath || "",
+			sessionId: this.session.id || "",
+			transcriptPath: this.session.transcriptPath || "",
 			cwd: this.cwd || process.cwd(),
 		};
 	}
@@ -929,7 +916,7 @@ export class AgentSession {
 			source,
 			this.pluginLifecycle,
 		);
-		if (started) this._hasStartedSession = true;
+		if (started) this.session.hasStarted = true;
 	}
 
 	private async emitSessionEnd(reason: string = "other"): Promise<void> {
@@ -981,28 +968,25 @@ export class AgentSession {
 	 * Conversation history itself is not touched — the caller is responsible
 	 * for loading it.
 	 */
-	attachSession(session: Session): void {
-		this._session = session;
-		this._sessionId = session.getMeta().id;
+	attachSession(session: SessionStore): void {
+		this.session.attachStore(session);
 	}
 
 	get messages(): Message[] {
-		return this.conversation.history;
+		return this.session.messages;
 	}
 
 	clearHistory(): void {
 		this.emitSessionEnd("reset").catch(() => {});
-		this.conversation.clear();
+		this.session.clearHistory();
 		this.emitSessionStart("clear").catch(() => {});
-		this._hasStartedSession = false;
 	}
 
 	setHistory(messages: Message[]): void {
 		this.assertIdle("setHistory");
 		this.emitSessionEnd("switch").catch(() => {});
-		this.conversation.replace(messages);
+		this.session.replaceHistory(messages);
 		this.emitSessionStart("resume").catch(() => {});
-		this._hasStartedSession = false;
 	}
 
 	/**
@@ -1012,13 +996,13 @@ export class AgentSession {
 	 */
 	appendMessages(messages: Message[]): void {
 		this.assertIdle("appendMessages");
-		const toAdd = this.conversation.append(messages);
+		const toAdd = this.session.appendMessages(messages);
 		if (toAdd.length) this.persistTurnMessages(toAdd);
 	}
 
 	rewind(): { messages: number; filesRestored: number } | null {
 		this.assertIdle("rewind");
-		return this.conversation.rewind();
+		return this.session.rewind();
 	}
 
 	// ── Branching ──────────────────────────────────────────────────────────
@@ -1031,10 +1015,7 @@ export class AgentSession {
 	 */
 	fork(customSummary?: BranchSummaryData): string {
 		this.assertIdle("fork");
-		return this.conversation.fork(
-			customSummary,
-			this._session?.getLeafEntryId(),
-		);
+		return this.session.fork(customSummary);
 	}
 
 	/**
@@ -1048,15 +1029,15 @@ export class AgentSession {
 		customInstructions?: string;
 	}): Promise<string | null> {
 		this.assertIdle("branchSummary");
-		const branch = this.conversation.activeBranch();
+		const branch = this.session.conversation.activeBranch();
 		if (!branch) return null;
 
-		const current = this.conversation.history;
+		const current = this.session.conversation.history;
 		const diverged = current.slice(branch.forkedAt);
 		if (!diverged.length) {
-			this.conversation.popBranch();
-			this._session?.checkout(branch.sessionLeafId);
-			this.conversation.history = branch.parent;
+			this.session.conversation.popBranch();
+			this.session.store?.checkout(branch.sessionLeafId);
+			this.session.conversation.history = branch.parent;
 			return null;
 		}
 
@@ -1072,14 +1053,14 @@ export class AgentSession {
 					thinkingLevel: this.config.thinkingLevel,
 				},
 			);
-			this.conversation.popBranch();
-			this._session?.checkout(branch.sessionLeafId);
+			this.session.conversation.popBranch();
+			this.session.store?.checkout(branch.sessionLeafId);
 			if (outcome.summaryText)
-				this._session?.appendBranchSummary(
+				this.session.store?.appendBranchSummary(
 					outcome.summaryText,
 					branch.sessionLeafId,
 				);
-			this.conversation.history = outcome.history;
+			this.session.conversation.history = outcome.history;
 			return outcome.summaryText;
 		});
 	}
@@ -1089,14 +1070,11 @@ export class AgentSession {
 	 */
 	discardBranch(): boolean {
 		this.assertIdle("discardBranch");
-		const branch = this.conversation.discardBranch();
-		if (!branch) return false;
-		this._session?.checkout(branch.sessionLeafId);
-		return true;
+		return this.session.discardBranch();
 	}
 
 	listBranches(): BranchInfo[] {
-		return this.conversation.listBranches();
+		return this.session.listBranches();
 	}
 
 	// ── Conversation management ────────────────────────────────────────────
@@ -1115,21 +1093,25 @@ export class AgentSession {
 				message =>
 					String(message.role) !== "compactionSummary" && message.entryId,
 			)?.entryId;
-		this._session?.appendCompaction(summary, tokensBefore, firstKeptEntryId);
+		this.session.store?.appendCompaction(
+			summary,
+			tokensBefore,
+			firstKeptEntryId,
+		);
 	}
 
 	// ── Compaction ─────────────────────────────────────────────────────────
 
 	async compact(): Promise<number | null> {
 		this.assertIdle("compact");
-		if (!this.conversation.history.length) return null;
+		if (!this.session.conversation.history.length) return null;
 		return this.runInPhase("compaction", "compact", () =>
 			this.performCompaction("manual", /* force */ true),
 		);
 	}
 
 	private async runAutoCompaction(reason: "auto" | "manual"): Promise<boolean> {
-		const messages = this.conversation.history;
+		const messages = this.session.conversation.history;
 		if (!messages.length || !this.autoCompactionSettings.enabled) return false;
 		return this.runInPhase("compaction", "autoCompact", () =>
 			this.performCompaction(reason, /* force */ false).then(
@@ -1149,7 +1131,7 @@ export class AgentSession {
 		reason: "auto" | "manual",
 		force: boolean,
 	): Promise<number> {
-		const messages = this.conversation.history;
+		const messages = this.session.conversation.history;
 		this.emitToSubscribers({ type: "compaction", reason });
 
 		if (!force && !this.shouldCompact(messages)) {
@@ -1183,7 +1165,7 @@ export class AgentSession {
 		await this._extensionRunner?.emit({
 			type: "session_before_compact",
 			context: {
-				sessionId: this._sessionId || "",
+				sessionId: this.session.id || "",
 				cwd: this.cwd || "",
 				reason,
 				tokensBefore: before,
@@ -1200,7 +1182,7 @@ export class AgentSession {
 		});
 
 		if (
-			this.conversation.history !== messages ||
+			this.session.conversation.history !== messages ||
 			!result.changed ||
 			result.tokensAfter >= before
 		) {
@@ -1214,14 +1196,14 @@ export class AgentSession {
 			return 0;
 		}
 
-		this.conversation.history = result.messages;
+		this.session.conversation.history = result.messages;
 		const after = result.tokensAfter;
 		this.persistCompactedContext(result.messages, before);
 		await this.emitPostCompact();
 		await this._extensionRunner?.emit({
 			type: "session_compact",
 			context: {
-				sessionId: this._sessionId || "",
+				sessionId: this.session.id || "",
 				cwd: this.cwd || "",
 				reason,
 				tokensBefore: before,
@@ -1256,7 +1238,7 @@ export class AgentSession {
 	 * Set a pending continuation to fire after the current turn settles.
 	 */
 	setPendingContinuation(value: boolean): void {
-		this.pendingContinuation = value;
+		this.session.setPendingContinuation(value);
 	}
 
 	/**
@@ -1292,8 +1274,7 @@ export class AgentSession {
 			this.onEvent?.({ type: "turn_end", turnId: `turn_${Date.now()}` });
 			this.onEvent?.({ type: "phase", state: "ready" });
 			// Check if another continuation is pending (recursive).
-			if (this.pendingContinuation) {
-				this.pendingContinuation = false;
+			if (this.session.takePendingContinuation()) {
 				void this.runQueuedContinuation(context, repositoryQuery).catch(
 					() => {},
 				);
@@ -1305,12 +1286,12 @@ export class AgentSession {
 	 * Set the active repository query for continuation context injection.
 	 */
 	setRepositoryQuery(query: string | undefined): void {
-		this.activeRepositoryQuery = query;
+		this.session.setRepositoryQuery(query);
 	}
 
 	/** Get the current repository query. */
 	getRepositoryQuery(): string | undefined {
-		return this.activeRepositoryQuery;
+		return this.session.getRepositoryQuery();
 	}
 
 	// ── Phase mapping  ──────────────────────────
@@ -1328,72 +1309,6 @@ export class AgentSession {
 					? "branching"
 					: "ready";
 		this.onEvent?.({ type: "phase", state });
-	}
-
-	// ── Slash command handling  ─────────────────
-
-	/**
-	 * Handle queue-related slash commands. Returns true if the command was handled.
-	 */
-	handleQueueSlashCommand(trimmed: string): {
-		handled: boolean;
-		text?: string;
-		level?: "info" | "warn";
-	} {
-		if (trimmed === "/steer-now") {
-			const count = this.flushSteeringNow();
-			return {
-				handled: true,
-				text:
-					count > 0
-						? `Processing ${count} queued steering message${count === 1 ? "" : "s"} now.`
-						: "No queued steering messages to process.",
-				level: count > 0 ? "info" : "warn",
-			};
-		}
-		if (trimmed === "/queue") {
-			const steering = this.getQueues().steering;
-			const followUp = this.getQueues().followUp;
-			const rows = [
-				...steering.map((message, i) => `${i + 1}. ▸ ${message}`),
-				...followUp.map(
-					(message, i) => `${steering.length + i + 1}. ↳ ${message}`,
-				),
-			];
-			return {
-				handled: true,
-				text: rows.length ? rows.join("\n") : "Queue is empty.",
-				level: "info",
-			};
-		}
-		if (trimmed === "/queue-clear") {
-			const cleared = this.clearQueues();
-			const count =
-				cleared.steering.length +
-				cleared.followUp.length +
-				cleared.nextTurn.length;
-			return {
-				handled: true,
-				text: `Cleared ${count} queued message${count === 1 ? "" : "s"}.`,
-				level: "info",
-			};
-		}
-		if (trimmed === "/queue-drop" || trimmed.startsWith("/queue-drop ")) {
-			const value = Number.parseInt(
-				trimmed.slice("/queue-drop".length).trim(),
-				10,
-			);
-			const removed =
-				Number.isInteger(value) && value > 0
-					? this.dropQueuedMessage(value - 1)
-					: undefined;
-			return {
-				handled: true,
-				text: removed ? `Removed: ${removed}` : "Usage: /queue-drop <number>",
-				level: removed ? "info" : "warn",
-			};
-		}
-		return { handled: false };
 	}
 
 	// ── Internals ──────────────────────────────────────────────────────────
@@ -1426,13 +1341,3 @@ export class AgentSession {
 		};
 	}
 }
-
-// ── Backward compatibility ──────────────────────────────────────────────
-// AgentHarness was renamed to AgentSession. This alias maintains compatibility
-// with existing code that imports the old name.
-
-/** @deprecated Use {@link AgentSession} instead. */
-export type AgentHarness = AgentSession;
-
-/** @deprecated Use {@link AgentSession} constructor instead. */
-export const AgentHarness = AgentSession as typeof AgentSession;

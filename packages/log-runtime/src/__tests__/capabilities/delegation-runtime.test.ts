@@ -45,14 +45,6 @@ const baseConfig: AgentConfig = {
 	tools: [],
 };
 
-function _report(status: "satisfied" | "failed", answer: string): LLMResponse {
-	return {
-		content: `${answer}\n\n\`\`\`acceptance-report\n{"criteriaSatisfied":[{"id":"criterion-1","status":"${status}","evidence":"checked"}]}\n\`\`\``,
-		toolCalls: [],
-		stopReason: "stop",
-	};
-}
-
 void test("delegated tool-call budgets are shared across the whole run", async () => {
 	let executions = 0;
 	const tool: Tool = {

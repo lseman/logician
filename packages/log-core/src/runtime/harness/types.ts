@@ -57,7 +57,7 @@ export function defineHarnessModule(module: HarnessModule): HarnessModule {
 	return module;
 }
 
-export interface AgentHarnessOptions {
+export interface AgentSessionOptions {
 	config: AgentConfig;
 	backend: LLMBackend;
 	cwd?: string;

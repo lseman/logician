@@ -41,49 +41,6 @@ export interface ApplyEditsResult {
 	newContent: string;
 }
 
-// ── Lookup table for fast normalizeChar ────────────────────────────────────────
-// Replaces per-char regex tests with O(1) table lookup. Built once at module load.
-const _NORM: Record<number, string> = {
-	// Left/right/single/double low-9 quotes → '
-	8216: "'",
-	8217: "'",
-	8218: "'",
-	8219: "'",
-	// Left/right double/pointing double quotes → "
-	8220: '"',
-	8221: '"',
-	8222: '"',
-	8223: '"',
-	// Hyphen/dash variants → -
-	8208: "-",
-	8209: "-",
-	8210: "-",
-	8211: "-",
-	8212: "-",
-	8213: "-",
-	8722: "-",
-	// Various spaces → regular space
-	160: " ",
-	8194: " ",
-	8195: " ",
-	8196: " ",
-	8197: " ",
-	8198: " ",
-	8199: " ",
-	8200: " ",
-	8201: " ",
-	8202: " ",
-	8239: " ",
-	8287: " ",
-	12288: " ",
-};
-
-/** Map smart quotes/dashes and uncommon Unicode spaces to their ASCII forms. */
-function _normalizeChar(ch: string): string {
-	const mapped = _NORM[ch.charCodeAt(0)];
-	return mapped !== undefined ? mapped : ch;
-}
-
 /**
  * Fast path: check if text contains any characters that need normalization.
  * Most source files use plain ASCII — skip normalization entirely for them.

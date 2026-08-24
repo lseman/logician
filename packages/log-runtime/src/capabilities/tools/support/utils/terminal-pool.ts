@@ -125,7 +125,6 @@ export class TerminalPool {
 		return new Promise<PersistentExecutionResult>(resolve => {
 			let settled = false;
 			let timeoutHandle: NodeJS.Timeout | undefined;
-			let _timedOut = false;
 
 			const cleanup = () => {
 				session.busy = false;
@@ -188,7 +187,6 @@ export class TerminalPool {
 
 			if (options.timeout && options.timeout > 0) {
 				timeoutHandle = setTimeout(() => {
-					_timedOut = true;
 					try {
 						session.child.stdin?.write("\x03\n");
 					} catch {

@@ -1,4 +1,4 @@
-// ── Session Abstraction ─────────────────────────────────────────────────
+// ── Durable Session Store ───────────────────────────────────────────────
 // JSONL-based session persistence for the agent harness.
 //
 // A session is a named JSONL file where each line is a persisted message
@@ -197,12 +197,12 @@ const DEFAULT_BASE_DIR = ".logician/sessions";
 const SESSIONS_DIR = "sessions";
 const META_FILE = "meta.json";
 
-// ── Session class ───────────────────────────────────────────────────────
+// ── SessionStore class ──────────────────────────────────────────────────
 // Append-only JSONL conversation tree for one harness session. Execution state
 // belongs exclusively to the Run Kernel. Also the sole persistence layer for
 // TUI conversation history and its session browser — see SessionRegistry below.
 
-export class Session {
+export class SessionStore {
 	private readonly dir: string;
 	private readonly filePath: string;
 	private readonly metaPath: string;
@@ -714,18 +714,18 @@ export class SessionRegistry {
 	}
 
 	/** Open an existing session by ID. Returns null if not found. */
-	getSession(sessionId: string): Session | null {
+	getSession(sessionId: string): SessionStore | null {
 		const metaPath = join(this.baseDir, sessionId, META_FILE);
 		if (!existsSync(metaPath)) return null;
-		return new Session(sessionId, {
+		return new SessionStore(sessionId, {
 			baseDir: join(this.baseDir, ".."),
 		});
 	}
 
 	/** Create a new session with a unique ID, scoped to a working directory. */
-	createSession(cwd: string, name?: string): Session {
+	createSession(cwd: string, name?: string): SessionStore {
 		const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-		const session = new Session(sessionId, {
+		const session = new SessionStore(sessionId, {
 			baseDir: join(this.baseDir, ".."),
 			cwd,
 		});
