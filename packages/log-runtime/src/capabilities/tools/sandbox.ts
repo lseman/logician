@@ -17,6 +17,7 @@ import {
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
+	makeUpdateThrottler,
 	OutputAccumulator,
 	type TruncationResult,
 } from "./support/utils/truncate.ts";
@@ -207,6 +208,7 @@ async function executeSandboxed(
 		const output = new OutputAccumulator({
 			tempFilePrefix: "logician-sandbox",
 		});
+		const throttledUpdate = makeUpdateThrottler();
 		const timeoutSeconds = timeout;
 		let settled = false;
 		let timedOut = false;
@@ -253,9 +255,11 @@ async function executeSandboxed(
 			// Stream output
 			const handleData = (data: Buffer) => {
 				output.append(data);
-				const snapshot = output.snapshot();
-				if (snapshot.content && ctx.onUpdate) {
-					ctx.onUpdate(snapshot.content);
+				if (ctx.onUpdate) {
+					throttledUpdate(() => {
+						const snapshot = output.snapshot();
+						if (snapshot.content) ctx.onUpdate?.(snapshot.content);
+					});
 				}
 			};
 
@@ -359,6 +363,7 @@ async function executeFallback(
 	const output = new OutputAccumulator({
 		tempFilePrefix: "logician-sandbox-fallback",
 	});
+	const throttledUpdate = makeUpdateThrottler();
 	let settled = false;
 	let timedOut = false;
 	let hasError = false;
@@ -406,9 +411,11 @@ async function executeFallback(
 
 		const handleData = (data: Buffer) => {
 			output.append(data);
-			const snapshot = output.snapshot();
-			if (snapshot.content && ctx.onUpdate) {
-				ctx.onUpdate(snapshot.content);
+			if (ctx.onUpdate) {
+				throttledUpdate(() => {
+					const snapshot = output.snapshot();
+					if (snapshot.content) ctx.onUpdate?.(snapshot.content);
+				});
 			}
 		};
 

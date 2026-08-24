@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { createMemoryStore } from "@logician/log-memory";
+import { createMemoryStore } from "@logician/memoriam";
 import { createMemoryMcpServer } from "./server.js";
 
 function option(name: string): string | undefined {

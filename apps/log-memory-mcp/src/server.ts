@@ -1,10 +1,23 @@
 import { createHash } from "node:crypto";
 import type {
-	HookPhase,
 	MemoryStore,
 	MemoryType,
 	RawObservation,
-} from "@logician/log-memory";
+} from "@logician/memoriam";
+
+/**
+ * Hook phases — kept local to the MCP server since hooks
+ * are agent-internal and removed from the standalone memoriam package.
+ */
+type HookPhase =
+	| "session_start"
+	| "prompt_submit"
+	| "pre_tool_use"
+	| "post_tool_use"
+	| "post_tool_failure"
+	| "pre_compact"
+	| "stop"
+	| "notification";
 
 export const MCP_PROTOCOL_VERSION = "2025-03-26";
 

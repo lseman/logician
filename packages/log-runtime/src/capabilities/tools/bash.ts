@@ -19,6 +19,7 @@ import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
+	makeUpdateThrottler,
 	OutputAccumulator,
 	type TruncationResult,
 } from "./support/utils/truncate.ts";
@@ -196,24 +197,6 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 	return {
 		...args,
 		...(command === undefined ? {} : { command: String(command) }),
-	};
-}
-
-// ── Update throttling ──────────────────────────────────────────────────────────
-// Throttle TUI updates to prevent flooding the interface.
-
-function makeUpdateThrottler(): (callback: () => void) => void {
-	let lastUpdate = 0;
-	const THROTTLE_MS = 100;
-
-	return function throttledUpdate(callback: () => void) {
-		const now = Date.now();
-		if (now - lastUpdate < THROTTLE_MS) {
-			// Debounce: skip this update
-			return;
-		}
-		lastUpdate = now;
-		callback();
 	};
 }
 

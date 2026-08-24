@@ -116,7 +116,7 @@ void test("whole-task deadlines cancel a delegated run", async () => {
 	assert.ok(result.durationMs < 1_000);
 });
 
-void test("subagent progress callbacks emit deltas rather than accumulated prefixes", async () => {
+void test("subagent progress callbacks emit accumulated output, matching other tool producers", async () => {
 	const backend: LLMBackend = {
 		model: "streaming",
 		withModel() {
@@ -142,7 +142,7 @@ void test("subagent progress callbacks emit deltas rather than accumulated prefi
 		{ onUpdate: value => updates.push(value) },
 	);
 
-	assert.deepEqual(updates, ["I", " finished."]);
+	assert.deepEqual(updates, ["I", "I finished."]);
 });
 
 void test("spawn_agents honors maxParallelAgents and preserves its plural API", async () => {

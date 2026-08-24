@@ -11,7 +11,7 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "./shell.ts";
-import { OutputAccumulator } from "./truncate.ts";
+import { makeUpdateThrottler, OutputAccumulator } from "./truncate.ts";
 
 export interface PersistentTerminalSession {
 	id: string;
@@ -121,6 +121,7 @@ export class TerminalPool {
 		const accumulator = new OutputAccumulator({
 			tempFilePrefix: `terminal-${id}`,
 		});
+		const throttledUpdate = makeUpdateThrottler();
 
 		return new Promise<PersistentExecutionResult>(resolve => {
 			let settled = false;
@@ -212,7 +213,9 @@ export class TerminalPool {
 				accumulator.append(chunk);
 
 				if (options.onUpdate) {
-					options.onUpdate(accumulator.snapshot().content);
+					throttledUpdate(() => {
+						options.onUpdate?.(accumulator.snapshot().content);
+					});
 				}
 
 				const match = outDelimiterRegex.exec(capturedOutput);
@@ -238,7 +241,9 @@ export class TerminalPool {
 			const onStderr = (chunk: Buffer) => {
 				accumulator.append(chunk);
 				if (options.onUpdate) {
-					options.onUpdate(accumulator.snapshot().content);
+					throttledUpdate(() => {
+						options.onUpdate?.(accumulator.snapshot().content);
+					});
 				}
 			};
 

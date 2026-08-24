@@ -438,6 +438,26 @@ export class OutputAccumulator {
 	}
 }
 
+// ── Update throttling ─────────────────────────────────────────────────────────
+// Throttle TUI streaming updates so a chatty process (verbose build, tight
+// output loop) can't flood the UI with a render/reconcile pass per chunk.
+
+const UPDATE_THROTTLE_MS = 100;
+
+export function makeUpdateThrottler(): (callback: () => void) => void {
+	let lastUpdate = 0;
+
+	return function throttledUpdate(callback: () => void) {
+		const now = Date.now();
+		if (now - lastUpdate < UPDATE_THROTTLE_MS) {
+			// Debounce: skip this update
+			return;
+		}
+		lastUpdate = now;
+		callback();
+	};
+}
+
 // ── Binary sanitization ───────────────────────────────────────────────────────
 
 /**

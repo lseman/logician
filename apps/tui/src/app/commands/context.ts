@@ -5,7 +5,7 @@
 // inline slash-command wiring block.
 
 import type { AutoresearchSession } from "@logician/log-autoresearch";
-import type { MemoryStore } from "@logician/log-memory";
+import type { MemoryStore } from "@logician/memoriam";
 import type {
 	AgentRuntime,
 	GoalTracker,

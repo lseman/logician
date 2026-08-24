@@ -9,12 +9,12 @@ import type { AgentConfig, OpenAIBackend } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	createMemoryHooks,
-	createMemoryStore,
-	getBoundViewerPort,
 	LocalMemoryEmbedder,
 	setSessionId,
 	startViewerServer,
-} from "@logician/log-memory";
+	getBoundViewerPort,
+} from "./agent-memory.js";
+import { createMemoryStore } from "@logician/memoriam";
 
 export interface MemoryManagerOptions {
 	memoryEnabled?: boolean;

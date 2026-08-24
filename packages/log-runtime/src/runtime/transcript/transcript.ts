@@ -1034,8 +1034,10 @@ export class Transcript {
 		);
 		if (!toolChunk?.tool) return;
 
-		toolChunk.tool.streamOutput =
-			(toolChunk.tool.streamOutput || "") + event.partialResult;
+		// partialResult is always the full cumulative output so far (every
+		// producer sends a snapshot, not a delta) — replace, don't append, or
+		// this grows quadratically on chatty commands.
+		toolChunk.tool.streamOutput = event.partialResult;
 		this.bumpTurnRevision(turn);
 	}
 

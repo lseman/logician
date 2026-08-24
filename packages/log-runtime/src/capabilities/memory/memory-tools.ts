@@ -1,5 +1,5 @@
 import type { Tool } from "@logician/log-core";
-import type { MemoryStore } from "@logician/log-memory";
+import type { MemoryStore } from "@logician/memoriam";
 
 function brief(value: string, maxLength: number = 220): string {
 	const normalized = value.replace(/\s+/g, " ").trim();

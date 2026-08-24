@@ -302,6 +302,11 @@ async function _runSpawn(
 		taskIndex: ctx.taskIndex,
 	});
 
+	// Accumulates text_delta chunks below into the full output so far — every
+	// onUpdate producer sends a cumulative snapshot, not a delta, so this
+	// keeps the contract consistent for transcript.ts's consumer.
+	let accumulatedText = "";
+
 	// Child config: parent's provider settings, but its own prompt, scoped
 	// tools, and NO parent hooks/queues/events — the child is isolated.
 	const childConfig: AgentConfig = {
@@ -337,7 +342,8 @@ async function _runSpawn(
 		continuationEnabled: true,
 		onEvent: event => {
 			if (event.type === "text_delta") {
-				ctx.onUpdate?.(event.delta);
+				accumulatedText += event.delta;
+				ctx.onUpdate?.(accumulatedText);
 			}
 			deps.emit({
 				type: "subagent_event",

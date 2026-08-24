@@ -1245,7 +1245,7 @@ export class AgentRuntime {
 	}
 
 	getMemoryStore(): ReturnType<
-		typeof import("@logician/log-memory").createMemoryStore
+		typeof import("@logician/memoriam").createMemoryStore
 	> | null {
 		return this.memory?.getStore() ?? null;
 	}

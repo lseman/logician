@@ -2,7 +2,7 @@
 	"name": "@logician/log-memory-mcp",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Stdio MCP adapter for @logician/log-memory",
+	"description": "Stdio MCP adapter for @logician/memoriam",
 	"type": "module",
 	"bin": {
 		"logician-memory-mcp": "src/index.ts"
@@ -13,7 +13,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@logician/log-memory": "0.1.0"
+		"@logician/memoriam": "0.1.0"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.3.14",

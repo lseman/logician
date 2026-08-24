@@ -3,7 +3,7 @@
 import type {
 	CompressedObservation,
 	ObservationType,
-} from "@logician/log-memory";
+} from "@logician/memoriam";
 import {
 	saveConfigField,
 	saveConfigNestedField,
