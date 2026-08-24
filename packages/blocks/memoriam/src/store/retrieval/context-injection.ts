@@ -25,21 +25,21 @@ import type {
 } from "../../types.ts";
 import { trackAccess } from "../access-tracker.js";
 import { safeParseJson, safeParseJsonArray } from "../models/db-helpers.js";
-import { searchEmbeddings } from "./embeddings.js";
 import { list, rowToMemory } from "../models/memories.js";
-import {
-	generateId,
-	now,
-	sanitizeString,
-	toFtsAnyQuery,
-} from "../module-helpers.js";
 import {
 	listClaims,
 	listRecentObservations,
 	rowToObservation,
 } from "../models/observations.js";
 import { getSession } from "../models/sessions.js";
+import {
+	generateId,
+	now,
+	sanitizeString,
+	toFtsAnyQuery,
+} from "../module-helpers.js";
 import { getWorkingMemoryTier } from "../policy/working-memory-tiers.js";
+import { searchEmbeddings } from "./embeddings.js";
 
 export function getShadowPolicy(
 	db: Database,

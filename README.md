@@ -11,7 +11,7 @@ Streaming, extensible, SSH-ready, and designed to turn instructions into verifie
 
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522.19-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Bun](https://img.shields.io/badge/Bun-%E2%89%A51.3.14-14151a?logo=bun&logoColor=white)](https://bun.sh)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6?logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178c6?logo=typescript&logoColor=white)](https://typescriptlang.org)
 ![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)
 
 [Install](#install) · [Quick start](#quick-start) · [Features](#why-logician) · [Documentation](docs/index.md) · [Architecture](#architecture)

@@ -10,7 +10,6 @@ import type {
 	RecallOptions,
 	WorkingMemoryTier,
 } from "../../types.ts";
-import { safeParseJsonArray } from "./db-helpers.js";
 import {
 	generateId,
 	normalizeWorkspacePath,
@@ -22,6 +21,7 @@ import {
 	extractConcepts,
 	extractFiles,
 } from "../text-helpers.js";
+import { safeParseJsonArray } from "./db-helpers.js";
 
 export function rowToMemory(row: any): Memory {
 	return {

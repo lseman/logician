@@ -3,8 +3,8 @@
 
 import type { Database } from "bun:sqlite";
 import type { Session } from "../../types.ts";
-import { safeParseJsonArray } from "./db-helpers.js";
 import { normalizeWorkspacePath, now } from "../module-helpers.js";
+import { safeParseJsonArray } from "./db-helpers.js";
 
 export function createSession(
 	db: Database,

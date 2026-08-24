@@ -3,8 +3,8 @@
  * current workspace scope. */
 
 import type { Database } from "bun:sqlite";
-import { normalizeWorkspacePath } from "../module-helpers.js";
 import { getSession } from "../models/sessions.js";
+import { normalizeWorkspacePath } from "../module-helpers.js";
 
 export function slidingWindowCap(
 	db: Database,

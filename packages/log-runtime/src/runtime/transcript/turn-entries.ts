@@ -8,8 +8,8 @@
 
 import type {
 	CustomSessionEntry,
-	SessionStore,
 	SessionEntry,
+	SessionStore,
 } from "@logician/log-core/runtime";
 import type { Turn } from "./transcript.ts";
 

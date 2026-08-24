@@ -1,13 +1,13 @@
 // ── Local slash-command registry ───────────────────────────────────────────
 
-import type {
-	CompressedObservation,
-	ObservationType,
-} from "@logician/memoriam";
 import {
 	saveConfigField,
 	saveConfigNestedField,
 } from "@logician/log-runtime/configuration";
+import type {
+	CompressedObservation,
+	ObservationType,
+} from "@logician/memoriam";
 import { theme } from "../../terminal/theme.ts";
 import type { SlashCommandsCtx } from "./context.ts";
 

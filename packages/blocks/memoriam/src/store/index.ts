@@ -10,28 +10,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { MemoryStore } from "../types.ts";
 import { getAccessStats, trackAccess } from "./access-tracker.js";
-import { autoForget } from "./policy/auto-forget.js";
-import { consolidate } from "./policy/consolidation.js";
-import {
-	getContext,
-	getShadowPolicy,
-	listOutcomeReceipts,
-	listRetrievalTraces,
-	recordOutcomeReceipt,
-	retrieve,
-} from "./retrieval/context-injection.js";
-import { dedupCheck, dedupRecord } from "./policy/dedup.js";
-import {
-	hasEmbedding,
-	searchEmbeddings,
-	upsertEmbedding,
-} from "./retrieval/embeddings.js";
 import { exportData, importData } from "./export-import.js";
-import {
-	getFileContext,
-	getFilesContext,
-	rebuildFileIndex,
-} from "./retrieval/file-context-index.js";
 import {
 	clearMemories,
 	create,
@@ -42,14 +21,6 @@ import {
 	recall,
 	update,
 } from "./models/memories.js";
-import {
-	evolve,
-	getRelatedMemories,
-	getRelations,
-	relate,
-	removeRelation,
-} from "./policy/memory-relations.js";
-import { normalizeWorkspacePath } from "./module-helpers.js";
 import {
 	clearObservations,
 	expandEntries,
@@ -62,12 +33,6 @@ import {
 	searchObservations,
 } from "./models/observations.js";
 import {
-	computeRetentionScore,
-	listByRetentionScore,
-	rescoreAll,
-} from "./policy/retention-scoring.js";
-import { initMemoryStoreSchema } from "./schema.js";
-import {
 	clearSessions,
 	createSession,
 	discardEmptySession,
@@ -75,12 +40,47 @@ import {
 	listSessions,
 	updateSession,
 } from "./models/sessions.js";
+import { normalizeWorkspacePath } from "./module-helpers.js";
+import { autoForget } from "./policy/auto-forget.js";
+import { consolidate } from "./policy/consolidation.js";
+import { dedupCheck, dedupRecord } from "./policy/dedup.js";
+import {
+	evolve,
+	getRelatedMemories,
+	getRelations,
+	relate,
+	removeRelation,
+} from "./policy/memory-relations.js";
+import {
+	computeRetentionScore,
+	listByRetentionScore,
+	rescoreAll,
+} from "./policy/retention-scoring.js";
 import { slidingWindowCap } from "./policy/sliding-window.js";
 import {
 	autoTierMemories,
 	getWorkingMemoryTier,
 	setWorkingMemoryTier,
 } from "./policy/working-memory-tiers.js";
+import {
+	getContext,
+	getShadowPolicy,
+	listOutcomeReceipts,
+	listRetrievalTraces,
+	recordOutcomeReceipt,
+	retrieve,
+} from "./retrieval/context-injection.js";
+import {
+	hasEmbedding,
+	searchEmbeddings,
+	upsertEmbedding,
+} from "./retrieval/embeddings.js";
+import {
+	getFileContext,
+	getFilesContext,
+	rebuildFileIndex,
+} from "./retrieval/file-context-index.js";
+import { initMemoryStoreSchema } from "./schema.js";
 
 export function createMemoryStore(dbPath: string): MemoryStore {
 	const resolved = dbPath

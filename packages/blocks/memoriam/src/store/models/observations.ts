@@ -13,22 +13,22 @@ import type {
 } from "../../types.ts";
 import { trackAccess } from "../access-tracker.js";
 import {
-	parseObservationClaims,
-	parseObservationProvenance,
-	safeParseJson,
-	safeParseJsonArray,
-} from "./db-helpers.js";
-import { rowToMemory } from "./memories.js";
-import {
 	normalizeWorkspacePath,
 	now,
 	sanitizePayload,
 	sanitizeString,
 	toFtsQuery,
 } from "../module-helpers.js";
-import { createSession, getSession } from "./sessions.js";
 import { slidingWindowCap } from "../policy/sliding-window.js";
 import { buildSyntheticCompression } from "../synthetic-compression.js";
+import {
+	parseObservationClaims,
+	parseObservationProvenance,
+	safeParseJson,
+	safeParseJsonArray,
+} from "./db-helpers.js";
+import { rowToMemory } from "./memories.js";
+import { createSession, getSession } from "./sessions.js";
 
 const CLAIM_NEGATION =
 	/\b(?:not|never|no longer|isn't|doesn't|don't|can't|cannot|without|disabled|removed|deprecated|incorrect|wrong)\b/gi;

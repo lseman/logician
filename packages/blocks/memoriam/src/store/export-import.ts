@@ -17,9 +17,9 @@ import {
 	safeParseJsonArray,
 } from "./models/db-helpers.js";
 import { rowToMemory } from "./models/memories.js";
-import { normalizeWorkspacePath, now } from "./module-helpers.js";
 import { persistObservationClaims, rowToClaim } from "./models/observations.js";
 import { listSessions } from "./models/sessions.js";
+import { normalizeWorkspacePath, now } from "./module-helpers.js";
 
 export function exportData(
 	db: Database,

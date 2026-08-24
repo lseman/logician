@@ -14,6 +14,11 @@
 		"types": ["bun-types"],
 		"allowImportingTsExtensions": true
 	},
-	"include": ["src/**/*.ts", "store/**/*.ts", "retrieval/**/*.ts", "evolution/**/*.ts"],
+	"include": [
+		"src/**/*.ts",
+		"store/**/*.ts",
+		"retrieval/**/*.ts",
+		"evolution/**/*.ts"
+	],
 	"exclude": ["node_modules"]
 }

@@ -3,7 +3,11 @@
  * (a superseding revision that keeps the old row for history). */
 
 import type { Database } from "bun:sqlite";
-import type { Memory, MemoryRelation, MemoryRelationType } from "../../types.ts";
+import type {
+	Memory,
+	MemoryRelation,
+	MemoryRelationType,
+} from "../../types.ts";
 import { get, rowToMemory } from "../models/memories.js";
 import { generateId, now } from "../module-helpers.js";
 

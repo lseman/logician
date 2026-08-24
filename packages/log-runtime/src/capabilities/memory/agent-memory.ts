@@ -18,7 +18,9 @@ export interface MemoryHooksOptions {
 		userPrompt: string;
 	}) => Promise<string>;
 	onBackgroundTask?: (task: Promise<void>) => void;
-	onMemoriesSaved?: (memories: Array<{ id: string; title: string; version: number }>) => void;
+	onMemoriesSaved?: (
+		memories: Array<{ id: string; title: string; version: number }>,
+	) => void;
 }
 
 type AgentHookCtx = Record<string, unknown>;
@@ -31,7 +33,9 @@ type AgentHookSignal = unknown;
 export function createMemoryHooks(
 	store: MemoryStore,
 	opts: MemoryHooksOptions,
-): Partial<Record<string, (ctx: AgentHookCtx, signal: AgentHookSignal) => unknown>> {
+): Partial<
+	Record<string, (ctx: AgentHookCtx, signal: AgentHookSignal) => unknown>
+> {
 	const {
 		captureTools = true,
 		injectContext = true,
@@ -39,10 +43,15 @@ export function createMemoryHooks(
 		embedder,
 	} = opts;
 
-	const hooks: Partial<Record<string, (ctx: AgentHookCtx, signal: AgentHookSignal) => unknown>> = {};
+	const hooks: Partial<
+		Record<string, (ctx: AgentHookCtx, signal: AgentHookSignal) => unknown>
+	> = {};
 
 	if (captureTools) {
-		hooks["post_tool_use"] = async (ctx: AgentHookCtx, _signal: AgentHookSignal) => {
+		hooks["post_tool_use"] = async (
+			ctx: AgentHookCtx,
+			_signal: AgentHookSignal,
+		) => {
 			const toolName = (ctx.toolName as string) || "";
 			const toolInput = (ctx.toolInput as string) || "";
 			if (!toolName || !toolInput) return;
@@ -78,15 +87,22 @@ export function createMemoryHooks(
 	}
 
 	if (injectContext) {
-		hooks["transformContext"] = async (ctx: AgentHookCtx, _signal: AgentHookSignal) => {
+		hooks["transformContext"] = async (
+			ctx: AgentHookCtx,
+			_signal: AgentHookSignal,
+		) => {
 			const sessionId = store.getCurrentSessionId();
 			if (!sessionId) return ctx;
 
-			const messages = ctx.messages as Array<{ role: string; content?: string }>;
+			const messages = ctx.messages as Array<{
+				role: string;
+				content?: string;
+			}>;
 			const latestPrompt =
-				[...messages].reverse().find(
-					m => m.role === "user" && m.content?.trim(),
-				)?.content?.trim() || "";
+				[...messages]
+					.reverse()
+					.find(m => m.role === "user" && m.content?.trim())
+					?.content?.trim() || "";
 
 			if (!latestPrompt) return ctx;
 
@@ -98,7 +114,8 @@ export function createMemoryHooks(
 					...ctx,
 					messages: [
 						{ role: "system", content: context },
-						...(ctx.messages as Array<{ role: string; content?: string }>) || [],
+						...((ctx.messages as Array<{ role: string; content?: string }>) ||
+							[]),
 					],
 				};
 			}
@@ -113,7 +130,9 @@ export function createMemoryHooks(
  * Lightweight embedder backed by a remote LLM endpoint.
  */
 export class LocalMemoryEmbedder {
-	constructor(_model?: string) { /* model accepted for API compat */ }
+	constructor(_model?: string) {
+		/* model accepted for API compat */
+	}
 	private cache = new Map<string, number[]>();
 
 	async embed(text: string): Promise<number[]> {
@@ -139,7 +158,7 @@ export class LocalMemoryEmbedder {
 		let hash = 0;
 		for (let i = 0; i < str.length; i++) {
 			const char = str.charCodeAt(i);
-			hash = ((hash << 5) - hash) + char;
+			hash = (hash << 5) - hash + char;
 			hash |= 0;
 		}
 		return Math.abs(hash);

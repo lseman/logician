@@ -10,8 +10,8 @@ import {
 	safeParseJsonArray,
 } from "../models/db-helpers.js";
 import { rowToMemory } from "../models/memories.js";
-import { detectContradictions } from "./memory-relations.js";
 import { generateId, now } from "../module-helpers.js";
+import { detectContradictions } from "./memory-relations.js";
 
 export function consolidate(
 	db: Database,
