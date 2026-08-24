@@ -725,6 +725,75 @@ void test("skill activations render as a compact dedicated status line", () => {
 	assert.match(rendered, /\x1b\[/);
 });
 
+void test("a steered continuation-nudge chunk renders as NOTICE, not YOU", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([
+		{
+			id: "steered-nudge",
+			userMessage: { type: "user", content: "Fix the failing tests." },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: false,
+				chunks: [
+					{
+						seq: 0,
+						type: "content",
+						contentText: "Working on it.",
+						isComplete: true,
+					},
+					{
+						seq: 1,
+						type: "user",
+						contentText:
+							"[continuation-nudge:todo] You still have 2 unfinished task(s). " +
+							"Continue working on #1 Audit legroom codebase for improvement opportunities. " +
+							"Keep the todo list accurate as work progresses. If you need user input or are blocked, say so explicitly and stop.",
+						isComplete: true,
+					},
+				],
+			},
+			isComplete: false,
+		},
+	]);
+	const output = plain(display.render(100).join("\n"));
+
+	assert.match(output, /⚠ NOTICE Guard: continuation_todo/);
+	assert.doesNotMatch(output, /YOU ‹[^\n]*continuation-nudge/);
+});
+
+void test("a steered plain-text chunk still renders as an ordinary YOU line", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([
+		{
+			id: "steered-plain",
+			userMessage: { type: "user", content: "Start the task." },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: false,
+				chunks: [
+					{
+						seq: 0,
+						type: "content",
+						contentText: "On it.",
+						isComplete: true,
+					},
+					{
+						seq: 1,
+						type: "user",
+						contentText: "Actually, use the staging config instead.",
+						isComplete: true,
+					},
+				],
+			},
+			isComplete: false,
+		},
+	]);
+	const output = plain(display.render(100).join("\n"));
+
+	assert.match(output, /YOU ‹/);
+	assert.match(output, /Actually, use the staging config instead\./);
+});
+
 void test("notices render their heading and message on separate themed lines", () => {
 	const display = new TranscriptDisplay();
 	display.setTurns([

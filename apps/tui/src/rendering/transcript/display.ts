@@ -736,9 +736,14 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			return " ".repeat(Math.max(0, frameWidth - w)) + clipped;
 		};
 
-		// User or system message
-		if (turn.userMessage) {
-			const content = turn.userMessage.content;
+		// Renders a "YOU"-slot message: plain user text, a "[System] " banner,
+		// or a "[continuation-nudge:...]" follow-up — the latter two render as
+		// SYSTEM/NOTICE blocks instead of a YOU bubble. Shared by turn.userMessage
+		// (a fresh turn's opening message) and steered `type: "user"` chunks
+		// (a follow-up message injected mid-turn, e.g. the continuation-nudge
+		// hook or a user steering message) since both carry the same content
+		// shapes and must render identically regardless of which path produced them.
+		const renderUserOrNoticeContent = (content: string): void => {
 			if (content.startsWith("[System] ")) {
 				lines.push(padToWidth(`${theme.fgRaw("systemText")}◇ SYSTEM${RESET}`));
 				const sysLines = renderMarkdownLines(
@@ -826,6 +831,11 @@ export class TranscriptDisplay implements Component, RenderCtx {
 						lines.push(padRight(`${line}  `));
 				}
 			}
+		};
+
+		// User or system message
+		if (turn.userMessage) {
+			renderUserOrNoticeContent(turn.userMessage.content);
 		}
 
 		// Assistant message — render chunks in seq order (chronological)
@@ -879,19 +889,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				flushContent();
 				if (chunk.type === "user") {
 					lastThinkingSection = false;
-					lines.push(
-						padRight(
-							`${theme.fgRaw("userLabel")}${BOLD}YOU${RESET} ${theme.fgRaw("separator")}‹${RESET}`,
-						),
-					);
-					const colored =
-						theme.fgRaw("userText") +
-						truncateText(chunk.contentText || "", this.maxMessageLength) +
-						RESET;
-					for (const rawLine of colored.split("\n")) {
-						for (const line of wrapText(rawLine, Math.max(1, contentWidth)))
-							lines.push(padRight(`${line}  `));
-					}
+					renderUserOrNoticeContent(chunk.contentText || "");
 				} else if (chunk.type === "thinking") {
 					// Render thinking block
 					const thinkLines = renderThinkingChunk(

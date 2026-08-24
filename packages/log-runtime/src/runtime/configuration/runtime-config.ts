@@ -188,7 +188,6 @@ export function resolveRuntimeConfig(
 			allowedPaths: config.allowedPaths,
 			allowAllPaths: configBool(config.allowAllPaths),
 			truncation: config.truncation,
-			autoResumeSession: configBool(config.autoResumeSession, true),
 			projectTrusted: options.loadProjectConfig !== false,
 		},
 	};

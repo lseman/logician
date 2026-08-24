@@ -619,3 +619,49 @@ void test("core iterations reconcile output without completing the UI turn early
 	// Only one turn_end should be emitted (at the end of the turn, not per iteration)
 	assert.equal(events.filter(event => event.type === "turn_end").length, 1);
 });
+
+void test("queued replacement turn reaches READY only after its stream ends", async () => {
+	const bridge = new AgentRuntime({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.startupHooksRan = true;
+	internal.toolRouter.isMcpLoaded = () => true;
+	let queued = ["change direction"];
+	internal.session = {
+		messages: [],
+		configure: () => {},
+		prompt: async () => {},
+		getQueues: () => ({ steering: [], followUp: [], nextTurn: queued }),
+		setRepositoryQuery: () => {},
+		runQueuedContinuation: async () => {
+			queued = [];
+			internal.emit({ type: "turn_start", turnId: "replacement" });
+			internal.emit({ type: "turn_end", turnId: "replacement" });
+			internal.emit({ type: "phase", state: "ready" });
+			return true;
+		},
+	} as any;
+
+	const lifecycle: string[] = [];
+	bridge.events.subscribe(({ event }) => {
+		if (event.type === "turn_start" || event.type === "turn_end") {
+			lifecycle.push(`${event.type}:${event.turnId}`);
+		} else if (event.type === "phase" && event.state === "ready") {
+			lifecycle.push("ready");
+		}
+	});
+
+	await bridge.sendMessage("initial request");
+
+	assert.equal(bridge.isActive(), false);
+	assert.deepEqual(lifecycle.slice(-4), [
+		lifecycle.find(value => value.startsWith("turn_end:turn_")),
+		"turn_start:replacement",
+		"turn_end:replacement",
+		"ready",
+	]);
+	assert.equal(lifecycle.indexOf("ready"), lifecycle.length - 1);
+});

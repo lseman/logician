@@ -626,18 +626,16 @@ export class AgentRuntime {
 			this.running = false;
 			this.publishContextUsage();
 			this.emit({ type: "turn_end", turnId });
-			// Keep the harness alive to retain history across turns.
-			this.emit({ type: "phase", state: "ready" });
-			if (
-				turnSucceeded &&
-				(this.session?.getQueues().nextTurn.length ?? 0) > 0
-			) {
+			const hasQueuedContinuation =
+				turnSucceeded && (this.session?.getQueues().nextTurn.length ?? 0) > 0;
+			if (hasQueuedContinuation) {
+				// Do not advertise READY between an interrupted turn and the queued
+				// replacement turn. The continuation owns the terminal ready event.
 				this.running = true;
-				const repoQuery = this.repositoryMap
-					? await this.repositoryMap.render("")
-					: undefined;
-				this.session?.setRepositoryQuery(repoQuery);
 				await this.runContinuation(turnActivations);
+			} else {
+				// Keep the harness alive to retain history across turns.
+				this.emit({ type: "phase", state: "ready" });
 			}
 		}
 	}

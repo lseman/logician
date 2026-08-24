@@ -143,7 +143,6 @@ export interface AgentBridgeOptions {
 	allowAllPaths?: boolean;
 	truncation?: TruncationConfig;
 	projectTrusted?: boolean;
-	autoResumeSession?: boolean;
 	reasoner?: string;
 	reasonerConfig?: ReasonerConfig;
 

@@ -1251,6 +1251,7 @@ export class AgentSession {
 		repositoryQuery?: string,
 	): Promise<boolean> {
 		const originalPrompt = this.config.systemPrompt;
+		const turnId = `turn_${Date.now()}`;
 		try {
 			const dynamicContext: string[] = [];
 			if (repositoryQuery) {
@@ -1264,20 +1265,21 @@ export class AgentSession {
 					systemPrompt: `${originalPrompt}\n\n${dynamicContext.join("\n\n")}`,
 				});
 			}
-			this.onEvent?.({ type: "turn_start", turnId: `turn_${Date.now()}` });
+			this.onEvent?.({ type: "turn_start", turnId });
 			await this.continueWithNextTurn(context, repositoryQuery);
 			return true;
 		} finally {
 			if (context || repositoryQuery) {
 				this.configure({ systemPrompt: originalPrompt });
 			}
-			this.onEvent?.({ type: "turn_end", turnId: `turn_${Date.now()}` });
-			this.onEvent?.({ type: "phase", state: "ready" });
-			// Check if another continuation is pending (recursive).
+			this.onEvent?.({ type: "turn_end", turnId });
+			// A pending continuation is still active work. Keep READY terminal by
+			// waiting for the final queued continuation instead of briefly exposing
+			// an idle phase between streams.
 			if (this.session.takePendingContinuation()) {
-				void this.runQueuedContinuation(context, repositoryQuery).catch(
-					() => {},
-				);
+				await this.runQueuedContinuation(context, repositoryQuery);
+			} else {
+				this.onEvent?.({ type: "phase", state: "ready" });
 			}
 		}
 	}

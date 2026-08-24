@@ -7,6 +7,11 @@ import {
 import { beginPendingTurn } from "../state/turn-state.ts";
 import type { LogicianTUI } from "./tui.ts";
 
+/** Ctrl+Enter encodings emitted by terminals with CSI-u or modifyOtherKeys. */
+export function isCtrlEnter(data: string): boolean {
+	return data === "\x1b[13;5u" || data === "\x1b[27;5;13~";
+}
+
 export function setupInputHandler(ctx: LogicianTUI): void {
 	// ── Choice popup handlers ──────────────────────────────────────
 	const handleChoicePopupSubmit = (): void => {
@@ -403,7 +408,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 
 		// Ctrl+Enter — submit the composer as immediate steering. With an
 		// empty composer, retain the shortcut for flushing an existing queue.
-		if (data === "\x1b[13;5u") {
+		if (isCtrlEnter(data)) {
 			if (ctx.inputBar.submit("steer-now")) {
 				return { consume: true };
 			}
@@ -595,20 +600,21 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 					? `Steering now: ${preview}`
 					: `Steering queued: ${preview}`;
 			ctx.notify(label, "info");
-			ctx.tui.requestRender(false, true);
-			setImmediate(() => {
-				try {
-					if (intent === "steer-now") {
-						ctx.bridge.steerNow(text);
-					} else {
-						ctx.bridge.steerQueue(text);
-					}
-				} catch (err) {
-					ctx.bridge.events.reportError(err as Error);
+			// Queue synchronously. In particular, Ctrl+Enter must abort the active
+			// provider call before this input callback yields; deferring this with
+			// setImmediate made "steer now" behave like ordinary queued steering
+			// under a busy event loop and delayed the queue_update frame.
+			try {
+				if (intent === "steer-now") {
+					ctx.bridge.steerNow(text);
+				} else {
+					ctx.bridge.steerQueue(text);
 				}
-				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-				ctx.tui.requestRender();
-			});
+			} catch (err) {
+				ctx.bridge.events.reportError(err as Error);
+			}
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			ctx.tui.requestRender(false, true);
 			return;
 		}
 

@@ -69,7 +69,6 @@ const KNOWN_KEYS = new Set([
 	"maxParallelAgents",
 	"cwd",
 	"truncation",
-	"autoResumeSession",
 	"memory",
 	"memoryDbPath",
 	"memoryExtractorModel",
@@ -833,8 +832,6 @@ export interface LogicianTuiConfig {
 		| "analytical";
 	// Universal output/result truncation limits.
 	truncation?: TruncationConfig;
-	// Whether to auto-resume the most recent session on startup (default: true).
-	autoResumeSession?: boolean;
 	/** Maximum delegated agents executing concurrently. */
 	maxParallelAgents?: number;
 	// Memory persistence settings.
