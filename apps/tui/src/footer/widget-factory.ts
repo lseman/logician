@@ -50,6 +50,7 @@ export interface WidgetFactoryStatus {
 	promptTokens?: number;
 	completionTokens?: number;
 	rtkProxyEnabled?: boolean;
+	legroomEnabled?: boolean;
 	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	memoryEnabled?: boolean;
@@ -426,6 +427,15 @@ function graphicianWidget(status: WidgetFactoryStatus): WidgetData {
 	return toggleWidget("graphician", "gph", status.graphicianEnabled ?? true);
 }
 
+function legroomWidget(status: WidgetFactoryStatus): WidgetData {
+	return styled(
+		"legroom",
+		theme.fg((status.legroomEnabled ?? false ? "success" : "dim") as any, ""),
+		"leg:",
+		status.legroomEnabled ?? false ? "sdk" : "off",
+	);
+}
+
 function fffgrepWidget(status: WidgetFactoryStatus): WidgetData {
 	return toggleWidget("fffgrep", "fff", status.fffgrepEnabled ?? true);
 }
@@ -511,6 +521,7 @@ const PROVIDERS: Record<
 	permission: permissionWidget,
 	mcp: mcpWidget,
 	rtk: rtkWidget,
+	legroom: legroomWidget,
 	graphician: graphicianWidget,
 	fffgrep: fffgrepWidget,
 	memory: memoryWidget,

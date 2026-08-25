@@ -26,16 +26,22 @@ describe("SettingsGateway", () => {
 			permissionMode: () => "ask",
 			postEditDiagnostics: () => true,
 			memoryEnabled: () => false,
+			legroomEnabled: () => true,
 		});
 
 		settings.update({
 			maxIterations: 12,
 			guardMode: "on",
 			graphicianEnabled: false,
+			legroomEnabled: false,
 		});
 		expect(config.maxIterations).toBe(12);
 		expect(config.guardsEnabled).toBe(true);
-		expect(toggles).toEqual([["graphicianEnabled", false]]);
+		expect(toggles).toEqual([
+			["graphicianEnabled", false],
+			["legroomEnabled", false],
+		]);
 		expect(settings.read().permissionMode).toBe("ask");
+		expect(settings.read().legroomEnabled).toBe(true);
 	});
 });

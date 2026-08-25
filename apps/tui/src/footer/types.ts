@@ -73,6 +73,7 @@ export type BuiltinWidgetId =
 	| "mcp" // MCP server count
 	// Memory
 	| "rtk" // RTK proxy status
+	| "legroom" // Legroom SDK compression status
 	| "graphician" // Graphician code-graph tool status
 	| "fffgrep" // fff indexed grep status
 	| "memory" // memory subsystem status
@@ -305,24 +306,31 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 			fill: "none",
 		},
 		rtk: { enabled: true, row: 0, position: 7, align: "right", fill: "none" },
-		graphician: {
+		legroom: {
 			enabled: true,
 			row: 0,
 			position: 8,
 			align: "right",
 			fill: "none",
 		},
-		fffgrep: {
+		graphician: {
 			enabled: true,
 			row: 0,
 			position: 9,
 			align: "right",
 			fill: "none",
 		},
-		memory: {
+		fffgrep: {
 			enabled: true,
 			row: 0,
 			position: 10,
+			align: "right",
+			fill: "none",
+		},
+		memory: {
+			enabled: true,
+			row: 0,
+			position: 11,
 			align: "right",
 			fill: "none",
 		},

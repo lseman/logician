@@ -14,6 +14,7 @@ export type RuntimeToggleKey =
 	| "rtkProxyEnabled"
 	| "graphicianEnabled"
 	| "fffgrepEnabled"
+	| "legroomEnabled"
 	| "memoryEnabled";
 
 export interface RuntimeSettingsHost {
@@ -27,6 +28,7 @@ export interface RuntimeSettingsHost {
 	permissionMode(): string;
 	postEditDiagnostics(): boolean;
 	memoryEnabled(): boolean;
+	legroomEnabled(): boolean;
 }
 
 export interface RuntimeSettingsView {
@@ -44,6 +46,7 @@ export interface RuntimeSettingsView {
 	rtkProxyEnabled: boolean;
 	graphicianEnabled: boolean;
 	fffgrepEnabled: boolean;
+	legroomEnabled: boolean;
 	memoryEnabled: boolean;
 	duplicateGuardEnabled: boolean;
 	failureGuardEnabled: boolean;
@@ -65,6 +68,7 @@ const TOGGLE_KEYS: readonly RuntimeToggleKey[] = [
 	"rtkProxyEnabled",
 	"graphicianEnabled",
 	"fffgrepEnabled",
+	"legroomEnabled",
 	"memoryEnabled",
 ];
 
@@ -123,6 +127,7 @@ export class SettingsGateway {
 			rtkProxyEnabled: config.rtkProxyEnabled ?? false,
 			graphicianEnabled: config.graphicianEnabled ?? true,
 			fffgrepEnabled: config.fffgrepEnabled ?? true,
+			legroomEnabled: this.host.legroomEnabled(),
 			memoryEnabled: this.host.memoryEnabled(),
 			duplicateGuardEnabled: config.duplicateGuardEnabled ?? true,
 			failureGuardEnabled: config.failureGuardEnabled ?? false,

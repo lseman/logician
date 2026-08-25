@@ -706,6 +706,20 @@ export function createSlashCommands(
 				return state ? "RTK proxy: on" : "RTK proxy: off";
 			},
 		),
+		cmd(
+			"/legroom",
+			"Toggle Legroom SDK context compression",
+			"local",
+			false,
+			{
+				category: "misc",
+				examples: ["/legroom"],
+			},
+			() => {
+				const state = localHandlers.toggleLegroom?.();
+				return state ? "Legroom SDK: on" : "Legroom SDK: off";
+			},
+		),
 	];
 	return commands;
 }

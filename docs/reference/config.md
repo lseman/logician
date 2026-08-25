@@ -56,6 +56,14 @@ The current flat runtime keys include:
     "reserveTokens": "positive number",
     "keepRecentTokens": "positive number"
   },
+	"legroom": {
+		"mode": "off|sdk",
+		"python": "python3",
+		"args": ["-m", "legroom.sdk_worker"],
+		"failOpen": "boolean (default true)",
+		"timeoutMs": "positive number (default 30000)",
+		"config": {}
+	},
   "maxParallelAgents": "positive number",
   "mcpServers": {
     "name": { "command": "string", "args": ["string"], "enabled": true }

@@ -41,6 +41,13 @@ function configuredWorkspace(): string {
 			memoryEmbeddingModel: "local/test-embedder",
 			reasoner: "reflexion",
 			reasonerConfig: { maxTrials: 2 },
+			legroom: {
+				mode: "sdk",
+				python: "/opt/legroom/bin/python",
+				failOpen: false,
+				timeoutMs: 12000,
+				config: { protect_recent: 2 },
+			},
 		}),
 		"utf8",
 	);
@@ -88,6 +95,13 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.memory?.embeddingModel, "local/test-embedder");
 	assert.equal(resolved.bridge.reasoner, "reflexion");
 	assert.deepEqual(resolved.bridge.reasonerConfig, { maxTrials: 2 });
+	assert.deepEqual(resolved.bridge.legroom, {
+		mode: "sdk",
+		python: "/opt/legroom/bin/python",
+		failOpen: false,
+		timeoutMs: 12000,
+		config: { protect_recent: 2 },
+	});
 });
 
 void test("reasoners are disabled by default", () => {

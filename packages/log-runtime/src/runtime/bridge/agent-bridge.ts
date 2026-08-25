@@ -31,6 +31,7 @@ import {
 } from "../../adapters/claude-code/plugin-runtime.ts";
 import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
 import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import { LegroomWorker } from "../../capabilities/legroom/worker.ts";
 import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
 import type {
@@ -212,6 +213,8 @@ export class AgentRuntime {
 		return this.runtimeCtx.memory;
 	}
 	private agentCoordinator: AgentCoordinator | null = null;
+	private readonly legroomWorker: LegroomWorker;
+	private legroomEnabled: boolean;
 
 	private get repositoryMap(): RepositoryMap | undefined {
 		return this.runtimeCtx.repositoryMap;
@@ -243,6 +246,8 @@ export class AgentRuntime {
 			process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS === "0"
 				? false
 				: opts.postEditDiagnostics !== false;
+		this.legroomWorker = new LegroomWorker(opts.legroom ?? {});
+		this.legroomEnabled = opts.legroom?.mode === "sdk";
 
 		// Independent capabilities — none reads another slot during
 		// construction (RuntimeContext's own contract) — mount together so
@@ -417,15 +422,17 @@ export class AgentRuntime {
 			onPermissionRequest: context =>
 				this.interactions.requestPermission(context),
 			onQuestionRequest: context => this.interactions.requestQuestion(context),
-			hooks: this.buildMemoryHooks(
-				createPostEditDiagnosticHooks(
-					this.cwd,
-					() => this.postEditDiagnosticsEnabled,
-					opts.lsp?.enabled === false ? undefined : this.lsp,
-					{
-						allowedPaths: opts.allowedPaths,
-						allowAllPaths: opts.allowAllPaths,
-					},
+			hooks: this.buildLegroomHooks(
+				this.buildMemoryHooks(
+					createPostEditDiagnosticHooks(
+						this.cwd,
+						() => this.postEditDiagnosticsEnabled,
+						opts.lsp?.enabled === false ? undefined : this.lsp,
+						{
+							allowedPaths: opts.allowedPaths,
+							allowAllPaths: opts.allowAllPaths,
+						},
+					),
 				),
 			),
 			turnEndCallback: (turnId: string) => {
@@ -476,6 +483,7 @@ export class AgentRuntime {
 			permissionMode: () => this.getPermissionMode(),
 			postEditDiagnostics: () => this.postEditDiagnosticsEnabled,
 			memoryEnabled: () => Boolean(this.memory?.getStore()),
+			legroomEnabled: () => this.legroomEnabled,
 		});
 
 		onTodosChanged(todos => {
@@ -514,6 +522,33 @@ export class AgentRuntime {
 			getBackend: () => this.backend,
 			emit: event => this.emit(event),
 		});
+	}
+
+	private buildLegroomHooks(
+		existingHooks: AgentConfig["hooks"],
+	): AgentConfig["hooks"] {
+		const worker = this.legroomWorker;
+		return {
+			...existingHooks,
+			beforeProviderPayload: async context => {
+				const existing = await existingHooks?.beforeProviderPayload?.(context);
+				const payload = existing?.payload ?? context.payload;
+				if (!this.legroomEnabled) return { payload };
+				const messages = payload.messages;
+				if (!Array.isArray(messages)) return { payload };
+				const compressible = messages.filter(
+					(message): message is Record<string, unknown> =>
+						message !== null && typeof message === "object",
+				);
+				if (compressible.length !== messages.length) return { payload };
+				return {
+					payload: {
+						...payload,
+						messages: await worker.compress(compressible, context.model),
+					},
+				};
+			},
+		};
 	}
 
 	/** Add a tool to the default set and propagate it into live config/harness/system prompt. */
@@ -806,6 +841,7 @@ export class AgentRuntime {
 		rtkProxyEnabled?: boolean;
 		graphicianEnabled?: boolean;
 		fffgrepEnabled?: boolean;
+		legroomEnabled?: boolean;
 	} {
 		return {
 			baseUrl: this.config.baseUrl,
@@ -813,6 +849,7 @@ export class AgentRuntime {
 			rtkProxyEnabled: this.config.rtkProxyEnabled,
 			graphicianEnabled: this.config.graphicianEnabled,
 			fffgrepEnabled: this.config.fffgrepEnabled,
+			legroomEnabled: this.legroomEnabled,
 		};
 	}
 
@@ -1181,6 +1218,17 @@ export class AgentRuntime {
 			this.postEditDiagnosticsEnabled = enabled;
 			return;
 		}
+		if (key === "legroomEnabled") {
+			this.legroomEnabled = enabled;
+			if (!enabled) this.legroomWorker.close();
+			this.emit({
+				type: "notice",
+				level: "info",
+				label: "Legroom",
+				text: enabled ? "Legroom SDK enabled" : "Legroom SDK disabled",
+			});
+			return;
+		}
 		if (key === "graphicianEnabled") {
 			this.config.graphicianEnabled = enabled;
 			this.toolRouter.setGraphicianEnabled(enabled);
@@ -1231,6 +1279,7 @@ export class AgentRuntime {
 		rtkProxyEnabled: boolean;
 		graphicianEnabled: boolean;
 		fffgrepEnabled: boolean;
+		legroomEnabled: boolean;
 		memoryEnabled: boolean;
 		duplicateGuardEnabled: boolean;
 		failureGuardEnabled: boolean;
@@ -1491,6 +1540,7 @@ export class AgentRuntime {
 		await this.memory?.waitForBackgroundTasks();
 		await this.fireSessionEnd("shutdown");
 		this.lsp.close();
+		this.legroomWorker.close();
 		await this.toolRouter.closeMcp();
 		killAllTrackedChildren();
 		this.running = false;

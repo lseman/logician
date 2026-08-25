@@ -366,6 +366,14 @@ export function createLocalHandlers(
 			ctx.statusPanel.update({ rtkProxyEnabled: next });
 			return next;
 		},
+		toggleLegroom: () => {
+			const current = ctx.bridge.getConfig()?.legroomEnabled ?? false;
+			const next = !current;
+			ctx.bridge.updateSettings({ legroomEnabled: next });
+			saveConfigNestedField("legroom", "mode", next ? "sdk" : "off");
+			ctx.statusPanel.update({ legroomEnabled: next });
+			return next;
+		},
 		openModelSelector: () => {
 			ctx.openModelSelector();
 		},

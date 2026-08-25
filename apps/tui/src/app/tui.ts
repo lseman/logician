@@ -459,6 +459,7 @@ export class LogicianTUI {
 			workflowMode: this.workflowMode,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "minimal",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
+			legroomEnabled: runtimeConfig.bridge.legroom?.mode === "sdk",
 			graphicianEnabled: runtimeConfig.bridge.graphicianEnabled ?? true,
 			fffgrepEnabled: runtimeConfig.bridge.fffgrepEnabled ?? true,
 			memoryEnabled: runtimeConfig.bridge.memory?.enabled ?? false,

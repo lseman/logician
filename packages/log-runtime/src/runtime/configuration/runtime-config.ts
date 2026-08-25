@@ -41,6 +41,7 @@ export function mergeRuntimeConfigLayers(
 		"mcp",
 		"mcpServers",
 		"plugins",
+		"legroom",
 	] as const) {
 		const value = mergeObject(
 			global[key] as Record<string, unknown> | undefined,
@@ -103,6 +104,7 @@ export function resolveRuntimeConfig(
 				configString(config.llmUrl) ||
 				"http://127.0.0.1:8080",
 			model: environment.LOGICIAN_MODEL || configString(config.model) || "",
+			legroom: config.legroom,
 			models: config.models,
 			systemPrompt:
 				environment.LOGICIAN_SYSTEM_PROMPT || configString(config.systemPrompt),

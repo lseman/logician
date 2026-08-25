@@ -81,6 +81,7 @@ const KNOWN_KEYS = new Set([
 	"transcriptMaxRenderedLines",
 	"reasoner",
 	"reasonerConfig",
+	"legroom",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
@@ -103,6 +104,14 @@ const MEMORY_EXTRACTOR_KEYS = new Set(["baseUrl", "model"]);
 /** Sourced from the reasoner registry itself so this can't drift from the real set. */
 const REASONER_IDS = new Set(getReasonerIds());
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
+const LEGROOM_KEYS = new Set([
+	"mode",
+	"python",
+	"args",
+	"failOpen",
+	"timeoutMs",
+	"config",
+]);
 
 /** Validate a URL string (non-empty, starts with http:// or https://). */
 function isValidUrl(v: unknown): boolean {
@@ -558,6 +567,60 @@ export function validateConfig(
 		}
 	}
 
+	// Legroom SDK worker.
+	if (obj.legroom !== undefined) {
+		if (
+			typeof obj.legroom !== "object" ||
+			obj.legroom === null ||
+			Array.isArray(obj.legroom)
+		) {
+			warn(warnings, '"legroom" must be an object.');
+		} else {
+			const value = obj.legroom as Record<string, unknown>;
+			for (const key of Object.keys(value)) {
+				if (!LEGROOM_KEYS.has(key))
+					warn(warnings, `Unknown legroom key: "${key}".`);
+			}
+			const mode = configString(value.mode);
+			if (mode !== undefined && mode !== "off" && mode !== "sdk") {
+				warn(warnings, '"legroom.mode" must be one of: off, sdk.');
+			} else {
+				const args = Array.isArray(value.args)
+					? value.args.filter(
+							(item): item is string => typeof item === "string",
+						)
+					: undefined;
+				if (value.args !== undefined && !Array.isArray(value.args))
+					warn(warnings, '"legroom.args" must be an array of strings.');
+				const compressionConfig =
+					value.config &&
+					typeof value.config === "object" &&
+					!Array.isArray(value.config)
+						? (value.config as Record<string, unknown>)
+						: undefined;
+				if (value.config !== undefined && !compressionConfig)
+					warn(warnings, '"legroom.config" must be an object.');
+				const timeoutMs = configNumber(value.timeoutMs);
+				if (timeoutMs !== undefined && timeoutMs <= 0)
+					warn(warnings, '"legroom.timeoutMs" must be greater than zero.');
+				cfg.legroom = {
+					...(mode !== undefined && { mode: mode as "off" | "sdk" }),
+					...(configString(value.python) !== undefined && {
+						python: configString(value.python),
+					}),
+					...(args !== undefined && { args }),
+					...(configBool(value.failOpen) !== undefined && {
+						failOpen: configBool(value.failOpen),
+					}),
+					...(timeoutMs !== undefined && timeoutMs > 0 && { timeoutMs }),
+					...(compressionConfig !== undefined && {
+						config: compressionConfig,
+					}),
+				};
+			}
+		}
+	}
+
 	// compaction sub-object.
 	if (obj.compaction !== undefined) {
 		if (typeof obj.compaction !== "object" || obj.compaction === null) {
@@ -760,6 +823,14 @@ export interface LogicianTuiConfig {
 	mcp?: Record<string, unknown>;
 	mcpServers?: Record<string, unknown>;
 	plugins?: Record<string, unknown>;
+	legroom?: {
+		mode?: "off" | "sdk";
+		python?: string;
+		args?: string[];
+		failOpen?: boolean;
+		timeoutMs?: number;
+		config?: Record<string, unknown>;
+	};
 	webSearch?: {
 		baseUrl?: string;
 		maxResults?: number;

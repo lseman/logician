@@ -225,6 +225,26 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				name: "Legroom SDK",
+				currentValue: data.legroomEnabled ? "on" : "off",
+				description:
+					"Compress outbound context through the local Legroom worker",
+				options: [
+					{
+						label: "on",
+						value: "true",
+						current: data.legroomEnabled,
+						toggleOn: true,
+					},
+					{
+						label: "off",
+						value: "false",
+						current: !data.legroomEnabled,
+						toggleOn: false,
+					},
+				],
+			},
+			{
 				name: "Graphician",
 				currentValue: data.graphicianEnabled ? "on" : "off",
 				description:
@@ -444,6 +464,14 @@ export function handleSettingsSelectorAction(
 			saveConfigField("rtkProxyEnabled", on);
 			ctx.statusPanel.update({ rtkProxyEnabled: on });
 			ctx.notify(`RTK proxy: ${on ? "on" : "off"}`, "success");
+			break;
+		}
+		case "legroom sdk": {
+			const on = value === "true";
+			ctx.bridge.updateSettings({ legroomEnabled: on });
+			saveConfigNestedField("legroom", "mode", on ? "sdk" : "off");
+			ctx.statusPanel.update({ legroomEnabled: on });
+			ctx.notify(`Legroom SDK: ${on ? "on" : "off"}`, "success");
 			break;
 		}
 		case "graphician": {

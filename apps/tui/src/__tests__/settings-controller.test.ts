@@ -21,6 +21,7 @@ void test("settings exposes tri-state guards and every inference provider mode",
 				proactiveCompactionEnabled: true,
 				postEditDiagnostics: true,
 				rtkProxyEnabled: false,
+				legroomEnabled: true,
 				graphicianEnabled: true,
 				fffgrepEnabled: true,
 				memoryEnabled: true,
@@ -54,4 +55,8 @@ void test("settings exposes tri-state guards and every inference provider mode",
 	const inference = settings.find(setting => setting.name === "Inference mode");
 	assert.ok(inference?.options.some(option => option.value === "auto"));
 	assert.ok(inference?.options.some(option => option.value === "none"));
+	assert.equal(
+		settings.find(setting => setting.name === "Legroom SDK")?.currentValue,
+		"on",
+	);
 });

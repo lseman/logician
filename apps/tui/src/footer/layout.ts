@@ -316,7 +316,8 @@ function renderGroupedRow(
 		"execution-profile": 12,
 		permission: 13,
 		rtk: 14,
-		memory: 15,
+		legroom: 15,
+		memory: 16,
 	};
 	while (visibleWidth(line) > width && visibleWidgets.length > 3) {
 		let dropIndex = -1;
@@ -489,6 +490,7 @@ const DEFAULT_INFO: WidgetFactoryStatus = {
 	promptTokens: undefined,
 	completionTokens: undefined,
 	rtkProxyEnabled: false,
+	legroomEnabled: false,
 	graphicianEnabled: true,
 	fffgrepEnabled: true,
 };

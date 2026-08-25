@@ -1057,6 +1057,14 @@ void test("status bar renders RTK when restored as enabled", () => {
 	assert.match(plain(status.render(200)[0]), /\brtk on\b/);
 });
 
+void test("status bar renders the live Legroom SDK state", () => {
+	const status = new StatusBar(createDefaultConfig());
+	assert.match(plain(status.render(240)[0]), /\bleg: off\b/);
+
+	status.update({ legroomEnabled: true });
+	assert.match(plain(status.render(240)[0]), /\bleg: on\b/);
+});
+
 void test("input prompt has stable inset modern chrome", () => {
 	const input = new InputBar();
 	input.focused = true;

@@ -53,6 +53,34 @@ Writes made by selectors and `/settings` update only the selected field in the
 user file via an atomic replacement. Starting Logician, switching sessions, or
 applying a resolved setting never writes configuration.
 
+## Legroom SDK mode
+
+Legroom can compress the outbound provider payload through a persistent Python
+worker, without enabling its HTTP proxy. Install `legroom` in the Python
+environment used to launch Logician, then configure:
+
+```json
+{
+  "legroom": {
+    "mode": "sdk",
+    "python": "python3",
+    "args": ["-m", "legroom.sdk_worker"],
+    "failOpen": true,
+    "timeoutMs": 30000,
+    "config": {
+      "protect_recent": 2,
+      "use_model_profile": true,
+      "ccr_enabled": false
+    }
+  }
+}
+```
+
+The worker starts lazily on the first provider request and exits with Logician.
+Only outbound `messages` are transformed; stored session history remains
+unchanged. `failOpen` defaults to `true`, returning the original messages if
+the worker is unavailable, rejects a request, or exceeds `timeoutMs`.
+
 ## Environment variables
 
 Logician also loads `~/.logician/.env` at startup. Use it for secrets referenced by MCP header or process-environment placeholders; do not commit secrets to project configuration.
