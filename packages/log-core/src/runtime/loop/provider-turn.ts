@@ -216,6 +216,12 @@ export async function requestAssistantTurn(
 				config.signal?.aborted ||
 				(llmError instanceof Error && llmError.name === "AbortError");
 			if (cancelled) {
+				// Drain any SSE deltas already queued before the abort landed so
+				// they are fully delivered before the terminal cancellation event —
+				// otherwise a stale token/message_update can arrive after the
+				// steering notice and the next turn's turn_start, leaving the UI's
+				// phase reducer stuck mid-stream.
+				await Promise.all(providerEvents);
 				const steeringInterrupt = input.isSteeringInterrupt(config.signal);
 				if (!steeringInterrupt) {
 					await input.emit({ type: "error", message: "Operation aborted" });

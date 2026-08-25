@@ -31,6 +31,13 @@ import {
 } from "../../adapters/claude-code/plugin-runtime.ts";
 import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
 import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import type {
+	CalibrationStatus,
+	CompressResult,
+	StoreStats,
+	WorkerHistory,
+	WorkerStats,
+} from "../../capabilities/legroom/worker.ts";
 import { LegroomWorker } from "../../capabilities/legroom/worker.ts";
 import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
@@ -703,6 +710,14 @@ export class AgentRuntime {
 				backend: this.backend,
 				cwd: this.config.cwd,
 				maxIterations: this.config.maxIterations,
+				// Forward the session's own turn_start/turn_end/phase/queue_update
+				// events (emitted around runQueuedContinuation, i.e. the steerNow
+				// auto-continue path) straight through as RuntimeEvents — their
+				// shapes already match. Without this, a steerNow interrupt never
+				// surfaces the replacement turn's lifecycle: the UI phase reducer
+				// sees the interrupted turn's turn_end (→ READY) and then nothing
+				// until some unrelated event happens to arrive.
+				onEvent: event => this.emit(event as RuntimeEvent),
 				extensionRunner: this.extensions?.runner ?? undefined,
 				pluginHookFactory: context =>
 					createClaudeCodeHookLayer({
@@ -1289,6 +1304,76 @@ export class AgentRuntime {
 		guardMode: "auto" | "on" | "off";
 	} {
 		return this.settings.read();
+	}
+
+	/** Get the underlying LegroomWorker for advanced CCR store operations. */
+	getLegroomWorker(): LegroomWorker | null {
+		return this.legroomWorker;
+	}
+
+	// ── Legroom CCR Store ──────────────────────────────────────────────────
+
+	/** Compress messages using a named CCR store (enables CCR automatically). */
+	async compressWithStore(
+		storeId: string,
+		messages: Record<string, unknown>[],
+		model: string,
+	): Promise<CompressResult> {
+		if (!this.legroomEnabled) {
+			throw new Error("Legroom SDK is not enabled");
+		}
+		return this.legroomWorker.compressWithStore(storeId, messages, model);
+	}
+
+	/** Retrieve original content from a CCR store by hash. */
+	async storeRetrieve(storeId: string, hash: string): Promise<string> {
+		if (!this.legroomEnabled) {
+			throw new Error("Legroom SDK is not enabled");
+		}
+		return this.legroomWorker.storeRetrieve(storeId, hash);
+	}
+
+	/** Get CCR store statistics. */
+	async storeStats(storeId: string): Promise<StoreStats> {
+		if (!this.legroomEnabled) {
+			throw new Error("Legroom SDK is not enabled");
+		}
+		return this.legroomWorker.storeStats(storeId);
+	}
+
+	/** Get aggregate worker statistics (includes CCR store metrics). */
+	async getLegroomStats(): Promise<WorkerStats> {
+		if (!this.legroomEnabled) {
+			throw new Error("Legroom SDK is not enabled");
+		}
+		return this.legroomWorker.workerStats();
+	}
+
+	/** Get recent compression request history. */
+	async getLegroomHistory(limit = 50, offset = 0): Promise<WorkerHistory> {
+		if (!this.legroomEnabled) {
+			throw new Error("Legroom SDK is not enabled");
+		}
+		return this.legroomWorker.workerHistory(limit, offset);
+	}
+
+	/** Query current calibration state. */
+	async getCalibrationStatus(): Promise<CalibrationStatus> {
+		if (!this.legroomEnabled) {
+			throw new Error("Legroom SDK is not enabled");
+		}
+		return this.legroomWorker.calibrationStatus();
+	}
+
+	/** Record quality feedback for phase calibration. */
+	async calibrationRecord(
+		phaseReports: Record<string, unknown>[],
+		quality: number,
+	): Promise<CalibrationStatus> {
+		if (!this.legroomEnabled) {
+			throw new Error("Legroom SDK is not enabled");
+		}
+		return this.legroomWorker.calibrationRecord(phaseReports, quality);
 	}
 
 	getMemoryStore(): ReturnType<
