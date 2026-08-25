@@ -4,3 +4,9 @@
 [submodule "ecosystem/memoriam"]
 	path = ecosystem/memoriam
 	url = https://github.com/lseman/memoriam.git
+[submodule "ecosystem/graphician"]
+	path = ecosystem/graphician
+	url = https://github.com/lseman/graphician.git
+[submodule "ecosystem/legroom"]
+	path = ecosystem/legroom
+	url = https://github.com/lseman/legroom.git
