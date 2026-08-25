@@ -6,7 +6,6 @@ export {
 	type PermissionRules,
 } from "@logician/log-core/permissions";
 export { ToolRegistry } from "@logician/log-core/runtime";
-export { ariadne } from "./ariadne.ts";
 export { createAutoresearchTools } from "./autoresearch.ts";
 export { type BashDetails, bash } from "./bash.ts";
 export {
@@ -24,6 +23,7 @@ export {
 export { file_diff } from "./file-diff.ts";
 export { find } from "./find.ts";
 export { git } from "./git.ts";
+export { graphician } from "./graphician.ts";
 export { type ListFilesDetails, list_files } from "./list-files.ts";
 export { read_file } from "./read-file.ts";
 export {

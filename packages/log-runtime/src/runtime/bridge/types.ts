@@ -34,7 +34,7 @@ export type RuntimeSettingsPatch = Partial<
 		| "autoRetryEnabled"
 		| "proactiveCompactionEnabled"
 		| "rtkProxyEnabled"
-		| "ariadneEnabled"
+		| "graphicianEnabled"
 		| "fffgrepEnabled"
 	>
 > & {
@@ -130,7 +130,7 @@ export interface AgentBridgeOptions {
 	continuationEnabled?: boolean;
 	postEditDiagnostics?: boolean;
 	rtkProxyEnabled?: boolean;
-	ariadneEnabled?: boolean;
+	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	autoRetryEnabled?: boolean;
 	maxRetries?: number;

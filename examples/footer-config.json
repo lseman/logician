@@ -21,7 +21,7 @@
     "cache-read": { "enabled": true, "row": 0, "position": 1, "align": "right", "fill": "none" },
     "mcp": { "enabled": true, "row": 0, "position": 2, "align": "right", "fill": "none" },
     "rtk": { "enabled": true, "row": 0, "position": 3, "align": "right", "fill": "none" },
-    "ariadne": { "enabled": true, "row": 0, "position": 4, "align": "right", "fill": "none" },
+    "graphician": { "enabled": true, "row": 0, "position": 4, "align": "right", "fill": "none" },
     "fffgrep": { "enabled": true, "row": 0, "position": 5, "align": "right", "fill": "none" },
     "memory": { "enabled": true, "row": 0, "position": 6, "align": "right", "fill": "none" }
   },

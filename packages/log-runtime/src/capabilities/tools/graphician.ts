@@ -1,6 +1,6 @@
-// ── ariadne tool ──────────────────────────────────────────────────────────────
-// Interface to the Ariadne code graph for semantic code navigation.
-// Uses `ariadne agent tool <operation> --params '{...}'` for graph queries.
+// ── graphician tool ──────────────────────────────────────────────────────────────
+// Interface to the Graphician code graph for semantic code navigation.
+// Uses `graphician tool <operation> --params '{...}'` for graph queries.
 // Falls back to "not available" when the CLI is missing or the graph is empty.
 
 import { spawn } from "node:child_process";
@@ -12,20 +12,20 @@ import type { Tool, ToolResult } from "@logician/log-core";
 import { formatSize, truncateHead } from "./support/utils/truncate.ts";
 
 const DEFAULT_LIMIT = 50;
-const DEFAULT_DB = "ariadne.db";
+const DEFAULT_DB = "graphician.db";
 const INDEX_REFRESH_INTERVAL_MS = 5_000;
 const MAX_PROCESS_OUTPUT = 2 * 1024 * 1024;
-const bundledAriadneRoot = path.resolve(
+const bundledGraphicianRoot = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
-	"../../../../../ariadne",
+	"../../../../../ecosystem/graphician",
 );
 const indexRefreshes = new Map<string, Promise<string | null>>();
 const indexRefreshedAt = new Map<string, number>();
 const cliDialects = new Map<string, Promise<"direct" | "agent">>();
 
-function resolveAriadneDb(cwd: string): string {
+function resolveGraphicianDb(cwd: string): string {
 	// Check for --db flag in environment or common locations
-	const envDb = process.env.ARIADNE_DB;
+	const envDb = process.env.GRAPHICIAN_DB;
 	if (envDb) return envDb;
 	const localDb = path.join(cwd, DEFAULT_DB);
 	return localDb;
@@ -40,12 +40,11 @@ async function executable(pathname: string): Promise<boolean> {
 	}
 }
 
-/** Resolve the submodule build first, then an explicitly configured/system CLI. */
-export async function resolveAriadneBinary(): Promise<string | null> {
+/** Resolve an explicitly configured CLI first, then fall back to PATH. */
+export async function resolveGraphicianBinary(): Promise<string | null> {
 	const candidates = [
-		process.env.ARIADNE_BIN,
-		path.join(bundledAriadneRoot, "target/release/ariadne"),
-		path.join(bundledAriadneRoot, "target/debug/ariadne"),
+		process.env.GRAPHICIAN_BIN,
+		path.join(bundledGraphicianRoot, ".venv/bin/graphician"),
 	].filter((candidate): candidate is string => Boolean(candidate));
 	for (const candidate of candidates) {
 		if (await executable(candidate)) return candidate;
@@ -53,7 +52,7 @@ export async function resolveAriadneBinary(): Promise<string | null> {
 	const { execFile } = await import("node:child_process");
 	const { promisify } = await import("node:util");
 	try {
-		const { stdout } = await promisify(execFile)("which", ["ariadne"], {
+		const { stdout } = await promisify(execFile)("which", ["graphician"], {
 			timeout: 3_000,
 		});
 		return stdout.trim().split("\n")[0]?.trim() || null;
@@ -62,7 +61,7 @@ export async function resolveAriadneBinary(): Promise<string | null> {
 	}
 }
 
-function runAriadne(
+function runGraphician(
 	binary: string,
 	args: string[],
 	options: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
@@ -111,7 +110,7 @@ async function detectCliDialect(
 ): Promise<"direct" | "agent"> {
 	let pending = cliDialects.get(binary);
 	if (!pending) {
-		pending = runAriadne(binary, ["tool", "--help"], {
+		pending = runGraphician(binary, ["tool", "--help"], {
 			cwd,
 			timeoutMs: 3_000,
 		}).then(result => (result.code === 0 ? "direct" : "agent"));
@@ -139,14 +138,14 @@ async function refreshIndex(
 		const args = dbExists
 			? ["--db", dbPath, "build", "update", "."]
 			: ["--db", dbPath, "build", "."];
-		const result = await runAriadne(binary, args, {
+		const result = await runGraphician(binary, args, {
 			cwd,
 			signal,
 			timeoutMs: dbExists ? 60_000 : 5 * 60_000,
 		});
-		if (result.aborted) return "Ariadne index refresh was aborted.";
+		if (result.aborted) return "Graphician index refresh was aborted.";
 		if (result.code !== 0) {
-			return `Ariadne index refresh failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`}`;
+			return `Graphician index refresh failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`}`;
 		}
 		indexRefreshedAt.set(dbPath, Date.now());
 		return null;
@@ -155,9 +154,9 @@ async function refreshIndex(
 	return pending;
 }
 
-/** Parse ariadne agent tool output, handling JSON wrapping */
+/** Parse graphician tool output, handling JSON wrapping */
 function parseOutput(raw: string): string {
-	// Ariadne may return JSON with a "result" field or plain text
+	// Graphician may return JSON with a "result" field or plain text
 	const trimmed = raw.trim();
 	if (!trimmed) return "(empty response)";
 
@@ -179,12 +178,12 @@ function parseOutput(raw: string): string {
 	}
 }
 
-export const ariadne: Tool = {
+export const graphician: Tool = {
 	readOnly: true,
-	name: "ariadne",
-	label: "Ariadne Code Graph",
+	name: "graphician",
+	label: "Graphician Code Graph",
 	description:
-		"Query the Ariadne code graph for semantic code analysis. " +
+		"Query the Graphician code graph for semantic code analysis. " +
 		"Use for: finding symbol context, impact analysis, dependency tracing, " +
 		"change risk assessment, caller/callee relationships, and structural analysis. " +
 		"Returns structured, bounded context — ideal when you need to understand " +
@@ -196,11 +195,11 @@ export const ariadne: Tool = {
 		"bridge_nodes, hub_nodes, god_nodes, gaps, knowledge_gaps, dead_code, " +
 		"flows, large_functions, counterfactual, motifs, graph_diff, health.",
 	promptSnippet:
-		"Query the Ariadne code graph for semantic analysis: minimal_context, search, impact, callers_of, callees_of, paths, traverse, detect_changes, risk, architecture, etc.",
+		"Query the Graphician code graph for semantic analysis: minimal_context, search, impact, callers_of, callees_of, paths, traverse, detect_changes, risk, architecture, etc.",
 	promptGuidelines: [
-		"Use Ariadne early to orient in unfamiliar code; its workspace index refreshes automatically",
-		"Use ariadne for semantic code analysis (symbol context, impact, dependencies)",
-		"Prefer ariadne over find/grep when you need relationship analysis",
+		"Use Graphician early to orient in unfamiliar code; its workspace index refreshes automatically",
+		"Use graphician for semantic code analysis (symbol context, impact, dependencies)",
+		"Prefer graphician over find/grep when you need relationship analysis",
 		"Use minimal_context to resolve a symbol and get bounded neighborhood",
 		"Use impact to see what breaks if a symbol changes",
 		"Before editing shared symbols, call impact; after a change set, call detect_changes or risk",
@@ -209,7 +208,7 @@ export const ariadne: Tool = {
 		"Use search for hybrid FTS5 + topology search",
 		"Use traverse for bounded graph traversal with token budget",
 		"Use architecture for community/coupling overview",
-		"Fall back to find/grep/read_file when ariadne has no data for the target",
+		"Fall back to find/grep/read_file when graphician has no data for the target",
 	],
 	parameters: {
 		type: "object",
@@ -287,7 +286,7 @@ export const ariadne: Tool = {
 					const extra = JSON.parse(args.params);
 					Object.assign(params, extra);
 				} catch {
-					// Keep as string, ariadne CLI will parse it
+					// Keep as string, graphician CLI will parse it
 				}
 			} else if (
 				typeof args.params === "object" &&
@@ -302,19 +301,19 @@ export const ariadne: Tool = {
 		const operation = String(args.operation);
 		if (!operation) return "Error: operation is required.";
 
-		const ariadnePath = await resolveAriadneBinary();
-		if (!ariadnePath) {
+		const graphicianPath = await resolveGraphicianBinary();
+		if (!graphicianPath) {
 			return [
-				"Ariadne CLI is unavailable.",
+				"Graphician CLI is unavailable.",
 				"",
-				"Build the bundled submodule:",
-				`  cargo build --release --manifest-path ${path.join(bundledAriadneRoot, "Cargo.toml")}`,
+				"Install it:",
+				"  pip install graphician",
 				"",
-				"You can also set ARIADNE_BIN or install ariadne on PATH.",
+				"You can also set GRAPHICIAN_BIN or install graphician on PATH.",
 			].join("\n");
 		}
 
-		const dbPath = resolveAriadneDb(ctx.cwd || ".");
+		const dbPath = resolveGraphicianDb(ctx.cwd || ".");
 		const target = args.target ? String(args.target) : "";
 
 		// Build params object for the CLI
@@ -349,14 +348,14 @@ export const ariadne: Tool = {
 		// Build or incrementally refresh the workspace graph before querying. Calls
 		// within a short burst share one refresh and queries remain bounded.
 		const refreshWarning = await refreshIndex(
-			ariadnePath,
+			graphicianPath,
 			dbPath,
 			ctx.cwd || ".",
 			ctx.signal,
 		);
 		if (ctx.signal?.aborted) return "Error: Command aborted";
 
-		const dialect = await detectCliDialect(ariadnePath, ctx.cwd || ".");
+		const dialect = await detectCliDialect(graphicianPath, ctx.cwd || ".");
 		const paramsJson = JSON.stringify(cliParams);
 		const cliArgs = [
 			"--db",
@@ -367,7 +366,7 @@ export const ariadne: Tool = {
 			"--params",
 			paramsJson,
 		];
-		const query = await runAriadne(ariadnePath, cliArgs, {
+		const query = await runGraphician(graphicianPath, cliArgs, {
 			cwd: ctx.cwd || ".",
 			signal: ctx.signal,
 			timeoutMs: 30_000,
@@ -394,7 +393,7 @@ export const ariadne: Tool = {
 				operation,
 				target,
 				db: dbPath,
-				binary: ariadnePath,
+				binary: graphicianPath,
 				dialect,
 				indexFresh: !refreshWarning,
 			},

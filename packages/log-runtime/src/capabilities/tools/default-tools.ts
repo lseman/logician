@@ -20,13 +20,13 @@ export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
 export interface DefaultToolsOptions {
 	// SearXNG config; defaults to DEFAULT_SEARXNG_URL when omitted.
 	webSearch?: WebSearchConfig;
-	ariadneEnabled?: boolean;
+	graphicianEnabled?: boolean;
 }
 
 export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 	const webSearch = opts.webSearch ?? { baseUrl: DEFAULT_SEARXNG_URL };
 	const enabled: Record<string, boolean | undefined> = {
-		ariadne: opts.ariadneEnabled,
+		graphician: opts.graphicianEnabled,
 	};
 	const optionalTools = OPTIONAL_CAPABILITIES.filter(
 		cap => (enabled[cap.id] ?? cap.enabledByDefault) !== false,

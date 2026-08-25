@@ -459,7 +459,7 @@ export class LogicianTUI {
 			workflowMode: this.workflowMode,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "minimal",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
-			ariadneEnabled: runtimeConfig.bridge.ariadneEnabled ?? true,
+			graphicianEnabled: runtimeConfig.bridge.graphicianEnabled ?? true,
 			fffgrepEnabled: runtimeConfig.bridge.fffgrepEnabled ?? true,
 			memoryEnabled: runtimeConfig.bridge.memory?.enabled ?? false,
 			// MCP discovery starts in the background the moment the bridge is

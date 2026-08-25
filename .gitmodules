@@ -1,3 +1,6 @@
 [submodule "ariadne"]
 	path = ariadne
 	url = https://github.com/lseman/ariadne
+[submodule "ecosystem/memoriam"]
+	path = ecosystem/memoriam
+	url = https://github.com/lseman/memoriam.git

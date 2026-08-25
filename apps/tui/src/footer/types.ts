@@ -73,7 +73,7 @@ export type BuiltinWidgetId =
 	| "mcp" // MCP server count
 	// Memory
 	| "rtk" // RTK proxy status
-	| "ariadne" // Ariadne code-graph tool status
+	| "graphician" // Graphician code-graph tool status
 	| "fffgrep" // fff indexed grep status
 	| "memory" // memory subsystem status
 	// Misc / config
@@ -305,7 +305,7 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 			fill: "none",
 		},
 		rtk: { enabled: true, row: 0, position: 7, align: "right", fill: "none" },
-		ariadne: {
+		graphician: {
 			enabled: true,
 			row: 0,
 			position: 8,

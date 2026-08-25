@@ -26,8 +26,8 @@ import {
 	type Skill,
 } from "../capabilities/skills/loader.ts";
 import { createReadSkillTool } from "../capabilities/skills/read-skill-tool.ts";
-import { ariadne } from "../capabilities/tools/ariadne.ts";
 import { createDefaultTools } from "../capabilities/tools/default-tools.ts";
+import { graphician } from "../capabilities/tools/graphician.ts";
 import { isFffGrepTool } from "../capabilities/tools/registry.ts";
 import {
 	getDefaultSandboxProfile,
@@ -46,7 +46,7 @@ export interface ToolRouterDeps {
 	tools?: Tool[];
 	extraTools?: Tool[];
 	webSearch?: Partial<{ baseUrl: string; maxResults: number }>;
-	ariadneEnabled?: boolean;
+	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	emit: (event: RuntimeEvent) => void;
 	/** Add a tool to the live default set (propagates into the harness configuration). */
@@ -156,7 +156,10 @@ export class ToolRouter {
 		};
 		this.defaultTools = deps.tools?.length
 			? deps.tools
-			: createDefaultTools({ webSearch, ariadneEnabled: deps.ariadneEnabled });
+			: createDefaultTools({
+					webSearch,
+					graphicianEnabled: deps.graphicianEnabled,
+				});
 		if (deps.extraTools?.length) {
 			this.defaultTools = [
 				...this.defaultTools,
@@ -186,14 +189,14 @@ export class ToolRouter {
 		return this.defaultTools;
 	}
 
-	setAriadneEnabled(enabled: boolean): void {
-		const hasAriadne = this.defaultTools.some(
-			tool => tool.name === ariadne.name,
+	setGraphicianEnabled(enabled: boolean): void {
+		const hasGraphician = this.defaultTools.some(
+			tool => tool.name === graphician.name,
 		);
-		if (enabled === hasAriadne) return;
+		if (enabled === hasGraphician) return;
 		this.defaultTools = enabled
-			? [ariadne, ...this.defaultTools]
-			: this.defaultTools.filter(tool => tool.name !== ariadne.name);
+			? [graphician, ...this.defaultTools]
+			: this.defaultTools.filter(tool => tool.name !== graphician.name);
 		this.onContextChanged();
 	}
 

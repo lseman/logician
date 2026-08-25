@@ -15,7 +15,6 @@ export {
 } from "./adapters/claude-code/plugin-runtime.ts";
 export { ask_user } from "./capabilities/ask-user/index.ts";
 export { createReadSkillTool } from "./capabilities/skills/read-skill-tool.ts";
-export { ariadne } from "./capabilities/tools/ariadne.ts";
 export { createAutoresearchTools } from "./capabilities/tools/autoresearch.ts";
 export { type BashDetails, bash } from "./capabilities/tools/bash.ts";
 export {
@@ -33,6 +32,7 @@ export {
 export { file_diff } from "./capabilities/tools/file-diff.ts";
 export { find } from "./capabilities/tools/find.ts";
 export { git } from "./capabilities/tools/git.ts";
+export { graphician } from "./capabilities/tools/graphician.ts";
 export {
 	type ListFilesDetails,
 	list_files,

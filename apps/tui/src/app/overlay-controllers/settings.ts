@@ -225,21 +225,21 @@ export async function openSettingsSelector(
 				],
 			},
 			{
-				name: "Ariadne",
-				currentValue: data.ariadneEnabled ? "on" : "off",
+				name: "Graphician",
+				currentValue: data.graphicianEnabled ? "on" : "off",
 				description:
-					"Expose the Ariadne code-graph tool for semantic repository analysis",
+					"Expose the Graphician code-graph tool for semantic repository analysis",
 				options: [
 					{
 						label: "on",
 						value: "true",
-						current: data.ariadneEnabled,
+						current: data.graphicianEnabled,
 						toggleOn: true,
 					},
 					{
 						label: "off",
 						value: "false",
-						current: !data.ariadneEnabled,
+						current: !data.graphicianEnabled,
 						toggleOn: false,
 					},
 				],
@@ -446,12 +446,12 @@ export function handleSettingsSelectorAction(
 			ctx.notify(`RTK proxy: ${on ? "on" : "off"}`, "success");
 			break;
 		}
-		case "ariadne": {
+		case "graphician": {
 			const on = value === "true";
-			ctx.bridge.updateSettings({ ariadneEnabled: on });
-			saveConfigField("ariadneEnabled", on);
-			ctx.statusPanel.update({ ariadneEnabled: on });
-			ctx.notify(`Ariadne: ${on ? "on" : "off"}`, "success");
+			ctx.bridge.updateSettings({ graphicianEnabled: on });
+			saveConfigField("graphicianEnabled", on);
+			ctx.statusPanel.update({ graphicianEnabled: on });
+			ctx.notify(`Graphician: ${on ? "on" : "off"}`, "success");
 			break;
 		}
 		case "fffgrep": {

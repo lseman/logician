@@ -7,13 +7,13 @@
 	"workspaces": [
 		"packages/*",
 		"packages/blocks/*",
+		"ecosystem/memoriam",
 		"apps/*"
 	],
 	"scripts": {
 		"dev": "tsx apps/tui/src/index.ts",
 		"start": "tsx apps/tui/src/index.ts",
-		"ariadne:build": "cargo build --release --manifest-path ariadne/Cargo.toml --package ariadne-graph",
-		"ariadne:check": "cargo test --manifest-path ariadne/Cargo.toml --workspace",
+		"graphician:check": "cd ecosystem/graphician && python -m pytest",
 		"lint": "biome check packages/ packages/blocks apps/",
 		"lint:fix": "biome check --fix packages/ packages/blocks apps/",
 		"format": "biome format --write packages/ packages/blocks apps/",

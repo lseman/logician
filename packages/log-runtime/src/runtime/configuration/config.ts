@@ -64,7 +64,7 @@ const KNOWN_KEYS = new Set([
 	"allowedPaths",
 	"allowAllPaths",
 	"rtkProxyEnabled",
-	"ariadneEnabled",
+	"graphicianEnabled",
 	"fffgrepEnabled",
 	"maxParallelAgents",
 	"cwd",
@@ -331,7 +331,7 @@ export function validateConfig(
 		postEditDiagnostics: true,
 		autoRetryEnabled: true,
 		rtkProxyEnabled: undefined,
-		ariadneEnabled: true,
+		graphicianEnabled: true,
 		fffgrepEnabled: true,
 	});
 
@@ -784,8 +784,8 @@ export interface LogicianTuiConfig {
 	autoRetryEnabled?: boolean;
 	// RTK CLI proxy — compresses bash/rg/grep output 60–90%.
 	rtkProxyEnabled?: boolean;
-	/** Expose the Ariadne code-graph tool (ON by default). */
-	ariadneEnabled?: boolean;
+	/** Expose the Graphician code-graph tool (ON by default). */
+	graphicianEnabled?: boolean;
 	/** Prefer the fff MCP indexed grep tool when available (ON by default). */
 	fffgrepEnabled?: boolean;
 	maxRetries?: number;

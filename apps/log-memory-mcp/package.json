@@ -13,7 +13,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@logician/memoriam": "0.1.0"
+		"@logician/memoriam": "link:@logician/memoriam"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.3.14",

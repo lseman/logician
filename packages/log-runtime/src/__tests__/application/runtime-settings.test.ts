@@ -31,11 +31,11 @@ describe("SettingsGateway", () => {
 		settings.update({
 			maxIterations: 12,
 			guardMode: "on",
-			ariadneEnabled: false,
+			graphicianEnabled: false,
 		});
 		expect(config.maxIterations).toBe(12);
 		expect(config.guardsEnabled).toBe(true);
-		expect(toggles).toEqual([["ariadneEnabled", false]]);
+		expect(toggles).toEqual([["graphicianEnabled", false]]);
 		expect(settings.read().permissionMode).toBe("ask");
 	});
 });

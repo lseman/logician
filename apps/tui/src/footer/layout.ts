@@ -489,7 +489,7 @@ const DEFAULT_INFO: WidgetFactoryStatus = {
 	promptTokens: undefined,
 	completionTokens: undefined,
 	rtkProxyEnabled: false,
-	ariadneEnabled: true,
+	graphicianEnabled: true,
 	fffgrepEnabled: true,
 };
 

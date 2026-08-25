@@ -12,7 +12,7 @@ export type RuntimeToggleKey =
 	| "proactiveCompactionEnabled"
 	| "postEditDiagnostics"
 	| "rtkProxyEnabled"
-	| "ariadneEnabled"
+	| "graphicianEnabled"
 	| "fffgrepEnabled"
 	| "memoryEnabled";
 
@@ -42,7 +42,7 @@ export interface RuntimeSettingsView {
 	proactiveCompactionEnabled: boolean;
 	postEditDiagnostics: boolean;
 	rtkProxyEnabled: boolean;
-	ariadneEnabled: boolean;
+	graphicianEnabled: boolean;
 	fffgrepEnabled: boolean;
 	memoryEnabled: boolean;
 	duplicateGuardEnabled: boolean;
@@ -63,7 +63,7 @@ const TOGGLE_KEYS: readonly RuntimeToggleKey[] = [
 	"proactiveCompactionEnabled",
 	"postEditDiagnostics",
 	"rtkProxyEnabled",
-	"ariadneEnabled",
+	"graphicianEnabled",
 	"fffgrepEnabled",
 	"memoryEnabled",
 ];
@@ -121,7 +121,7 @@ export class SettingsGateway {
 			proactiveCompactionEnabled: config.proactiveCompactionEnabled ?? true,
 			postEditDiagnostics: this.host.postEditDiagnostics(),
 			rtkProxyEnabled: config.rtkProxyEnabled ?? false,
-			ariadneEnabled: config.ariadneEnabled ?? true,
+			graphicianEnabled: config.graphicianEnabled ?? true,
 			fffgrepEnabled: config.fffgrepEnabled ?? true,
 			memoryEnabled: this.host.memoryEnabled(),
 			duplicateGuardEnabled: config.duplicateGuardEnabled ?? true,

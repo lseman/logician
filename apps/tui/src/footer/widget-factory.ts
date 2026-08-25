@@ -50,7 +50,7 @@ export interface WidgetFactoryStatus {
 	promptTokens?: number;
 	completionTokens?: number;
 	rtkProxyEnabled?: boolean;
-	ariadneEnabled?: boolean;
+	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	memoryEnabled?: boolean;
 	runPhase?: string;
@@ -422,8 +422,8 @@ function toggleWidget(
 	);
 }
 
-function ariadneWidget(status: WidgetFactoryStatus): WidgetData {
-	return toggleWidget("ariadne", "ari", status.ariadneEnabled ?? true);
+function graphicianWidget(status: WidgetFactoryStatus): WidgetData {
+	return toggleWidget("graphician", "gph", status.graphicianEnabled ?? true);
 }
 
 function fffgrepWidget(status: WidgetFactoryStatus): WidgetData {
@@ -511,7 +511,7 @@ const PROVIDERS: Record<
 	permission: permissionWidget,
 	mcp: mcpWidget,
 	rtk: rtkWidget,
-	ariadne: ariadneWidget,
+	graphician: graphicianWidget,
 	fffgrep: fffgrepWidget,
 	memory: memoryWidget,
 	goal: goalWidget,

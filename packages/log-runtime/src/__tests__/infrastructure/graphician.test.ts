@@ -1,29 +1,29 @@
-// ── Ariadne tool tests ────────────────────────────────────────────────────────
+// ── Graphician tool tests ────────────────────────────────────────────────────────
 
 import { describe, expect, it } from "bun:test";
-import { ariadne } from "../../capabilities/tools/ariadne.ts";
+import { graphician } from "../../capabilities/tools/graphician.ts";
 
-describe("ariadne tool", () => {
+describe("graphician tool", () => {
 	it("should have correct metadata", () => {
-		expect(ariadne.name).toBe("ariadne");
-		expect(ariadne.label).toBe("Ariadne Code Graph");
-		expect(ariadne.readOnly).toBe(true);
-		expect(ariadne.description).toContain("Ariadne code graph");
+		expect(graphician.name).toBe("graphician");
+		expect(graphician.label).toBe("Graphician Code Graph");
+		expect(graphician.readOnly).toBe(true);
+		expect(graphician.description).toContain("Graphician code graph");
 	});
 
 	it("should have required parameters", () => {
-		const props = ariadne.parameters as Record<string, unknown>;
+		const props = graphician.parameters as Record<string, unknown>;
 		expect(props.required).toContain("operation");
 	});
 
 	it("should parse string arguments as operation", () => {
-		const result = ariadne.prepareArguments?.("minimal_context") ?? {};
+		const result = graphician.prepareArguments?.("minimal_context") ?? {};
 		expect(result.operation).toBe("minimal_context");
 	});
 
 	it("should parse object arguments with operation", () => {
 		const result =
-			ariadne.prepareArguments?.({
+			graphician.prepareArguments?.({
 				operation: "search",
 				target: "login",
 			}) ?? {};
@@ -33,7 +33,7 @@ describe("ariadne tool", () => {
 
 	it("should handle argument aliases", () => {
 		const result =
-			ariadne.prepareArguments?.({
+			graphician.prepareArguments?.({
 				op: "impact",
 				symbol: "Graph::add_node",
 			}) ?? {};
@@ -43,7 +43,7 @@ describe("ariadne tool", () => {
 
 	it("should merge params from JSON string", () => {
 		const result =
-			ariadne.prepareArguments?.({
+			graphician.prepareArguments?.({
 				operation: "minimal_context",
 				params: '{"mode":"review"}',
 			}) ?? {};
@@ -53,7 +53,7 @@ describe("ariadne tool", () => {
 
 	it("should merge params from object", () => {
 		const result =
-			ariadne.prepareArguments?.({
+			graphician.prepareArguments?.({
 				operation: "search",
 				params: { limit: 10, offset: 5 },
 			}) ?? {};
@@ -64,7 +64,7 @@ describe("ariadne tool", () => {
 
 	it("should handle max_hops alias", () => {
 		const result =
-			ariadne.prepareArguments?.({
+			graphician.prepareArguments?.({
 				operation: "impact",
 				maxHops: 4,
 			}) ?? {};
@@ -73,7 +73,7 @@ describe("ariadne tool", () => {
 
 	it("should handle limit alias", () => {
 		const result =
-			ariadne.prepareArguments?.({
+			graphician.prepareArguments?.({
 				operation: "search",
 				response_limit: 25,
 			}) ?? {};

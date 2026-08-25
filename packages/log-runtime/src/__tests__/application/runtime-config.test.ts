@@ -22,7 +22,7 @@ function configuredWorkspace(): string {
 			toolExecution: "sequential",
 			hooks: true,
 			rtkProxyEnabled: true,
-			ariadneEnabled: false,
+			graphicianEnabled: false,
 			fffgrepEnabled: false,
 			autoRetryEnabled: false,
 			maxRetries: 2,
@@ -69,7 +69,7 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.toolExecution, "sequential");
 	assert.equal(resolved.bridge.permissions?.mode, "ask");
 	assert.equal(resolved.bridge.rtkProxyEnabled, true);
-	assert.equal(resolved.bridge.ariadneEnabled, false);
+	assert.equal(resolved.bridge.graphicianEnabled, false);
 	assert.equal(resolved.bridge.fffgrepEnabled, false);
 	assert.equal(resolved.bridge.autoRetryEnabled, false);
 	assert.equal(resolved.bridge.maxRetries, 2);

@@ -337,7 +337,7 @@ export class AgentRuntime {
 			tools: opts.tools,
 			extraTools,
 			webSearch,
-			ariadneEnabled: opts.ariadneEnabled,
+			graphicianEnabled: opts.graphicianEnabled,
 			fffgrepEnabled: opts.fffgrepEnabled,
 			autoStartMcp: false,
 			emit: event => this.emit(event),
@@ -402,7 +402,7 @@ export class AgentRuntime {
 			proactiveCompactionEnabled: opts.proactiveCompactionEnabled,
 			continuationEnabled: opts.continuationEnabled,
 			rtkProxyEnabled: opts.rtkProxyEnabled,
-			ariadneEnabled: opts.ariadneEnabled ?? true,
+			graphicianEnabled: opts.graphicianEnabled ?? true,
 			fffgrepEnabled: opts.fffgrepEnabled ?? true,
 			autoRetryEnabled: opts.autoRetryEnabled,
 			maxRetries: opts.maxRetries,
@@ -804,14 +804,14 @@ export class AgentRuntime {
 		baseUrl: string;
 		model: string;
 		rtkProxyEnabled?: boolean;
-		ariadneEnabled?: boolean;
+		graphicianEnabled?: boolean;
 		fffgrepEnabled?: boolean;
 	} {
 		return {
 			baseUrl: this.config.baseUrl,
 			model: this.config.model,
 			rtkProxyEnabled: this.config.rtkProxyEnabled,
-			ariadneEnabled: this.config.ariadneEnabled,
+			graphicianEnabled: this.config.graphicianEnabled,
 			fffgrepEnabled: this.config.fffgrepEnabled,
 		};
 	}
@@ -1181,9 +1181,9 @@ export class AgentRuntime {
 			this.postEditDiagnosticsEnabled = enabled;
 			return;
 		}
-		if (key === "ariadneEnabled") {
-			this.config.ariadneEnabled = enabled;
-			this.toolRouter.setAriadneEnabled(enabled);
+		if (key === "graphicianEnabled") {
+			this.config.graphicianEnabled = enabled;
+			this.toolRouter.setGraphicianEnabled(enabled);
 			this.config.tools = this._defaultTools;
 			this.session?.configure({ tools: this.config.tools });
 			return;
@@ -1229,7 +1229,7 @@ export class AgentRuntime {
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
 		rtkProxyEnabled: boolean;
-		ariadneEnabled: boolean;
+		graphicianEnabled: boolean;
 		fffgrepEnabled: boolean;
 		memoryEnabled: boolean;
 		duplicateGuardEnabled: boolean;

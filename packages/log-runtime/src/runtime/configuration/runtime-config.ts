@@ -151,7 +151,7 @@ export function resolveRuntimeConfig(
 			continuationEnabled: configBool(config.continuationEnabled, true),
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),
 			rtkProxyEnabled: configBool(config.rtkProxyEnabled),
-			ariadneEnabled: configBool(config.ariadneEnabled, true),
+			graphicianEnabled: configBool(config.graphicianEnabled, true),
 			fffgrepEnabled: configBool(config.fffgrepEnabled, true),
 			autoRetryEnabled: configBool(config.autoRetryEnabled, true),
 			maxRetries: configNumber(config.maxRetries),

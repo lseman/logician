@@ -155,7 +155,7 @@ void test("validateConfig accepts the act/plan workflow mode", () => {
 		continuationEnabled: true,
 		postEditDiagnostics: true,
 		autoRetryEnabled: true,
-		ariadneEnabled: true,
+		graphicianEnabled: true,
 		fffgrepEnabled: true,
 	});
 	assert.deepEqual(warnings, []);
@@ -226,7 +226,7 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 	const w: string[] = [];
 	const cfg = validateConfig({}, w);
 	assert.deepEqual(cfg, {
-		ariadneEnabled: true,
+		graphicianEnabled: true,
 		autoRetryEnabled: true,
 		continuationEnabled: true,
 		duplicateGuardEnabled: true,

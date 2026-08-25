@@ -326,7 +326,7 @@ export interface AgentConfig {
 	progressStopEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
 	proactiveCompactionFraction?: number;
-	ariadneEnabled?: boolean;
+	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	continuationEnabled?: boolean;
 	toolExecution?: "sequential" | "parallel";
