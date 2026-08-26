@@ -1,6 +1,5 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
-import { randomUUID } from "node:crypto";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -14,32 +13,24 @@ import type { PermissionMode } from "@logician/log-core/permissions";
 import type { AbortResult, SessionStore } from "@logician/log-core/runtime";
 import {
 	estimateChatPayloadTokens,
-	estimateTokens,
 	type ToolRegistry,
 } from "@logician/log-core/runtime";
-import { AgentSession } from "@logician/log-core/session";
-import {
-	claudeToolMatcherName,
-	createClaudeCodeHookLayer,
-} from "../../adapters/claude-code/hook-layer.ts";
-import type { PluginCommandResult } from "../../adapters/claude-code/plugin-runtime.ts";
+import type { AgentSession } from "@logician/log-core/session";
 import {
 	configurePluginRuntimeEnv,
-	runHookEvent,
-	runPluginBackend,
-	runSessionStartHooks,
-	splitPluginArgs,
+	type PluginCommandResult,
 } from "../../adapters/claude-code/plugin-runtime.ts";
 import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
 import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import { LegroomGateway } from "../../capabilities/legroom/legroom-gateway.ts";
 import type {
 	CalibrationStatus,
 	CompressResult,
+	LegroomWorker,
 	StoreStats,
 	WorkerHistory,
 	WorkerStats,
 } from "../../capabilities/legroom/worker.ts";
-import { LegroomWorker } from "../../capabilities/legroom/worker.ts";
 import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
 import type {
@@ -51,44 +42,44 @@ import {
 	createMemoryGetTool,
 	createMemorySearchTool,
 } from "../../capabilities/memory/memory-tools.ts";
-import {
-	findPromptByName,
-	type Prompt,
-} from "../../capabilities/prompts/loader.ts";
+import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
-import {
-	formatActivatedSkills,
-	formatSkillActivationNotice,
-	type selectSkillsForPrompt,
-} from "../../capabilities/skills/activation.ts";
-import {
-	findSkillByName,
-	formatSkillInvocation,
-	type Skill,
-} from "../../capabilities/skills/loader.ts";
-import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
+import type { Skill } from "../../capabilities/skills/loader.ts";
+import { onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type { SandboxProfile } from "../../capabilities/tools/sandbox.ts";
 import { killAllTrackedChildren } from "../../capabilities/tools/support/utils/shell.ts";
+import {
+	contextSources,
+	inspectContext,
+} from "../context/context-inspector.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
-import { mapAgentEvent } from "../events/event-mapping.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
 import { ModelSelector } from "../model-selector.ts";
 import { buildToolRegistry } from "../runtime-context.ts";
-import { type RuntimeToggleKey, SettingsGateway } from "../settings-gateway.ts";
 import { ToolRouter } from "../tool-router.ts";
-import { AgentCoordinator } from "./agent-coordinator.ts";
+import { AgentCoordinator } from "./application/agent-coordinator.ts";
+import { CommandDispatcher } from "./application/command-dispatcher.ts";
+import { ConversationIdentity } from "./application/conversation-identity.ts";
+import { ConversationSession } from "./application/conversation-session.ts";
+import { PluginLifecycle } from "./application/plugin-lifecycle.ts";
+import { executeProcessCommand } from "./application/process-command.ts";
+import { RuntimeActivity } from "./application/runtime-activity.ts";
+import { RuntimeConfiguration } from "./application/runtime-configuration.ts";
+import { RuntimeLifecycle } from "./application/runtime-lifecycle.ts";
+import {
+	projectInitializationStatus,
+	projectRuntimeStatus,
+	runtimeToolNames,
+} from "./application/runtime-status.ts";
+import { TurnOrchestrator } from "./application/turn-orchestrator.ts";
 import { RuntimeContext } from "./capability-context.ts";
 import {
 	buildPluginRuntimeEnv,
-	createHookTranscriptPath,
 	envNumber,
 	eventLogPathFor,
 	resolveWebSearchConfig,
 } from "./environment.ts";
-import { formatPluginResult } from "./plugin-result-formatter.ts";
-import { runQueueCommand } from "./queue-command.ts";
-import { RuntimeRunCoordinator } from "./run-coordinator.ts";
-import { RuntimeStartupCoordinator } from "./startup-coordinator.ts";
+import { SessionRunner } from "./session-runner.ts";
 
 export { findJbPrompt } from "./project-prompt.ts";
 
@@ -106,11 +97,15 @@ import type { AgentBridgeOptions, RuntimeSettingsPatch } from "./types.ts";
 export class AgentRuntime {
 	private config: AgentConfig;
 	private backend: OpenAIBackend;
-	private session: AgentSession | null = null;
-	private durableSession: SessionStore | undefined;
+	private readonly sessions: ConversationSession;
+	private readonly commands: CommandDispatcher;
+	private get session(): AgentSession | null {
+		return this.sessions?.current ?? null;
+	}
 	readonly events: RuntimeEventBus;
 	readonly models: ModelSelector;
-	private readonly runs = new RuntimeRunCoordinator();
+	private readonly turns: TurnOrchestrator;
+	private readonly lifecycle: RuntimeLifecycle;
 
 	private cwd: string;
 	private readonly toolRouter: ToolRouter;
@@ -133,84 +128,34 @@ export class AgentRuntime {
 
 	async loadMcpToolsOnce(): Promise<void> {
 		await this.toolRouter.loadMcpToolsOnce();
-		this.refreshInjectedContext();
+		this.plugins.refreshContext();
 	}
 
 	async injectSkillsFromPlugins(): Promise<void> {
 		await this.toolRouter.injectSkillsFromPlugins();
-		this.refreshInjectedContext();
+		this.plugins.refreshContext();
 	}
 
 	async injectPrompts(): Promise<void> {
 		await this.toolRouter.injectPrompts();
 	}
 
-	private refreshInjectedContext(): void {
-		this.applyPluginHookContext(
-			this.startupHookResult || {
-				additional_contexts: [],
-				context_messages: [],
-				initial_user_message: "",
-			},
-		);
-	}
-
-	applyPluginHookContext(result: PluginCommandResult): void {
-		const messageContexts = Array.isArray(result.context_messages)
-			? result.context_messages.flatMap(message => {
-					if (
-						!message ||
-						typeof message !== "object" ||
-						typeof message.content !== "string"
-					) {
-						return [];
-					}
-					return [message.content];
-				})
-			: [];
-		const contexts = [
-			...(result.additional_contexts || []),
-			...messageContexts,
-			result.initial_user_message || "",
-		]
-			.map(item => String(item || "").trim())
-			.filter(
-				(item, index, all) => Boolean(item) && all.indexOf(item) === index,
-			);
-
-		// Recombine base + plugin context + MCP context + skills context
-		const allContexts: string[] = [];
-		if (contexts.length) {
-			allContexts.push(
-				`<startup-hook-context>\n${contexts.join("\n\n")}\n</startup-hook-context>`,
-			);
-		}
-		const mcpContext = this.toolRouter.getMcpSystemContext();
-		const skillsContext = this.toolRouter.getSkillsContext();
-		if (mcpContext) allContexts.push(mcpContext);
-		if (skillsContext) allContexts.push(skillsContext);
-
-		this.config.systemPrompt = allContexts.length
-			? `${this.baseSystemPrompt}\n\n${allContexts.join("\n\n")}`
-			: this.baseSystemPrompt;
-	}
 	private readonly runtimeCtx: RuntimeContext;
 	private get extensions(): ExtensionRegistry {
 		return this.runtimeCtx.extensions;
 	}
 
-	private sessionId =
-		`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-	private transcriptPath = "";
-	private readonly startup = new RuntimeStartupCoordinator(source =>
-		this.runStartupHooksNow(source),
-	);
-	private startupHookResult: PluginCommandResult | null = null;
-	private startupPluginCount = 0;
-	private contextTokens = 0;
-	private contextMaxTokens?: number;
+	private readonly identity: ConversationIdentity;
+	private get sessionId(): string {
+		return this.identity.id;
+	}
+	private get transcriptPath(): string {
+		return this.identity.transcript;
+	}
+	private readonly plugins: PluginLifecycle;
+	private readonly activity: RuntimeActivity;
 	private configPath: string | null;
-	private postEditDiagnosticsEnabled: boolean;
+	private readonly runtimeConfiguration: RuntimeConfiguration;
 	private get lsp(): LspClientPool {
 		return this.runtimeCtx.lsp;
 	}
@@ -218,20 +163,19 @@ export class AgentRuntime {
 	private get interactions(): InteractionGateway {
 		return this.runtimeCtx.interactions;
 	}
-	private readonly settings: SettingsGateway;
 	private get memory(): MemoryHost {
 		return this.runtimeCtx.memory;
 	}
 	private agentCoordinator: AgentCoordinator | null = null;
-	private readonly legroomWorker: LegroomWorker;
-	private legroomEnabled: boolean;
+	private readonly sessionRunner: SessionRunner;
+	private readonly legroom: LegroomGateway;
+	private get legroomEnabled(): boolean {
+		return this.legroom.isEnabled();
+	}
 
 	private get repositoryMap(): RepositoryMap | undefined {
 		return this.runtimeCtx.repositoryMap;
 	}
-	private runtimeRetry?: string;
-	private runtimeRepair?: string;
-	private readonly activeRuntimeSubagents = new Set<string>();
 	private readonly compactionSettings?: AgentBridgeOptions["compaction"];
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
@@ -252,15 +196,24 @@ export class AgentRuntime {
 		});
 		this.compactionSettings = opts.compaction;
 		this.cwd = opts.cwd || process.cwd();
+		this.identity = new ConversationIdentity(
+			`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+			{
+				cwd: this.cwd,
+				config: () => this.config,
+				sessions: () => this.sessions,
+				events: () => this.events,
+				memory: () => this.memory,
+			},
+		);
 		this.projectTrusted = opts.projectTrusted === true;
 		this.configPath = opts.configPath ?? null;
 		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
-		this.postEditDiagnosticsEnabled =
+		const postEditDiagnosticsEnabled =
 			process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS === "0"
 				? false
 				: opts.postEditDiagnostics !== false;
-		this.legroomWorker = new LegroomWorker(opts.legroom ?? {});
-		this.legroomEnabled = opts.legroom?.mode === "sdk";
+		this.legroom = new LegroomGateway(opts.legroom ?? {});
 
 		// Independent capabilities — none reads another slot during
 		// construction (RuntimeContext's own contract) — mount together so
@@ -332,7 +285,6 @@ export class AgentRuntime {
 		// register(), which the context treats as pure construction.
 		void this.extensions.initialize();
 
-		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
 		const defaultWebSearch = resolveWebSearchConfig();
 		const webSearch = {
 			baseUrl: opts.webSearch?.baseUrl || defaultWebSearch.baseUrl,
@@ -365,7 +317,7 @@ export class AgentRuntime {
 				this.session?.configure({ tools: this.config.tools });
 			},
 			onContextChanged: () => {
-				if (this.baseSystemPrompt) this.refreshInjectedContext();
+				if (this.baseSystemPrompt) this.plugins?.refreshContext();
 			},
 		});
 		this.baseSystemPrompt = buildDefaultSystemPrompt(
@@ -439,7 +391,7 @@ export class AgentRuntime {
 				this.buildMemoryHooks(
 					createPostEditDiagnosticHooks(
 						this.cwd,
-						() => this.postEditDiagnosticsEnabled,
+						() => this.runtimeConfiguration.postEditDiagnostics,
 						opts.lsp?.enabled === false ? undefined : this.lsp,
 						{
 							allowedPaths: opts.allowedPaths,
@@ -452,53 +404,40 @@ export class AgentRuntime {
 				this.emit({ type: "turn_end", turnId });
 			},
 			onEvent: (event: AgentEvent) => {
-				if (event.type === "context_update") {
-					this.contextTokens = event.tokens;
-					this.contextMaxTokens = event.maxTokens;
-				}
-
-				if (event.type === "agent_retry_start") {
-					this.runtimeRetry = `${event.attempt}/${event.maxRetries}`;
-				} else if (event.type === "agent_retry_end")
-					this.runtimeRetry = undefined;
-				if (event.type === "repair_nudge")
-					this.runtimeRepair = event.repairStage;
-				if (event.type === "turn_start") this.runtimeRepair = undefined;
-				if (event.type === "subagent_start") {
-					this.activeRuntimeSubagents.add(event.agentId);
-				} else if (event.type === "subagent_end") {
-					this.activeRuntimeSubagents.delete(event.agentId);
-				}
-				const mapped = mapAgentEvent(event);
-				if (mapped) {
-					this.emit(mapped);
-				}
-				this.emitRuntimeStatus();
+				this.activity.handle(event);
 			},
 		};
+		this.activity = new RuntimeActivity({
+			emit: event => this.emit(event),
+			runPhase: () => this.session?.phase,
+		});
+		this.sessions = new ConversationSession(
+			{
+				config: () => this.config,
+				backend: this.backend,
+				extensions: () => this.extensions,
+				emit: event => this.emit(event),
+				contextChanged: () => this.publishContextUsage(),
+				contextCompacted: tokens => {
+					this.activity.setContext(tokens);
+				},
+				compaction: this.compactionSettings,
+			},
+			this.sessionId,
+		);
+		this.commands = new CommandDispatcher({
+			session: () => this.session,
+			skills: () => this._loadedSkills,
+			prompts: () => this._loadedPrompts,
+			sendMessage: message => this.sendMessage(message),
+			reload: () => this.reload(),
+			emit: event => this.emit(event),
+			reportError: error => this.events.notifyError(error),
+		});
 		this.models = new ModelSelector(
 			() => this.config,
 			() => this.session,
 		);
-		this.settings = new SettingsGateway({
-			config: () => this.config,
-			patchCore: patch => {
-				Object.assign(this.config, patch);
-				this.session?.configure(patch);
-			},
-			setThinkingLevel: level => {
-				if (level !== undefined) this.setThinkingLevel(level);
-			},
-			setTemperature: value => this.setTemperature(value),
-			setReasoner: id => this.setReasonerId(id),
-			setSteeringInterrupt: enabled => this.setSteeringInterrupt(enabled),
-			setToggle: (key, enabled) => this.applyRuntimeToggle(key, enabled),
-			permissionMode: () => this.getPermissionMode(),
-			postEditDiagnostics: () => this.postEditDiagnosticsEnabled,
-			memoryEnabled: () => Boolean(this.memory?.getStore()),
-			legroomEnabled: () => this.legroomEnabled,
-		});
-
 		onTodosChanged(todos => {
 			this.emit({ type: "todos", todos });
 		});
@@ -508,6 +447,7 @@ export class AgentRuntime {
 			{
 				emit: event => this.emit(event),
 				getBackend: () => this.backend,
+				getConfig: () => this.config,
 				getBaseUrl: () => this.config.baseUrl,
 				getCurrentModel: () => this.models.current(),
 				cwd: this.cwd,
@@ -526,6 +466,107 @@ export class AgentRuntime {
 			opts.reasoner,
 			opts.reasonerConfig,
 		);
+		this.runtimeConfiguration = new RuntimeConfiguration({
+			config: this.config,
+			backend: this.backend,
+			session: () => this.session,
+			sessionId: () => this.sessionId,
+			tools: this.toolRouter,
+			interactions: this.interactions,
+			memory: this.memory,
+			legroom: this.legroom,
+			defaultTools: () => this._defaultTools,
+			setReasoner: id => this.agentCoordinator?.setReasonerId(id),
+			emit: event => this.emit(event),
+			postEditDiagnostics: postEditDiagnosticsEnabled,
+		});
+		this.plugins = new PluginLifecycle({
+			config: () => this.config,
+			baseSystemPrompt: () => this.baseSystemPrompt,
+			sessionId: () => this.sessionId,
+			tools: this.toolRouter,
+			injectSubagents: async () => {
+				await this.agentCoordinator?.injectSubagents();
+			},
+		});
+
+		this.sessionRunner = new SessionRunner({
+			callbacks: {
+				emit: event => this.emit(event),
+				reportError: (error, context) =>
+					this.events.reportError(error, context),
+				getSession: () => this.session,
+				ensureSession: () => this.ensureSession(),
+				getSessionId: () => this.sessionId,
+				getSystemPrompt: () => this.config.systemPrompt,
+				renderRepositoryContext: message => this.repositoryMap?.render(message),
+				abortMemoryExtractors: () => this.memory?.abortExtractors(),
+				publishUsage: () => this.publishContextUsage(),
+			},
+			events: this.events,
+			backend: this.backend,
+			getAgentCoordinator: () => this.agentCoordinator,
+			getRepositoryMap: () => this.repositoryMap,
+		});
+		this.turns = new TurnOrchestrator({
+			extensionsReady: () => this.extensions.getLoadPromise(),
+			hasSession: () => this.session !== null,
+			steer: message => this.sessions.steer(message),
+			emit: event => this.emit(event),
+			ensureStartup: () => this.plugins.ensureStarted(),
+			isMcpLoaded: () => this.toolRouter.isMcpLoaded(),
+			loadMcp: () => this.toolRouter.loadMcpToolsOnce(),
+			reportMcpError: error =>
+				this.events.reportError(error, {
+					component: "mcp",
+					operation: "background-discovery",
+					recoverable: true,
+				}),
+			runTurn: message => this.sessionRunner.submit(message),
+		});
+		this.lifecycle = new RuntimeLifecycle({
+			cancel: () => this.cancel(),
+			resetTurns: () => this.turns.reset(),
+			dropSession: () => this.sessions.drop(),
+			clearSession: () => this.sessions.clearAndDrop(),
+			resetIdentity: () => this.identity.reset(),
+			endPluginSession: reason => this.plugins.endSession(reason),
+			resetPlugin: options => this.plugins.reset(options),
+			refreshPluginContext: () => this.plugins.refreshContext(),
+			resetInjectedContext: () => this.toolRouter.resetInjectedContext(),
+			resetDiscoveredResources: () => this.toolRouter.resetSkillsAndPrompts(),
+			injectSkills: () => this.injectSkillsFromPlugins(),
+			injectPrompts: () => this.injectPrompts(),
+			reloadExtensions: () => this.extensions.reload(),
+			reportExtensionError: error =>
+				this.events.reportError(error, {
+					component: "extensions",
+					operation: "reload",
+					recoverable: true,
+				}),
+			extensionsReady: () => this.extensions.getLoadPromise(),
+			ensurePluginsStarted: () => this.plugins.ensureStarted(),
+			ensureSession: () => {
+				this.ensureSession();
+			},
+			loadMcp: () => this.loadMcpToolsOnce(),
+			reportMcpError: error =>
+				this.events.reportError(error, {
+					component: "mcp",
+					operation: "reload-tools",
+					recoverable: true,
+				}),
+			waitForMemory: () => this.memory.waitForBackgroundTasks(),
+			closeResources: async () => {
+				this.lsp.close();
+				this.legroom.close();
+				await this.toolRouter.closeMcp();
+				killAllTrackedChildren();
+			},
+			resetActivity: () => this.activity.resetContext(),
+			publishUsage: () => this.publishContextUsage(),
+			emitTurnEnd: turnId => this.emit({ type: "turn_end", turnId }),
+		});
 	}
 
 	/**
@@ -536,7 +577,7 @@ export class AgentRuntime {
 	): AgentConfig["hooks"] {
 		if (!this.memory) return existingHooks;
 		return this.memory.createHooks(existingHooks, {
-			isRunning: () => this.runs.isActive(),
+			isRunning: () => this.turns.isActive(),
 			getBackend: () => this.backend,
 			emit: event => this.emit(event),
 		});
@@ -545,28 +586,7 @@ export class AgentRuntime {
 	private buildLegroomHooks(
 		existingHooks: AgentConfig["hooks"],
 	): AgentConfig["hooks"] {
-		const worker = this.legroomWorker;
-		return {
-			...existingHooks,
-			beforeProviderPayload: async context => {
-				const existing = await existingHooks?.beforeProviderPayload?.(context);
-				const payload = existing?.payload ?? context.payload;
-				if (!this.legroomEnabled) return { payload };
-				const messages = payload.messages;
-				if (!Array.isArray(messages)) return { payload };
-				const compressible = messages.filter(
-					(message): message is Record<string, unknown> =>
-						message !== null && typeof message === "object",
-				);
-				if (compressible.length !== messages.length) return { payload };
-				return {
-					payload: {
-						...payload,
-						messages: await worker.compress(compressible, context.model),
-					},
-				};
-			},
-		};
+		return this.legroom.createHooks(existingHooks);
 	}
 
 	/** Add a tool to the default set and propagate it into live config/harness/system prompt. */
@@ -580,229 +600,12 @@ export class AgentRuntime {
 	// ── High-level commands ──────────────────────────────────────────────
 
 	async sendMessage(message: string): Promise<void> {
-		await this.extensions?.getLoadPromise();
-		return this.runs.submit({
-			message,
-			canSteer: () => this.session !== null,
-			steer: text => {
-				this.steer(text);
-				this.emit({ type: "steered", message: text });
-			},
-			execute: text => this.runMessage(text),
-		});
-	}
-
-	private async runMessage(message: string): Promise<void> {
-		// Local extractor models can saturate CPU/GPU and make both the UI and
-		// primary provider sluggish. Prefer the interactive turn; extraction's
-		// deterministic fallback still records the completed prior turn.
-		this.memory?.abortExtractors();
-		const runId = `run_${randomUUID()}`;
-		const turnId = `turn_${randomUUID()}`;
-		this.events.beginRun({ sessionId: this.sessionId, runId, turnId });
-		let persistentSystemPrompt: string | undefined;
-		let turnSystemPrompt = this.config.systemPrompt;
-		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
-		let turnSucceeded = false;
-		try {
-			await this.runStartupHooksOnce();
-			// MCP loads in the background from the moment the bridge is
-			// constructed (see ToolRouter's constructor) — never block turn
-			// submission on it. Whatever has finished connecting by the time the
-			// prompt actually goes out is what the model sees; a load still in
-			// flight keeps running and its tools become available on the next
-			// turn once it settles.
-			if (!this.toolRouter.isMcpLoaded()) {
-				void this.toolRouter.loadMcpToolsOnce().catch(error =>
-					this.events.reportError(error, {
-						component: "mcp",
-						operation: "background-discovery",
-						recoverable: true,
-					}),
-				);
-			}
-			// Reuse one session across messages so conversation history (and thus
-			// "continue" / "go on" follow-ups) persists. Created lazily once.
-			const session = this.ensureSession();
-			const repositoryContext = this.repositoryMap?.render(message);
-			if (repositoryContext) {
-				persistentSystemPrompt = this.config.systemPrompt;
-				turnSystemPrompt = `${persistentSystemPrompt}\n\n${repositoryContext}`;
-				session.configure({ systemPrompt: turnSystemPrompt });
-			}
-			if (this.agentCoordinator) {
-				const advisory = await this.agentCoordinator.runReasoner(
-					message,
-					this.backend,
-				);
-				if (advisory) {
-					persistentSystemPrompt ??= this.config.systemPrompt;
-					turnSystemPrompt = `${turnSystemPrompt}\n\nA structured reasoner produced the following advisory analysis for this turn. Verify it, use tools as needed, and do not mention this internal advisory unless useful:\n\n${advisory}`;
-					session.configure({ systemPrompt: turnSystemPrompt });
-				}
-			}
-			const activations: ReturnType<typeof selectSkillsForPrompt> = [];
-			// Skills stay discoverable through read_skill; none are injected unless
-			// a caller explicitly activates them for this turn.
-			turnActivations = activations;
-			if (activations.length) {
-				persistentSystemPrompt ??= this.config.systemPrompt;
-				session.configure({
-					systemPrompt: `${turnSystemPrompt}\n\n${formatActivatedSkills(activations)}`,
-				});
-				this.emit({
-					type: "notice",
-					level: "info",
-					label: "Skills",
-					text: formatSkillActivationNotice(activations),
-				});
-			}
-
-			this.emit({ type: "turn_start", turnId: turnId });
-			await session.prompt(message);
-			turnSucceeded = true;
-		} catch (err: unknown) {
-			const error = err as Error;
-			// Emit a visible error notice so the user sees connection/server
-			// failures in the transcript rather than only in the console.
-			this.events.reportError(error, {
-				component: "agent-runtime",
-				operation: "run-message",
-				recoverable: false,
-			});
-			throw error;
-		} finally {
-			try {
-				if (persistentSystemPrompt !== undefined) {
-					this.session?.configure({ systemPrompt: persistentSystemPrompt });
-				}
-				this.publishContextUsage();
-				this.emit({ type: "turn_end", turnId });
-				const hasQueuedContinuation =
-					turnSucceeded && (this.session?.getQueues().nextTurn.length ?? 0) > 0;
-				if (hasQueuedContinuation) {
-					// Do not advertise READY between an interrupted turn and the queued
-					// replacement turn. The continuation owns the terminal ready event.
-					await this.runContinuation(turnActivations);
-				} else {
-					// Keep the harness alive to retain history across turns.
-					this.emit({ type: "phase", state: "ready" });
-				}
-			} finally {
-				this.events.endRun();
-			}
-		}
-	}
-
-	// ── Continuation ───────────────────────────────────────────────────────
-
-	private async runContinuation(
-		activations: ReturnType<typeof selectSkillsForPrompt>,
-	): Promise<void> {
-		const repoQuery = this.repositoryMap?.render("");
-		this.session?.setRepositoryQuery(repoQuery);
-		const context = activations.length
-			? formatActivatedSkills(activations)
-			: undefined;
-		await this.session?.runQueuedContinuation(context, repoQuery);
+		return this.turns.submit(message);
 	}
 
 	// Lazily build the singleton harness and wire its UI callbacks.
 	private ensureSession(): AgentSession {
-		if (!this.session) {
-			this.session = new AgentSession({
-				config: {
-					...this.config,
-					taskLedger: { snapshot: getTasks },
-				},
-				backend: this.backend,
-				cwd: this.config.cwd,
-				maxIterations: this.config.maxIterations,
-				// Forward the session's own turn_start/turn_end/phase/queue_update
-				// events (emitted around runQueuedContinuation, i.e. the steerNow
-				// auto-continue path) straight through as RuntimeEvents — their
-				// shapes already match. Without this, a steerNow interrupt never
-				// surfaces the replacement turn's lifecycle: the UI phase reducer
-				// sees the interrupted turn's turn_end (→ READY) and then nothing
-				// until some unrelated event happens to arrive.
-				onEvent: event => this.emit(event as RuntimeEvent),
-				extensionRunner: this.extensions?.runner ?? undefined,
-				pluginHookFactory: context =>
-					createClaudeCodeHookLayer({
-						enabled: context.enabled,
-						sessionId: context.sessionId,
-						transcriptPath: context.transcriptPath,
-						cwd: context.cwd,
-						getMatcherValue: toolName => {
-							const tool = context.tools.find(item => item.name === toolName);
-							return (
-								tool?.hookAliases?.join("|") || claudeToolMatcherName(toolName)
-							);
-						},
-					}),
-				pluginLifecycle: {
-					sessionStart: async (context, source) => {
-						await runSessionStartHooks({
-							source,
-							session_id: context.sessionId,
-							transcript_path: context.transcriptPath,
-							cwd: context.cwd,
-						});
-					},
-					sessionEnd: async (context, reason) => {
-						await runHookEvent("SessionEnd", {
-							session_id: context.sessionId,
-							transcript_path: context.transcriptPath,
-							cwd: context.cwd,
-							reason,
-						});
-					},
-					preCompact: async context => {
-						await runHookEvent("PreCompact", {
-							session_id: context.sessionId,
-							transcript_path: context.transcriptPath,
-							cwd: context.cwd,
-						});
-					},
-					postCompact: async context => {
-						await runHookEvent("PostCompact", {
-							session_id: context.sessionId,
-							transcript_path: context.transcriptPath,
-							cwd: context.cwd,
-						});
-					},
-				},
-			});
-			this.session.setSessionId(this.sessionId);
-			if (this.durableSession) this.session.attachSession(this.durableSession);
-			if (this.compactionSettings)
-				this.session.setAutoCompactionSettings(this.compactionSettings);
-			// Session handles queue/phase events internally via onEvent callback.
-			// Observe settled to show continuation notice.
-			this.session.observe({
-				settled: nextTurnCount => {
-					if (nextTurnCount === 0) return;
-					this.emit({
-						type: "notice",
-						level: "info",
-						label: "Continuation",
-						text: `${nextTurnCount} next-turn message(s) queued; continuation will start after settlement.`,
-					});
-				},
-			});
-		}
-		return this.session;
-	}
-
-	private emitRuntimeStatus(): void {
-		if (!this.session) return;
-		this.emit({
-			type: "runtime_status",
-			runPhase: this.session.phase,
-			retry: this.runtimeRetry,
-			repair: this.runtimeRepair,
-			activeSubagents: this.activeRuntimeSubagents.size,
-		});
+		return this.sessions.ensure();
 	}
 
 	/**
@@ -812,45 +615,35 @@ export class AgentRuntime {
 	 * running (the harness rejects structural ops mid-turn).
 	 */
 	restoreHistory(messages: Message[]): boolean {
-		try {
-			this.ensureSession().setHistory(messages);
-			this.publishContextUsage();
-			return true;
-		} catch (_e: unknown) {
-			return false;
-		}
+		return this.sessions.restoreHistory(messages);
 	}
 
 	// ── Queue operations (delegated to AgentSession) ─────────────────
 
 	steer(message: string): void {
-		this.session?.steer(message);
+		this.sessions.steer(message);
 	}
 
 	/** Queue steering for after the current turn (never interrupts). */
 	steerQueue(message: string): void {
-		this.session?.steerQueue(message);
+		this.sessions.steerQueue(message);
 	}
 
 	/** Immediately interrupt and apply steering (always forces abort). */
 	steerNow(message: string): void {
-		this.session?.steerNow(message);
+		this.sessions.steerNow(message);
 	}
 
 	followUp(message: string): void {
-		this.session?.followUp(message);
+		this.sessions.followUp(message);
 	}
 
 	nextTurn(message: string): void {
-		this.session?.nextTurn(message);
+		this.sessions.nextTurn(message);
 	}
 
 	setSteeringMode(mode: QueueMode): void {
-		this.session?.setSteeringMode(mode);
-	}
-
-	private setSteeringInterrupt(enabled: boolean): void {
-		this.session?.configure({ steeringInterrupt: enabled });
+		this.sessions.setSteeringMode(mode);
 	}
 
 	getSteeringInterrupt(): boolean {
@@ -877,23 +670,23 @@ export class AgentRuntime {
 	}
 
 	setFollowUpMode(mode: QueueMode): void {
-		this.session?.setFollowUpMode(mode);
+		this.sessions.setFollowUpMode(mode);
 	}
 
 	getSteeringMessages(): string[] {
-		return this.session?.getQueues().steering ?? [];
+		return this.sessions.queues().steering;
 	}
 
 	flushSteeringNow(): number {
-		return this.session?.flushSteeringNow() ?? 0;
+		return this.sessions.flushSteeringNow();
 	}
 
 	getFollowUpMessages(): string[] {
-		return this.session?.getQueues().followUp ?? [];
+		return this.sessions.queues().followUp;
 	}
 
 	getNextTurnMessages(): string[] {
-		return this.session?.getQueues().nextTurn ?? [];
+		return this.sessions.queues().nextTurn;
 	}
 
 	clearQueue(): {
@@ -901,91 +694,29 @@ export class AgentRuntime {
 		followUp: string[];
 		nextTurn: string[];
 	} {
-		const q = this.session?.clearQueues() ?? {
-			steering: [],
-			followUp: [],
-			nextTurn: [],
-		};
-		return q;
+		return this.sessions.clearQueues();
 	}
 
 	dropQueuedMessage(displayIndex: number): string | undefined {
-		return this.session?.dropQueuedMessage(displayIndex);
+		return this.sessions.dropQueuedMessage(displayIndex);
 	}
 
 	/** Abort: clear steering/follow-up queues (preserves nextTurn). */
 	async abort(): Promise<AbortResult | null> {
 		// harness.abort() clears steering/follow-up and emits onQueueChange.
-		return (await this.session?.abort()) ?? null;
+		return this.sessions.abort();
 	}
 
 	/** Execute a slash command (sends as chat message to the agent). */
 	sendSlash(raw: string): void {
-		const trimmed = raw.trim();
-		const result = runQueueCommand(this.session, trimmed);
-		if (result) {
-			this.emit({
-				type: "notice",
-				level: result.level,
-				label: "Queue",
-				text: result.text,
-			});
-			return;
-		}
-		// /reload — reload settings, skills, extensions, and MCP config
-		if (trimmed === "/reload") {
-			this.reload().catch(err => this.events.notifyError(err));
-			return;
-		}
-		this.sendMessage(raw).catch(err => this.events.notifyError(err));
+		this.commands.dispatchSlash(raw);
 	}
 
 	// ── Reload ────────────────────────────────────────────────────────────
 
 	/** Reload: restart the session (like Pi's /reload). */
 	private async reload(): Promise<void> {
-		// Stop any running turn
-		void this.cancel();
-		this.runs.reset();
-
-		// Drop the old harness — conversation starts fresh
-		this.session = null;
-
-		// Reload the runtime without splitting memory from the active
-		// user-facing conversation session.
-		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
-		this.config.hookSessionId = this.sessionId;
-		this.config.hookTranscriptPath = this.transcriptPath;
-		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
-		// Sync memory session
-		this.memory?.resetSession(this.sessionId);
-
-		// Reset state that is per-session
-		this.toolRouter.resetSkillsAndPrompts();
-		this.startup.reset();
-		this.startupHookResult = null;
-
-		// ── Re-discover skills and prompts ────────────────────────────────
-		await this.injectSkillsFromPlugins();
-		await this.injectPrompts();
-
-		// ── Re-load extensions ────────────────────────────────────────────
-		await this.extensions?.reload().catch(error =>
-			this.events.reportError(error, {
-				component: "extensions",
-				operation: "reload",
-				recoverable: true,
-			}),
-		);
-
-		// ── Re-discover MCP servers ───────────────────────────────────────
-		await this.loadMcpToolsOnce();
-
-		// Send reload confirmation (not via sendMessage to avoid starting a turn)
-		this.emit({
-			type: "turn_end",
-			turnId: "reload",
-		});
+		await this.lifecycle.reload();
 	}
 
 	// ── Skill invocation ───────────────────────────────────────────────
@@ -1001,26 +732,7 @@ export class AgentRuntime {
 	 * caller can fall back to normal slash handling.
 	 */
 	invokeSkill(name: string, args: string): boolean {
-		const skill = findSkillByName(this._loadedSkills, name);
-		if (!skill) return false;
-		const trimmedArgs = args.trim();
-		// Claude Code command convention: $ARGUMENTS in the body is replaced with
-		// the user's arguments instead of appending an instructions line.
-		const substitutes = skill.content.includes("$ARGUMENTS");
-		const effective = substitutes
-			? {
-					...skill,
-					content: skill.content.replaceAll("$ARGUMENTS", trimmedArgs),
-				}
-			: skill;
-		const message = formatSkillInvocation(
-			effective,
-			trimmedArgs && !substitutes
-				? `User arguments for this skill invocation: ${trimmedArgs}`
-				: undefined,
-		);
-		this.sendMessage(message).catch(err => this.events.notifyError(err));
-		return true;
+		return this.commands.invokeSkill(name, args);
 	}
 
 	/** Prompts discovered at startup (for /<prompt-name> completion). */
@@ -1036,17 +748,7 @@ export class AgentRuntime {
 	 * can fall back to normal slash handling.
 	 */
 	invokePrompt(name: string, args: string): boolean {
-		const prompt = findPromptByName(this._loadedPrompts, name);
-		if (!prompt) return false;
-		const trimmedArgs = args.trim();
-		const substitutes = prompt.content.includes("$ARGUMENTS");
-		const message = substitutes
-			? prompt.content.replaceAll("$ARGUMENTS", trimmedArgs)
-			: trimmedArgs
-				? `${prompt.content}\n\n${trimmedArgs}`
-				: prompt.content;
-		this.sendMessage(message).catch(err => this.events.notifyError(err));
-		return true;
+		return this.commands.invokePrompt(name, args);
 	}
 
 	// ── Permissions & interactive questions (inlined from InteractionCoordinator) ─
@@ -1108,37 +810,23 @@ export class AgentRuntime {
 				}),
 			);
 		}
-		this.contextTokens = this.measureContextTokens();
-		const toolNames =
-			this.session?.tools?.list().map((t: Tool) => t.name) ||
-			this._defaultTools.map(t => t.name);
-		const state = {
-			agent_name: "logician",
-			model: this.config.model,
-			base_url: this.config.baseUrl,
-			web_search_url: this.config.webSearch?.baseUrl || "",
-			web_search_enabled: toolNames.includes("web_search"),
-			tools: toolNames,
-			mcp_servers: this.toolRouter.getMcpServerCount(),
-			mcp_tools: this.toolRouter.getMcpToolCount(),
-			mcp_errors: this.toolRouter.getMcpErrors(),
-			context_tokens: this.contextTokens,
-			context_max_tokens: this.contextMaxTokens,
-			runtime_state: this.session?.runtimeState ?? {
-				phase: "idle",
-				isStreaming: false,
-				pendingToolCalls: [],
-				abortRequested: false,
-			},
-			config_path: this.configPath || "",
-			connected: true,
-			reasoner: this.agentCoordinator?.getReasonerStatus() ?? "none",
-		};
-		return state;
+		const context = this.activity.setContext(this.measureContextTokens());
+		return projectRuntimeStatus({
+			config: this.config,
+			toolNames: runtimeToolNames(this.session?.tools, this._defaultTools),
+			mcpServerCount: this.toolRouter.getMcpServerCount(),
+			mcpToolCount: this.toolRouter.getMcpToolCount(),
+			mcpErrors: this.toolRouter.getMcpErrors(),
+			contextTokens: context.tokens,
+			contextMaxTokens: context.maxTokens,
+			runtimeState: this.session?.runtimeState,
+			configPath: this.configPath,
+			reasoner: this.getReasonerStatus(),
+		});
 	}
 
 	async getPluginSnapshot(): Promise<PluginCommandResult> {
-		return runPluginBackend("list", []);
+		return this.plugins.snapshot();
 	}
 
 	async getMcpSnapshot(): Promise<McpSnapshotResult> {
@@ -1156,65 +844,11 @@ export class AgentRuntime {
 		pluginId: string,
 		enabled: boolean,
 	): Promise<PluginCommandResult> {
-		const result = await runPluginBackend(enabled ? "enable" : "disable", [
-			pluginId,
-		]);
-		if (result.status !== "error") {
-			this.startup.reset();
-			await this.runStartupHooksOnce();
-		}
-		return result;
+		return this.plugins.setEnabled(pluginId, enabled);
 	}
 
 	async runPluginCommand(input: string): Promise<string> {
-		const parts = splitPluginArgs(input);
-		const action = (parts.shift() || "list").toLowerCase();
-
-		if (action === "help" || action === "-h" || action === "--help") {
-			return [
-				"# Plugins",
-				"Usage: /plugins [list|enable|disable|install|remove|update|deps|info|hooks|run-hooks]",
-				"",
-				"- /plugins list",
-				"- /plugins enable <plugin>",
-				"- /plugins disable <plugin>",
-				"- /plugins hooks [startup|clear|compact|Stop|PreToolUse|PostToolUse|SessionEnd]",
-				"- /plugins run-hooks [startup|clear|compact]",
-			].join("\n");
-		}
-
-		const backendAction = action === "refresh" ? "run-hooks" : action;
-		const result = await runPluginBackend(backendAction, parts);
-
-		if (backendAction === "run-hooks" && result.status !== "error") {
-			this.applyPluginHookContext(result);
-		}
-
-		return formatPluginResult(backendAction, result);
-	}
-
-	private setThinkingLevel(level: string): void {
-		this.config.thinkingLevel = level as
-			| "off"
-			| "minimal"
-			| "low"
-			| "medium"
-			| "high"
-			| "xhigh";
-		this.session?.models.setThinkingLevel(level);
-		// Also update the backend's default so future turns pick it up.
-		(this.backend as OpenAIBackend).setDefaultThinkingLevel(
-			level as "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
-		);
-	}
-
-	private setTemperature(temperature: number): void {
-		this.config.temperature = temperature;
-		this.session?.configure({ temperature });
-	}
-
-	private setReasonerId(reasonerId: string): void {
-		this.agentCoordinator?.setReasonerId(reasonerId);
+		return this.plugins.runCommand(input);
 	}
 
 	getReasonerStatus(): string {
@@ -1232,64 +866,8 @@ export class AgentRuntime {
 		return this.toolRouter.isMcpLoading();
 	}
 
-	private applyRuntimeToggle(key: RuntimeToggleKey, enabled: boolean): void {
-		if (key === "memoryEnabled") {
-			this.memory?.setEnabled(enabled, this.sessionId);
-			this.emit({
-				type: "notice",
-				level: "info",
-				label: "Memory",
-				text: enabled ? "Memory enabled" : "Memory disabled",
-			});
-			return;
-		}
-		if (key === "postEditDiagnostics") {
-			this.postEditDiagnosticsEnabled = enabled;
-			return;
-		}
-		if (key === "legroomEnabled") {
-			this.legroomEnabled = enabled;
-			if (!enabled) this.legroomWorker.close();
-			this.emit({
-				type: "notice",
-				level: "info",
-				label: "Legroom",
-				text: enabled ? "Legroom SDK enabled" : "Legroom SDK disabled",
-			});
-			return;
-		}
-		if (key === "graphicianEnabled") {
-			this.config.graphicianEnabled = enabled;
-			this.toolRouter.setGraphicianEnabled(enabled);
-			this.config.tools = this._defaultTools;
-			this.session?.configure({ tools: this.config.tools });
-			return;
-		}
-		if (key === "fffgrepEnabled") {
-			this.config.fffgrepEnabled = enabled;
-			this.toolRouter.setFffgrepEnabled(enabled);
-			this.config.tools = this._defaultTools;
-			this.session?.configure({ tools: this.config.tools });
-			return;
-		}
-		this.config[key] = enabled;
-		if (
-			key === "guardsEnabled" ||
-			key === "duplicateGuardEnabled" ||
-			key === "failureGuardEnabled" ||
-			key === "progressStopEnabled" ||
-			key === "continuationEnabled" ||
-			key === "autoRetryEnabled"
-		) {
-			this.session?.configure({ [key]: enabled });
-		}
-		if (key === "proactiveCompactionEnabled") {
-			this.session?.enableAutoCompaction(enabled);
-		}
-	}
-
 	updateSettings(patch: RuntimeSettingsPatch): void {
-		this.settings.update(patch);
+		this.runtimeConfiguration.update(patch);
 	}
 
 	/** Return structured settings data for the overlay UI. */
@@ -1317,12 +895,12 @@ export class AgentRuntime {
 		progressStopEnabled: boolean;
 		guardMode: "auto" | "on" | "off";
 	} {
-		return this.settings.read();
+		return this.runtimeConfiguration.read();
 	}
 
 	/** Get the underlying LegroomWorker for advanced CCR store operations. */
 	getLegroomWorker(): LegroomWorker | null {
-		return this.legroomWorker;
+		return this.legroom.worker;
 	}
 
 	// ── Legroom CCR Store ──────────────────────────────────────────────────
@@ -1333,50 +911,32 @@ export class AgentRuntime {
 		messages: Record<string, unknown>[],
 		model: string,
 	): Promise<CompressResult> {
-		if (!this.legroomEnabled) {
-			throw new Error("Legroom SDK is not enabled");
-		}
-		return this.legroomWorker.compressWithStore(storeId, messages, model);
+		return this.legroom.compressWithStore(storeId, messages, model);
 	}
 
 	/** Retrieve original content from a CCR store by hash. */
 	async storeRetrieve(storeId: string, hash: string): Promise<string> {
-		if (!this.legroomEnabled) {
-			throw new Error("Legroom SDK is not enabled");
-		}
-		return this.legroomWorker.storeRetrieve(storeId, hash);
+		return this.legroom.storeRetrieve(storeId, hash);
 	}
 
 	/** Get CCR store statistics. */
 	async storeStats(storeId: string): Promise<StoreStats> {
-		if (!this.legroomEnabled) {
-			throw new Error("Legroom SDK is not enabled");
-		}
-		return this.legroomWorker.storeStats(storeId);
+		return this.legroom.storeStats(storeId);
 	}
 
 	/** Get aggregate worker statistics (includes CCR store metrics). */
 	async getLegroomStats(): Promise<WorkerStats> {
-		if (!this.legroomEnabled) {
-			throw new Error("Legroom SDK is not enabled");
-		}
-		return this.legroomWorker.workerStats();
+		return this.legroom.workerStats();
 	}
 
 	/** Get recent compression request history. */
 	async getLegroomHistory(limit = 50, offset = 0): Promise<WorkerHistory> {
-		if (!this.legroomEnabled) {
-			throw new Error("Legroom SDK is not enabled");
-		}
-		return this.legroomWorker.workerHistory(limit, offset);
+		return this.legroom.workerHistory(limit, offset);
 	}
 
 	/** Query current calibration state. */
 	async getCalibrationStatus(): Promise<CalibrationStatus> {
-		if (!this.legroomEnabled) {
-			throw new Error("Legroom SDK is not enabled");
-		}
-		return this.legroomWorker.calibrationStatus();
+		return this.legroom.calibrationStatus();
 	}
 
 	/** Record quality feedback for phase calibration. */
@@ -1384,10 +944,7 @@ export class AgentRuntime {
 		phaseReports: Record<string, unknown>[],
 		quality: number,
 	): Promise<CalibrationStatus> {
-		if (!this.legroomEnabled) {
-			throw new Error("Legroom SDK is not enabled");
-		}
-		return this.legroomWorker.calibrationRecord(phaseReports, quality);
+		return this.legroom.calibrationRecord(phaseReports, quality);
 	}
 
 	getMemoryStore(): ReturnType<
@@ -1419,19 +976,7 @@ export class AgentRuntime {
 		sessionId: string,
 		durableSession?: SessionStore,
 	): void {
-		if (!sessionId.trim()) return;
-		const provisionalSessionId = this.sessionId;
-		this.sessionId = sessionId;
-		this.events.setSessionId(sessionId);
-		this.durableSession = durableSession;
-		this.session?.setSessionId(sessionId);
-		if (durableSession) this.session?.attachSession(durableSession);
-		this.transcriptPath = createHookTranscriptPath(this.cwd, sessionId);
-		this.config.hookSessionId = sessionId;
-		this.config.hookTranscriptPath = this.transcriptPath;
-		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
-		// Sync memory session
-		this.memory?.onSessionChanged(sessionId, provisionalSessionId);
+		this.identity.use(sessionId, durableSession);
 	}
 
 	renameConversationSession(sessionId: string, name: string): void {
@@ -1439,40 +984,14 @@ export class AgentRuntime {
 	}
 
 	reset(): void {
-		// Reset tool state and conversation
-		void this.fireSessionEnd("reset");
-		// Drop the persisted harness so history starts fresh.
-		this.session?.clearHistory();
-		this.session = null;
-		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
-		this.config.hookSessionId = this.sessionId;
-		this.config.hookTranscriptPath = this.transcriptPath;
-		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
-		// Update memory session ID
-		this.memory?.resetSession(this.sessionId);
-		// Reset skill/prompt injection state
-		this.toolRouter.resetInjectedContext();
-		this.startup.reset();
-		this.applyPluginHookContext(
-			this.startupHookResult || {
-				additional_contexts: [],
-				context_messages: [],
-				initial_user_message: "",
-			},
-		);
-		this.contextTokens = 0;
-		this.publishContextUsage();
-		this.emit({
-			type: "turn_end",
-			turnId: "reset",
-		});
+		this.lifecycle.reset();
 	}
 
 	async cancel(): Promise<AbortResult | null> {
 		// A turn blocked on an approval must unblock to abort cleanly.
 		this.denyPendingPermissions();
 		try {
-			return (await this.session?.abort()) ?? null;
+			return await this.sessions.abort();
 		} catch (error) {
 			const normalized =
 				error instanceof Error ? error : new Error(String(error));
@@ -1487,28 +1006,14 @@ export class AgentRuntime {
 		tokensBefore: number;
 		tokensAfter: number;
 	} | null> {
-		if (!this.session) return null;
-		const saved = await this.session.compact();
-		if (saved === null) return null;
-		// Re-emit context update with new token count
-		const messages = this.session.messages;
-		const after = estimateChatPayloadTokens(messages);
-		const before = after + saved;
-		this.contextTokens = after;
-		this.emit({
-			type: "compaction",
-			reason: "manual",
-			tokensBefore: before,
-			tokensAfter: after,
-		} as RuntimeEvent);
-		return { tokensSaved: saved, tokensBefore: before, tokensAfter: after };
+		return this.sessions.compact();
 	}
 
 	// ── Conversation branching ─────────────────────────────────────────────
 
 	/** Fork the conversation; returns the new branch id, or null if no harness. */
 	fork(): string | null {
-		return this.session?.fork() ?? null;
+		return this.sessions.fork();
 	}
 
 	/**
@@ -1516,11 +1021,7 @@ export class AgentRuntime {
 	 * summary text, or null if nothing to summarize / no harness.
 	 */
 	async branchSummary(): Promise<string | null> {
-		if (!this.session) return null;
-		const summary = await this.session.branchSummary();
-		// Token count changed (branch tail collapsed into one message).
-		this.publishContextUsage();
-		return summary;
+		return this.sessions.branchSummary();
 	}
 
 	/**
@@ -1530,91 +1031,42 @@ export class AgentRuntime {
 	 * running.
 	 */
 	rewind(): { messages: number; filesRestored: number } | null {
-		try {
-			const restored = this.session?.rewind() ?? null;
-			if (restored !== null && this.session) {
-				this.publishContextUsage();
-			}
-			return restored;
-		} catch (_e: unknown) {
-			return null;
-		}
+		return this.sessions.rewind();
 	}
 
 	/** Discard the active branch without merging. Returns true if one was discarded. */
 	discardBranch(): boolean {
-		const discarded = this.session?.discardBranch() ?? false;
-		if (discarded && this.session) this.publishContextUsage();
-		return discarded;
+		return this.sessions.discardBranch();
 	}
 
 	// ── State management ─────────────────────────────────────────────────
 
 	async init(): Promise<Record<string, unknown>> {
-		await this.extensions?.getLoadPromise();
-		await this.runStartupHooksOnce();
-		this.ensureSession();
-		// MCP discovery already started in ToolRouter's constructor — fire-
-		// and-forget from the moment the bridge exists, not gated behind
-		// init() or the first message. loadMcpToolsOnce() is memoized, so this
-		// just observes the same in-flight/settled load instead of starting a
-		// second one; the "Loaded N server(s)" notice fires once, from inside
-		// loadMcpToolsOnce() itself, whenever that load actually finishes.
-		void this.loadMcpToolsOnce().catch(error =>
-			this.events.reportError(error, {
-				component: "mcp",
-				operation: "reload-tools",
-				recoverable: true,
-			}),
-		);
-		const toolNames =
-			this.session?.tools?.list().map((t: Tool) => t.name) ||
-			this._defaultTools.map(t => t.name);
+		await this.lifecycle.initialize();
+		const toolNames = runtimeToolNames(this.session?.tools, this._defaultTools);
 		const status = this.toolRouter.getStatus();
-		const info: Record<string, unknown> = {
-			agent_name: "logician",
-			model: this.config.model,
-			base_url: this.config.baseUrl,
-			web_search_url: this.config.webSearch?.baseUrl || "",
-			web_search_enabled: toolNames.includes("web_search"),
-			mcp_deferred: !status.mcpLoaded && process.env.LOGICIAN_MCP !== "0",
-			mcp_loading: status.mcpLoading,
-			tools: toolNames,
-			mcp_servers_loaded: status.mcpServerCount,
-			mcp_tools_loaded: status.mcpToolCount,
-			mcp_errors: status.mcpErrors,
-			context_tokens: this.contextTokens,
-			context_max_tokens:
-				this.contextMaxTokens || this.config.contextWindowTokens,
-			runtime_state: this.session?.runtimeState ?? {
-				phase: "idle",
-				isStreaming: false,
-				pendingToolCalls: [],
-				abortRequested: false,
-			},
-			config_path: this.configPath || "",
-			hooks_enabled: this.config.runtimeHooksEnabled !== false,
-			hook_transcript_path: this.config.hookTranscriptPath || "",
-			startup_plugins_loaded: this.startupPluginCount,
-			startup_plugins: status.enabledPluginRoots.map(plugin => plugin.name),
-			startup_hooks_loaded: this.startupHookResult?.hook_count || 0,
-			startup_hook_contexts: this.startupHookResult?.additional_contexts || [],
-			startup_hook_messages: this.startupHookResult?.context_messages || [],
-			startup_hook_initial_message:
-				this.startupHookResult?.initial_user_message || "",
-			startup_hook_errors: this.startupHookResult?.errors || [],
-			skills_injected: status.skillsInjected
-				? status.loadedSkills.filter(skill => !skill.disableModelInvocation)
-						.length
-				: 0,
-			skills_visible: status.skillsVisible,
-			loaded_skills: status.loadedSkills.map(skill => ({
-				name: skill.name,
-				slash_name: skill.slashName,
-				description: skill.description,
-				model_visible: !skill.disableModelInvocation,
-			})),
-		};
+		const pluginStatus = this.plugins.status();
+		const context = this.activity.context();
+		const info = projectInitializationStatus({
+			config: this.config,
+			toolNames,
+			mcpServerCount: status.mcpServerCount,
+			mcpToolCount: status.mcpToolCount,
+			mcpErrors: status.mcpErrors,
+			contextTokens: context.tokens,
+			contextMaxTokens: context.maxTokens || this.config.contextWindowTokens,
+			runtimeState: this.session?.runtimeState,
+			configPath: this.configPath,
+			reasoner: this.getReasonerStatus(),
+			mcpLoaded: status.mcpLoaded,
+			mcpLoading: status.mcpLoading,
+			enabledPluginRoots: status.enabledPluginRoots,
+			loadedSkills: status.loadedSkills,
+			skillsInjected: status.skillsInjected,
+			skillsVisible: status.skillsVisible,
+			pluginCount: pluginStatus.pluginCount,
+			hookResult: pluginStatus.hookResult,
+		});
 		// Explicitly signal ready so the TUI status bar doesn't get stuck in
 		// streaming after init.
 		this.emit({ type: "phase", state: "ready" });
@@ -1627,32 +1079,22 @@ export class AgentRuntime {
 		usage?: string;
 		acceptsArgs?: boolean;
 	}> {
-		return this.extensions?.getCommands() ?? [];
+		return this.extensions.getCommands();
 	}
 
 	invokeExtensionCommand(
 		name: string,
 		args: string,
 	): Promise<string | undefined> {
-		return (
-			this.extensions?.executeCommand(name, args) ?? Promise.resolve(undefined)
-		);
+		return this.extensions.executeCommand(name, args);
 	}
 
 	async stop(): Promise<void> {
-		void this.cancel();
-		// Abort extraction and wait for background tasks to complete.
-		await this.memory?.waitForBackgroundTasks();
-		await this.fireSessionEnd("shutdown");
-		this.lsp.close();
-		this.legroomWorker.close();
-		await this.toolRouter.closeMcp();
-		killAllTrackedChildren();
-		this.runs.reset();
+		await this.lifecycle.stop();
 	}
 
 	isActive(): boolean {
-		return this.runs.isActive();
+		return this.turns.isActive();
 	}
 
 	getMessages(): Message[] {
@@ -1663,75 +1105,14 @@ export class AgentRuntime {
 	getContext(): string {
 		const msgs = this.getMessages();
 		const memoryContext = this.getMemoryContextForInspection(msgs);
-		const contextTokens =
-			this.measureContextTokens() + estimateTokens(memoryContext);
-		this.contextTokens = contextTokens;
-
-		const sourceMap = this.getContextSourceMap(memoryContext);
-		const sourceLines = sourceMap.map(
-			zone =>
-				`- ${zone.name}: ~${zone.tokens} tokens${zone.detail ? ` — ${zone.detail}` : ""}`,
-		);
-		const lines: string[] = ["## Prompt source map", "", ...sourceLines, ""];
-		lines.push("## Effective context", "");
-
-		// System prompt zone (the static identity + tool instructions).
-		// Session history filters out system messages, so we pull the current
-		// config system prompt and show it at the top of the context dump.
-		const systemPrompt = this.config.systemPrompt || "";
-		if (!msgs.length && !systemPrompt && !memoryContext)
-			lines.push("No messages yet.");
-		if (systemPrompt) {
-			lines.push("[SYSTEM] system prompt");
-			lines.push(systemPrompt);
-			lines.push("");
-		}
-
-		// Memory retrieval is a request-time context block, injected between
-		// the system prompt and conversation turns. Show it in the correct
-		// position so /context reflects the effective provider payload.
-		if (memoryContext) {
-			lines.push("[SYSTEM] Memory Context");
-			lines.push(memoryContext);
-			lines.push("");
-		}
-
-		// Conversation turns (user / assistant / tool messages).
-		// System messages are already shown separately above, so skip them here.
-		for (const msg of msgs) {
-			if (!msg) continue;
-			if (msg.role === "system") continue;
-			const role = msg.role.toUpperCase();
-			const ts = msg.timestamp ? new Date(msg.timestamp).toISOString() : "";
-			const header = `[${role}]${ts ? ` ${ts}` : ""}`;
-
-			if (msg.role === "tool" && msg.content) {
-				// Tool result: show the originating tool name alongside its content.
-				const callId = msg.tool_call_id || "";
-				const name =
-					msgs
-						.find(
-							m =>
-								m.role === "assistant" &&
-								m.tool_calls?.some(tc => tc.id === callId),
-						)
-						?.tool_calls?.find(tc => tc.id === callId)?.name || "tool";
-				lines.push(`${header} (${name})\n${msg.content}`);
-			} else if (msg.role === "assistant" && msg.tool_calls?.length) {
-				// Assistant with tool calls
-				lines.push(
-					`${header}\n${msg.content || "(no content)"}\n\nTool calls:`,
-				);
-				for (const tc of msg.tool_calls) {
-					lines.push(`  - ${tc.name}(${tc.arguments || ""})`);
-				}
-			} else {
-				lines.push(`${header}\n${msg.content || ""}`);
-			}
-			lines.push("");
-		}
-
-		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;
+		const inspection = inspectContext({
+			messages: msgs,
+			systemPrompt: this.config.systemPrompt || "",
+			memoryContext,
+			toolDefinitions: this.getTools().toToolDefinitions(),
+		});
+		this.activity.setContext(inspection.tokens);
+		return inspection.text;
 	}
 
 	private getMemoryContextForInspection(messages: Message[]): string {
@@ -1746,46 +1127,12 @@ export class AgentRuntime {
 		tokens: number;
 		detail: string;
 	}> {
-		const messages = this.getMessages();
-		const toolDefinitions = this.getTools().toToolDefinitions();
-		const conversation = messages.filter(message => message.role !== "tool");
-		const toolEvidence = messages.filter(message => message.role === "tool");
-		return [
-			{
-				name: "Base instructions",
-				tokens: estimateTokens(this.config.systemPrompt || ""),
-				detail: "system zone",
-			},
-			{
-				name: "Plugin context",
-				tokens: estimateTokens(""),
-				detail: "startup hooks",
-			},
-			{
-				name: "Tool definitions",
-				tokens: estimateChatPayloadTokens([], toolDefinitions),
-				detail: `${toolDefinitions.length} tools`,
-			},
-			{
-				name: "Retrieved memory",
-				tokens: estimateTokens(memoryContext),
-				detail: memoryContext ? "request-time compact index" : "none retrieved",
-			},
-			{
-				name: "Conversation",
-				tokens: conversation.length
-					? estimateChatPayloadTokens(conversation)
-					: 0,
-				detail: `${conversation.length} messages`,
-			},
-			{
-				name: "Tool evidence",
-				tokens: toolEvidence.length
-					? estimateChatPayloadTokens(toolEvidence)
-					: 0,
-				detail: `${toolEvidence.length} results`,
-			},
-		].filter(zone => zone.tokens > 0 || zone.name === "Conversation");
+		return contextSources({
+			messages: this.getMessages(),
+			systemPrompt: this.config.systemPrompt || "",
+			memoryContext,
+			toolDefinitions: this.getTools().toToolDefinitions(),
+		});
 	}
 
 	/** Canonical size used by /context, /status, and the status bar. */
@@ -1796,13 +1143,15 @@ export class AgentRuntime {
 	}
 
 	private publishContextUsage(): void {
-		this.contextTokens = this.measureContextTokens();
-		this.contextMaxTokens =
-			this.contextMaxTokens || this.config.contextWindowTokens;
+		const current = this.activity.context();
+		const context = this.activity.setContext(
+			this.measureContextTokens(),
+			current.maxTokens || this.config.contextWindowTokens,
+		);
 		this.emit({
 			type: "context_update",
-			tokens: this.contextTokens,
-			maxTokens: this.contextMaxTokens,
+			tokens: context.tokens,
+			maxTokens: context.maxTokens,
 			compacted: false,
 		});
 	}
@@ -1821,53 +1170,6 @@ export class AgentRuntime {
 	}
 
 	/**
-	 * Runs plugin listing, session-start hooks, and skill/prompt/subagent
-	 * injection through the startup coordinator. Concurrent callers join the
-	 * same attempt; failure is retryable and reset invalidates stale completion.
-	 */
-	private async runStartupHooksOnce(source = "startup"): Promise<void> {
-		await this.startup.ensure(source);
-	}
-
-	private async runStartupHooksNow(source: string): Promise<void> {
-		const snapshot = await runPluginBackend("list", []);
-		this.startupPluginCount = (snapshot.plugins || []).filter(plugin => {
-			return plugin.enabled !== false && plugin.on_disk !== false;
-		}).length;
-		if (this.config.runtimeHooksEnabled !== false) {
-			const result = await runSessionStartHooks({
-				source,
-				session_id: this.sessionId,
-				transcript_path: this.config.hookTranscriptPath,
-				cwd: this.config.cwd || process.cwd(),
-			});
-			this.startupHookResult = result;
-			if (result.status !== "error") {
-				this.applyPluginHookContext(result);
-			}
-		}
-		// Skills, prompts, and agents are runtime resources, independent of
-		// whether command hooks are enabled.
-		await this.injectSkillsFromPlugins();
-		await this.injectPrompts();
-		await this.agentCoordinator?.injectSubagents();
-	}
-
-	private async fireSessionEnd(reason: string): Promise<void> {
-		if (this.config.runtimeHooksEnabled === false) return;
-		try {
-			await runHookEvent("SessionEnd", {
-				session_id: this.sessionId,
-				transcript_path: this.config.hookTranscriptPath || "",
-				cwd: this.config.cwd || process.cwd(),
-				reason,
-			});
-		} catch (_e: unknown) {
-			// SessionEnd hooks are best-effort during shutdown/reset.
-		}
-	}
-
-	/**
 	 * Execute a bash command directly (for user_bash / !command in the input bar).
 	 * Returns the command output and exit code.
 	 */
@@ -1875,37 +1177,7 @@ export class AgentRuntime {
 		output: string;
 		exitCode: number;
 	}> {
-		const { spawn } = await import("node:child_process");
-		const { getShellConfig } = await import(
-			"../../capabilities/tools/support/utils/shell.ts"
-		);
-		const { shell, args: shellArgs } = getShellConfig();
-
-		return new Promise((resolve, reject) => {
-			const child = spawn(shell, [...shellArgs, command], {
-				cwd: this.cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-
-			let output = "";
-			child.stdout?.on("data", (data: Buffer) => {
-				output += data.toString();
-			});
-			child.stderr?.on("data", (data: Buffer) => {
-				output += data.toString();
-			});
-
-			child.on("close", (code: number | null) => {
-				resolve({
-					output: output || "(no output)",
-					exitCode: code ?? 1,
-				});
-			});
-
-			child.on("error", (err: Error) => {
-				reject(err);
-			});
-		});
+		return executeProcessCommand(this.cwd, command);
 	}
 }
 

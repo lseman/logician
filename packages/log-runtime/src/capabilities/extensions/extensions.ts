@@ -21,10 +21,13 @@ export interface ExtensionManagerOptions {
 // ── ExtensionRegistry class ─────────────────────────────────────────────────────
 
 export class ExtensionRegistry {
+	private readonly opts: ExtensionManagerOptions;
 	private _runner: ExtensionRunner | null = null;
 	private loadPromise: Promise<void> = Promise.resolve();
 
-	constructor(private readonly opts: ExtensionManagerOptions) {}
+	constructor(opts: ExtensionManagerOptions) {
+		this.opts = opts;
+	}
 
 	/** Access the internal runner for harness wiring. */
 	get runner(): ExtensionRunner | null {

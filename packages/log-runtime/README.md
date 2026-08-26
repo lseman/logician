@@ -32,7 +32,24 @@ turn, and tool-call correlation across replay. Set
 `eventStream.historyCapacity` when constructing `AgentRuntime` to control the
 bounded replay window.
 
+`AgentRuntime` is a compatibility facade over focused application modules:
+
+- `ConversationSession` owns live harness creation, history, queues, abort,
+  compaction, and branches.
+- `ConversationIdentity` keeps the session store, event stream, hook paths, and
+  memory identity synchronized.
+- `TurnOrchestrator` and `SessionRunner` own turn admission and execution.
+- `CommandDispatcher` owns slash, skill, prompt, and reload routing.
+- `PluginLifecycle`, `RuntimeConfiguration`, and `RuntimeActivity` own their
+  respective state transitions and side effects.
+- `LegroomGateway` is the adapter for the optional compression worker.
+
 Run serialization and active/idle state live behind `RuntimeRunCoordinator`;
-the public `AgentRuntime` interface remains unchanged. Operational failures emit
-structured, replayable `diagnostic` events alongside compatible transcript
-notices.
+concurrent exactly-once initialization and retry/reset behavior live behind
+`RuntimeStartupCoordinator`. Each module is tested through the same interface
+used by the facade. Operational failures emit structured, replayable
+`diagnostic` events alongside compatible transcript notices.
+
+Provider turns, tools, hooks, MCP HTTP/stdio requests, and plugin HTTP/shell
+hooks share `@logician/log-core/runtime`'s `CancellationScope` for parent
+propagation, typed deadlines, and deterministic cleanup.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { runQueueCommand } from "../../runtime/bridge/queue-command.ts";
+import { runQueueCommand } from "../../runtime/bridge/application/queue-command.ts";
 
 function target(overrides: Record<string, unknown> = {}) {
 	return {

@@ -22,11 +22,12 @@ export {
 export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
 export { stripAcceptanceReport } from "./control/guards/acceptance-contract.ts";
 export {
-	type RunAgentLoopConfig,
-	type RunAgentLoopContext,
-	runAgentLoop,
-	STEERING_INTERRUPT_SUMMARY,
-} from "./runtime/harness/agent-harness.ts";
+	type CancellationCleanup,
+	CancellationError,
+	type CancellationKind,
+	CancellationScope,
+	type CancellationScopeOptions,
+} from "./runtime/control/cancellation-scope.ts";
 export {
 	EventJournal,
 	type EventJournalEntry,
@@ -36,12 +37,11 @@ export {
 	type JournalEvent,
 } from "./runtime/events/event-journal.ts";
 export {
-	CancellationError,
-	CancellationScope,
-	type CancellationCleanup,
-	type CancellationKind,
-	type CancellationScopeOptions,
-} from "./runtime/control/cancellation-scope.ts";
+	type RunAgentLoopConfig,
+	type RunAgentLoopContext,
+	runAgentLoop,
+	STEERING_INTERRUPT_SUMMARY,
+} from "./runtime/harness/agent-harness.ts";
 export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export {
 	type AgentConfig,

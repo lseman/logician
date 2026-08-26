@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { RuntimeRunCoordinator } from "../../runtime/bridge/run-coordinator.ts";
+import { RuntimeRunCoordinator } from "../../runtime/bridge/application/run-coordinator.ts";
 
 describe("RuntimeRunCoordinator", () => {
 	test("serializes runs and recovers its queue after a rejection", async () => {

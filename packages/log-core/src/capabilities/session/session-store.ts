@@ -280,6 +280,23 @@ function isValidSessionEntry(value: unknown): value is SessionEntry {
 	}
 }
 
+function isValidSessionMeta(value: unknown): value is SessionMeta {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.id === "string" &&
+		Number.isFinite(value.createdAt) &&
+		Number.isSafeInteger(value.messageCount) &&
+		(value.messageCount as number) >= 0 &&
+		Number.isFinite(value.lastActivity) &&
+		(value.name === undefined || typeof value.name === "string") &&
+		(value.cwd === undefined || typeof value.cwd === "string") &&
+		(value.parentId === undefined || typeof value.parentId === "string") &&
+		(value.activeLeafId === undefined ||
+			typeof value.activeLeafId === "string") &&
+		(value.version === undefined || Number.isSafeInteger(value.version))
+	);
+}
+
 // ── SessionStore class ──────────────────────────────────────────────────
 // Append-only JSONL conversation tree for one harness session. Execution state
 // belongs exclusively to the Run Kernel. Also the sole persistence layer for
@@ -774,7 +791,9 @@ export class SessionStore {
 		const parsed: unknown = JSON.parse(line);
 		if (isValidSessionEntry(parsed)) return parsed;
 		if (isRecord(parsed) && "type" in parsed) {
-			throw new TypeError(`Invalid session entry of type ${String(parsed.type)}`);
+			throw new TypeError(
+				`Invalid session entry of type ${String(parsed.type)}`,
+			);
 		}
 		if (!parsed || typeof parsed !== "object") {
 			throw new TypeError("Session entry must be an object");
@@ -796,7 +815,8 @@ export class SessionStore {
 	private getMetaSilent(): SessionMeta | null {
 		if (!existsSync(this.metaPath)) return null;
 		try {
-			return JSON.parse(readFileSync(this.metaPath, "utf8")) as SessionMeta;
+			const parsed: unknown = JSON.parse(readFileSync(this.metaPath, "utf8"));
+			return isValidSessionMeta(parsed) ? parsed : null;
 		} catch (_e: unknown) {
 			return null;
 		}
@@ -891,7 +911,8 @@ export class SessionRegistry {
 	/** Open an existing session by ID. Returns null if not found. */
 	getSession(sessionId: string): SessionStore | null {
 		const sessionDir = join(this.baseDir, sessionId);
-		if (!existsSync(sessionDir) || !statSync(sessionDir).isDirectory()) return null;
+		if (!existsSync(sessionDir) || !statSync(sessionDir).isDirectory())
+			return null;
 		return new SessionStore(sessionId, {
 			baseDir: join(this.baseDir, ".."),
 		});

@@ -109,6 +109,9 @@ describe("RuntimeEventBus replay", () => {
 			missingFromSequence: 1,
 			missingThroughSequence: 1,
 			oldestAvailableSequence: 2,
+			sessionId: undefined,
+			resolutionHint: "partial",
+			intraRunGap: false,
 		});
 		expect(replayed).toEqual([2, 3]);
 	});
@@ -124,6 +127,9 @@ describe("RuntimeEventBus replay", () => {
 			missingFromSequence: 1,
 			missingThroughSequence: 2,
 			oldestAvailableSequence: undefined,
+			sessionId: undefined,
+			resolutionHint: "partial",
+			intraRunGap: false,
 		});
 	});
 

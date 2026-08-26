@@ -1074,7 +1074,7 @@ void test("status bar renders the live Legroom SDK state", () => {
 	assert.match(plain(status.render(240)[0]), /\bleg: off\b/);
 
 	status.update({ legroomEnabled: true });
-	assert.match(plain(status.render(240)[0]), /\bleg: on\b/);
+	assert.match(plain(status.render(240)[0]), /\bleg: sdk\b/);
 });
 
 void test("input prompt has stable inset modern chrome", () => {

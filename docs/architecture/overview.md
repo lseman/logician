@@ -93,9 +93,24 @@ capability, organized as one folder per capability under `capabilities/`:
 - `memory/`, `lsp/`, `mcp/`, `skills/`, `interactions/`, `extensions/`,
   `repository-map/`, `prompts/`, `commands/` — the remaining capability seams
 
-`runtime/` is the orchestration layer on top: the agent bridge, tool router,
-session/transcript handling, and configuration — the code that wires
-capabilities together rather than being one itself.
+`runtime/` is the orchestration layer on top. `AgentRuntime` remains the stable
+client-facing facade, while application modules behind it own distinct state
+transitions:
+
+```text
+AgentRuntime (compatibility facade)
+├── TurnOrchestrator + SessionRunner       turn admission and execution
+├── ConversationSession                   harness, history, queues, branches
+├── ConversationIdentity                  session/event/hook/memory identity
+├── CommandDispatcher                     slash, skill, and prompt routing
+├── PluginLifecycle                       startup, resources, hooks, shutdown
+├── RuntimeConfiguration + RuntimeActivity settings and observable run state
+└── ToolRouter + capability gateways      product capability adapters
+```
+
+These seams keep orchestration policy out of the presentation layer and avoid
+making the facade the owner of every subsystem. Tests exercise each module
+through the same interface used by `AgentRuntime`.
 
 ### log-eoh
 

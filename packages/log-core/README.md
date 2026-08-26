@@ -56,6 +56,8 @@ and deterministic LIFO cleanup. The harness turn controller and tool registry
 use this module instead of managing independent abort listeners and timers.
 
 Session JSONL is authoritative. Metadata is written through an fsynced temporary
-file and atomic rename, then reconciled from the journal on startup. A truncated
-final JSONL record is removed safely; corruption before the tail raises the
-typed `SessionCorruptionError` rather than silently discarding history.
+file and atomic rename after the journal append itself reaches stable storage,
+then reconciled from the journal on startup. Missing or invalid metadata is
+rebuilt during registry scans. A truncated final JSONL record is removed safely;
+corruption before the tail raises the typed `SessionCorruptionError` rather than
+silently discarding history.

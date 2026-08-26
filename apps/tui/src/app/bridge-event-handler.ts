@@ -362,6 +362,11 @@ export function handleEvent(
 				});
 			}
 			break;
+		case "diagnostic":
+			// The following notice is the human-readable transcript projection.
+			// Keep this structured event available to replay/automation clients
+			// without rendering the same failure twice in the TUI.
+			break;
 		case "repair_nudge":
 			ctx.transcript.addSystemMessage(
 				`Tool-call repair: ${event.message || "recovered malformed tool call"}`,

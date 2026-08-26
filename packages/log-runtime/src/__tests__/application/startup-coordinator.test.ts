@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { RuntimeStartupCoordinator } from "../../runtime/bridge/startup-coordinator.ts";
+import { RuntimeStartupCoordinator } from "../../runtime/bridge/application/startup-coordinator.ts";
 
 describe("RuntimeStartupCoordinator", () => {
 	test("joins concurrent callers onto one initialization", async () => {

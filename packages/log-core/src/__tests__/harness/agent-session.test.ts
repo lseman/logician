@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +13,7 @@ import { join } from "node:path";
 import { BackendError } from "../../capabilities/provider/backend.ts";
 import {
 	SessionCorruptionError,
+	SessionRegistry,
 	SessionStore,
 } from "../../capabilities/session/session-store.ts";
 import {
@@ -775,5 +777,55 @@ void test("session recovery rejects corruption before the final JSONL record", (
 		() => new SessionStore("corrupt", { baseDir, enabled: true }),
 		(error: unknown) =>
 			error instanceof SessionCorruptionError && error.lineNumber === 2,
+	);
+});
+
+void test("session registry rebuilds missing metadata from the durable journal", () => {
+	const baseDir = mkdtempSync(join(tmpdir(), "logician-session-registry-"));
+	const cwd = join(baseDir, "workspace");
+	const session = new SessionStore("recoverable", {
+		baseDir,
+		enabled: true,
+		cwd,
+	});
+	session.append({ role: "user", content: "recover me", timestamp: 10 });
+	unlinkSync(join(session.dirPath, "meta.json"));
+
+	const registry = new SessionRegistry({ baseDir });
+	const recovered = registry.getSession("recoverable");
+	assert.ok(recovered);
+	assert.equal(recovered.getMeta().messageCount, 1);
+	assert.equal(recovered.load()[0]?.content, "recover me");
+	assert.equal(registry.listSessions()[0]?.id, "recoverable");
+});
+
+void test("session registry repairs corrupt metadata without hiding the session", () => {
+	const baseDir = mkdtempSync(join(tmpdir(), "logician-session-meta-"));
+	const session = new SessionStore("bad-meta", { baseDir, enabled: true });
+	session.append({ role: "user", content: "still safe", timestamp: 10 });
+	writeFileSync(join(session.dirPath, "meta.json"), "{truncated", "utf8");
+
+	const registry = new SessionRegistry({ baseDir });
+	assert.equal(registry.listSessions()[0]?.id, "bad-meta");
+	assert.equal(
+		registry.getSession("bad-meta")?.load()[0]?.content,
+		"still safe",
+	);
+});
+
+void test("session validation rejects unknown typed entries", () => {
+	const baseDir = mkdtempSync(join(tmpdir(), "logician-session-schema-"));
+	const session = new SessionStore("schema", { baseDir, enabled: true });
+	const journalPath = join(session.dirPath, "messages.jsonl");
+	appendFileSync(
+		journalPath,
+		'{"type":"future_unknown","id":"x","timestamp":1}\n',
+		"utf8",
+	);
+
+	assert.throws(
+		() => session.loadEntries(),
+		(error: unknown) =>
+			error instanceof SessionCorruptionError && error.lineNumber === 1,
 	);
 });

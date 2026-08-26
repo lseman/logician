@@ -40,6 +40,7 @@ import type {
 	TransformContext,
 	TransformContextResult,
 } from "../../system/types/types-messages.ts";
+import { CancellationScope } from "../control/cancellation-scope.ts";
 
 export type HookEventName = keyof AgentHooks;
 
@@ -506,20 +507,18 @@ export class HookBus {
 		_id: string,
 		parentSignal?: AbortSignal,
 	): Promise<T | undefined> {
-		const controller = new AbortController();
-		const abort = () => controller.abort(parentSignal?.reason);
-		if (parentSignal?.aborted) abort();
-		else parentSignal?.addEventListener("abort", abort, { once: true });
+		const scope = new CancellationScope({
+			operation: `hook ${event}${source ? ` (${source})` : ""}`,
+			parent: parentSignal,
+		});
 		try {
-			if (controller.signal.aborted)
-				throw controller.signal.reason ?? new Error("Hook handler aborted");
-			return await fn(controller.signal);
+			return await scope.run(signal => Promise.resolve(fn(signal)), {
+				rejectOnAbort: false,
+			});
 		} catch (e) {
 			const error = e as Error;
 			this.onError?.(error, event, source);
 			return undefined;
-		} finally {
-			parentSignal?.removeEventListener("abort", abort);
 		}
 	}
 

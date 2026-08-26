@@ -56,6 +56,13 @@ append-oriented. If Logician adds a SQLite session index, it should remain a
 rebuildable query accelerator for search and large catalogs rather than become a
 second authoritative history.
 
+Each append is flushed to stable storage before `meta.json` advances. Metadata
+and journal rewrites use an fsynced temporary file followed by an atomic rename.
+At startup, Logician reconciles stale metadata from the journal, rebuilds missing
+or invalid metadata during registry scans, and removes only an incomplete final
+JSONL record. Invalid entries earlier in the journal raise a typed corruption
+error instead of silently discarding history.
+
 ## File recovery
 
 Conversation branches are distinct from file checkpoints. When checkpointing is enabled, Logician records recoverable file state around edits so rewind can restore both conversational position and affected files without destructive Git operations. See [Durability & Recovery](./run-kernel.md) for how checkpoint frames are captured.

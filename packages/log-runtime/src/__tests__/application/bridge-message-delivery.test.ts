@@ -4,7 +4,15 @@ import type { RuntimeEvent } from "@logician/log-core/events";
 import { AgentRuntime } from "../../runtime/bridge/agent-bridge.ts";
 
 function bypassStartup(internal: Record<string, unknown>): void {
-	internal.startup = { ensure: async () => {}, reset: () => {} };
+	const plugins = internal.plugins as Record<string, unknown> | undefined;
+	if (plugins) plugins.ensureStarted = async () => {};
+}
+
+function installSession(
+	internal: Record<string, any>,
+	session: Record<string, any>,
+): void {
+	internal.sessions.replace(session);
 }
 
 void test("bridge publishes ordered versioned protocol notifications", () => {
@@ -38,6 +46,45 @@ void test("bridge publishes ordered versioned protocol notifications", () => {
 	);
 });
 
+void test("bridge scopes correlation to one run and preserves the conversation identity", async () => {
+	const bridge = new AgentRuntime({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+	});
+	bridge.useConversationSession("session-correlation");
+	const internal = bridge as unknown as Record<string, any>;
+	bypassStartup(internal);
+	internal.toolRouter.isMcpLoaded = () => true;
+	installSession(internal, {
+		messages: [],
+		configure: () => {},
+		prompt: async () => {},
+		getQueues: () => ({ steering: [], followUp: [], nextTurn: [] }),
+	});
+
+	await bridge.sendMessage("correlate this run");
+	const runNotifications = bridge.events
+		.snapshot()
+		.filter(item => item.correlation?.runId);
+	assert.ok(runNotifications.length > 0);
+	const correlation = runNotifications[0]?.correlation;
+	assert.equal(correlation?.sessionId, "session-correlation");
+	assert.match(correlation?.runId ?? "", /^run_/);
+	assert.match(correlation?.turnId ?? "", /^turn_/);
+	assert.equal(
+		runNotifications.every(
+			item => item.correlation?.runId === correlation?.runId,
+		),
+		true,
+	);
+
+	internal.emit({ type: "phase", state: "ready" });
+	assert.deepEqual(bridge.events.snapshot().at(-1)?.correlation, {
+		sessionId: "session-correlation",
+	});
+});
+
 void test("runtime settings update the live harness and preserve guard auto mode", () => {
 	const bridge = new AgentRuntime({
 		baseUrl: "http://127.0.0.1:1",
@@ -64,11 +111,11 @@ void test("setThinkingLevel propagates to the live harness", () => {
 	});
 	const harnessLevels: string[] = [];
 	const internal = bridge as unknown as Record<string, any>;
-	internal.session = {
+	installSession(internal, {
 		models: {
 			setThinkingLevel: (level: string) => harnessLevels.push(level),
 		},
-	};
+	});
 
 	bridge.updateSettings({ thinkingLevel: "high" });
 
@@ -83,13 +130,13 @@ void test("setSteeringInterrupt propagates to the live harness", () => {
 	});
 	const harnessValues: boolean[] = [];
 	const internal = bridge as unknown as Record<string, any>;
-	internal.session = {
+	installSession(internal, {
 		configure: (patch: any) => {
 			if (patch.steeringInterrupt !== undefined) {
 				harnessValues.push(patch.steeringInterrupt);
 			}
 		},
-	};
+	});
 
 	bridge.updateSettings({ steeringInterrupt: true });
 
@@ -171,14 +218,14 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 	internal.toolRouter.loadMcpToolsOnce = () => new Promise<void>(() => {});
 
 	let delivered = "";
-	internal.session = {
+	installSession(internal, {
 		messages: [],
 		configure: () => {},
 		prompt: async (message: string) => {
 			delivered = message;
 		},
 		getQueues: () => ({ nextTurn: [] }),
-	} as any;
+	});
 
 	await Promise.race([
 		bridge.sendMessage("hello"),
@@ -209,14 +256,14 @@ void test("MCP discovery never blocks the first turn — it loads in the backgro
 			resolveLoad = resolve;
 		});
 	let delivered = false;
-	internal.session = {
+	installSession(internal, {
 		messages: [],
 		configure: () => {},
 		prompt: async () => {
 			delivered = true;
 		},
 		getQueues: () => ({ nextTurn: [] }),
-	} as any;
+	});
 
 	// The turn should complete without ever waiting on the in-flight MCP
 	// load — MCP starts loading the moment the bridge (ToolRouter) is
@@ -276,7 +323,7 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 	};
 
 	await internal.loadMcpToolsOnce();
-	internal.applyPluginHookContext({
+	internal.plugins.applyContext({
 		additional_contexts: ["startup instructions"],
 		context_messages: [
 			{
@@ -308,7 +355,7 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 	assert.match(internal.config.systemPrompt, /<mcp-status>/);
 	assert.match(internal.config.systemPrompt, /<available-skills>/);
 
-	internal.applyPluginHookContext({ additional_contexts: [] });
+	internal.plugins.applyContext({ additional_contexts: [] });
 
 	assert.doesNotMatch(internal.config.systemPrompt, /<startup-hook-context>/);
 	assert.match(internal.config.systemPrompt, /<mcp-status>/);
@@ -323,7 +370,7 @@ void test("malformed startup hook messages do not prevent initialization", () =>
 	});
 	const internal = bridge as unknown as Record<string, any>;
 
-	internal.applyPluginHookContext({
+	internal.plugins.applyContext({
 		additional_contexts: ["valid additional context"],
 		context_messages: [
 			null,
@@ -349,7 +396,7 @@ void test("/context preserves complete long messages and tool results", () => {
 	const internal = bridge as unknown as Record<string, any>;
 	const longUserMessage = `user-start\n${"u".repeat(2500)}\nuser-end`;
 	const longToolResult = `tool-start\n${"t".repeat(2500)}\ntool-end`;
-	internal.session = {
+	installSession(internal, {
 		messages: [
 			{ role: "user", content: longUserMessage },
 			{
@@ -359,7 +406,7 @@ void test("/context preserves complete long messages and tool results", () => {
 			},
 			{ role: "tool", tool_call_id: "call-1", content: longToolResult },
 		],
-	} as any;
+	});
 
 	const context = bridge.getContext();
 
@@ -475,7 +522,7 @@ void test("loaded skills are exposed as a persistent catalog, not scored per tur
 		"<available-skills>\n" +
 		'  <skill name="typescript-code-review" slash_command="/typescript-code-review" />\n' +
 		"</available-skills>";
-	internal.applyPluginHookContext({
+	internal.plugins.applyContext({
 		additional_contexts: [],
 		context_messages: [],
 		initial_user_message: "",
@@ -500,7 +547,7 @@ void test("automatic continuation reuses the current system prompt", async () =>
 	const seen: Array<{ kind: string; systemPrompt: string }> = [];
 
 	// Mock session to capture prompt/continuation behavior
-	internal.session = {
+	installSession(internal, {
 		messages: [],
 		configure: () => {},
 		prompt: async () => {
@@ -508,7 +555,7 @@ void test("automatic continuation reuses the current system prompt", async () =>
 		},
 		getQueues: () => ({ nextTurn: [] }),
 		setRepositoryQuery: () => {},
-	} as any;
+	});
 
 	await bridge.sendMessage("Diagnose this TypeScript error.");
 	// Allow async continuation to process
@@ -533,14 +580,14 @@ void test("sendMessage rejects when the turn fails", async () => {
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	// Mock session to simulate provider failure
-	internal.session = {
+	installSession(internal, {
 		messages: [],
 		configure: () => {},
 		prompt: async () => {
 			throw new Error("provider failed");
 		},
 		getQueues: () => ({ nextTurn: [] }),
-	} as any;
+	});
 
 	await assert.rejects(bridge.sendMessage("hello"), /provider failed/);
 });
@@ -553,7 +600,7 @@ void test("cancel resolves only after abort settlement and returns recoverable q
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	let settled = false;
-	internal.session = {
+	installSession(internal, {
 		abort: async () => {
 			await Promise.resolve();
 			settled = true;
@@ -563,7 +610,7 @@ void test("cancel resolves only after abort settlement and returns recoverable q
 				clearedNextTurn: [],
 			};
 		},
-	} as any;
+	});
 
 	const result = await bridge.cancel();
 
@@ -586,7 +633,7 @@ void test("core iterations reconcile output without completing the UI turn early
 	internal.toolRouter.isMcpLoaded = () => true;
 
 	// Mock session to simulate provider events
-	internal.session = {
+	installSession(internal, {
 		messages: [],
 		configure: () => {},
 		prompt: async () => {
@@ -601,7 +648,7 @@ void test("core iterations reconcile output without completing the UI turn early
 			} as any);
 		},
 		getQueues: () => ({ nextTurn: [] }),
-	} as any;
+	});
 
 	const events: RuntimeEvent[] = [];
 	bridge.events.subscribe(({ event }) => events.push(event));
@@ -634,7 +681,7 @@ void test("queued replacement turn reaches READY only after its stream ends", as
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	let queued = ["change direction"];
-	internal.session = {
+	installSession(internal, {
 		messages: [],
 		configure: () => {},
 		prompt: async () => {},
@@ -647,7 +694,7 @@ void test("queued replacement turn reaches READY only after its stream ends", as
 			internal.emit({ type: "phase", state: "ready" });
 			return true;
 		},
-	} as any;
+	});
 
 	const lifecycle: string[] = [];
 	bridge.events.subscribe(({ event }) => {

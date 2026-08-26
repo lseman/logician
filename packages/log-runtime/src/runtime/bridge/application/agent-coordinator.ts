@@ -1,21 +1,22 @@
 /** Coordinates optional reasoners, subagents, and heuristic evolution. */
 
-import type { LLMBackend, Tool } from "@logician/log-core";
+import type { AgentConfig, LLMBackend, Tool } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import type { AgentSession } from "@logician/log-core/session";
 import {
 	get_reasoner,
 	getReasonerMeta,
 	type ReasonerConfig,
-} from "../../capabilities/reasoning/index.ts";
-import { EohController } from "../eoh/controller.ts";
-import { SubagentCoordinator } from "../subagent-coordinator.ts";
+} from "../../../capabilities/reasoning/index.ts";
+import { EohController } from "../../eoh/controller.ts";
+import { SubagentCoordinator } from "../../subagent-coordinator.ts";
 
 // ── Dependencies ───────────────────────────────────────────────────────────────
 
 export interface AgentCoordinatorDeps {
 	emit: (event: RuntimeEvent) => void;
-	getBackend: () => LLMBackend | null;
+	getBackend: () => LLMBackend;
+	getConfig: () => AgentConfig;
 	getBaseUrl: () => string;
 	getCurrentModel: () => string;
 	cwd: string;
@@ -54,8 +55,8 @@ export class AgentCoordinator {
 		});
 
 		this.subagents = new SubagentCoordinator({
-			config: () => ({ systemPrompt: "", tools: [] }) as any,
-			backend: deps.getBackend()!,
+			config: deps.getConfig,
+			backend: deps.getBackend(),
 			cwd: deps.cwd,
 			projectTrusted: deps.projectTrusted,
 			maxParallelAgents: deps.maxParallelAgents,
