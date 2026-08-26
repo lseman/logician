@@ -5,10 +5,23 @@ description: Persistence, labels, branches, rewind, and compaction.
 
 # Session Management
 
-Logician maintains two complementary records:
+Logician stores each conversation as one append-only, parent-linked session
+journal. The TUI session browser and the agent harness use the same canonical
+record rather than maintaining separate catalog and recovery databases.
 
-- the TUI session catalog in `<workspace>/.logician/tui/sessions/history.db`, used for browsing, names, labels, and completed turns;
-- an append-only agent journal used for crash recovery, branches, settings changes, and compaction state.
+By default, sessions live under `.logician/sessions/sessions/` in the directory where
+Logician was launched:
+
+```text
+.logician/sessions/sessions/<session-id>/
+├── meta.json
+└── messages.jsonl
+```
+
+`meta.json` contains the session name, workspace, activity time, selected leaf,
+and format version. `messages.jsonl` contains messages, completed TUI turns,
+settings changes, labels, branch summaries, and compaction entries. The files
+are local, inspectable, and require no database server.
 
 ## Everyday operations
 
@@ -51,4 +64,13 @@ Use `/context` to inspect current context state and `/compact` when you want to 
 
 ## Recovery
 
-The SQLite catalog uses WAL mode and saves completed turns. The agent journal records incremental execution state. After an interruption, Logician can restore the selected session path and recover queued/session metadata without treating the displayed transcript as the only source of truth.
+The journal records incremental execution state, not only the final transcript.
+After an interruption, Logician rebuilds the selected parent-linked path and
+restores its conversation, settings, branch state, and completed TUI turns.
+`meta.json` identifies the active leaf, so selecting a branch does not rewrite or
+duplicate earlier history.
+
+Session history currently uses JSONL rather than SQLite. Session listing scans
+the per-session metadata files, while previews are derived from the first user
+message. A future search index may use SQLite as a rebuildable acceleration
+layer, but it would not replace the append-only journal as the canonical record.

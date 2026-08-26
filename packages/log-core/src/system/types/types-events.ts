@@ -208,6 +208,17 @@ export interface AgentErrorEvent {
 	recoverable: boolean;
 }
 
+/** Machine-readable operational failure; safe to persist and replay. */
+export interface DiagnosticEvent {
+	type: "diagnostic";
+	severity: "info" | "warning" | "error";
+	component: string;
+	operation: string;
+	code: string;
+	message: string;
+	recoverable: boolean;
+}
+
 export interface RuntimeStatusEvent {
 	type: "runtime_status";
 	runPhase: string;
@@ -344,7 +355,8 @@ export type RuntimeEvent =
 	| AgentRetryStartEvent
 	| AgentRetryEndEvent
 	| RuntimeStatusEvent
-	| AgentErrorEvent;
+	| AgentErrorEvent
+	| DiagnosticEvent;
 
 /** Event names are derived from the canonical discriminated union so the two
  * cannot drift as new runtime events are added. */

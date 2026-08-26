@@ -19,7 +19,7 @@ The lifecycle roles are intentionally distinct:
 Dependency direction:
 
 ```text
-agent-core <- agent-blocks / eoh / autoresearch <- agent-runtime <- tui
+log-core <- memoriam / log-rag / log-eoh / log-autoresearch <- log-runtime <- tui
 ```
 
 Applications use `@logician/log-core/session`. Lower-level engines and tests may
@@ -48,3 +48,14 @@ const missed = events.snapshot({ afterId: lastSeenId });
 Journal cursors are monotonic even after `clear()`. A capacity of zero disables
 retention while preserving live subscriptions. Subscriber failures are isolated
 and can be reported through `onSubscriberError`.
+
+## Cancellation and recovery
+
+`CancellationScope` centralizes parent cancellation, typed deadline reasons,
+and deterministic LIFO cleanup. The harness turn controller and tool registry
+use this module instead of managing independent abort listeners and timers.
+
+Session JSONL is authoritative. Metadata is written through an fsynced temporary
+file and atomic rename, then reconciled from the journal on startup. A truncated
+final JSONL record is removed safely; corruption before the tail raises the
+typed `SessionCorruptionError` rather than silently discarding history.

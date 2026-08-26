@@ -7,6 +7,7 @@
 
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
+import { CancellationScope } from "../../runtime/control/cancellation-scope.ts";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AskUserContext,
@@ -15,7 +16,6 @@ import type {
 	ToolContext,
 	ToolResult,
 } from "../../system/types/types-messages.ts";
-import { withTimeout } from "./internal/async.ts";
 import { parseToolInput } from "./internal/parser.ts";
 import { normalizeProviderToolSchema } from "./provider-schema.ts";
 import { ToolResultCache } from "./tool-result-cache.ts";
@@ -281,33 +281,18 @@ export class ToolRegistry {
 				tool.resolveTimeoutMs?.(args) ??
 				tool.timeoutMs ??
 				this.defaultToolTimeoutMs;
-			const parentSignal = context?.signal ?? this.ctx.signal;
-			const executionController = new AbortController();
-			const abortFromParent = () =>
-				executionController.abort(parentSignal?.reason);
-			if (parentSignal?.aborted) abortFromParent();
-			else
-				parentSignal?.addEventListener("abort", abortFromParent, {
-					once: true,
-				});
-			let raw: string | ToolResult;
-			try {
-				const run = tool.execute(args, {
+			const executionScope = new CancellationScope({
+				operation: `tool ${call.name}`,
+				parent: context?.signal ?? this.ctx.signal,
+				timeoutMs,
+			});
+			const raw: string | ToolResult = await executionScope.run(signal =>
+				tool.execute(args, {
 					...this.ctx,
 					...context,
-					signal: executionController.signal,
-				});
-				raw =
-					timeoutMs > 0
-						? await withTimeout(run, timeoutMs, () =>
-								executionController.abort(
-									new Error(`Tool execution timed out after ${timeoutMs}ms`),
-								),
-							)
-						: await run;
-			} finally {
-				parentSignal?.removeEventListener("abort", abortFromParent);
-			}
+					signal,
+				}),
+			);
 			// Normalize the string | ToolResult union to a ToolResult.
 			const result: ToolResult =
 				typeof raw === "string" ? { content: raw } : raw;

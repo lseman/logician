@@ -5,28 +5,40 @@ description: TUI features, keybindings, layouts, and terminal compatibility.
 
 # Terminal UI
 
-The Logician TUI is designed for real terminal environments — SSH sessions, tmux, and local terminals.
+The Logician TUI is designed for real terminal environments — SSH sessions,
+tmux, and local terminals. Its layout adapts to narrow terminals while keeping
+the transcript, composer, and current execution state visible.
 
 ## Layout
 
+```text
+◆ LOGICIAN
+
+  RESPONSE
+  I found the failing boundary and updated the parser.
+
+  COMMAND  bun test packages/log-core
+  OUTPUT   42 pass, 0 fail
+
+  COMPOSER             / Enter commands · @ files · Enter send · Ctrl+Enter steer
+  › Ask Logician…
+  ──────────────────────────────────────────────────────────────────────────────
+  ● READY │ model │ cwd │ branch │ thinking mode
 ```
-┌─────────────────────────────────────────────────┐
-│ Logician v0.2.0                    [ask] mode  │ ← Status bar
-├─────────────────────────────────────────────────┤
-│ > Fix the auth bug in src/middleware.ts         │ ← Input
-├─────────────────────────────────────────────────┤
-│ 💭 Thinking: analyzing middleware auth check... │
-│ 🔧 read src/middleware.ts                       │
-│ 🔧 edit src/middleware.ts                       │
-│ ✅ Done: Fixed auth check, 2 files changed     │
-└─────────────────────────────────────────────────┘
-```
+
+The main transcript is scrollable. Tool activity is rendered as compact cards
+that can be focused and expanded, while longer-lived workflows can open a work
+surface or fullscreen overlay without replacing the conversation. An empty
+session shows project-aware starting actions; typing `/` opens the searchable
+command palette and `@` starts file mention completion.
 
 ## Keybindings
 
 | Key | Action |
 |---|---|
 | `Enter` | Submit instruction |
+| `Shift+Enter` | Insert a newline |
+| `Ctrl+Enter` | Immediately steer the active turn with the composer text |
 | `Esc`, `Esc` | Clear the composer, then safely interrupt the active turn and restore its prompt |
 | `Ctrl+C` | Immediately request interruption |
 | `Ctrl+O` | Expand or collapse all tool results |
@@ -38,6 +50,9 @@ The Logician TUI is designed for real terminal environments — SSH sessions, tm
 | `Ctrl+P` | Toggle plan/act permission mode |
 | `Ctrl+I` | Toggle autonomous/minimal execution policy (enhanced keyboard protocol) |
 | `Ctrl+M` / `Alt+M` | Open the inference-mode selector |
+| `Ctrl+G` | Jump to a file in the current working set |
+| `Ctrl+Shift+T` | Cycle the thinking display mode |
+| `Ctrl+A` | Open the autoresearch dashboard |
 | `/` | Open command palette |
 | `/help` | Show the live command reference |
 
@@ -53,6 +68,7 @@ Works with any VT100-compatible terminal:
 
 - **Normal** — type instructions naturally
 - **Multi-line** — press `Shift+Enter` for newlines
+- **Steering** — press `Ctrl+Enter` during a turn to interrupt and steer now
 - **Paste** — pasted text is processed as a single instruction
 
 ## Streaming output
@@ -61,3 +77,5 @@ Provider output and tool progress stream in real time:
 - Thinking content appears when the provider exposes it and thinking is enabled
 - Tool calls show before execution
 - Results display immediately after completion
+- Tool cards remain compact by default and can be focused or expanded with the
+  keybindings above

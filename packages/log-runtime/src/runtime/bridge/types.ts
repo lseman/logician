@@ -93,6 +93,11 @@ export interface ExtensionsCapabilityConfig {
 	dirs?: { user?: string; paths?: string[] };
 }
 
+export interface EventStreamConfig {
+	/** Number of protocol notifications retained for reconnect replay. */
+	historyCapacity?: number;
+}
+
 export interface AgentBridgeOptions {
 	configPath?: string;
 	baseUrl: string;
@@ -154,4 +159,5 @@ export interface AgentBridgeOptions {
 	repositoryMap?: RepositoryMapCapabilityConfig;
 	permissions?: PermissionsCapabilityConfig;
 	extensions?: ExtensionsCapabilityConfig;
+	eventStream?: EventStreamConfig;
 }

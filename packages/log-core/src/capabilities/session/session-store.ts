@@ -19,12 +19,18 @@
 import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
+	closeSync,
 	existsSync,
+	fsyncSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	statSync,
+	truncateSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -193,9 +199,86 @@ export interface SessionInfo extends SessionMeta {
 	preview: string;
 }
 
+export class SessionCorruptionError extends Error {
+	constructor(
+		message: string,
+		readonly filePath: string,
+		readonly lineNumber?: number,
+		options?: ErrorOptions,
+	) {
+		super(message, options);
+		this.name = "SessionCorruptionError";
+	}
+}
+
 const DEFAULT_BASE_DIR = ".logician/sessions";
 const SESSIONS_DIR = "sessions";
 const META_FILE = "meta.json";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasEntryBase(value: Record<string, unknown>): boolean {
+	return (
+		typeof value.type === "string" &&
+		typeof value.id === "string" &&
+		value.id.length > 0 &&
+		Number.isFinite(value.timestamp) &&
+		(value.parentId === undefined || typeof value.parentId === "string")
+	);
+}
+
+function isValidSessionEntry(value: unknown): value is SessionEntry {
+	if (!isRecord(value) || !hasEntryBase(value)) return false;
+	switch (value.type) {
+		case "message":
+			return (
+				isRecord(value.message) &&
+				typeof value.message.role === "string" &&
+				(value.message.content === null ||
+					typeof value.message.content === "string")
+			);
+		case "model_change":
+			return typeof value.model === "string";
+		case "thinking_level_changed":
+			return typeof value.thinkingLevel === "string";
+		case "active_tools_change":
+			return (
+				Array.isArray(value.activeToolNames) &&
+				value.activeToolNames.every(name => typeof name === "string")
+			);
+		case "settings_change":
+			return (
+				typeof value.key === "string" &&
+				(value.value === null || typeof value.value === "string") &&
+				(value.previousValue === undefined ||
+					value.previousValue === null ||
+					typeof value.previousValue === "string")
+			);
+		case "compaction":
+			return (
+				typeof value.summary === "string" &&
+				Number.isFinite(value.tokensBefore) &&
+				(value.firstKeptEntryId === undefined ||
+					typeof value.firstKeptEntryId === "string")
+			);
+		case "branch_summary":
+			return (
+				typeof value.summary === "string" &&
+				(value.fromId === undefined || typeof value.fromId === "string")
+			);
+		case "label":
+			return (
+				typeof value.targetId === "string" &&
+				(value.label === undefined || typeof value.label === "string")
+			);
+		case "custom":
+			return typeof value.customType === "string";
+		default:
+			return false;
+	}
+}
 
 // ── SessionStore class ──────────────────────────────────────────────────
 // Append-only JSONL conversation tree for one harness session. Execution state
@@ -247,8 +330,11 @@ export class SessionStore {
 			this.version = config?.version ?? 3;
 		}
 
-		// Initialize session directory and meta
+		// Initialize session directory, then reconcile the metadata projection
+		// from the authoritative append-only journal. This repairs a crash after
+		// the journal append but before the metadata rename.
 		this.init();
+		this.reconcileMetaFromJournal();
 	}
 
 	/** Create the session directory and meta file if they don't exist. */
@@ -256,21 +342,17 @@ export class SessionStore {
 		mkdirSync(this.dir, { recursive: true });
 		markPathIgnoredByCloudSync(this.dir);
 
-		if (!existsSync(this.metaPath)) {
-			writeFileSync(
-				this.metaPath,
-				JSON.stringify({
-					id: this.sessionId,
-					createdAt: this.createdAt,
-					messageCount: 0,
-					lastActivity: this.lastActivity,
-					cwd: this.cwd,
-					name: this.name,
-					parentId: this.parentId,
-					version: this.version,
-				}),
-				"utf8",
-			);
+		if (!this.getMetaSilent()) {
+			this.writeMetaAtomically({
+				id: this.sessionId,
+				createdAt: this.createdAt,
+				messageCount: 0,
+				lastActivity: this.lastActivity,
+				cwd: this.cwd,
+				name: this.name,
+				parentId: this.parentId,
+				version: this.version,
+			});
 		}
 	}
 
@@ -389,7 +471,7 @@ export class SessionStore {
 			entry.message.entryId = entry.id;
 			entry.message.parentId = entry.parentId;
 		}
-		appendFileSync(this.filePath, `${JSON.stringify(entry)}\n`, "utf8");
+		this.appendJournalEntry(entry);
 		this.activeLeafId = entry.id;
 		this.messageCount++;
 		this.lastActivity = Date.now();
@@ -406,8 +488,35 @@ export class SessionStore {
 	loadEntries(): SessionEntry[] {
 		if (!existsSync(this.filePath)) return [];
 		const content = readFileSync(this.filePath, "utf8");
-		const lines = content.trim().split("\n").filter(Boolean);
-		return lines.map(line => this.parseEntryLine(line));
+		if (!content) return [];
+		const lines = content.split("\n");
+		const entries: SessionEntry[] = [];
+		for (let index = 0; index < lines.length; index++) {
+			const line = lines[index];
+			if (!line.trim()) continue;
+			try {
+				entries.push(this.parseEntryLine(line));
+			} catch (error) {
+				const isTruncatedTail =
+					index === lines.length - 1 && !content.endsWith("\n");
+				if (isTruncatedTail) {
+					const validPrefix = lines.slice(0, index).join("\n");
+					truncateSync(
+						this.filePath,
+						Buffer.byteLength(validPrefix ? `${validPrefix}\n` : ""),
+					);
+					this.syncFile(this.filePath);
+					break;
+				}
+				throw new SessionCorruptionError(
+					`Invalid session entry at line ${index + 1}`,
+					this.filePath,
+					index + 1,
+					{ cause: error },
+				);
+			}
+		}
+		return entries;
 	}
 
 	buildContext(): SessionContext {
@@ -571,12 +680,11 @@ export class SessionStore {
 			});
 		}
 		this.messageCount = truncated.length;
-		writeFileSync(
+		this.writeFileAtomically(
 			this.filePath,
 			`${entries
 				.map(entry => JSON.stringify(entry satisfies MessageSessionEntry))
 				.join("\n")}\n`,
-			"utf8",
 		);
 		this.activeLeafId = entries.at(-1)?.id;
 		this.lastActivity = Date.now();
@@ -586,33 +694,95 @@ export class SessionStore {
 	// ── Internals ───────────────────────────────────────────────────────
 
 	private updateMeta(): void {
-		writeFileSync(
-			this.metaPath,
-			JSON.stringify({
-				id: this.sessionId,
-				createdAt: this.createdAt,
-				messageCount: this.messageCount,
-				lastActivity: this.lastActivity,
-				name: this.name,
-				cwd: this.cwd,
-				parentId: this.parentId,
-				activeLeafId: this.activeLeafId,
-				version: this.version,
-			}),
-			"utf8",
+		this.writeMetaAtomically({
+			id: this.sessionId,
+			createdAt: this.createdAt,
+			messageCount: this.messageCount,
+			lastActivity: this.lastActivity,
+			name: this.name,
+			cwd: this.cwd,
+			parentId: this.parentId,
+			activeLeafId: this.activeLeafId,
+			version: this.version,
+		});
+	}
+
+	private appendJournalEntry(entry: SessionEntry): void {
+		const descriptor = openSync(this.filePath, "a", 0o600);
+		try {
+			appendFileSync(descriptor, `${JSON.stringify(entry)}\n`, "utf8");
+			fsyncSync(descriptor);
+		} finally {
+			closeSync(descriptor);
+		}
+	}
+
+	private writeMetaAtomically(meta: SessionMeta): void {
+		this.writeFileAtomically(this.metaPath, JSON.stringify(meta));
+	}
+
+	private writeFileAtomically(filePath: string, contents: string): void {
+		mkdirSync(dirname(filePath), { recursive: true });
+		const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+		let descriptor: number | undefined;
+		try {
+			descriptor = openSync(temporaryPath, "wx", 0o600);
+			writeFileSync(descriptor, contents, "utf8");
+			fsyncSync(descriptor);
+			closeSync(descriptor);
+			descriptor = undefined;
+			renameSync(temporaryPath, filePath);
+			const directoryDescriptor = openSync(this.dir, "r");
+			try {
+				fsyncSync(directoryDescriptor);
+			} finally {
+				closeSync(directoryDescriptor);
+			}
+		} finally {
+			if (descriptor !== undefined) closeSync(descriptor);
+			if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+		}
+	}
+
+	private syncFile(filePath: string): void {
+		const descriptor = openSync(filePath, "r");
+		try {
+			fsyncSync(descriptor);
+		} finally {
+			closeSync(descriptor);
+		}
+	}
+
+	private reconcileMetaFromJournal(): void {
+		const entries = this.loadEntries();
+		if (entries.length === 0) return;
+		const ids = new Set(entries.map(entry => entry.id));
+		const countChanged = this.messageCount !== entries.length;
+		const leafMissing = !this.activeLeafId || !ids.has(this.activeLeafId);
+		if (!countChanged && !leafMissing) return;
+		this.messageCount = entries.length;
+		this.activeLeafId = entries.at(-1)?.id;
+		this.lastActivity = Math.max(
+			this.lastActivity,
+			statSync(this.filePath).mtimeMs,
+			...entries.map(entry => entry.timestamp),
 		);
+		this.updateMeta();
 	}
 
 	private parseEntryLine(line: string): SessionEntry {
-		const parsed = JSON.parse(line);
-		if (
-			parsed &&
-			typeof parsed === "object" &&
-			typeof parsed.type === "string"
-		) {
-			return parsed as SessionEntry;
+		const parsed: unknown = JSON.parse(line);
+		if (isValidSessionEntry(parsed)) return parsed;
+		if (isRecord(parsed) && "type" in parsed) {
+			throw new TypeError(`Invalid session entry of type ${String(parsed.type)}`);
+		}
+		if (!parsed || typeof parsed !== "object") {
+			throw new TypeError("Session entry must be an object");
 		}
 		const message = parsed as SessionMessage;
+		if (typeof message.role !== "string") {
+			throw new TypeError("Legacy session message must have a role");
+		}
 		const id = message.entryId ?? `${message.timestamp}`;
 		return {
 			type: "message",
@@ -638,7 +808,7 @@ export class SessionStore {
 			const meta = this.getMetaSilent();
 			if (meta && !meta.parentId) {
 				meta.parentId = undefined;
-				writeFileSync(this.metaPath, JSON.stringify(meta, null, 2), "utf8");
+				this.writeMetaAtomically(meta);
 			}
 			this.version = 2;
 		}
@@ -648,7 +818,7 @@ export class SessionStore {
 			if (meta) {
 				meta.activeLeafId = this.activeLeafId;
 				meta.version = 3;
-				writeFileSync(this.metaPath, JSON.stringify(meta, null, 2), "utf8");
+				this.writeMetaAtomically(meta);
 			}
 			this.version = 3;
 		}
@@ -675,9 +845,14 @@ export class SessionRegistry {
 				return statSync(dir).isDirectory();
 			})
 			.map(id => {
-				const metaPath = join(this.baseDir, id, META_FILE);
-				if (!existsSync(metaPath)) return null;
-				return JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta;
+				try {
+					return new SessionStore(id, {
+						baseDir: join(this.baseDir, ".."),
+					}).getMeta();
+				} catch (_error: unknown) {
+					// One corrupt journal must not hide healthy sessions from the browser.
+					return null;
+				}
 			})
 			.filter((meta): meta is SessionMeta => meta !== null);
 	}
@@ -715,8 +890,8 @@ export class SessionRegistry {
 
 	/** Open an existing session by ID. Returns null if not found. */
 	getSession(sessionId: string): SessionStore | null {
-		const metaPath = join(this.baseDir, sessionId, META_FILE);
-		if (!existsSync(metaPath)) return null;
+		const sessionDir = join(this.baseDir, sessionId);
+		if (!existsSync(sessionDir) || !statSync(sessionDir).isDirectory()) return null;
 		return new SessionStore(sessionId, {
 			baseDir: join(this.baseDir, ".."),
 		});

@@ -1,5 +1,6 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
+import { randomUUID } from "node:crypto";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -86,6 +87,8 @@ import {
 } from "./environment.ts";
 import { formatPluginResult } from "./plugin-result-formatter.ts";
 import { runQueueCommand } from "./queue-command.ts";
+import { RuntimeRunCoordinator } from "./run-coordinator.ts";
+import { RuntimeStartupCoordinator } from "./startup-coordinator.ts";
 
 export { findJbPrompt } from "./project-prompt.ts";
 
@@ -105,10 +108,9 @@ export class AgentRuntime {
 	private backend: OpenAIBackend;
 	private session: AgentSession | null = null;
 	private durableSession: SessionStore | undefined;
-	readonly events = new RuntimeEventBus();
+	readonly events: RuntimeEventBus;
 	readonly models: ModelSelector;
-	private running = false;
-	private sendTail: Promise<void> = Promise.resolve();
+	private readonly runs = new RuntimeRunCoordinator();
 
 	private cwd: string;
 	private readonly toolRouter: ToolRouter;
@@ -200,8 +202,9 @@ export class AgentRuntime {
 	private sessionId =
 		`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 	private transcriptPath = "";
-	private startupHooksRan = false;
-	private startupHooksPromise: Promise<void> | null = null;
+	private readonly startup = new RuntimeStartupCoordinator(source =>
+		this.runStartupHooksNow(source),
+	);
 	private startupHookResult: PluginCommandResult | null = null;
 	private startupPluginCount = 0;
 	private contextTokens = 0;
@@ -244,6 +247,9 @@ export class AgentRuntime {
 			model: "",
 		},
 	) {
+		this.events = new RuntimeEventBus({
+			historyCapacity: opts.eventStream?.historyCapacity,
+		});
 		this.compactionSettings = opts.compaction;
 		this.cwd = opts.cwd || process.cwd();
 		this.projectTrusted = opts.projectTrusted === true;
@@ -510,7 +516,12 @@ export class AgentRuntime {
 				getEnabledPluginRoots: () => this._enabledPluginRoots,
 				getDefaultTools: () => this._defaultTools,
 				ensureSession: () => this.ensureSession(),
-				reportError: error => this.events.reportError(error),
+				reportError: error =>
+					this.events.reportError(error, {
+						component: "agent-coordinator",
+						operation: "capability-run",
+						recoverable: true,
+					}),
 			},
 			opts.reasoner,
 			opts.reasonerConfig,
@@ -525,7 +536,7 @@ export class AgentRuntime {
 	): AgentConfig["hooks"] {
 		if (!this.memory) return existingHooks;
 		return this.memory.createHooks(existingHooks, {
-			isRunning: () => this.running,
+			isRunning: () => this.runs.isActive(),
 			getBackend: () => this.backend,
 			emit: event => this.emit(event),
 		});
@@ -570,19 +581,15 @@ export class AgentRuntime {
 
 	async sendMessage(message: string): Promise<void> {
 		await this.extensions?.getLoadPromise();
-		// A message submitted while a turn is in flight steers the running
-		// turn instead of starting a second concurrent run. Route through
-		// steer() so the queue update reaches the UI.
-		if (this.running && this.session) {
-			this.steer(message);
-			this.emit({ type: "steered", message });
-			return;
-		}
-		const run = this.sendTail.then(() => this.runMessage(message));
-		// Keep the queue usable after a failed startup/provider boundary while
-		// returning the original rejection to this caller.
-		this.sendTail = run.catch(() => {});
-		return run;
+		return this.runs.submit({
+			message,
+			canSteer: () => this.session !== null,
+			steer: text => {
+				this.steer(text);
+				this.emit({ type: "steered", message: text });
+			},
+			execute: text => this.runMessage(text),
+		});
 	}
 
 	private async runMessage(message: string): Promise<void> {
@@ -590,8 +597,9 @@ export class AgentRuntime {
 		// primary provider sluggish. Prefer the interactive turn; extraction's
 		// deterministic fallback still records the completed prior turn.
 		this.memory?.abortExtractors();
-		this.running = true;
-		const turnId = `turn_${Date.now()}`;
+		const runId = `run_${randomUUID()}`;
+		const turnId = `turn_${randomUUID()}`;
+		this.events.beginRun({ sessionId: this.sessionId, runId, turnId });
 		let persistentSystemPrompt: string | undefined;
 		let turnSystemPrompt = this.config.systemPrompt;
 		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
@@ -605,9 +613,13 @@ export class AgentRuntime {
 			// flight keeps running and its tools become available on the next
 			// turn once it settles.
 			if (!this.toolRouter.isMcpLoaded()) {
-				void this.toolRouter
-					.loadMcpToolsOnce()
-					.catch(error => this.events.reportError(error));
+				void this.toolRouter.loadMcpToolsOnce().catch(error =>
+					this.events.reportError(error, {
+						component: "mcp",
+						operation: "background-discovery",
+						recoverable: true,
+					}),
+				);
 			}
 			// Reuse one session across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
@@ -653,31 +665,31 @@ export class AgentRuntime {
 			const error = err as Error;
 			// Emit a visible error notice so the user sees connection/server
 			// failures in the transcript rather than only in the console.
-			this.emit({
-				type: "notice",
-				level: "error",
-				label: "Error",
-				text: error.message,
+			this.events.reportError(error, {
+				component: "agent-runtime",
+				operation: "run-message",
+				recoverable: false,
 			});
-			this.events.notifyError(error);
 			throw error;
 		} finally {
-			if (persistentSystemPrompt !== undefined) {
-				this.session?.configure({ systemPrompt: persistentSystemPrompt });
-			}
-			this.running = false;
-			this.publishContextUsage();
-			this.emit({ type: "turn_end", turnId });
-			const hasQueuedContinuation =
-				turnSucceeded && (this.session?.getQueues().nextTurn.length ?? 0) > 0;
-			if (hasQueuedContinuation) {
-				// Do not advertise READY between an interrupted turn and the queued
-				// replacement turn. The continuation owns the terminal ready event.
-				this.running = true;
-				await this.runContinuation(turnActivations);
-			} else {
-				// Keep the harness alive to retain history across turns.
-				this.emit({ type: "phase", state: "ready" });
+			try {
+				if (persistentSystemPrompt !== undefined) {
+					this.session?.configure({ systemPrompt: persistentSystemPrompt });
+				}
+				this.publishContextUsage();
+				this.emit({ type: "turn_end", turnId });
+				const hasQueuedContinuation =
+					turnSucceeded && (this.session?.getQueues().nextTurn.length ?? 0) > 0;
+				if (hasQueuedContinuation) {
+					// Do not advertise READY between an interrupted turn and the queued
+					// replacement turn. The continuation owns the terminal ready event.
+					await this.runContinuation(turnActivations);
+				} else {
+					// Keep the harness alive to retain history across turns.
+					this.emit({ type: "phase", state: "ready" });
+				}
+			} finally {
+				this.events.endRun();
 			}
 		}
 	}
@@ -687,16 +699,12 @@ export class AgentRuntime {
 	private async runContinuation(
 		activations: ReturnType<typeof selectSkillsForPrompt>,
 	): Promise<void> {
-		try {
-			const repoQuery = this.repositoryMap?.render("");
-			this.session?.setRepositoryQuery(repoQuery);
-			const context = activations.length
-				? formatActivatedSkills(activations)
-				: undefined;
-			await this.session?.runQueuedContinuation(context, repoQuery);
-		} finally {
-			this.running = false;
-		}
+		const repoQuery = this.repositoryMap?.render("");
+		this.session?.setRepositoryQuery(repoQuery);
+		const context = activations.length
+			? formatActivatedSkills(activations)
+			: undefined;
+		await this.session?.runQueuedContinuation(context, repoQuery);
 	}
 
 	// Lazily build the singleton harness and wire its UI callbacks.
@@ -938,7 +946,7 @@ export class AgentRuntime {
 	private async reload(): Promise<void> {
 		// Stop any running turn
 		void this.cancel();
-		this.running = false;
+		this.runs.reset();
 
 		// Drop the old harness — conversation starts fresh
 		this.session = null;
@@ -954,8 +962,7 @@ export class AgentRuntime {
 
 		// Reset state that is per-session
 		this.toolRouter.resetSkillsAndPrompts();
-		this.startupHooksRan = false;
-		this.startupHooksPromise = null;
+		this.startup.reset();
 		this.startupHookResult = null;
 
 		// ── Re-discover skills and prompts ────────────────────────────────
@@ -963,9 +970,13 @@ export class AgentRuntime {
 		await this.injectPrompts();
 
 		// ── Re-load extensions ────────────────────────────────────────────
-		await this.extensions
-			?.reload()
-			.catch(err => console.error("[logician] extension reload error:", err));
+		await this.extensions?.reload().catch(error =>
+			this.events.reportError(error, {
+				component: "extensions",
+				operation: "reload",
+				recoverable: true,
+			}),
+		);
 
 		// ── Re-discover MCP servers ───────────────────────────────────────
 		await this.loadMcpToolsOnce();
@@ -1089,9 +1100,13 @@ export class AgentRuntime {
 		// Status is a snapshot, not a synchronization barrier for external MCP
 		// transports. The manager UI provides explicit awaited refresh operations.
 		if (!this.toolRouter.isMcpLoaded() && !this.toolRouter.isMcpLoading()) {
-			void this.toolRouter
-				.loadMcpToolsOnce()
-				.catch(error => this.events.reportError(error));
+			void this.toolRouter.loadMcpToolsOnce().catch(error =>
+				this.events.reportError(error, {
+					component: "mcp",
+					operation: "load-tools",
+					recoverable: true,
+				}),
+			);
 		}
 		this.contextTokens = this.measureContextTokens();
 		const toolNames =
@@ -1145,8 +1160,7 @@ export class AgentRuntime {
 			pluginId,
 		]);
 		if (result.status !== "error") {
-			this.startupHooksRan = false;
-			this.startupHooksPromise = null;
+			this.startup.reset();
 			await this.runStartupHooksOnce();
 		}
 		return result;
@@ -1408,6 +1422,7 @@ export class AgentRuntime {
 		if (!sessionId.trim()) return;
 		const provisionalSessionId = this.sessionId;
 		this.sessionId = sessionId;
+		this.events.setSessionId(sessionId);
 		this.durableSession = durableSession;
 		this.session?.setSessionId(sessionId);
 		if (durableSession) this.session?.attachSession(durableSession);
@@ -1437,8 +1452,7 @@ export class AgentRuntime {
 		this.memory?.resetSession(this.sessionId);
 		// Reset skill/prompt injection state
 		this.toolRouter.resetInjectedContext();
-		this.startupHooksRan = false;
-		this.startupHooksPromise = null;
+		this.startup.reset();
 		this.applyPluginHookContext(
 			this.startupHookResult || {
 				additional_contexts: [],
@@ -1546,7 +1560,13 @@ export class AgentRuntime {
 		// just observes the same in-flight/settled load instead of starting a
 		// second one; the "Loaded N server(s)" notice fires once, from inside
 		// loadMcpToolsOnce() itself, whenever that load actually finishes.
-		void this.loadMcpToolsOnce().catch(error => this.events.reportError(error));
+		void this.loadMcpToolsOnce().catch(error =>
+			this.events.reportError(error, {
+				component: "mcp",
+				operation: "reload-tools",
+				recoverable: true,
+			}),
+		);
 		const toolNames =
 			this.session?.tools?.list().map((t: Tool) => t.name) ||
 			this._defaultTools.map(t => t.name);
@@ -1628,11 +1648,11 @@ export class AgentRuntime {
 		this.legroomWorker.close();
 		await this.toolRouter.closeMcp();
 		killAllTrackedChildren();
-		this.running = false;
+		this.runs.reset();
 	}
 
 	isActive(): boolean {
-		return this.running;
+		return this.runs.isActive();
 	}
 
 	getMessages(): Message[] {
@@ -1802,21 +1822,11 @@ export class AgentRuntime {
 
 	/**
 	 * Runs plugin listing, session-start hooks, and skill/prompt/subagent
-	 * injection exactly once per (re)set of `startupHooksRan`. Memoized as a
-	 * promise — not just the boolean flag — so a caller that starts this
-	 * eagerly (e.g. right after construction, to prewarm before the user's
-	 * first message) and a concurrent `runMessage()` call both await the same
-	 * in-flight work instead of the second caller seeing the flag flip early
-	 * and racing ahead of hook/skill injection.
+	 * injection through the startup coordinator. Concurrent callers join the
+	 * same attempt; failure is retryable and reset invalidates stale completion.
 	 */
 	private async runStartupHooksOnce(source = "startup"): Promise<void> {
-		if (this.startupHooksRan) return;
-		if (!this.startupHooksPromise) {
-			this.startupHooksPromise = this.runStartupHooksNow(source).then(() => {
-				this.startupHooksRan = true;
-			});
-		}
-		await this.startupHooksPromise;
+		await this.startup.ensure(source);
 	}
 
 	private async runStartupHooksNow(source: string): Promise<void> {

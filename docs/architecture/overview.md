@@ -14,26 +14,20 @@ graph LR
   subgraph Presentation
     A["@logician/tui"]
   end
-  subgraph Protocol
-    P["@logician/log-protocol"]
-  end
   subgraph Runtime
     C["@logician/log-core"]
     D["@logician/log-runtime"]
     H["@logician/log-eoh"]
   end
   subgraph DataAndEvaluation["Data and evaluation"]
-    M["log-memory + log-rag"]
+    M["memoriam + log-rag"]
     E["log-autoresearch + log-eval"]
   end
-  A --> P
   A --> C
-  C --> P
   D --> C
   D --> H
-  C --> H
   A --> D
-  C --> M
+  D --> M
   D --> E
   C --> L[LLM Backend]
 ```
@@ -75,11 +69,14 @@ and run-scoped policy state — see
 The evidence and invariants behind the current runtime boundaries are recorded
 in [Runtime Design Decisions](/architecture/modernization).
 
-### log-protocol
+### Client protocol
 
-The dependency-free client protocol. It owns versioned UI-ready notifications.
-Internal provider, hook, and tool events are translated before crossing this
-seam. TUI and future clients depend on this package rather than core internals.
+The dependency-free, versioned client protocol lives inside `log-core` and is
+exported as `@logician/log-core/protocol`; its event vocabulary is exported as
+`@logician/log-core/events`. `log-runtime` translates internal agent events into
+ordered protocol notifications before they cross the application boundary.
+The TUI and headless clients subscribe through `AgentRuntime.events` rather
+than depending on runtime internals.
 
 ### log-runtime
 
@@ -117,7 +114,7 @@ The presentation layer. Handles:
 - State management
 - Layout and theming
 
-### log-memory and log-rag
+### memoriam and log-rag
 
 Workspace-scoped durable memory and document/repository retrieval, with hybrid
 ranking, provenance, context budgets, and component evaluation.
@@ -138,5 +135,6 @@ flowchart LR
     Provider --> Core
     Core --> Tools
     Tools --> Core
-    Core --> Protocol["log-protocol"] --> TUI --> User
+    Core --> Runtime
+    Runtime --> Protocol["versioned notifications"] --> TUI --> User
 ```

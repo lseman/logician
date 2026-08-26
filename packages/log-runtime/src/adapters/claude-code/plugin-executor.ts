@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { CancellationScope } from "@logician/log-core/runtime";
 import { stripJsonComments } from "../../capabilities/tools/support/utils/json-utils.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -189,20 +190,18 @@ export async function executeCommand(
 			: null;
 	}
 	if (command.type === "http" && command.url) {
-		const controller = new AbortController();
-		const timer = setTimeout(
-			() => controller.abort(),
-			Math.max(1, command.timeout || 30) * 1000,
-		);
-		try {
-			const response = await fetch(command.url, {
+		const url = command.url;
+		const scope = new CancellationScope({
+			operation: `plugin HTTP hook ${source}`,
+			timeoutMs: Math.max(1, command.timeout || 30) * 1000,
+		});
+		return scope.run(async signal => {
+			const response = await fetch(url, {
 				headers: command.headers,
-				signal: controller.signal,
+				signal,
 			});
 			return parseHookResponse(await response.text());
-		} finally {
-			clearTimeout(timer);
-		}
+		});
 	}
 	if (command.type === "agent") return null;
 	if (!command.command) return null;
@@ -515,43 +514,45 @@ export function runShellCommand(
 		timeoutMs: number;
 	},
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
-	return new Promise((resolve, reject) => {
-		const child = spawn(command, {
-			cwd: options.cwd,
-			env: options.env,
-			shell: true,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
-		let stdout = "";
-		let stderr = "";
-		const timer = setTimeout(
-			() => {
-				child.kill("SIGTERM");
-				reject(new Error("hook command timed out"));
-			},
-			Math.max(1, options.timeoutMs),
-		);
-
-		child.stdout.setEncoding("utf8");
-		child.stderr.setEncoding("utf8");
-		child.stdout.on("data", chunk => {
-			stdout += chunk;
-			if (stdout.length > 1024 * 1024) stdout = stdout.slice(-1024 * 1024);
-		});
-		child.stderr.on("data", chunk => {
-			stderr += chunk;
-			if (stderr.length > 1024 * 1024) stderr = stderr.slice(-1024 * 1024);
-		});
-		child.on("error", error => {
-			clearTimeout(timer);
-			reject(error);
-		});
-		child.on("close", code => {
-			clearTimeout(timer);
-			resolve({ stdout, stderr, code });
-		});
-		child.stdin.end(options.input);
+	const scope = new CancellationScope({
+		operation: "plugin shell hook",
+		timeoutMs: Math.max(1, options.timeoutMs),
 	});
+	return scope.run(
+		signal =>
+			new Promise((resolve, reject) => {
+				const child = spawn(command, {
+					cwd: options.cwd,
+					env: options.env,
+					shell: true,
+					stdio: ["pipe", "pipe", "pipe"],
+				});
+				let stdout = "";
+				let stderr = "";
+				const stop = () => child.kill("SIGTERM");
+				signal.addEventListener("abort", stop, { once: true });
+
+				child.stdout.setEncoding("utf8");
+				child.stderr.setEncoding("utf8");
+				child.stdout.on("data", chunk => {
+					stdout += chunk;
+					if (stdout.length > 1024 * 1024) stdout = stdout.slice(-1024 * 1024);
+				});
+				child.stderr.on("data", chunk => {
+					stderr += chunk;
+					if (stderr.length > 1024 * 1024) stderr = stderr.slice(-1024 * 1024);
+				});
+				child.on("error", error => {
+					signal.removeEventListener("abort", stop);
+					reject(error);
+				});
+				child.on("close", code => {
+					signal.removeEventListener("abort", stop);
+					resolve({ stdout, stderr, code });
+				});
+				child.stdin.end(options.input);
+			}),
+	);
 }
 
 // ── Shared utilities ─────────────────────────────────────────────────────────

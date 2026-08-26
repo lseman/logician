@@ -1,8 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { CancellationError } from "@logician/log-core/runtime";
 import {
 	allocateMcpToolName,
 	buildMcpProcessEnv,
+	createMcpClient,
 	createMcpTool,
 	encodeMcpMessage,
 	formatMcpToolResult,
@@ -92,4 +94,46 @@ void test("MCP object results use compact JSON in model context", () => {
 		formatMcpToolResult({ isError: true, code: "failed" }),
 		'Error: {"isError":true,"code":"failed"}',
 	);
+});
+
+void test("HTTP MCP deadlines reject with the shared typed cancellation reason", async () => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (() => new Promise(() => {})) as unknown as typeof fetch;
+	const client = createMcpClient(
+		"slow-http",
+		{ type: "http", url: "http://mcp.invalid", timeout: 0.005 },
+		process.cwd(),
+	);
+	try {
+		await assert.rejects(
+			client.initialize(),
+			(error: unknown) =>
+				error instanceof CancellationError && error.kind === "timeout",
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+		client.close();
+	}
+});
+
+void test("stdio MCP deadlines use the same cancellation module", async () => {
+	const client = createMcpClient(
+		"slow-stdio",
+		{
+			type: "stdio",
+			command: process.execPath,
+			args: ["-e", "process.stdin.resume()"],
+			timeout: 0.01,
+		},
+		process.cwd(),
+	);
+	try {
+		await assert.rejects(
+			client.initialize(),
+			(error: unknown) =>
+				error instanceof CancellationError && error.kind === "timeout",
+		);
+	} finally {
+		client.close();
+	}
 });

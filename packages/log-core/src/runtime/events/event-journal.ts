@@ -53,7 +53,9 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 	constructor(options: EventJournalOptions<E> = {}) {
 		const capacity = options.capacity ?? DEFAULT_CAPACITY;
 		if (!Number.isSafeInteger(capacity) || capacity < 0) {
-			throw new RangeError("Event journal capacity must be a non-negative safe integer.");
+			throw new RangeError(
+				"Event journal capacity must be a non-negative safe integer.",
+			);
 		}
 		this.capacity = capacity;
 		this.now = options.now ?? Date.now;
@@ -67,6 +69,11 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 
 	get latestId(): number {
 		return this.nextId - 1;
+	}
+
+	/** Oldest retained cursor, or undefined when the retained window is empty. */
+	get oldestId(): number | undefined {
+		return this.count > 0 ? this.entries[this.start]?.id : undefined;
 	}
 
 	append(event: E): EventJournalEntry<E> {
@@ -94,7 +101,11 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 		const matches: EventJournalEntry<E>[] = [];
 		for (let offset = 0; offset < this.count; offset++) {
 			const entry = this.entries[(this.start + offset) % this.capacity];
-			if (!entry || entry.id <= afterId || (types && !types.has(entry.event.type))) {
+			if (
+				!entry ||
+				entry.id <= afterId ||
+				(types && !types.has(entry.event.type))
+			) {
 				continue;
 			}
 			matches.push(entry);

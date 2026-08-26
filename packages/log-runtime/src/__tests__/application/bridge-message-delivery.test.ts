@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import { AgentRuntime } from "../../runtime/bridge/agent-bridge.ts";
 
+function bypassStartup(internal: Record<string, unknown>): void {
+	internal.startup = { ensure: async () => {}, reset: () => {} };
+}
+
 void test("bridge publishes ordered versioned protocol notifications", () => {
 	const bridge = new AgentRuntime({
 		baseUrl: "http://127.0.0.1:1",
@@ -117,7 +121,7 @@ void test("startup state reports the registered web_search capability", async ()
 		webSearch: { baseUrl: "http://search.test:8090" },
 	});
 	const internal = bridge as unknown as Record<string, unknown>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 
 	const state = await bridge.init();
 	assert.equal(state.web_search_enabled, true);
@@ -159,7 +163,7 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 	// Mock isMcpLoaded to return false (MCP still loading)
 	internal.toolRouter.isMcpLoaded = () => false;
 	// Prevent the background MCP load from actually running
@@ -197,7 +201,7 @@ void test("MCP discovery never blocks the first turn — it loads in the backgro
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 	let resolveLoad!: () => void;
 	internal.toolRouter.isMcpLoaded = () => false;
 	internal.toolRouter.loadMcpToolsOnce = () =>
@@ -465,7 +469,7 @@ void test("loaded skills are exposed as a persistent catalog, not scored per tur
 		runtimeHooksEnabled: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 	// Inject skills context via the toolRouter
 	internal.toolRouter.getSkillsContext = () =>
 		"<available-skills>\n" +
@@ -489,7 +493,7 @@ void test("automatic continuation reuses the current system prompt", async () =>
 		runtimeHooksEnabled: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 	const originalSystemPrompt = internal.config.systemPrompt;
 	internal.config.systemPrompt =
 		"Keep debugging until the root cause is verified.";
@@ -526,7 +530,7 @@ void test("sendMessage rejects when the turn fails", async () => {
 		runtimeHooksEnabled: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	// Mock session to simulate provider failure
 	internal.session = {
@@ -578,7 +582,7 @@ void test("core iterations reconcile output without completing the UI turn early
 		runtimeHooksEnabled: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 
 	// Mock session to simulate provider events
@@ -627,7 +631,7 @@ void test("queued replacement turn reaches READY only after its stream ends", as
 		runtimeHooksEnabled: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.startupHooksRan = true;
+	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	let queued = ["change direction"];
 	internal.session = {

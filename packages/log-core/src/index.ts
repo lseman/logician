@@ -35,6 +35,13 @@ export {
 	type EventJournalSubscriptionOptions,
 	type JournalEvent,
 } from "./runtime/events/event-journal.ts";
+export {
+	CancellationError,
+	CancellationScope,
+	type CancellationCleanup,
+	type CancellationKind,
+	type CancellationScopeOptions,
+} from "./runtime/control/cancellation-scope.ts";
 export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export {
 	type AgentConfig,

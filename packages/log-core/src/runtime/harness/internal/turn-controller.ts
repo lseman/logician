@@ -1,6 +1,8 @@
+import { CancellationScope } from "../../control/cancellation-scope.ts";
+
 /** Owns abort signaling and settlement for one active harness turn. */
 export class HarnessTurnController {
-	private abortController: AbortController | null = null;
+	private scope: CancellationScope | null = null;
 	private settledPromise?: Promise<void>;
 	private resolveSettled?: () => void;
 
@@ -8,14 +10,14 @@ export class HarnessTurnController {
 		execute: (signal: AbortSignal) => Promise<T>,
 		onSettled: () => void,
 	): Promise<T> {
-		this.abortController = new AbortController();
+		this.scope = new CancellationScope({ operation: "agent turn" });
 		this.settledPromise = new Promise<void>(resolve => {
 			this.resolveSettled = resolve;
 		});
 		try {
-			return await execute(this.abortController.signal);
+			return await this.scope.run(execute, { rejectOnAbort: false });
 		} finally {
-			this.abortController = null;
+			this.scope = null;
 			onSettled();
 			this.resolveSettled?.();
 			this.settledPromise = undefined;
@@ -24,7 +26,7 @@ export class HarnessTurnController {
 	}
 
 	abort(reason?: unknown): void {
-		this.abortController?.abort(reason);
+		this.scope?.abort(reason);
 	}
 
 	async wait(): Promise<void> {

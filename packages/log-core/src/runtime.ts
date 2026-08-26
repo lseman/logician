@@ -23,6 +23,13 @@ export {
 	SessionStore,
 } from "./capabilities/session/session-store.ts";
 export { ToolRegistry } from "./capabilities/tools/registry.ts";
+export {
+	CancellationError,
+	CancellationScope,
+	type CancellationCleanup,
+	type CancellationKind,
+	type CancellationScopeOptions,
+} from "./runtime/control/cancellation-scope.ts";
 export { resolveAgentSettings } from "./control/configuration/agent-settings.ts";
 export type { AbortResult } from "./runtime/harness/types.ts";
 export type { HarnessPhase } from "./runtime/state/runtime-state.ts";

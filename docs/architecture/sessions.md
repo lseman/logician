@@ -1,26 +1,35 @@
 ---
 title: Session Persistence
-description: How the TUI catalog and append-only agent journal work together.
+description: How the shared append-only session journal supports browsing, recovery, and branches.
 ---
 
 # Session Persistence
 
-Session persistence has two layers because browsing history and recovering an in-flight agent have different requirements.
+Session persistence has one canonical record shared by the TUI and agent
+harness. Each session is an append-only JSONL conversation tree accompanied by
+a small metadata file.
 
 ```mermaid
 flowchart LR
-    Turn[Completed or interrupted turn] --> Catalog[(TUI SQLite catalog)]
-    Turn --> Journal[Append-only agent journal]
-    Catalog --> Browser[Session browser and labels]
+    Turn[Message, turn, or state change] --> Journal[messages.jsonl]
+    Journal --> Browser[Session browser and previews]
     Journal --> ActivePath[Parent-linked active path]
     ActivePath --> Resume[Resume, fork, discard, compact]
+    Metadata[meta.json] --> Browser
+    Metadata --> ActivePath
 ```
 
-## TUI catalog
+## On-disk layout
 
-Each workspace stores `history.db` under `.logician/tui/sessions/`. The schema tracks sessions, completed turns, labels, and settings changes. SQLite WAL mode makes incremental saves crash-resistant and supports fast session-browser queries.
+Sessions are stored under `.logician/sessions/sessions/<session-id>/`. `messages.jsonl`
+is the append-only entry stream. `meta.json` stores inexpensive listing data:
+the session name, workspace, timestamps, entry count, parent session, active
+leaf, and format version.
 
-## Agent journal
+The TUI does not keep a second SQLite history database. Its session service is
+an adapter over the same core session registry and journal used by the harness.
+
+## Conversation tree
 
 The core session journal is append-only. Entries can point to parents, allowing an active path to diverge without truncating or copying earlier history. Branch operations change the selected leaf or append summaries; they do not rewrite the journal.
 
@@ -41,6 +50,11 @@ stateDiagram-v2
 ## Compaction and durability
 
 Compaction changes the context sent to the model, not the historical record shown to the user. Summaries, usage metadata, and the active journal path are persisted so later recovery uses the same logical conversation state.
+
+JSONL is the source of truth because it is portable, inspectable, and naturally
+append-oriented. If Logician adds a SQLite session index, it should remain a
+rebuildable query accelerator for search and large catalogs rather than become a
+second authoritative history.
 
 ## File recovery
 

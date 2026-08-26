@@ -35,7 +35,7 @@ It works equally well at a local workstation, inside `tmux`, or over SSH—and i
 | 🔌 | **Extensibility** | `SKILL.md` capabilities, plugins, lifecycle hooks, custom events, and MCP tools |
 | 🌿 | **Parallel agents** | Delegate bounded work to child agents with isolated context and worktree support |
 | 🛡️ | **Controlled autonomy** | Permission modes, sandbox profiles, workspace trust, loop guards, and cancellation |
-| 💾 | **Durable sessions** | JSONL transcripts, search, bookmarks, branching, rewind, export, and compaction |
+| 💾 | **Durable sessions** | Append-only JSONL journals, bookmarks, branching, rewind, recovery, and compaction |
 | 🧪 | **Autoresearch** | Run measured experiment loops and keep improvements that beat the baseline |
 | 🤖 | **Headless operation** | Versioned JSONL events for scripts, CI, editors, and other agent systems |
 
@@ -111,6 +111,18 @@ Inside the composer:
 
 Ask Logician to inspect, implement, test, and explain changes in one continuous session. Tool calls remain visible and interruptible, and you can steer the active turn with `Ctrl+Enter`.
 
+### Durable sessions
+
+The TUI and agent harness share one canonical session record. Each conversation
+is stored locally under `.logician/sessions/sessions/<session-id>/` as an append-only
+`messages.jsonl` tree plus `meta.json` for its name, workspace, timestamps, and
+active branch leaf. This supports resume, fork, discard, rewind, labels, and
+compaction without a separate SQLite history database.
+
+The journal remains human-inspectable and portable. Session browsing currently
+uses the per-session metadata directly; a future SQLite search index can be
+added as a rebuildable cache without changing the durable format.
+
 ### Headless automation
 
 ```bash
@@ -162,9 +174,9 @@ Logician is a TypeScript monorepo organized as a layered agent runtime:
 ```mermaid
 flowchart LR
     User([User or automation]) --> TUI[Terminal UI / JSONL]
-    TUI --> Core[Agent core]
-    Core --> Protocol[Versioned client protocol]
-    Protocol --> TUI
+    TUI --> Runtime[Runtime composition]
+    Runtime --> Core[Agent core + client protocol]
+    Core --> TUI
     Core --> Model[OpenAI-compatible model]
     Core --> Tools[Built-in and MCP tools]
     Core --> Memory[Memory and RAG]
@@ -175,10 +187,9 @@ flowchart LR
 | Package | Responsibility |
 |---|---|
 | `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
-| `@logician/log-protocol` | Dependency-free, versioned client notifications shared by the runtime and presentation layers |
-| `@logician/log-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, config, sessions, and application orchestration |
+| `@logician/log-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, sessions, and versioned client protocol |
 | `@logician/log-runtime` | Runtime composition: capabilities (delegation, reasoning strategies, tasks, user interaction, tools, memory, LSP, MCP, skills) and orchestration |
-| `@logician/log-memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
+| `@logician/memoriam` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
 | `@logician/log-memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |
 | `@logician/log-rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
 | `@logician/log-autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |

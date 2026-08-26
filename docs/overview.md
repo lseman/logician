@@ -53,23 +53,22 @@ graph TB
 
 | Package | Responsibility |
 |---|---|
-| `log-protocol` | Dependency-free, versioned notifications for clients |
-| `log-core` | Agent loop, harness, context, configuration, sessions, hooks, compaction, and tool registry |
+| `log-core` | Agent loop, harness, context, configuration, sessions, hooks, compaction, tools, and versioned client notifications |
 | `log-runtime` | Runtime composition: capabilities (reasoning, delegation, tasks, ask-user, RAG tools, built-in tools, memory wiring, LSP, MCP, skills) plus orchestration (bridge, session, transcript) |
 | `log-eoh` | Evolution of Heuristics — standalone optimization engine, wired into `log-runtime`'s capabilities |
-| `log-memory` | SQLite-backed persistent memory: observation capture, consolidation, retrieval |
+| `memoriam` | SQLite-backed persistent memory: observation capture, consolidation, retrieval |
 | `log-rag` | Hybrid dense + BM25 retrieval, chunking, reranking, context budgets |
 | `log-autoresearch` | Measured experiment loops — run, evaluate, keep or discard |
 | `log-eval` | Outcome-grounded evaluation runner for agent trials |
 | `tui` | Terminal UI components, engine, layers, state management (`apps/tui`) |
-| `log-memory-mcp` | Stdio MCP adapter exposing `@logician/log-memory` to any MCP client (`apps/log-memory-mcp`) |
+| `log-memory-mcp` | Stdio MCP adapter exposing `@logician/memoriam` to any MCP client (`apps/log-memory-mcp`) |
 
 ### Key concepts
 
 - **Agent loop** — the core cycle: receive input → build system prompt → call LLM → parse response → execute tools → repeat.
 - **Skills** — `SKILL.md` files that inject specialized instructions into the system prompt when triggered.
 - **Hooks** — lifecycle callbacks (before/after tool calls, before/after LLM requests, etc.) for plugins.
-- **Sessions** — persistent conversation history stored in SQLite, with support for bookmarks, branching, and compaction.
+- **Sessions** — append-only JSONL conversation trees with bookmarks, branching, recovery, and compaction.
 - **Trust model** — permission modes (`acceptAll`, `acceptEdits`, `ask`, `plan`) control agent behavior.
 
 ## Why local-first?

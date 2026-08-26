@@ -1,10 +1,19 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import {
+	appendFileSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BackendError } from "../../capabilities/provider/backend.ts";
-import { SessionStore } from "../../capabilities/session/session-store.ts";
+import {
+	SessionCorruptionError,
+	SessionStore,
+} from "../../capabilities/session/session-store.ts";
 import {
 	AgentSession,
 	defineHarnessModule,
@@ -716,4 +725,55 @@ void test("session active leaf makes branch checkout durable without truncation"
 		["root", "selected"],
 	);
 	assert.equal(restored.loadEntries().length, 3);
+});
+
+void test("session metadata is reconciled from the journal after an interrupted projection write", () => {
+	const baseDir = mkdtempSync(join(tmpdir(), "logician-session-reconcile-"));
+	const session = new SessionStore("repair", { baseDir, enabled: true });
+	session.append({ role: "user", content: "one", timestamp: 1 });
+	session.append({ role: "assistant", content: "two", timestamp: 2 });
+	const expectedLeaf = session.getLeafEntryId();
+	const metaPath = join(session.dirPath, "meta.json");
+	const stale = {
+		...session.getMeta(),
+		messageCount: 1,
+		activeLeafId: undefined,
+	};
+	writeFileSync(metaPath, JSON.stringify(stale), "utf8");
+
+	const restored = new SessionStore("repair", { baseDir, enabled: true });
+	assert.equal(restored.getMeta().messageCount, 2);
+	assert.equal(restored.getLeafEntryId(), expectedLeaf);
+	assert.equal(restored.getMeta().activeLeafId, expectedLeaf);
+	assert.equal(
+		readdirSync(restored.dirPath).some(name => name.endsWith(".tmp")),
+		false,
+	);
+});
+
+void test("session recovery removes only a truncated final JSONL record", () => {
+	const baseDir = mkdtempSync(join(tmpdir(), "logician-session-tail-"));
+	const session = new SessionStore("tail", { baseDir, enabled: true });
+	session.append({ role: "user", content: "safe", timestamp: 1 });
+	const journalPath = join(session.dirPath, "messages.jsonl");
+	appendFileSync(journalPath, '{"type":"message","id":"partial', "utf8");
+
+	const restored = new SessionStore("tail", { baseDir, enabled: true });
+	assert.equal(restored.loadEntries().length, 1);
+	assert.equal(readFileSync(journalPath, "utf8").endsWith("\n"), true);
+	assert.doesNotMatch(readFileSync(journalPath, "utf8"), /partial/);
+});
+
+void test("session recovery rejects corruption before the final JSONL record", () => {
+	const baseDir = mkdtempSync(join(tmpdir(), "logician-session-corrupt-"));
+	const session = new SessionStore("corrupt", { baseDir, enabled: true });
+	session.append({ role: "user", content: "safe", timestamp: 1 });
+	const journalPath = join(session.dirPath, "messages.jsonl");
+	appendFileSync(journalPath, "not-json\n", "utf8");
+
+	assert.throws(
+		() => new SessionStore("corrupt", { baseDir, enabled: true }),
+		(error: unknown) =>
+			error instanceof SessionCorruptionError && error.lineNumber === 2,
+	);
 });

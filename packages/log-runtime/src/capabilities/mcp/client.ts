@@ -3,6 +3,7 @@
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { CancellationScope } from "@logician/log-core/runtime";
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 
@@ -16,7 +17,6 @@ interface JsonRpcRequest {
 interface PendingRequest {
 	resolve: (value: Record<string, unknown>) => void;
 	reject: (error: Error) => void;
-	timer: NodeJS.Timeout;
 }
 
 export interface McpServerConfig {
@@ -111,7 +111,6 @@ class StdioMcpClient implements McpClient {
 			const exitStatus = signal || (code ?? "unknown");
 			const error = new Error(`MCP server exited (${exitStatus})${suffix}`);
 			for (const pending of this.pending.values()) {
-				clearTimeout(pending.timer);
 				pending.reject(error);
 			}
 			this.pending.clear();
@@ -156,7 +155,7 @@ class StdioMcpClient implements McpClient {
 		this.proc = null;
 	}
 
-	private rpc(
+	private async rpc(
 		method: string,
 		params?: Record<string, unknown>,
 	): Promise<Record<string, unknown>> {
@@ -165,15 +164,21 @@ class StdioMcpClient implements McpClient {
 		const request: JsonRpcRequest = { jsonrpc: "2.0", id, method };
 		if (params) request.params = params;
 		const payload = encodeMcpMessage(request);
-		const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`MCP request timed out: ${method}`));
-			}, this.timeoutMs);
-			this.pending.set(id, { resolve, reject, timer });
+		const scope = new CancellationScope({
+			operation: `MCP stdio ${method}`,
+			timeoutMs: this.timeoutMs,
 		});
-		this.proc.stdin.write(payload);
-		return promise;
+		try {
+			return await scope.run(
+				() =>
+					new Promise<Record<string, unknown>>((resolve, reject) => {
+						this.pending.set(id, { resolve, reject });
+						this.proc?.stdin.write(payload);
+					}),
+			);
+		} finally {
+			this.pending.delete(id);
+		}
 	}
 
 	private notify(method: string, params?: Record<string, unknown>): void {
@@ -195,7 +200,6 @@ class StdioMcpClient implements McpClient {
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				for (const pending of this.pending.values()) {
-					clearTimeout(pending.timer);
 					pending.reject(new Error(`MCP decode failed: ${message}`));
 				}
 				this.pending.clear();
@@ -214,7 +218,6 @@ class StdioMcpClient implements McpClient {
 		const pending = this.pending.get(id);
 		if (!pending) return;
 		this.pending.delete(id);
-		clearTimeout(pending.timer);
 		const error = message.error;
 		if (error && typeof error === "object") {
 			const err = error as { code?: unknown; message?: unknown };
@@ -313,14 +316,17 @@ class HttpMcpClient implements McpClient {
 		id: number | undefined,
 	): Promise<Record<string, unknown>> {
 		if (!this.config.url) throw new Error("HTTP MCP server is missing url");
-		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-		try {
-			const response = await fetch(this.config.url, {
+		const url = this.config.url;
+		const scope = new CancellationScope({
+			operation: `MCP HTTP ${request.method}`,
+			timeoutMs: this.timeoutMs,
+		});
+		return scope.run(async signal => {
+			const response = await fetch(url, {
 				method: "POST",
 				headers: this.headers(),
 				body: JSON.stringify(request),
-				signal: controller.signal,
+				signal,
 			});
 			const sessionId = response.headers.get("Mcp-Session-Id");
 			if (sessionId && !this.sessionId) this.sessionId = sessionId;
@@ -334,9 +340,7 @@ class HttpMcpClient implements McpClient {
 				? parseSseEnvelope(text, id)
 				: JSON.parse(text || "{}");
 			return unwrapEnvelope(envelope);
-		} finally {
-			clearTimeout(timer);
-		}
+		});
 	}
 
 	private headers(): Record<string, string> {

@@ -23,7 +23,7 @@ tsx apps/tui/src/index.ts
 ### Memory MCP server
 
 `@logician/log-memory-mcp` (`apps/log-memory-mcp`) is a stdio MCP server that
-exposes `@logician/log-memory` — search, capture, and consolidation — to any
+exposes `@logician/memoriam` — search, capture, and consolidation — to any
 MCP client, independent of the TUI or headless bridge. It requires an
 explicit `--workspace`; the default database is
 `<workspace>/.logician/memory.db`.
@@ -39,8 +39,7 @@ for the full tool list and MCP client configuration.
 
 The headless entry point is `AgentRuntime` from `@logician/log-runtime`'s
 `application` export — the same bridge the TUI itself drives. It is
-event-driven: subscribe with `onNotification()`/`onError()`, then call
-`sendMessage()`.
+event-driven: subscribe through `bridge.events`, then call `sendMessage()`.
 
 ```typescript
 import { AgentRuntime } from '@logician/log-runtime/application'
@@ -49,19 +48,20 @@ const bridge = new AgentRuntime({
   baseUrl: 'http://127.0.0.1:8080',
   model: 'gpt-4o',
   cwd: process.cwd(),
-  permissionMode: 'acceptEdits',
+  permissions: { mode: 'acceptEdits' },
 })
 
-const unsubscribe = bridge.onNotification(notification => {
-  if (notification.event.type === 'agent_end') console.log('done')
+const unsubscribe = bridge.events.subscribe(notification => {
+  if (notification.event.type === 'turn_end') console.log('done')
 })
-bridge.onError(err => console.error(err))
+bridge.events.onError(err => console.error(err))
 
 await bridge.sendMessage('fix the auth bug')
 ```
 
-Other notable `AgentRuntime` methods: `steer()`, `followUp()`,
-`abort()`, `respondToQuestion()`, `getSkills()` / `invokeSkill()`,
+Other notable `AgentRuntime` methods: `steer()`, `steerQueue()`, `steerNow()`,
+`followUp()`, `abort()`, `respondToQuestion()`, `respondToPermission()`,
+`getSkills()` / `invokeSkill()`,
 `getPrompts()` / `invokePrompt()`, `sendSlash()`, and
 `setPermissionMode()` / `getPermissionMode()`.
 
@@ -72,10 +72,13 @@ type ProtocolCallback = (notification: AgentProtocolNotification) => void
 type ErrorCallback = (err: Error) => void
 ```
 
-`RuntimeEvent` is a discriminated union keyed on `type`, exported from the
-dependency-free `@logician/log-protocol` package. Subscribe with
-`onNotification()` to receive an ordered envelope containing `protocolVersion`,
-`sequence`, `timestamp`, and `event`. Event families include:
+`RuntimeEvent` is a discriminated union keyed on `type`, exported from
+`@logician/log-core/events`; `AgentProtocolNotification` is exported from
+`@logician/log-core/protocol`. Subscribe through `bridge.events` to receive an
+ordered envelope containing `protocolVersion`, `sequence`, `timestamp`,
+optional `correlation`, and `event`. Correlation identifies the session, run,
+turn, and tool call when available and is preserved during replay. Event
+families include:
 
 ```typescript
 type RuntimeEventType =
@@ -87,17 +90,35 @@ type RuntimeEventType =
   | 'phase' | 'runtime_status' | 'context_update' | 'compaction'
   | 'queue_update' | 'repair_nudge'
   | 'question_request' | 'permission_request'
-  | 'agent_retry_start' | 'agent_retry_end' | 'agent_error'
+  | 'agent_retry_start' | 'agent_retry_end' | 'agent_error' | 'diagnostic'
   | 'model_select' | 'todos' | 'steered' | 'notice' | 'memory_update'
   | 'subagent_chunk' | 'subagent_lifecycle'
 ```
 
 Each variant has its own payload shape (see
-`packages/log-protocol/src/events.ts` for the full interfaces).
+`packages/log-core/src/system/types/types-events.ts` for the full interfaces).
 Most core events pass through `mapAgentEvent()`; bridge-owned features also
 emit UI-facing events such as `todos`, `steered`, `notice`, and
 `memory_update`. The [headless JSONL stream](/tutorials/headless) is a separate,
 smaller versioned contract.
+
+The event bus retains a bounded history for reconnecting or late clients:
+
+```typescript
+bridge.events.subscribe(handleNotification, {
+  replay: { afterId: lastSeenSequence },
+  onReplayGap: gap => resynchronizeFromSnapshot(gap),
+})
+
+const recent = bridge.events.snapshot({ types: ['notice', 'agent_error'] })
+const cursor = bridge.events.latestSequence
+bridge.events.clearHistory()
+```
+
+Replay cursors are protocol sequence numbers and remain monotonic after retained
+history is cleared. `onReplayGap` reports the exact missing sequence range when
+a reconnect cursor predates retained history. Configure retention with
+`eventStream: { historyCapacity: 2_000 }` in `AgentBridgeOptions`.
 
 ## Configuration
 
