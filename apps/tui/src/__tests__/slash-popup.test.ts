@@ -136,3 +136,39 @@ test("submitRaw delivers handler return text after the turn is established", () 
 		"result:Thinking level: high",
 	]);
 });
+
+test("SlashPopup promotes recent commands without duplicating them", () => {
+	const popup = new SlashPopup();
+	popup.setCommands(commands);
+	assert.equal(popup.submitRaw("/settings"), true);
+	popup.setQuery("/");
+	popup.show();
+
+	const rendered = popup.render(90).join("\n");
+	assert.match(rendered, /command palette/);
+	assert.match(rendered, /Recent/);
+	assert.equal(rendered.match(/\/settings/g)?.length, 1);
+	assert.equal(popup.currentCommand(), "/settings");
+	popup.moveSelection(1);
+	assert.equal(popup.currentCommand(), "/help");
+});
+
+test("SlashPopup shows search context and non-builtin command sources", () => {
+	const popup = new SlashPopup();
+	popup.setCommands([
+		{
+			command: "/review-ui",
+			description: "Review the current interface",
+			dispatch: "local",
+			acceptsArgs: false,
+			category: "skills",
+			source: "skill",
+		},
+	]);
+	popup.setQuery("/rui");
+	popup.show();
+
+	const rendered = popup.render(90).join("\n");
+	assert.match(rendered, /· \/rui/);
+	assert.match(rendered, /skill/);
+});

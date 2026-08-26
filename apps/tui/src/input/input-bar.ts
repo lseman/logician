@@ -773,20 +773,27 @@ export class InputBar implements Component, Focusable {
 	}
 
 	private _renderComposerHeader(width: number): string {
+		const hasValue = this.value.length > 0;
+		const lineCount = hasValue ? this.value.split("\n").length : 0;
+		const graphemeCount = hasValue ? this._graphemeCount(this.value) : 0;
+		const labelText = width >= 52 ? " COMPOSER " : " MESSAGE ";
+		const label = `${theme.fg("accent", "")}${BOLD}${labelText}${RESET}`;
 		const hintText =
 			width >= 72
-				? this.value
-					? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear  ·  Ctrl+O tools"
-					: "/ Enter commands  ·  Ctrl+Enter steer now  ·  Ctrl+O tools"
+				? hasValue
+					? `${lineCount}L · ${graphemeCount} chars  ·  Enter send  ·  Ctrl+Enter steer`
+					: "/ Enter commands  ·  @ files  ·  Enter send  ·  Ctrl+Enter steer"
 				: width >= 52
-					? this.value
-						? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear"
-						: "/ commands  ·  Ctrl+Enter steer now"
-					: "Enter send  ·  Ctrl+Enter now";
+					? hasValue
+						? `${graphemeCount} chars  ·  Enter send`
+						: "/ Enter commands  ·  Enter send"
+					: "Enter send";
 		const hint = ` ${theme.fg("muted", hintText)} `;
-		const hintWidth = visibleWidth(hint);
-		const ruleWidth = Math.max(1, width - hintWidth);
-		return theme.fg("borderMuted", "─".repeat(ruleWidth)) + hint;
+		const ruleWidth = Math.max(
+			1,
+			width - visibleWidth(label) - visibleWidth(hint),
+		);
+		return label + theme.fg("borderMuted", "─".repeat(ruleWidth)) + hint;
 	}
 
 	private _inputViewport(

@@ -1,4 +1,5 @@
 import type { Component } from "../terminal/primitives.ts";
+import { theme } from "../terminal/theme.ts";
 
 /** A single horizontal rule, styled to match the divider lines the fixed
  * layout used to draw inline in TUI._doRenderInner. */
@@ -12,7 +13,7 @@ export class Separator implements Component {
 		}
 		this.cachedWidth = width;
 		this.cachedLines = [
-			`\x1b[38;5;236m${"─".repeat(Math.max(0, width))}\x1b[0m`,
+			theme.fg("separator", "─".repeat(Math.max(0, width))),
 		];
 		return this.cachedLines;
 	}

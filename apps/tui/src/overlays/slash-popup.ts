@@ -23,9 +23,12 @@ import {
 } from "./popup-utils.ts";
 
 const MAX_VISIBLE_ENTRIES = 8;
+const MAX_RECENT_COMMANDS = 4;
+type DisplayCategory = SlashCommandCategory | "recent";
 const getSelectedColor = (): string => theme.fgRaw("selected");
-const getCategoryColor = (cat: SlashCommandCategory): string => {
-	const colors: Record<SlashCommandCategory, string> = {
+const getCategoryColor = (cat: DisplayCategory): string => {
+	const colors: Record<DisplayCategory, string> = {
+		recent: theme.fgRaw("accent"),
 		help: "\x1b[36m",
 		session: "\x1b[33m",
 		agent: "\x1b[35m",
@@ -47,7 +50,7 @@ interface RenderState {
 	selectedCmd: SlashCommandDef | null;
 	// For grouped display (when not filtered): ordered category headers with command indices
 	groups: Array<{
-		category: SlashCommandCategory;
+		category: DisplayCategory;
 		start: number;
 		count: number;
 	}>;
@@ -55,7 +58,7 @@ interface RenderState {
 	flatEntries: Array<{
 		cmd: SlashCommandDef;
 		isHeader: boolean;
-		category?: SlashCommandCategory;
+		category?: DisplayCategory;
 	}>;
 	// Selection translated to flat index
 	flatSelection: number;
@@ -65,6 +68,7 @@ export class SlashPopup implements Component {
 	private commands: SlashCommandDef[] = [];
 	private query = "";
 	private selectedIndex = 0;
+	private recentCommands: string[] = [];
 	public visible = false;
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
@@ -76,7 +80,7 @@ export class SlashPopup implements Component {
 
 	/** Prepare rendering state: groups commands by category or filters by query. */
 	private _prepareRenderState(): RenderState {
-		const filtered = this._getFiltered();
+		const filtered = this._getDisplayFiltered();
 		const isFiltered = this.query.length > 1;
 
 		if (isFiltered) {
@@ -90,12 +94,36 @@ export class SlashPopup implements Component {
 			};
 		}
 
-		const groupsMap = groupByCategory(filtered);
+		const recent = this.recentCommands
+			.map(commandName =>
+				filtered.find(command => command.command === commandName),
+			)
+			.filter((command): command is SlashCommandDef => command !== undefined);
+		const recentNames = new Set(recent.map(command => command.command));
+		const groupedCommands = filtered.filter(
+			command => !recentNames.has(command.command),
+		);
+		const groupsMap = groupByCategory(groupedCommands);
 		const groups: RenderState["groups"] = [];
 		const flatEntries: RenderState["flatEntries"] = [];
 		let idx = 0;
 		let commandIndex = 0;
 		let flatSelection = 0;
+		if (recent.length > 0) {
+			flatEntries.push({
+				cmd: {} as SlashCommandDef,
+				isHeader: true,
+				category: "recent",
+			});
+			idx++;
+			for (const cmd of recent) {
+				if (commandIndex === this.selectedIndex) flatSelection = idx;
+				flatEntries.push({ cmd, isHeader: false });
+				idx++;
+				commandIndex++;
+			}
+			groups.push({ category: "recent", start: 0, count: recent.length });
+		}
 		for (const cat of CATEGORY_ORDER) {
 			const cmds = groupsMap.get(cat);
 			if (!cmds || cmds.length === 0) continue;
@@ -159,7 +187,7 @@ export class SlashPopup implements Component {
 
 	/** Command string of the highlighted row, or null when no match. */
 	currentCommand(): string | null {
-		const filtered = this._getFiltered();
+		const filtered = this._getDisplayFiltered();
 		return filtered.length > 0 ? filtered[this.selectedIndex].command : null;
 	}
 
@@ -271,8 +299,25 @@ export class SlashPopup implements Component {
 		return filterSlashCommands(this.commands, this.query);
 	}
 
-	private _submit(): void {
+	private _getDisplayFiltered(): SlashCommandDef[] {
 		const filtered = this._getFiltered();
+		if (this.query.length > 1 || this.recentCommands.length === 0) {
+			return filtered;
+		}
+		const recentNames = new Set(this.recentCommands);
+		const recent = this.recentCommands
+			.map(commandName =>
+				filtered.find(command => command.command === commandName),
+			)
+			.filter((command): command is SlashCommandDef => command !== undefined);
+		return [
+			...recent,
+			...filtered.filter(command => !recentNames.has(command.command)),
+		];
+	}
+
+	private _submit(): void {
+		const filtered = this._getDisplayFiltered();
 		if (filtered.length > 0) {
 			const cmd = filtered[this.selectedIndex];
 			const args = this.query.replace(/^\/[^\s]+\s*/, "").trim();
@@ -291,6 +336,10 @@ export class SlashPopup implements Component {
 			command => command.command.toLowerCase() === commandName,
 		);
 		if (!cmd) return false;
+		this.recentCommands = [
+			cmd.command,
+			...this.recentCommands.filter(command => command !== cmd.command),
+		].slice(0, MAX_RECENT_COMMANDS);
 		const args = this._lastCommand.replace(/^\/[^\s]+\s*/, "").trim();
 
 		if (cmd.dispatch === "quit") {
@@ -388,14 +437,23 @@ export class SlashPopup implements Component {
 					line += ` ${DIM}[${cmd.argHint}]${RESET}`;
 				}
 
-				// Description
+				const sourceBadge =
+					cmd.source && cmd.source !== "builtin" && contentWidth >= 54
+						? `  ${theme.fg("accent", cmd.source)}`
+						: "";
+
+				// Description reserves room for source attribution.
 				if (cmd.description) {
 					const descStart = visibleWidth(line) + 2;
-					const descWidth = Math.max(1, contentWidth - descStart);
+					const descWidth = Math.max(
+						1,
+						contentWidth - descStart - visibleWidth(sourceBadge),
+					);
 					if (descWidth > 0) {
 						line += `  ${DIM}${cmd.description.slice(0, descWidth)}${RESET}`;
 					}
 				}
+				line += sourceBadge;
 
 				lines.push(line);
 			}
@@ -427,14 +485,23 @@ export class SlashPopup implements Component {
 					line += ` ${DIM}[${cmd.argHint}]${RESET}`;
 				}
 
-				// Description
+				const sourceBadge =
+					cmd.source && cmd.source !== "builtin" && contentWidth >= 54
+						? `  ${theme.fg("accent", cmd.source)}`
+						: "";
+
+				// Description reserves room for source attribution.
 				if (cmd.description) {
 					const descStart = visibleWidth(line) + 2;
-					const descWidth = Math.max(1, contentWidth - descStart);
+					const descWidth = Math.max(
+						1,
+						contentWidth - descStart - visibleWidth(sourceBadge),
+					);
 					if (descWidth > 0) {
 						line += `  ${DIM}${cmd.description.slice(0, descWidth)}${RESET}`;
 					}
 				}
+				line += sourceBadge;
 
 				lines.push(line);
 			}
@@ -467,8 +534,8 @@ export class SlashPopup implements Component {
 			renderListPopupFrame({
 				popupWidth,
 				innerWidth: contentWidth,
-				title: "commands",
-				subtitle: ` (${count})`,
+				title: "command palette",
+				subtitle: ` · ${count}${this.query.length > 1 ? ` · ${this.query}` : ""}`,
 				hints: "↑↓ select · tab complete · enter run · esc close",
 				bodyLines: lines,
 				bottomText: state.selectedCmd?.description ?? "Run a Logician command.",

@@ -45,6 +45,8 @@ interface TranscriptDisplayOptions {
 	maxTurns?: number;
 	/** Max rendered lines before cutting off older content. */
 	maxRenderedLines?: number;
+	/** Workspace details shown before the first turn. */
+	emptyState?: { workspace: string; branch?: string };
 }
 
 interface TurnRenderCache {
@@ -117,10 +119,12 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	private spinnerTick = 0;
 	private spinnerTimer: ReturnType<typeof setInterval> | null = null;
 	private onAnimationTick: (() => void) | null = null;
+	private emptyState: { workspace: string; branch?: string } | undefined;
 	sanitizedToolCache = new WeakMap<ToolExecution, SanitizedToolCache>();
 	sanitizationMetrics = { cacheHits: 0, scannedCharacters: 0 };
 
 	constructor(options: TranscriptDisplayOptions = {}) {
+		this.emptyState = options.emptyState;
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
 		this.maxMessageLength =
 			options.maxMessageLength ?? DEFAULT_TRUNCATION.transcriptMessageMaxChars;
@@ -135,6 +139,11 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		this.maxTurns = options.maxTurns ?? Number.POSITIVE_INFINITY;
 		this.maxRenderedLines =
 			options.maxRenderedLines ?? Number.POSITIVE_INFINITY;
+	}
+
+	setEmptyStateContext(context: { workspace: string; branch?: string }): void {
+		this.emptyState = context;
+		this.invalidate();
 	}
 
 	private static readonly SPINNER_FRAMES = [
@@ -374,6 +383,12 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		};
 		const emptyLine = " ".repeat(frameWidth);
 
+		if (this.turns.length === 0) {
+			const lines = this.renderEmptyState(frameWidth, padToWidth);
+			this.cachedLines = lines;
+			return lines;
+		}
+
 		// Reuse the assembled prefix from the last frame up to the first turn
 		// whose identity or revision actually changed. During normal streaming
 		// only the newest turn's revision moves, so this turns an O(all turns)
@@ -551,6 +566,35 @@ export class TranscriptDisplay implements Component, RenderCtx {
 
 		this.cachedLines = visibleBuffer;
 		return visibleBuffer;
+	}
+
+	private renderEmptyState(
+		frameWidth: number,
+		padToWidth: (line: string) => string,
+	): string[] {
+		const workspace = this.emptyState?.workspace || "workspace";
+		const branch = this.emptyState?.branch;
+		const location = branch ? `${workspace}  ·  ${branch}` : workspace;
+		if (frameWidth < 48) {
+			return [
+				padToWidth(""),
+				padToWidth(`${theme.fg("accent", "◆")} ${BOLD}LOGICIAN${RESET}`),
+				padToWidth(theme.fg("muted", location)),
+				padToWidth(""),
+				padToWidth(`${theme.fg("text", "Start typing")} ${theme.fg("dim", "or use / commands")}`),
+			];
+		}
+		return [
+			padToWidth(""),
+			padToWidth(`${theme.fg("accent", "◆")} ${BOLD}LOGICIAN${RESET}`),
+			padToWidth(theme.fg("muted", "Your workspace, ready to reason.")),
+			padToWidth(theme.fg("dim", location)),
+			padToWidth(""),
+			padToWidth(`${theme.fg("header", `${BOLD}QUICK START${RESET}`)}`),
+			padToWidth(`${theme.fg("accent", "/")}  ${theme.fg("text", "Browse commands")}     ${theme.fg("accent", "@")}  ${theme.fg("text", "Attach a file")}`),
+			padToWidth(`${theme.fg("accent", "/sessions")}  ${theme.fg("muted", "Resume previous work")}`),
+			padToWidth(`${theme.fg("accent", "/help")}      ${theme.fg("muted", "See keys and capabilities")}`),
+		];
 	}
 
 	setTurns(turns: Turn[]): void {

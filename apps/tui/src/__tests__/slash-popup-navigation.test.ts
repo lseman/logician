@@ -22,7 +22,7 @@ void test("slash popup renders every command for a bare slash", () => {
 	popup.setQuery("/");
 	popup.show();
 	let rendered = popup.render(120).join("\n");
-	assert.match(rendered, /commands.*\(15\)/);
+	assert.match(rendered, /command palette.*· 15/);
 	assert.match(rendered, /more below/);
 	for (let index = 0; index < commands.length - 1; index++) {
 		popup.moveSelection(1);

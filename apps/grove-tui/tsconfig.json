@@ -1,0 +1,18 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"rootDir": "../..",
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"types": ["node", "bun-types"],
+		"paths": {
+			"@logician/log-core/runtime": ["../../packages/log-core/src/runtime.ts"]
+		}
+	},
+	"include": ["src/**/*", "../../packages/log-core/src/**/*"],
+	"exclude": ["node_modules", "dist"]
+}

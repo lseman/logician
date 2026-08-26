@@ -13,6 +13,7 @@
 	"scripts": {
 		"dev": "tsx apps/tui/src/index.ts",
 		"start": "tsx apps/tui/src/index.ts",
+		"grove": "tsx apps/grove-tui/src/index.ts",
 		"graphician:check": "cd ecosystem/graphician && python -m pytest",
 		"lint": "biome check packages/ packages/blocks apps/",
 		"lint:fix": "biome check --fix packages/ packages/blocks apps/",

@@ -10,6 +10,7 @@
 		{ "path": "packages/blocks/log-memory" },
 		{ "path": "packages/log-runtime" },
 		{ "path": "apps/log-memory-mcp" },
+		{ "path": "apps/grove-tui" },
 		{ "path": "apps/tui" }
 	]
 }

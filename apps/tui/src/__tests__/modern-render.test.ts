@@ -89,6 +89,18 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 	assert.ok(lines.every(line => visibleWidth(line) <= 80));
 });
 
+void test("empty transcript renders a project-aware quick-start surface", () => {
+	const display = new TranscriptDisplay({
+		emptyState: { workspace: "logician", branch: "main" },
+	});
+	const output = plain(display.render(80).join("\n"));
+	assert.match(output, /◆ LOGICIAN/);
+	assert.match(output, /logician  ·  main/);
+	assert.match(output, /QUICK START/);
+	assert.match(output, /\/sessions/);
+	assert.ok(display.render(80).every(line => visibleWidth(line) <= 78));
+});
+
 void test("collapsed running tools show live output without expanding details", () => {
 	const display = new TranscriptDisplay();
 	display.setTurns([
@@ -1069,10 +1081,26 @@ void test("input prompt has stable inset modern chrome", () => {
 	const input = new InputBar();
 	input.focused = true;
 	const [header, line] = input.render(40);
+	assert.match(plain(header), /MESSAGE/);
 	assert.match(plain(header), /Enter send/);
 	assert.match(plain(line).replace(CURSOR_MARKER, ""), /^ {2}› Ask Logician/);
 	assert.equal(visibleWidth(header), 40);
 	assert.equal(visibleWidth(line), 40);
+});
+
+void test("composer header adapts from discovery hints to prompt telemetry", () => {
+	const input = new InputBar();
+	const emptyHeader = plain(input.render(80)[0]);
+	assert.match(emptyHeader, /COMPOSER/);
+	assert.match(emptyHeader, /\/ Enter commands/);
+	assert.match(emptyHeader, /@ files/);
+
+	input.valueText = "Review this\nthen run tests";
+	const activeHeader = plain(input.render(80)[0]);
+	assert.match(activeHeader, /2L · 26 chars/);
+	assert.match(activeHeader, /Enter send/);
+	assert.match(activeHeader, /Ctrl\+Enter steer/);
+	assert.equal(visibleWidth(input.render(80)[0]), 80);
 });
 
 void test("composer preserves explicit steer-now submission intent", () => {
