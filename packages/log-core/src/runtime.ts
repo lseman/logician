@@ -1,6 +1,15 @@
 /** Contracts used by hosts that embed the core engine. */
 
 export {
+	EventJournal,
+	type EventJournalEntry,
+	type EventJournalOptions,
+	type EventJournalQuery,
+	type EventJournalSubscriptionOptions,
+	type JournalEvent,
+} from "./runtime/events/event-journal.ts";
+
+export {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,

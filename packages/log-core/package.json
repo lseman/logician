@@ -16,6 +16,7 @@
 		"./permissions": "./src/capabilities/tools/permissions.ts",
 		"./protocol": "./src/system/types/types-protocol.ts",
 		"./events": "./src/system/types/types-events.ts",
+		"./event-journal": "./src/runtime/events/event-journal.ts",
 		"./runtime": "./src/runtime.ts"
 	},
 	"scripts": {

@@ -27,6 +27,14 @@ export {
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
 } from "./runtime/harness/agent-harness.ts";
+export {
+	EventJournal,
+	type EventJournalEntry,
+	type EventJournalOptions,
+	type EventJournalQuery,
+	type EventJournalSubscriptionOptions,
+	type JournalEvent,
+} from "./runtime/events/event-journal.ts";
 export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export {
 	type AgentConfig,
