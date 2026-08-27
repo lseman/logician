@@ -56,6 +56,10 @@ import {
 } from "../overlays/reasoner-selector.ts";
 import { SessionBrowserOverlay } from "../overlays/session-manager.ts";
 import {
+	type SessionTreeAction,
+	SessionTreeOverlay,
+} from "../overlays/session-tree.ts";
+import {
 	type SettingsSelectorAction,
 	SettingsSelectorOverlay,
 } from "../overlays/settings-overlay.ts";
@@ -108,6 +112,7 @@ import {
 	handlePluginManagerAction as handlePluginManagerActionImpl,
 	handleQueueManagerAction as handleQueueManagerActionImpl,
 	handleReasonerSelectorAction as handleReasonerSelectorActionImpl,
+	handleSessionTreeAction as handleSessionTreeActionImpl,
 	handleSettingsSelectorAction as handleSettingsSelectorActionImpl,
 	handleThemeSelectorAction as handleThemeSelectorActionImpl,
 	handleThinkingLevelSelectorAction as handleThinkingLevelSelectorActionImpl,
@@ -118,6 +123,7 @@ import {
 	openPluginManager as openPluginManagerImpl,
 	openQueueManager as openQueueManagerImpl,
 	openReasonerSelector as openReasonerSelectorImpl,
+	openSessionTree as openSessionTreeImpl,
 	openSettingsSelector as openSettingsSelectorImpl,
 	openThemeSelector as openThemeSelectorImpl,
 	openThinkingLevelSelector as openThinkingLevelSelectorImpl,
@@ -170,6 +176,7 @@ export class LogicianTUI {
 	settingsSelector: SettingsSelectorOverlay;
 	transcriptDisplay: TranscriptDisplay;
 	sessionManager: SessionBrowserOverlay;
+	sessionTree: SessionTreeOverlay;
 	sessionService: TuiSessionService;
 	private killRing: KillRing;
 	private undoStack: UndoStack<{ value: string; cursor: number }>;
@@ -406,6 +413,11 @@ export class LogicianTUI {
 		this.sessionManager.setActionCallback(action =>
 			this.handleSessionAction(action),
 		);
+		this.sessionTree = new SessionTreeOverlay();
+		this.sessionTree.setStore(this.sessionService);
+		this.sessionTree.setActionCallback(action =>
+			this.handleSessionTreeAction(action),
+		);
 		// Only create initial session — never auto-resume. Sessions are loaded
 		// explicitly via the --session CLI flag in index.ts.
 		this.currentSessionId = this.sessionService.createSession("New Session");
@@ -465,6 +477,7 @@ export class LogicianTUI {
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "minimal",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
 			legroomEnabled: runtimeConfig.bridge.legroom?.mode === "sdk",
+			memoriamEnabled: runtimeConfig.bridge.memoriam?.mode === "sdk",
 			graphicianEnabled: runtimeConfig.bridge.graphicianEnabled ?? true,
 			fffgrepEnabled: runtimeConfig.bridge.fffgrepEnabled ?? true,
 			memoryEnabled: runtimeConfig.bridge.memory?.enabled ?? false,
@@ -530,9 +543,19 @@ export class LogicianTUI {
 		handleSessionActionImpl(this, action);
 	}
 
+	/** Handle session tree actions (navigate, close). */
+	private handleSessionTreeAction(action: SessionTreeAction): void {
+		handleSessionTreeActionImpl(this, action);
+	}
+
 	/** Open the session manager overlay. */
 	openSessionManager(): void {
 		openSessionManagerImpl(this);
+	}
+
+	/** Open the session tree overlay. */
+	openSessionTree(): void {
+		openSessionTreeImpl(this);
 	}
 
 	/** Load turns for a specific session ID (used by --session CLI flag). */

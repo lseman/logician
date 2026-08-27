@@ -1,6 +1,6 @@
 import type { AgentConfig } from "@logician/log-core";
 import { resolveAgentSettings } from "@logician/log-core/runtime";
-import type { RuntimeSettingsPatch } from "./bridge/types.ts";
+import type { RuntimeSettingsPatch } from "../types.ts";
 
 export type RuntimeToggleKey =
 	| "guardsEnabled"
@@ -15,7 +15,7 @@ export type RuntimeToggleKey =
 	| "graphicianEnabled"
 	| "fffgrepEnabled"
 	| "legroomEnabled"
-	| "memoryEnabled";
+	| "memoriamEnabled";
 
 export interface RuntimeSettingsHost {
 	config(): Readonly<AgentConfig>;
@@ -27,8 +27,8 @@ export interface RuntimeSettingsHost {
 	setToggle(key: RuntimeToggleKey, enabled: boolean): void;
 	permissionMode(): string;
 	postEditDiagnostics(): boolean;
-	memoryEnabled(): boolean;
 	legroomEnabled(): boolean;
+	memoriamEnabled(): boolean;
 }
 
 export interface RuntimeSettingsView {
@@ -47,7 +47,7 @@ export interface RuntimeSettingsView {
 	graphicianEnabled: boolean;
 	fffgrepEnabled: boolean;
 	legroomEnabled: boolean;
-	memoryEnabled: boolean;
+	memoriamEnabled: boolean;
 	duplicateGuardEnabled: boolean;
 	failureGuardEnabled: boolean;
 	continuationEnabled: boolean;
@@ -69,7 +69,7 @@ const TOGGLE_KEYS: readonly RuntimeToggleKey[] = [
 	"graphicianEnabled",
 	"fffgrepEnabled",
 	"legroomEnabled",
-	"memoryEnabled",
+	"memoriamEnabled",
 ];
 
 /** Normalizes settings mutations and projects the single settings view used by clients. */
@@ -128,7 +128,7 @@ export class SettingsGateway {
 			graphicianEnabled: config.graphicianEnabled ?? true,
 			fffgrepEnabled: config.fffgrepEnabled ?? true,
 			legroomEnabled: this.host.legroomEnabled(),
-			memoryEnabled: this.host.memoryEnabled(),
+			memoriamEnabled: this.host.memoriamEnabled(),
 			duplicateGuardEnabled: config.duplicateGuardEnabled ?? true,
 			failureGuardEnabled: config.failureGuardEnabled ?? false,
 			continuationEnabled: config.continuationEnabled ?? true,

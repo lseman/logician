@@ -74,6 +74,7 @@ export type BuiltinWidgetId =
 	// Memory
 	| "rtk" // RTK proxy status
 	| "legroom" // Legroom SDK compression status
+	| "memoriam" // Memoriam SDK memory retrieval status
 	| "graphician" // Graphician code-graph tool status
 	| "fffgrep" // fff indexed grep status
 	| "memory" // memory subsystem status
@@ -313,24 +314,31 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 			align: "right",
 			fill: "none",
 		},
-		graphician: {
+		memoriam: {
 			enabled: true,
 			row: 0,
 			position: 9,
 			align: "right",
 			fill: "none",
 		},
-		fffgrep: {
+		graphician: {
 			enabled: true,
 			row: 0,
 			position: 10,
 			align: "right",
 			fill: "none",
 		},
-		memory: {
+		fffgrep: {
 			enabled: true,
 			row: 0,
 			position: 11,
+			align: "right",
+			fill: "none",
+		},
+		memory: {
+			enabled: true,
+			row: 0,
+			position: 12,
 			align: "right",
 			fill: "none",
 		},

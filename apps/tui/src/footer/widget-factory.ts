@@ -51,6 +51,7 @@ export interface WidgetFactoryStatus {
 	completionTokens?: number;
 	rtkProxyEnabled?: boolean;
 	legroomEnabled?: boolean;
+	memoriamEnabled?: boolean;
 	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	memoryEnabled?: boolean;
@@ -436,6 +437,15 @@ function legroomWidget(status: WidgetFactoryStatus): WidgetData {
 	);
 }
 
+function memoriamWidget(status: WidgetFactoryStatus): WidgetData {
+	return styled(
+		"memoriam",
+		theme.fg(((status.memoriamEnabled ?? false) ? "success" : "dim") as any, ""),
+		"mem:",
+		(status.memoriamEnabled ?? false) ? "sdk" : "off",
+	);
+}
+
 function fffgrepWidget(status: WidgetFactoryStatus): WidgetData {
 	return toggleWidget("fffgrep", "fff", status.fffgrepEnabled ?? true);
 }
@@ -522,6 +532,7 @@ const PROVIDERS: Record<
 	mcp: mcpWidget,
 	rtk: rtkWidget,
 	legroom: legroomWidget,
+	memoriam: memoriamWidget,
 	graphician: graphicianWidget,
 	fffgrep: fffgrepWidget,
 	memory: memoryWidget,

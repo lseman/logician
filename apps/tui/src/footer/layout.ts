@@ -491,6 +491,7 @@ const DEFAULT_INFO: WidgetFactoryStatus = {
 	completionTokens: undefined,
 	rtkProxyEnabled: false,
 	legroomEnabled: false,
+	memoriamEnabled: false,
 	graphicianEnabled: true,
 	fffgrepEnabled: true,
 };

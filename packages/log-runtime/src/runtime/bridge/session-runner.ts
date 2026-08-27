@@ -18,6 +18,14 @@ import type { LLMBackend } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import type { AgentSession } from "@logician/log-core/session";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
+import {
+	formatSkillActivationNotice,
+	SkillActivationSession,
+} from "../../capabilities/skills/activation.ts";
+import {
+	formatSkillInvocation,
+	type Skill,
+} from "../../capabilities/skills/loader.ts";
 import type { RuntimeEventBus } from "../events/runtime-event-bus.ts";
 import type { AgentCoordinator } from "./application/agent-coordinator.ts";
 
@@ -43,10 +51,10 @@ export interface SessionRunnerCallbacks {
 	getSessionId(): string;
 	/** Get the current AgentConfig system prompt. */
 	getSystemPrompt(): string | undefined;
+	/** Get trusted skills discovered by the runtime. */
+	getSkills(): Skill[];
 	/** Render repository-map context for the given message, if enabled. */
 	renderRepositoryContext(message: string): string | undefined;
-	/** Abort any in-flight memory extraction so it doesn't contend with the turn. */
-	abortMemoryExtractors(): void;
 	/** Publish current context-token usage (bridge owns the measurement). */
 	publishUsage(): void;
 }
@@ -69,6 +77,7 @@ export class SessionRunner {
 	private readonly getAgentCoordinator: () => AgentCoordinator | null;
 	/** Live accessor — RepositoryMap is a runtime-context getter on the bridge. */
 	private readonly getRepositoryMap: () => RepositoryMap | undefined;
+	private readonly skillActivations = new SkillActivationSession();
 
 	constructor(deps: {
 		callbacks: SessionRunnerCallbacks;
@@ -94,8 +103,6 @@ export class SessionRunner {
 	 * before calling submit).
 	 */
 	async submit(message: string): Promise<void> {
-		this.callbacks.abortMemoryExtractors();
-
 		const runId = `run_${randomUUID()}`;
 		const turnId = `turn_${randomUUID()}`;
 		this.events.beginRun({
@@ -107,6 +114,9 @@ export class SessionRunner {
 		let persistentSystemPrompt: string | undefined;
 		let turnSystemPrompt = this.callbacks.getSystemPrompt();
 		let turnSucceeded = false;
+		const activations = isFormattedSkillInvocation(message)
+			? []
+			: this.skillActivations.select(this.callbacks.getSkills(), message);
 
 		try {
 			const session = this.callbacks.ensureSession();
@@ -133,8 +143,28 @@ export class SessionRunner {
 				}
 			}
 
+			if (activations.length) {
+				this.callbacks.emit({
+					type: "notice",
+					level: "info",
+					label: "Skills",
+					text: formatSkillActivationNotice(activations),
+				});
+			}
+
 			this.callbacks.emit({ type: "turn_start", turnId });
-			await session.prompt(message);
+			await session.prompt(message, {
+				contextContributions: activations.map(activation => ({
+					source: `skill:${activation.skill.name}`,
+					priority: activation.score,
+					messages: [
+						{
+							role: "system",
+							content: formatSkillInvocation(activation.skill),
+						},
+					],
+				})),
+			});
 			turnSucceeded = true;
 		} catch (err: unknown) {
 			const error = err as Error;
@@ -158,6 +188,7 @@ export class SessionRunner {
 				const hasQueuedContinuation =
 					turnSucceeded && (session?.getQueues().nextTurn.length ?? 0) > 0;
 				if (hasQueuedContinuation) {
+					this.skillActivations.continueWith(activations);
 					await this.continue();
 				} else {
 					this.callbacks.emit({ type: "phase", state: "ready" });
@@ -183,6 +214,25 @@ export class SessionRunner {
 
 		const repoQuery = this.getRepositoryMap()?.render("");
 		session.setRepositoryQuery(repoQuery);
-		await session.runQueuedContinuation(undefined, repoQuery);
+		const activations = this.skillActivations.select(
+			this.callbacks.getSkills(),
+			"continue",
+		);
+		await session.runQueuedContinuation(undefined, repoQuery, {
+			contextContributions: activations.map(activation => ({
+				source: `skill:${activation.skill.name}`,
+				priority: activation.score,
+				messages: [
+					{
+						role: "system",
+						content: formatSkillInvocation(activation.skill),
+					},
+				],
+			})),
+		});
 	}
+}
+
+function isFormattedSkillInvocation(message: string): boolean {
+	return /^\s*<skill\s+name="[^"]+"/u.test(message);
 }

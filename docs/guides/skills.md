@@ -53,7 +53,18 @@ Read a file before editing it. Preserve its existing line endings and encoding.
 
 ## Activation
 
-Logician scores the current request against names, aliases, descriptions, triggers, and examples. A bounded set of relevant skills is injected for that turn. Skills with `disable-model-invocation: true` remain available as slash commands but are excluded from automatic activation.
+Logician scores each new user request against names, aliases, descriptions,
+triggers, and examples. Strong matches are loaded as separate request-scoped
+context sources, deduplicated and packed under the adaptive context budget. An
+activation notice explains which skills were selected and why. Explicit `$name`
+or `/name` references receive the highest routing priority, while an explicit
+slash-command invocation that already contains the skill body is never injected
+twice.
+
+Internal continuations inherit the active skill set once. A new user request is
+always matched afresh, preventing an old skill from leaking into an unrelated
+task. Skills with `disable-model-invocation: true` remain available as slash
+commands but are excluded from automatic activation.
 
 You can invoke a skill directly with `/<directory-name> [arguments]`. Restart or use `/reload` after adding a skill.
 

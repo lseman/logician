@@ -37,11 +37,8 @@ import type {
 	McpSnapshotResult,
 	McpToggleResult,
 } from "../../capabilities/mcp/mcp-server-registry.ts";
-import type { MemoryHost } from "../../capabilities/memory/memory.ts";
-import {
-	createMemoryGetTool,
-	createMemorySearchTool,
-} from "../../capabilities/memory/memory-tools.ts";
+import { MemoriamGateway } from "../../capabilities/memoriam/memoriam-gateway.ts";
+import type { MemoriamWorker } from "../../capabilities/memoriam/worker.ts";
 import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
@@ -54,9 +51,9 @@ import {
 } from "../context/context-inspector.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
-import { ModelSelector } from "../model-selector.ts";
-import { buildToolRegistry } from "../runtime-context.ts";
-import { ToolRouter } from "../tool-router.ts";
+import { ModelSelector } from "./support/model-selector.ts";
+import { buildToolRegistry } from "./support/runtime-context.ts";
+import { ToolRouter } from "./support/tool-router.ts";
 import { AgentCoordinator } from "./application/agent-coordinator.ts";
 import { CommandDispatcher } from "./application/command-dispatcher.ts";
 import { ConversationIdentity } from "./application/conversation-identity.ts";
@@ -166,14 +163,16 @@ export class AgentRuntime {
 	private get interactions(): InteractionGateway {
 		return this.runtimeCtx.interactions;
 	}
-	private get memory(): MemoryHost {
-		return this.runtimeCtx.memory;
-	}
 	private agentCoordinator: AgentCoordinator | null = null;
 	private readonly sessionRunner: SessionRunner;
 	private readonly legroom: LegroomGateway;
 	private get legroomEnabled(): boolean {
 		return this.legroom.isEnabled();
+	}
+
+	private readonly memoriam: MemoriamGateway;
+	private get memoriamEnabled(): boolean {
+		return this.memoriam.isEnabled();
 	}
 
 	private get repositoryMap(): RepositoryMap | undefined {
@@ -206,7 +205,6 @@ export class AgentRuntime {
 				config: () => this.config,
 				sessions: () => this.sessions,
 				events: () => this.events,
-				memory: () => this.memory,
 			},
 		);
 		this.projectTrusted = opts.projectTrusted === true;
@@ -217,6 +215,7 @@ export class AgentRuntime {
 				? false
 				: opts.postEditDiagnostics !== false;
 		this.legroom = new LegroomGateway(opts.legroom ?? {});
+		this.memoriam = new MemoriamGateway(opts.memoriam ?? {});
 
 		this.runtimeCtx = createRuntimeContext({
 			opts,
@@ -235,17 +234,7 @@ export class AgentRuntime {
 			baseUrl: opts.webSearch?.baseUrl || defaultWebSearch.baseUrl,
 			maxResults: opts.webSearch?.maxResults ?? defaultWebSearch.maxResults,
 		};
-		const extraTools = opts.extraTools?.length
-			? [
-					...(opts.memory?.enabled !== false
-						? [
-								createMemorySearchTool(() => this.memory?.getStore() ?? null),
-								createMemoryGetTool(() => this.memory?.getStore() ?? null),
-							]
-						: []),
-					...opts.extraTools,
-				]
-			: undefined;
+		const extraTools = opts.extraTools?.length ? [...opts.extraTools] : undefined;
 		this.toolRouter = new ToolRouter({
 			cwd: this.cwd,
 			projectTrusted: this.projectTrusted,
@@ -332,8 +321,8 @@ export class AgentRuntime {
 			onPermissionRequest: context =>
 				this.interactions.requestPermission(context),
 			onQuestionRequest: context => this.interactions.requestQuestion(context),
-			hooks: this.buildLegroomHooks(
-				this.buildMemoryHooks(
+			hooks: this.buildMemoriamHooks(
+				this.buildLegroomHooks(
 					createPostEditDiagnosticHooks(
 						this.cwd,
 						() => this.runtimeConfiguration.postEditDiagnostics,
@@ -418,8 +407,8 @@ export class AgentRuntime {
 			sessionId: () => this.sessionId,
 			tools: this.toolRouter,
 			interactions: this.interactions,
-			memory: this.memory,
 			legroom: this.legroom,
+			memoriam: this.memoriam,
 			defaultTools: () => this._defaultTools,
 			setReasoner: id => this.agentCoordinator?.setReasonerId(id),
 			emit: event => this.emit(event),
@@ -444,8 +433,8 @@ export class AgentRuntime {
 				ensureSession: () => this.ensureSession(),
 				getSessionId: () => this.sessionId,
 				getSystemPrompt: () => this.config.systemPrompt,
+				getSkills: () => this._loadedSkills,
 				renderRepositoryContext: message => this.repositoryMap?.render(message),
-				abortMemoryExtractors: () => this.memory?.abortExtractors(),
 				publishUsage: () => this.publishContextUsage(),
 			},
 			events: this.events,
@@ -501,10 +490,10 @@ export class AgentRuntime {
 					operation: "reload-tools",
 					recoverable: true,
 				}),
-			waitForMemory: () => this.memory.waitForBackgroundTasks(),
 			closeResources: async () => {
 				this.lsp.close();
 				this.legroom.close();
+				this.memoriam.close();
 				await this.toolRouter.closeMcp();
 				killAllTrackedChildren();
 			},
@@ -514,24 +503,17 @@ export class AgentRuntime {
 		});
 	}
 
-	/**
-	 * Build memory hooks by delegating to the MemoryHost.
-	 */
-	private buildMemoryHooks(
-		existingHooks: AgentConfig["hooks"],
-	): AgentConfig["hooks"] {
-		if (!this.memory) return existingHooks;
-		return this.memory.createHooks(existingHooks, {
-			isRunning: () => this.turns.isActive(),
-			getBackend: () => this.backend,
-			emit: event => this.emit(event),
-		});
-	}
-
 	private buildLegroomHooks(
 		existingHooks: AgentConfig["hooks"],
 	): AgentConfig["hooks"] {
 		return this.legroom.createHooks(existingHooks);
+	}
+
+	/** Build Memoriam hooks by delegating to the MemoriamGateway. */
+	private buildMemoriamHooks(
+		existingHooks: AgentConfig["hooks"],
+	): AgentConfig["hooks"] {
+		return this.memoriam.createHooks(existingHooks);
 	}
 
 	/** Add a tool to the default set and propagate it into live config/harness/system prompt. */
@@ -603,6 +585,7 @@ export class AgentRuntime {
 		graphicianEnabled?: boolean;
 		fffgrepEnabled?: boolean;
 		legroomEnabled?: boolean;
+		memoriamEnabled?: boolean;
 	} {
 		return {
 			baseUrl: this.config.baseUrl,
@@ -611,6 +594,7 @@ export class AgentRuntime {
 			graphicianEnabled: this.config.graphicianEnabled,
 			fffgrepEnabled: this.config.fffgrepEnabled,
 			legroomEnabled: this.legroomEnabled,
+			memoriamEnabled: this.memoriamEnabled,
 		};
 	}
 
@@ -832,7 +816,7 @@ export class AgentRuntime {
 		graphicianEnabled: boolean;
 		fffgrepEnabled: boolean;
 		legroomEnabled: boolean;
-		memoryEnabled: boolean;
+		memoriamEnabled: boolean;
 		duplicateGuardEnabled: boolean;
 		failureGuardEnabled: boolean;
 		continuationEnabled: boolean;
@@ -892,28 +876,98 @@ export class AgentRuntime {
 		return this.legroom.calibrationRecord(phaseReports, quality);
 	}
 
-	getMemoryStore(): ReturnType<
-		typeof import("@logician/memoriam").createMemoryStore
-	> | null {
-		return this.memory?.getStore() ?? null;
+	// ── Memoriam ──────────────────────────────────────────────────────────
+
+	/** Get the underlying MemoriamWorker for advanced memory-store operations. */
+	getMemoriamWorker(): MemoriamWorker | null {
+		return this.memoriamEnabled ? this.memoriam.worker : null;
 	}
 
-	getMemoryStats(): {
-		memoryEnabled: boolean;
-		memoryCount: number;
-		sessionCount: number;
-		observationCount: number;
-		viewerPort?: number;
-	} {
-		if (!this.memory) {
-			return {
-				memoryEnabled: false,
-				memoryCount: 0,
-				sessionCount: 0,
-				observationCount: 0,
-			};
-		}
-		return this.memory.getStats(this.sessionId);
+	/** Observe a tool interaction or conversation turn. */
+	async memoriamObserve(
+		sessionId: string,
+		hookType: string,
+		opts?: {
+			toolName?: string;
+			toolInput?: unknown;
+			toolOutput?: unknown;
+			userPrompt?: string;
+			raw?: unknown;
+		},
+	): Promise<unknown> {
+		return this.memoriam.observe(sessionId, hookType, opts);
+	}
+
+	/** Get memory context as plain text for a query. */
+	async memoriamGetContext(
+		sessionId: string,
+		query: string,
+		budget: number,
+	): Promise<string> {
+		return this.memoriam.getContext(sessionId, query, budget);
+	}
+
+	/** Recall memories in a formatted string (markdown/plain). */
+	async memoriamRecall(
+		query: Record<string, unknown>,
+		format: string,
+	): Promise<string> {
+		return this.memoriam.recall(query, format);
+	}
+
+	/** List memories, optionally filtered by a query. */
+	async memoriamListMemories(
+		query?: Record<string, unknown>,
+	): Promise<unknown[]> {
+		return this.memoriam.listMemories(query);
+	}
+
+	/** Remove a single memory by id. */
+	async memoriamRemoveMemory(id: string): Promise<boolean> {
+		return this.memoriam.removeMemory(id);
+	}
+
+	/** Consolidate a session's observations into memories. */
+	async memoriamConsolidate(sessionId: string): Promise<unknown[]> {
+		return this.memoriam.consolidate(sessionId);
+	}
+
+	/** List observations for a session. */
+	async memoriamListObservations(
+		sessionId: string,
+		limit: number,
+	): Promise<unknown[]> {
+		return this.memoriam.listObservations(sessionId, limit);
+	}
+
+	/** Search observations across sessions. */
+	async memoriamSearchObservations(
+		query: string,
+		limit: number,
+	): Promise<unknown[]> {
+		return this.memoriam.searchObservations(query, limit);
+	}
+
+	/** Clear all observations. Returns the number removed. */
+	async memoriamClearObservations(): Promise<number> {
+		return this.memoriam.clearObservations();
+	}
+
+	/** List memory sessions. */
+	async memoriamListSessions(
+		query?: Record<string, unknown>,
+	): Promise<unknown[]> {
+		return this.memoriam.listSessions(query);
+	}
+
+	/** Clear stored sessions, optionally keeping one. */
+	async memoriamClearSessions(keepSessionId?: string | null): Promise<void> {
+		return this.memoriam.clearSessions(keepSessionId ?? null);
+	}
+
+	/** Aggregate Memoriam worker statistics. */
+	async getMemoriamStats(): Promise<Record<string, unknown>> {
+		return this.memoriam.workerStats();
 	}
 
 	/** Use the user-facing conversation session as the hook and memory session. */
@@ -924,8 +978,17 @@ export class AgentRuntime {
 		this.identity.use(sessionId, durableSession);
 	}
 
-	renameConversationSession(sessionId: string, name: string): void {
-		this.memory?.renameSession(sessionId, name);
+	/** Rename the Memoriam session metadata (best-effort). */
+	async renameConversationSession(
+		sessionId: string,
+		name: string,
+	): Promise<void> {
+		if (!this.memoriamEnabled) return;
+		try {
+			await this.memoriam.updateSession(sessionId, { name: name.trim() });
+		} catch {
+			// Fail open — memory metadata rename is not load-bearing.
+		}
 	}
 
 	reset(): void {
@@ -1046,25 +1109,22 @@ export class AgentRuntime {
 		return this.session?.messages || [];
 	}
 
-	/** Return full context as formatted text for /context command. */
+	/** Return full context as formatted text for /context command.
+	 *
+	 * Memoriam memory context is injected into the provider payload by the
+	 * beforeProviderPayload hook rather than composed here, so it does not
+	 * appear in this synchronous inspection view.
+	 */
 	getContext(): string {
 		const msgs = this.getMessages();
-		const memoryContext = this.getMemoryContextForInspection(msgs);
 		const inspection = inspectContext({
 			messages: msgs,
 			systemPrompt: this.config.systemPrompt || "",
-			memoryContext,
+			memoryContext: "",
 			toolDefinitions: this.getTools().toToolDefinitions(),
 		});
 		this.activity.setContext(inspection.tokens);
 		return inspection.text;
-	}
-
-	private getMemoryContextForInspection(messages: Message[]): string {
-		if (!this.memory) return "";
-		// Cast: Message content is string | null but manager expects string | undefined
-		const msgArray = messages as Array<{ role: string; content?: string }>;
-		return this.memory.getContextForInspection(msgArray);
 	}
 
 	getContextSourceMap(memoryContext: string = ""): Array<{
@@ -1126,4 +1186,4 @@ export class AgentRuntime {
 	}
 }
 
-export { getSkillsDirs } from "../resource-directories.ts";
+export { getSkillsDirs } from "./support/resource-directories.ts";

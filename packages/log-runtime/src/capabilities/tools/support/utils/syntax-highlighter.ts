@@ -159,6 +159,3 @@ export function highlight(code: string, language: string): HighlightResult {
 /**
  * List all supported language names.
  */
-export function listLanguages(): string[] {
-	return instance.listLanguages();
-}

@@ -42,6 +42,13 @@ export {
 	runAgentLoop,
 	STEERING_INTERRUPT_SUMMARY,
 } from "./runtime/harness/agent-harness.ts";
+export {
+	AdaptiveContextController,
+	type AdaptiveContextControllerOptions,
+	type AdaptiveContextPlan,
+	type AdaptiveContextRequest,
+	type ContextOutcome,
+} from "./system/context/adaptive-context-controller.ts";
 export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export {
 	type AgentConfig,

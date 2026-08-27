@@ -178,9 +178,11 @@ export class ConversationSession {
 		return this.currentSession?.fork() ?? null;
 	}
 
-	async branchSummary(): Promise<string | null> {
+	async branchSummary(options?: {
+		customInstructions?: string;
+	}): Promise<string | null> {
 		if (!this.currentSession) return null;
-		const summary = await this.currentSession.branchSummary();
+		const summary = await this.currentSession.branchSummary(options);
 		this.dependencies.contextChanged();
 		return summary;
 	}

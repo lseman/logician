@@ -127,6 +127,11 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
+		if (ctx.sessionTree.isVisibleOverlay()) {
+			ctx.sessionTree.handleInput(data);
+			ctx.tui.requestRender();
+			return { consume: true };
+		}
 		if (ctx.modelSelector.isVisibleOverlay()) {
 			const action = ctx.modelSelector.handleInput(data);
 			if (action) {
@@ -378,9 +383,9 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			return { consume: true };
 		}
 
-		// Ctrl+S — open session manager
+		// Ctrl+S — open session tree
 		if (data === "\x13") {
-			ctx.openSessionManager();
+			ctx.openSessionTree();
 			return { consume: true };
 		}
 

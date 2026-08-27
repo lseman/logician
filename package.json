@@ -7,11 +7,9 @@
 	"workspaces": [
 		"packages/*",
 		"packages/blocks/*",
-		"ecosystem/memoriam",
 		"apps/*"
 	],
 	"scripts": {
-		"build:memoriam": "bun run --cwd ecosystem/memoriam build",
 		"dev": "tsx apps/tui/src/index.ts",
 		"start": "tsx apps/tui/src/index.ts",
 		"grove": "tsx apps/grove-tui/src/index.ts",
@@ -25,8 +23,8 @@
 		"bench:keystroke": "tsx apps/tui/src/__tests__/benchmark-keystroke.ts",
 		"bench:latency": "tsx apps/tui/src/__tests__/benchmark-latency.ts",
 		"eval:smoke": "bun run --filter @logician/log-eval eval:smoke",
-		"test": "bun run build:memoriam && bun run --workspaces --if-present test",
-		"typecheck": "bun run build:memoriam && bun run --workspaces --if-present typecheck",
+		"test": "bun run --workspaces --if-present test",
+		"typecheck": "bun run --workspaces --if-present typecheck",
 		"ci": "bun run typecheck && bun run lint && bun run format:check && bun run deadcode:check && bun run test"
 	},
 	"engines": {

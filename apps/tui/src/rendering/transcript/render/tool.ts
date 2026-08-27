@@ -375,13 +375,13 @@ function renderPostEditDiagnostics(
 	return lines;
 }
 
-export function detailSection(label: string, meta = ""): string {
+function detailSection(label: string, meta = ""): string {
 	return `${theme.fg("active", "── ")}${BOLD}${label.toUpperCase()}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`;
 }
 
 /** detailSection("file", path), with the path wrapped as a clickable
  * file:// hyperlink when the terminal supports OSC 8. */
-export function detailSectionFile(path: string): string {
+function detailSectionFile(path: string): string {
 	return `${theme.fg("active", "── ")}${BOLD}FILE${RESET}  ${hyperlinkedFilePath(path, `${DIM}${path}${RESET}`)}`;
 }
 
@@ -500,7 +500,7 @@ function toolDetailLines(
  * that — reused by both the collapsed header and the expanded per-task
  * breakdown.
  */
-export function computeBatchTally(
+function computeBatchTally(
 	_ctx: RenderCtx,
 	tool: ToolExecution,
 ): {
@@ -565,7 +565,7 @@ export function computeBatchTally(
 	return { total, completed, failed, running, liveStatus, taskElapsedMs };
 }
 
-export function writeFileContent(tool: ToolExecution): string | undefined {
+function writeFileContent(tool: ToolExecution): string | undefined {
 	return (
 		stringArg(tool.args || {}, "content") ??
 		streamedStringArgLive(tool.partialResult, "content")
@@ -587,7 +587,7 @@ function renderPermissionBlock(
 	return lines;
 }
 
-export function renderMcpResultBlocks(
+function renderMcpResultBlocks(
 	ctx: RenderCtx,
 	result: string,
 	width: number,
@@ -616,7 +616,7 @@ export function renderMcpResultBlocks(
 	return previewBlock(ctx, JSON.stringify(parsed, null, 2), width);
 }
 
-export function renderDiffBlock(
+function renderDiffBlock(
 	ctx: RenderCtx,
 	diff: string,
 	width: number,
@@ -669,7 +669,7 @@ export function renderDiffBlock(
 	return lines;
 }
 
-export function renderTerminalBlock(
+function renderTerminalBlock(
 	ctx: RenderCtx,
 	text: string,
 	width: number,
@@ -695,7 +695,7 @@ export function renderTerminalBlock(
 	return lines;
 }
 
-export function previewBlock(
+function previewBlock(
 	ctx: RenderCtx,
 	text: string,
 	width: number,

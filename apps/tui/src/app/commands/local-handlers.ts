@@ -374,6 +374,14 @@ export function createLocalHandlers(
 			ctx.statusPanel.update({ legroomEnabled: next });
 			return next;
 		},
+		toggleMemoriam: () => {
+			const current = ctx.bridge.getConfig()?.memoriamEnabled ?? false;
+			const next = !current;
+			ctx.bridge.updateSettings({ memoriamEnabled: next });
+			saveConfigNestedField("memoriam", "mode", next ? "sdk" : "off");
+			ctx.statusPanel.update({ memoriamEnabled: next });
+			return next;
+		},
 		openModelSelector: () => {
 			ctx.openModelSelector();
 		},

@@ -23,11 +23,11 @@ import type { AgentSession } from "@logician/log-core/session";
 import {
 	type AgentDefinition,
 	loadAgentDefinitions,
-} from "../capabilities/delegation/definitions.ts";
+} from "../../../capabilities/delegation/definitions.ts";
 import {
 	getBuiltInSubagentTools,
 	type SubagentToolDeps,
-} from "../capabilities/tools/builtin-blocks.ts";
+} from "../../../capabilities/tools/builtin-blocks.ts";
 
 export interface SubagentCoordinatorDeps {
 	config: () => AgentConfig;

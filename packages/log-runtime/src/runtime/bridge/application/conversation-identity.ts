@@ -10,20 +10,14 @@ interface IdentityEventPort {
 	setSessionId(sessionId: string): void;
 }
 
-interface IdentityMemoryPort {
-	onSessionChanged(sessionId: string, previousSessionId: string): void;
-	resetSession(sessionId: string): void;
-}
-
 export interface ConversationIdentityDependencies {
 	cwd: string;
 	config: () => AgentConfig | undefined;
 	sessions: () => IdentitySessionPort | undefined;
 	events: () => IdentityEventPort | undefined;
-	memory: () => IdentityMemoryPort | undefined;
 }
 
-/** Owns the identity shared by sessions, hooks, events, and memory. */
+/** Owns the identity shared by sessions, hooks, and events. */
 export class ConversationIdentity {
 	private sessionId: string;
 	private transcriptPath: string;
@@ -51,18 +45,15 @@ export class ConversationIdentity {
 
 	use(sessionId: string, durableSession?: SessionStore): boolean {
 		if (!sessionId.trim()) return false;
-		const previousSessionId = this.sessionId;
 		this.sessionId = sessionId;
 		this.refreshPaths();
 		this.dependencies.events()?.setSessionId(sessionId);
 		this.dependencies.sessions()?.use(sessionId, durableSession);
-		this.dependencies.memory()?.onSessionChanged(sessionId, previousSessionId);
 		return true;
 	}
 
 	reset(): void {
 		this.refreshPaths();
-		this.dependencies.memory()?.resetSession(this.sessionId);
 	}
 
 	private refreshPaths(): void {

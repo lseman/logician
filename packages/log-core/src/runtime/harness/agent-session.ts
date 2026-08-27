@@ -33,7 +33,8 @@ import { LoopDetector } from "../../control/guards/loop-detector.ts";
 import { OutputGuard } from "../../control/guards/output-guard.ts";
 import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
 import { AgentRunController } from "../../control/policy/run-controller.ts";
-import { ContextEngine } from "../../system/context/context-engine.ts";
+import { AdaptiveContextController } from "../../system/context/adaptive-context-controller.ts";
+import type { ContextContribution } from "../../system/context/context-engine.ts";
 import type { ExtensionRunner } from "../../system/extension/runner.ts";
 import type {
 	AgentConfig,
@@ -97,6 +98,7 @@ import type {
 	HarnessPluginHookFactory,
 	HarnessPluginHookLayer,
 	HarnessPluginLifecycle,
+	HarnessPromptOptions,
 	HarnessQueues,
 	HarnessTurnSnapshot,
 } from "./types.ts";
@@ -116,6 +118,7 @@ export type {
 	AgentSessionOptions,
 	HarnessModule,
 	HarnessObserver,
+	HarnessPromptOptions,
 	HarnessQueues,
 } from "./types.ts";
 export { defineHarnessModule } from "./types.ts";
@@ -148,9 +151,10 @@ export class AgentSession {
 	private readonly turn = new HarnessTurnController();
 	private loopConfig: AgentConfig | null = null;
 	private readonly session: SessionState;
-	private readonly contextEngine = new ContextEngine(messages =>
+	private readonly contextController = new AdaptiveContextController(messages =>
 		estimateChatPayloadTokens([...messages]),
 	);
+	private activeContextPlanId?: string;
 	private loopDetector: LoopDetector;
 	// Durable intervention history spans turns; run policy is reset per prompt.
 	private interventions: HarnessInterventionController =
@@ -393,15 +397,18 @@ export class AgentSession {
 
 	// ── Structural operation: turns (prompt / continue) ─────────────────────
 
-	async prompt(userMessage: string): Promise<Message[]> {
+	async prompt(
+		userMessage: string,
+		options: HarnessPromptOptions = {},
+	): Promise<Message[]> {
 		this.assertIdle("prompt");
 		if (this.autoCompactionSettings.enabled) {
 			const compacted = await this.runAutoCompaction("auto");
 			if (compacted) {
-				return this.prompt(userMessage);
+				return this.prompt(userMessage, options);
 			}
 		}
-		return this.runTurn({ kind: "prompt", text: userMessage });
+		return this.runTurn({ kind: "prompt", text: userMessage }, options);
 	}
 
 	/**
@@ -433,6 +440,7 @@ export class AgentSession {
 	async continueWithNextTurn(
 		context?: string,
 		repositoryQuery?: string,
+		options: HarnessPromptOptions = {},
 	): Promise<Message[]> {
 		this.assertIdle("continue with next-turn guidance");
 		return this.runTurn(
@@ -440,6 +448,7 @@ export class AgentSession {
 			{
 				continuationContext: context,
 				repositoryQuery,
+				contextContributions: options.contextContributions,
 			},
 		);
 	}
@@ -458,6 +467,7 @@ export class AgentSession {
 		options?: {
 			continuationContext?: string;
 			repositoryQuery?: string;
+			contextContributions?: readonly ContextContribution[];
 		},
 	): Promise<Message[]> {
 		return this.turn.run(
@@ -574,6 +584,7 @@ export class AgentSession {
 		options?: {
 			continuationContext?: string;
 			repositoryQuery?: string;
+			contextContributions?: readonly ContextContribution[];
 		},
 	): Promise<HarnessTurnSnapshot> {
 		let initialMessages: Message[] = [...this.session.conversation.history];
@@ -597,10 +608,23 @@ export class AgentSession {
 				.map(message => createUserMessage(message.content));
 			if (nextTurnMessages.length > 0) this.emitQueueChange();
 
-			const assembled = this.contextEngine.assemble({
-				history: initialMessages,
+			const assembled = this.contextController.buildContext({
+				// Queued user guidance is control-plane input, not optional retrieved
+				// context. Keep it outside the adaptive budget and learning policy.
+				history: [...initialMessages, ...nextTurnMessages],
 				baseSystemPrompt: this.config.systemPrompt,
+				objective: request.text,
+				maxInjectedTokens: Math.max(
+					2_048,
+					Math.min(
+						16_384,
+						Math.floor(
+							(this.autoCompactionSettings.contextWindow ?? 128_000) / 8,
+						),
+					),
+				),
 				contributions: [
+					...(options?.contextContributions ?? []),
 					{ source: "plugins", messages: pluginPromptMessages },
 					{
 						source: "extension",
@@ -613,9 +637,9 @@ export class AgentSession {
 						systemPrompt: beforeStart?.systemPrompt,
 						priority: 1,
 					},
-					{ source: "next-turn", messages: nextTurnMessages },
 				],
 			});
+			this.activeContextPlanId = assembled.id;
 			initialMessages = assembled.messages;
 			systemPrompt = assembled.systemPrompt;
 		}
@@ -1249,6 +1273,7 @@ export class AgentSession {
 	async runQueuedContinuation(
 		context?: string,
 		repositoryQuery?: string,
+		options: HarnessPromptOptions = {},
 	): Promise<boolean> {
 		const originalPrompt = this.config.systemPrompt;
 		const turnId = `turn_${Date.now()}`;
@@ -1266,7 +1291,7 @@ export class AgentSession {
 				});
 			}
 			this.onEvent?.({ type: "turn_start", turnId });
-			await this.continueWithNextTurn(context, repositoryQuery);
+			await this.continueWithNextTurn(context, repositoryQuery, options);
 			return true;
 		} finally {
 			if (context || repositoryQuery) {
@@ -1277,7 +1302,7 @@ export class AgentSession {
 			// waiting for the final queued continuation instead of briefly exposing
 			// an idle phase between streams.
 			if (this.session.takePendingContinuation()) {
-				await this.runQueuedContinuation(context, repositoryQuery);
+				await this.runQueuedContinuation(context, repositoryQuery, options);
 			} else {
 				this.onEvent?.({ type: "phase", state: "ready" });
 			}
@@ -1316,6 +1341,17 @@ export class AgentSession {
 	// ── Internals ──────────────────────────────────────────────────────────
 
 	private emitToSubscribers(event: AgentEvent): void {
+		if (this.activeContextPlanId && event.type === "acceptance_complete") {
+			this.contextController.recordOutcome(this.activeContextPlanId, {
+				success: event.status === "passed",
+			});
+			this.activeContextPlanId = undefined;
+		} else if (this.activeContextPlanId && event.type === "agent_end") {
+			this.contextController.recordOutcome(this.activeContextPlanId, {
+				success: event.status === "completed",
+			});
+			this.activeContextPlanId = undefined;
+		}
 		this.observation.event(event);
 	}
 

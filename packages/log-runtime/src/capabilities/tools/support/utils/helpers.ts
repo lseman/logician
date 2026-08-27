@@ -63,15 +63,3 @@ const defaultEditOperations: EditOperations = {
 };
 
 export { defaultEditOperations };
-
-import { summarizeDiff, syntheticUnifiedDiff } from "./diff-utils.ts";
-
-/** Generate a summary diff for file mutation reporting. */
-export async function mutationSummary(
-	_cwd: string | undefined,
-	filePath: string,
-	before: string | null,
-	after: string,
-): Promise<string> {
-	return summarizeDiff(syntheticUnifiedDiff(filePath, before, after));
-}

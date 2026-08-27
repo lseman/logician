@@ -744,6 +744,77 @@ void test("runAgentLoop processes follow-up messages after a stop", async () => 
 	);
 });
 
+void test("runAgentLoop applies configured stop policies when idle", async () => {
+	const events: AgentEvent[] = [];
+	const newMessages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig(),
+			backend: new FakeBackend([() => textResponse("first")]),
+			stopPolicies: [
+				context => {
+					assert.equal(context.iteration, 1);
+					assert.equal(context.newMessages.at(-1)?.content, "first");
+					return {
+						action: "finish",
+						status: "blocked",
+						summary: "external dependency required",
+					};
+				},
+			],
+		},
+		event => {
+			events.push(event);
+		},
+	);
+
+	assert.equal(newMessages.at(-1)?.content, "first");
+	assert.ok(
+		events.some(
+			event =>
+				event.type === "agent_end" &&
+				event.status === "blocked" &&
+				event.summary === "external dependency required",
+		),
+	);
+});
+
+void test("runAgentLoop schedules stop-policy continuation messages", async () => {
+	let policyCalls = 0;
+	const newMessages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig(),
+			backend: new FakeBackend([
+				() => textResponse("first"),
+				messages => {
+					assert.equal(messages.at(-1)?.content, "check one more thing");
+					return textResponse("second");
+				},
+			]),
+			stopPolicies: [
+				() =>
+					policyCalls++ === 0
+						? { action: "continue", messages: [user("check one more thing")] }
+						: undefined,
+			],
+		},
+		() => {},
+	);
+
+	assert.deepEqual(
+		newMessages.map(message => `${message.role}:${message.content ?? ""}`),
+		[
+			"user:prompt",
+			"assistant:first",
+			"user:check one more thing",
+			"assistant:second",
+		],
+	);
+});
+
 void test("runAgentLoop executes a tool batch and returns ordered tool results", async () => {
 	const tool: Tool = {
 		name: "echo",

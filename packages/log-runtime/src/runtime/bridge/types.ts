@@ -11,6 +11,7 @@ import type {
 } from "@logician/log-core/permissions";
 import type { AgentProtocolNotification } from "@logician/log-core/protocol";
 import type { LegroomSdkConfig } from "../../capabilities/legroom/worker.ts";
+import type { MemoriamSdkConfig } from "../../capabilities/memoriam/worker.ts";
 import type { ReasonerConfig } from "../../capabilities/reasoning/index.ts";
 
 export type ProtocolCallback = (
@@ -42,8 +43,8 @@ export type RuntimeSettingsPatch = Partial<
 	reasonerId?: string;
 	steeringInterrupt?: boolean;
 	postEditDiagnostics?: boolean;
-	memoryEnabled?: boolean;
 	legroomEnabled?: boolean;
+	memoriamEnabled?: boolean;
 	guardMode?: "auto" | "on" | "off";
 };
 
@@ -153,6 +154,7 @@ export interface AgentBridgeOptions {
 	reasoner?: string;
 	reasonerConfig?: ReasonerConfig;
 	legroom?: LegroomSdkConfig;
+	memoriam?: MemoriamSdkConfig;
 
 	lsp?: LspCapabilityConfig;
 	memory?: MemoryCapabilityConfig;

@@ -80,6 +80,10 @@ function createRuntimeConfiguration() {
 				if (!enabled) legroomCloses++;
 			},
 		},
+		memoriam: {
+			isEnabled: () => true,
+			setEnabled: () => {},
+		},
 		defaultTools: () => config.tools,
 		setReasoner: () => {},
 		emit: event => events.push(event),

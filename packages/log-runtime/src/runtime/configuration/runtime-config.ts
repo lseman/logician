@@ -105,6 +105,7 @@ export function resolveRuntimeConfig(
 				"http://127.0.0.1:8080",
 			model: environment.LOGICIAN_MODEL || configString(config.model) || "",
 			legroom: config.legroom,
+			memoriam: config.memoriam,
 			models: config.models,
 			systemPrompt:
 				environment.LOGICIAN_SYSTEM_PROMPT || configString(config.systemPrompt),

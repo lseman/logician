@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { RuntimeEvent } from "@logician/log-core/events";
+import type { HarnessPromptOptions } from "@logician/log-core/session";
 import { AgentRuntime } from "../../runtime/bridge/agent-bridge.ts";
 
 function bypassStartup(internal: Record<string, unknown>): void {
@@ -505,11 +506,9 @@ void test("/context renders request-time memory injection", () => {
 	bridge.getMemoryStore()?.close();
 });
 
-void test("loaded skills are exposed as a persistent catalog, not scored per turn", async () => {
-	// Skill activation is no longer scored/selected per prompt: every visible
-	// skill's name+description is folded into the base system prompt once
-	// (via _skillsContext/applyPluginHookContext), and the model pulls a
-	// skill's full body on demand via read_skill.
+void test("loaded skills are exposed as a persistent discovery catalog", async () => {
+	// The compact catalog supports discovery and read_skill. Strongly relevant
+	// skill bodies are also selected separately when each turn is prepared.
 	const bridge = new AgentRuntime({
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
@@ -531,6 +530,104 @@ void test("loaded skills are exposed as a persistent catalog, not scored per tur
 	// The skills should be in the system prompt after applyPluginHookContext
 	assert.match(internal.config.systemPrompt, /<available-skills>/);
 	assert.match(internal.config.systemPrompt, /typescript-code-review/);
+});
+
+void test("strongly relevant skills are activated as request-scoped context", async () => {
+	const bridge = new AgentRuntime({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	bypassStartup(internal);
+	internal.toolRouter.isMcpLoaded = () => true;
+	internal.toolRouter.loadedSkills = [
+		{
+			name: "typescript-code-review",
+			displayName: "TypeScript Code Review",
+			description: "Review TypeScript code for correctness and type safety.",
+			content: "Inspect runtime safety and report findings before editing.",
+			filePath: "/skills/typescript-code-review/SKILL.md",
+			baseDir: "/skills/typescript-code-review",
+			slashName: "typescript-code-review",
+			disableModelInvocation: false,
+			triggers: ["TypeScript code review"],
+			source: "user",
+		},
+	];
+
+	let promptOptions: HarnessPromptOptions | undefined;
+	installSession(internal, {
+		messages: [],
+		configure: () => {},
+		prompt: async (_message: string, options: HarnessPromptOptions) => {
+			promptOptions = options;
+		},
+		getQueues: () => ({ steering: [], followUp: [], nextTurn: [] }),
+	});
+
+	await bridge.sendMessage(
+		"Please review this TypeScript module for correctness.",
+	);
+
+	const contribution = promptOptions?.contextContributions?.[0];
+	assert.ok(contribution);
+	assert.equal(contribution.source, "skill:typescript-code-review");
+	const skillMessage = contribution.messages?.[0];
+	assert.ok(skillMessage && typeof skillMessage.content === "string");
+	assert.match(
+		skillMessage.content,
+		/Inspect runtime safety and report findings before editing\./,
+	);
+	assert.ok(
+		bridge.events
+			.snapshot()
+			.some(
+				item =>
+					item.event.type === "notice" &&
+					item.event.label === "Skills" &&
+					item.event.text.includes("TypeScript Code Review"),
+			),
+	);
+});
+
+void test("a preformatted explicit skill invocation is not injected twice", async () => {
+	const bridge = new AgentRuntime({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	bypassStartup(internal);
+	internal.toolRouter.isMcpLoaded = () => true;
+	internal.toolRouter.loadedSkills = [
+		{
+			name: "review",
+			displayName: "Review",
+			description: "Review code.",
+			content: "Review instructions.",
+			filePath: "/skills/review/SKILL.md",
+			baseDir: "/skills/review",
+			slashName: "review",
+			disableModelInvocation: false,
+			source: "user",
+		},
+	];
+
+	let contributionCount = -1;
+	installSession(internal, {
+		messages: [],
+		configure: () => {},
+		prompt: async (_message: string, options: HarnessPromptOptions) => {
+			contributionCount = options.contextContributions?.length ?? 0;
+		},
+		getQueues: () => ({ steering: [], followUp: [], nextTurn: [] }),
+	});
+
+	await bridge.sendMessage(
+		'<skill name="review" display_name="Review" location="/skills/review/SKILL.md" base_dir="/skills/review">\nReview instructions.\n</skill>',
+	);
+	assert.equal(contributionCount, 0);
 });
 
 void test("automatic continuation reuses the current system prompt", async () => {

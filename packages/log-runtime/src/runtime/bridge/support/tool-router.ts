@@ -13,28 +13,31 @@ import path from "node:path";
 import type { Tool } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
-import { runPluginBackend } from "../adapters/claude-code/plugin-runtime.ts";
+import { runPluginBackend } from "../../../adapters/claude-code/plugin-runtime.ts";
 import {
 	McpServerRegistry,
 	type McpSnapshotResult,
 	type McpToggleResult,
-} from "../capabilities/mcp/mcp-server-registry.ts";
-import { loadPrompts, type Prompt } from "../capabilities/prompts/loader.ts";
+} from "../../../capabilities/mcp/mcp-server-registry.ts";
+import {
+	loadPrompts,
+	type Prompt,
+} from "../../../capabilities/prompts/loader.ts";
 import {
 	formatSkillCatalog,
 	loadSkills,
 	type Skill,
-} from "../capabilities/skills/loader.ts";
-import { createReadSkillTool } from "../capabilities/skills/read-skill-tool.ts";
-import { createDefaultTools } from "../capabilities/tools/default-tools.ts";
-import { graphician } from "../capabilities/tools/graphician.ts";
-import { isFffGrepTool } from "../capabilities/tools/registry.ts";
+} from "../../../capabilities/skills/loader.ts";
+import { createReadSkillTool } from "../../../capabilities/skills/read-skill-tool.ts";
+import { createDefaultTools } from "../../../capabilities/tools/default-tools.ts";
+import { graphician } from "../../../capabilities/tools/graphician.ts";
+import { isFffGrepTool } from "../../../capabilities/tools/registry.ts";
 import {
 	getDefaultSandboxProfile,
 	type SandboxProfile,
 	setDefaultSandboxProfile,
-} from "../capabilities/tools/sandbox.ts";
-import { resolveWebSearchConfig } from "./bridge/environment.ts";
+} from "../../../capabilities/tools/sandbox.ts";
+import { resolveWebSearchConfig } from "../environment.ts";
 import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,

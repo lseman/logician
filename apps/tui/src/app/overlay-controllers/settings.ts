@@ -245,6 +245,26 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				name: "Memoriam SDK",
+				currentValue: data.memoriamEnabled ? "on" : "off",
+				description:
+					"Retrieve memory context for every turn (SQLite-backed store)",
+				options: [
+					{
+						label: "on",
+						value: "true",
+						current: data.memoriamEnabled,
+						toggleOn: true,
+					},
+					{
+						label: "off",
+						value: "false",
+						current: !data.memoriamEnabled,
+						toggleOn: false,
+					},
+				],
+			},
+			{
 				name: "Graphician",
 				currentValue: data.graphicianEnabled ? "on" : "off",
 				description:
@@ -472,6 +492,14 @@ export function handleSettingsSelectorAction(
 			saveConfigNestedField("legroom", "mode", on ? "sdk" : "off");
 			ctx.statusPanel.update({ legroomEnabled: on });
 			ctx.notify(`Legroom SDK: ${on ? "on" : "off"}`, "success");
+			break;
+		}
+		case "memoriam sdk": {
+			const on = value === "true";
+			ctx.bridge.updateSettings({ memoriamEnabled: on });
+			saveConfigNestedField("memoriam", "mode", on ? "sdk" : "off");
+			ctx.statusPanel.update({ memoriamEnabled: on });
+			ctx.notify(`Memoriam SDK: ${on ? "on" : "off"}`, "success");
 			break;
 		}
 		case "graphician": {

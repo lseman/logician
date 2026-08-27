@@ -511,7 +511,7 @@ export class LegroomWorker {
 		this.stderrTail = "";
 		const child = spawn(
 			this.options.python ?? "python3",
-			this.options.args ?? ["-m", "legroom.sdk_worker"],
+			this.options.args ?? ["-m", "legroom.integration.sdk_worker"],
 			{ stdio: ["pipe", "pipe", "pipe"] },
 		);
 		this.process = child;

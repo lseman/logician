@@ -31,6 +31,7 @@ export type AgentLoopOptions = Pick<
 	| "permissions"
 	| "runBudget"
 	| "streamOptions"
+	| "stopPolicies"
 	| "systemPrompt"
 	| "taskLedger"
 	| "temperature"

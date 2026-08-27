@@ -175,29 +175,4 @@ function parseJsonArg(raw?: string): Record<string, unknown> {
 	}
 }
 
-// ── Re-exports from sub-modules ──────────────────────────────────────────────
-
-// Executor exports
-export type {
-	HookCommand,
-	HookContextMessage,
-	HookDefinition,
-	HookEventType,
-	HookExecutionResult,
-	LoadedHook,
-} from "./plugin-executor.ts";
-export {
-	buildHookInput,
-	executeCommand,
-	executeLoadedHook,
-	loadPluginHooks,
-	matcherMatches,
-	parseHookEventType,
-	parseHookResponse,
-} from "./plugin-executor.ts";
-export type {
-	PluginCommandResult,
-	PluginInstall,
-} from "./plugin-registry.ts";
-// Manager exports
-export { PluginRegistry } from "./plugin-registry.ts";
+export type { PluginCommandResult } from "./plugin-registry.ts";

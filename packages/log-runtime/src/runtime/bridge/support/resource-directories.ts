@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { runPluginBackend } from "../adapters/claude-code/plugin-runtime.ts";
+import { runPluginBackend } from "../../../adapters/claude-code/plugin-runtime.ts";
 
 export async function getSkillsDirs(cwd: string): Promise<string[]> {
 	const dirs: string[] = [];

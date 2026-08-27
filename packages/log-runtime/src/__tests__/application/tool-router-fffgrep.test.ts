@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { Tool } from "@logician/log-core";
-import { ToolRouter } from "../../runtime/tool-router.ts";
+import { ToolRouter } from "../../runtime/bridge/support/tool-router.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

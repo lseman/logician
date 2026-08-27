@@ -19,6 +19,16 @@ export interface TuiSessionSummary {
 	messageCount: number;
 }
 
+export interface TuiSessionTreeNode {
+	id: string;
+	parentId?: string;
+	label: string;
+	preview: string;
+	timestamp: number;
+	isCurrent: boolean;
+	hasChildren: boolean;
+}
+
 /** Derive a compact topic label from the first completed user/agent exchange. */
 export function isGeneratedSessionTitle(name: string): boolean {
 	return name === "Untitled Session" || name === "New Session";
@@ -201,6 +211,69 @@ export class TuiSessionService {
 	loadTurns(sessionId: string): Turn[] {
 		const session = this.open(sessionId);
 		if (!session) return [];
+		return loadTurnsFromSession(session);
+	}
+
+	/** Return persisted TUI turns as a flat list (depth-first branch order). */
+	getTurnTree(sessionId: string): TuiSessionTreeNode[] {
+		const session = this.open(sessionId);
+		if (!session) return [];
+		const entries = session.loadEntries();
+		const byId = new Map(entries.map(entry => [entry.id, entry]));
+		const turns = entries.filter(
+			entry => entry.type === "custom" && entry.customType === "tui_turn",
+		);
+		// Narrow to CustomSessionEntry so `.data` is accessible
+		const turnsTyped = turns as Array<{
+			type: "custom";
+			id: string;
+			parentId?: string;
+			timestamp: number;
+			customType: string;
+			data: Turn;
+		}>;
+		const turnIds = new Set(turnsTyped.map(entry => entry.id));
+		const nearestTurn = (start?: string): string | undefined => {
+			let id = start;
+			while (id) {
+				if (turnIds.has(id)) return id;
+				id = byId.get(id)?.parentId;
+			}
+			return undefined;
+		};
+		const children = new Map<string | undefined, typeof turnsTyped>();
+		for (const entry of turnsTyped) {
+			const parentId = nearestTurn(entry.parentId);
+			const siblings = children.get(parentId) ?? [];
+			siblings.push(entry);
+			children.set(parentId, siblings);
+		}
+		const currentTurnId = nearestTurn(session.getLeafEntryId());
+		const result: TuiSessionTreeNode[] = [];
+		const visit = (entry: (typeof turnsTyped)[number]): void => {
+			const turn = entry.data;
+			const content = turn.userMessage?.content?.trim() || "(empty turn)";
+			const childEntries = children.get(entry.id) ?? [];
+			result.push({
+				id: entry.id,
+				parentId: nearestTurn(entry.parentId),
+				label: content.split(/\r?\n/, 1)[0]?.slice(0, 72) || "(empty turn)",
+				preview: content,
+				timestamp: entry.timestamp,
+				isCurrent: entry.id === currentTurnId,
+				hasChildren: childEntries.length > 0,
+			});
+			for (const child of childEntries) visit(child);
+		};
+		for (const root of children.get(undefined) ?? []) visit(root);
+		return result;
+	}
+
+	/** Select a persisted turn as the active leaf and return its transcript path. */
+	checkoutTurn(sessionId: string, entryId: string): Turn[] {
+		const session = this.open(sessionId);
+		if (!session) return [];
+		session.checkout(entryId);
 		return loadTurnsFromSession(session);
 	}
 

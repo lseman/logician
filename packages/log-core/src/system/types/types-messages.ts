@@ -542,6 +542,7 @@ export interface BeforeProviderRequestResult {
 export interface BeforeProviderPayloadContext {
 	model: string;
 	payload: Record<string, unknown>;
+	hookSessionId?: string;
 }
 
 export interface BeforeProviderPayloadResult {

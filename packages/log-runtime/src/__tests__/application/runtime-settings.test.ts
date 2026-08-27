@@ -3,7 +3,7 @@ import type { AgentConfig } from "@logician/log-core";
 import {
 	type RuntimeToggleKey,
 	SettingsGateway,
-} from "../../runtime/settings-gateway.ts";
+} from "../../runtime/bridge/support/settings-gateway.ts";
 
 describe("SettingsGateway", () => {
 	test("normalizes a client patch into core and feature mutations", () => {
@@ -27,6 +27,7 @@ describe("SettingsGateway", () => {
 			postEditDiagnostics: () => true,
 			memoryEnabled: () => false,
 			legroomEnabled: () => true,
+			memoriamEnabled: () => true,
 		});
 
 		settings.update({

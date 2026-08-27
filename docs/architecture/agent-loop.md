@@ -84,6 +84,33 @@ sequenceDiagram
 | 7. Repeat | Feed results back to LLM | `prepareNextTurn`, `shouldStopAfterTurn` |
 | 8. Output | Render final response | — |
 
+## Adaptive context planning
+
+At each user-initiated turn, `AgentSession` asks the adaptive context controller
+to build one request-scoped plan. The controller deduplicates context already in
+the conversation, ranks contributions using declared priority, lexical relevance
+to the current objective, learned source utility, and a bounded exploration
+bonus, then packs individual messages under an injection budget. Automatically
+activated skills, plugin hooks, extensions, and application context cross this
+same seam as separately attributed sources. Queued next-turn user guidance is
+control-plane input and remains outside the adaptive budget.
+
+The controller records whether the resulting run passed acceptance checks (or,
+when no acceptance report exists, completed successfully). That outcome updates
+an in-memory utility estimate for the included sources, influencing later turns
+without making context selection nondeterministic. The plan and its feedback are
+request-scoped; injected messages never become durable conversation history.
+
+The public module interface is intentionally small:
+
+```ts
+const plan = controller.buildContext(request);
+controller.recordOutcome(plan.id, { success: true });
+```
+
+Persistence is not part of this interface. It should be introduced only when a
+host needs a durable adapter in addition to the current in-memory behavior.
+
 ## Error handling
 
 The backend classifies errors into categories:

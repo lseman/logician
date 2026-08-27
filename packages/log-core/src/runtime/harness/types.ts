@@ -1,4 +1,5 @@
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
+import type { ContextContribution } from "../../system/context/context-engine.ts";
 import type { ExtensionRunner } from "../../system/extension/runner.ts";
 import type {
 	AgentConfig,
@@ -66,6 +67,11 @@ export interface AgentSessionOptions {
 	modules?: HarnessModule[];
 	pluginHookFactory?: HarnessPluginHookFactory;
 	pluginLifecycle?: HarnessPluginLifecycle;
+}
+
+/** Request-scoped context supplied by the host for one user-initiated turn. */
+export interface HarnessPromptOptions {
+	contextContributions?: readonly ContextContribution[];
 }
 
 export interface HarnessTurnSnapshot {

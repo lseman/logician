@@ -13,7 +13,7 @@ afterEach(() => {
 void test("LegroomWorker transforms messages through the persistent SDK", async () => {
 	const worker = new LegroomWorker({
 		python: legroomPython,
-		args: ["-m", "legroom.sdk_worker"],
+		args: ["-m", "legroom.integration.sdk_worker"],
 		config: { optimize: false },
 		failOpen: false,
 	});

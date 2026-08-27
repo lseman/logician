@@ -165,6 +165,39 @@ void test("appendMessages adds to history without dropping prior turns", async (
 	assert.equal(tool?.tool_call_id, "spawn_1");
 });
 
+void test("host context contributions are visible for one request but not persisted", async () => {
+	const backend = new FakeBackend([
+		messages => {
+			assert.ok(
+				messages.some(
+					message =>
+						message.role === "system" &&
+						typeof message.content === "string" &&
+						message.content.includes("activated review skill"),
+				),
+			);
+			return textResponse("done");
+		},
+	]);
+	const harness = makeHarness(backend);
+	await harness.prompt("review this", {
+		contextContributions: [
+			{
+				source: "skill:review",
+				priority: 20,
+				messages: [{ role: "system", content: "activated review skill" }],
+			},
+		],
+	});
+
+	assert.equal(
+		harness.messages.some(message =>
+			message.content?.includes("activated review skill"),
+		),
+		false,
+	);
+});
+
 void test("constructor stream options reach the first provider request", async () => {
 	const backend = new FakeBackend([
 		(_messages, options) => {

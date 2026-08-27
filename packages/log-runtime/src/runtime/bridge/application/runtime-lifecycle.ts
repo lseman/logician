@@ -18,7 +18,6 @@ export interface RuntimeLifecycleDependencies {
 	ensureSession: () => void;
 	loadMcp: () => Promise<void>;
 	reportMcpError: (error: unknown) => void;
-	waitForMemory: () => Promise<unknown>;
 	closeResources: () => Promise<void>;
 	resetActivity: () => void;
 	publishUsage: () => void;
@@ -72,7 +71,6 @@ export class RuntimeLifecycle {
 
 	async stop(): Promise<void> {
 		void this.dependencies.cancel();
-		await this.dependencies.waitForMemory();
 		await this.dependencies.endPluginSession("shutdown");
 		await this.dependencies.closeResources();
 		this.dependencies.resetTurns();

@@ -10,6 +10,7 @@ import type { ModelSelectorOverlay } from "../../overlays/model-selector.ts";
 import type { PluginManagerOverlay } from "../../overlays/plugin-manager.ts";
 import type { QueueManagerOverlay } from "../../overlays/queue-manager.ts";
 import type { ReasonerSelectorOverlay } from "../../overlays/reasoner-selector.ts";
+import type { SessionTreeOverlay } from "../../overlays/session-tree.ts";
 import type { SettingsSelectorOverlay } from "../../overlays/settings-overlay.ts";
 import type { ThemeSelectorOverlay } from "../../overlays/theme-selector.ts";
 import type { ThinkingLevelSelectorOverlay } from "../../overlays/thinking-level-selector.ts";
@@ -37,6 +38,7 @@ export interface OverlayHandlersCtx {
 	mcpManager: McpManagerOverlay;
 	reasonerSelector: InstanceType<typeof ReasonerSelectorOverlay>;
 	queueManager: QueueManagerOverlay;
+	sessionTree: SessionTreeOverlay;
 	fileMentionPopup: FileMentionPopup;
 	fileMentionListedCwd: string | null;
 	fileMentionListing: Promise<string[]> | null;
@@ -45,6 +47,7 @@ export interface OverlayHandlersCtx {
 	themeSelector: InstanceType<typeof ThemeSelectorOverlay>;
 	settingsSelector: SettingsSelectorOverlay;
 	thinkingLevelSelector: InstanceType<typeof ThinkingLevelSelectorOverlay>;
+	sessionService: import("@logician/log-runtime/sessions").TuiSessionService;
 	thinkingLevel: string;
 	inferenceMode: InferenceMode;
 	workflowMode: "act" | "plan";

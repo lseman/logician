@@ -4,7 +4,7 @@ import {
 	type RuntimeSettingsView,
 	type RuntimeToggleKey,
 	SettingsGateway,
-} from "../../settings-gateway.ts";
+} from "../support/settings-gateway.ts";
 import type { RuntimeSettingsPatch } from "../types.ts";
 
 type ThinkingLevel = NonNullable<AgentConfig["thinkingLevel"]>;
@@ -16,8 +16,11 @@ export interface RuntimeConfigurationDependencies {
 	sessionId: () => string;
 	tools: RuntimeSettingsTools;
 	interactions: { readonly mode: string };
-	memory: RuntimeSettingsMemory;
 	legroom: {
+		isEnabled(): boolean;
+		setEnabled(enabled: boolean): void;
+	};
+	memoriam: {
 		isEnabled(): boolean;
 		setEnabled(enabled: boolean): void;
 	};
@@ -36,11 +39,6 @@ export interface RuntimeSettingsSession {
 export interface RuntimeSettingsTools {
 	setGraphicianEnabled(enabled: boolean): void;
 	setFffgrepEnabled(enabled: boolean): void;
-}
-
-export interface RuntimeSettingsMemory {
-	getStore(): unknown;
-	setEnabled(enabled: boolean, sessionId: string): void;
 }
 
 /** Owns mutable runtime settings and propagates each change to live capabilities. */
@@ -65,8 +63,8 @@ export class RuntimeConfiguration {
 			setToggle: (key, enabled) => this.setToggle(key, enabled),
 			permissionMode: () => this.dependencies.interactions.mode,
 			postEditDiagnostics: () => this.postEditDiagnosticsEnabled,
-			memoryEnabled: () => Boolean(this.dependencies.memory.getStore()),
 			legroomEnabled: () => this.dependencies.legroom.isEnabled(),
+			memoriamEnabled: () => this.dependencies.memoriam.isEnabled(),
 		});
 	}
 
@@ -103,14 +101,6 @@ export class RuntimeConfiguration {
 	}
 
 	private setToggle(key: RuntimeToggleKey, enabled: boolean): void {
-		if (key === "memoryEnabled") {
-			this.dependencies.memory.setEnabled(
-				enabled,
-				this.dependencies.sessionId(),
-			);
-			this.notice("Memory", enabled ? "Memory enabled" : "Memory disabled");
-			return;
-		}
 		if (key === "postEditDiagnostics") {
 			this.postEditDiagnosticsEnabled = enabled;
 			return;
@@ -120,6 +110,14 @@ export class RuntimeConfiguration {
 			this.notice(
 				"Legroom",
 				enabled ? "Legroom SDK enabled" : "Legroom SDK disabled",
+			);
+			return;
+		}
+		if (key === "memoriamEnabled") {
+			this.dependencies.memoriam.setEnabled(enabled);
+			this.notice(
+				"Memoriam",
+				enabled ? "Memoriam SDK enabled" : "Memoriam SDK disabled",
 			);
 			return;
 		}

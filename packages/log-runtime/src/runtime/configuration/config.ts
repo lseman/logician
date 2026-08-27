@@ -831,6 +831,14 @@ export interface LogicianTuiConfig {
 		timeoutMs?: number;
 		config?: Record<string, unknown>;
 	};
+	memoriam?: {
+		mode?: "off" | "sdk";
+		python?: string;
+		args?: string[];
+		failOpen?: boolean;
+		timeoutMs?: number;
+		config?: Record<string, unknown>;
+	};
 	webSearch?: {
 		baseUrl?: string;
 		maxResults?: number;

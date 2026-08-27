@@ -1,7 +1,7 @@
 /**
  * Shared registration point for AgentRuntime's independent capability
- * managers (RepositoryMap, LspClientPool, ExtensionRegistry, InteractionGateway,
- * MemoryHost). Each is self-contained at construction time — its
+ * managers (RepositoryMap, LspClientPool, ExtensionRegistry, InteractionGateway).
+ * Each is self-contained at construction time — its
  * constructor takes only cwd/sessionId/options/emit, never another manager
  * — so they mount into typed slots on the exported RuntimeContext in any
  * order, instead of being `new`'d as inline constructor statements with no
@@ -9,13 +9,12 @@
  * delegating to this context, so existing call sites (`this.lspManager.foo()`)
  * are unaffected; only construction changes shape. File name is
  * capability-context.ts (not runtime-context.ts) to stay distinct from
- * ../runtime-context.ts, the unrelated ToolRegistry-composition helper.
+ * ./support/runtime-context.ts, the unrelated ToolRegistry-composition helper.
  *
- * What deliberately stays OUT of this context: ToolRouter (its `extraTools`
- * closure reads memory lazily, but its own construction has no cross-manager
- * input worth registering for), the AgentConfig object, and
- * ModelSelector/SettingsGateway/AgentCoordinator. Those are
- * consumers that aggregate context slots' output (hooks from lsp+memory,
+ * What deliberately stays OUT of this context: ToolRouter (its own
+ * construction has no cross-manager input worth registering for), the
+ * AgentConfig object, and ModelSelector/SettingsGateway/AgentCoordinator.
+ * Those are consumers that aggregate context slots' output (hooks from lsp,
  * permissions from interactions, tools from toolRouter) — they are built
  * from the context, not entries in it, and forcing them into slots would
  * hide real build-order dependencies behind fake independence.
@@ -25,7 +24,6 @@ import type { RuntimeEvent } from "@logician/log-core/events";
 import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
 import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
 import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
-import { MemoryHost } from "../../capabilities/memory/memory.ts";
 import { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import type { AgentBridgeOptions } from "./types.ts";
 
@@ -34,7 +32,6 @@ interface RuntimeContextSlots {
 	lsp: LspClientPool;
 	extensions: ExtensionRegistry;
 	interactions: InteractionGateway;
-	memory: MemoryHost;
 }
 
 type SlotKey = keyof RuntimeContextSlots;
@@ -88,10 +85,6 @@ export class RuntimeContext {
 		return this.read("interactions");
 	}
 
-	get memory(): MemoryHost {
-		return this.read("memory");
-	}
-
 	/** Mount every entry in order. Order is irrelevant today (no entry's
 	 * register() reads another slot) but is preserved as the extension
 	 * point: a future capability that needs an earlier one just reads
@@ -127,8 +120,8 @@ export function createRuntimeContext({
 			register: () =>
 				opts.repositoryMap?.enabled !== false
 					? new RepositoryMap(cwd, {
-							maxTokens: opts.repositoryMap?.maxTokens,
-						})
+						maxTokens: opts.repositoryMap?.maxTokens,
+					})
 					: undefined,
 		},
 		{
@@ -161,24 +154,6 @@ export function createRuntimeContext({
 					mode: opts.permissions?.mode ?? "acceptEdits",
 					rules: opts.permissions?.rules,
 					emit,
-				}),
-		},
-		{
-			id: "memory",
-			register: () =>
-				new MemoryHost(cwd, sessionId, {
-					memoryEnabled: opts.memory?.enabled,
-					memoryDbPath: opts.memory?.dbPath,
-					memoryExtractorModel: opts.memory?.extractorModel,
-					memoryExtractorBaseUrl: opts.memory?.extractorBaseUrl,
-					memoryCaptureTools: opts.memory?.captureTools,
-					memoryInjectContext: opts.memory?.injectContext,
-					memoryContextBudget: opts.memory?.contextBudget,
-					memoryViewerEnabled: opts.memory?.viewerEnabled,
-					memoryViewerPort: opts.memory?.viewerPort,
-					memoryEmbeddingsEnabled: opts.memory?.embeddingsEnabled,
-					memoryEmbeddingModel: opts.memory?.embeddingModel,
-					model: opts.model,
 				}),
 		},
 	]);

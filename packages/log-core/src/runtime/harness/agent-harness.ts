@@ -19,7 +19,10 @@ import {
 	shouldRunAcceptanceFinalization,
 	verifyAcceptanceCommands,
 } from "../../control/guards/acceptance-contract.ts";
-import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
+import {
+	evaluateStopPolicies,
+	resolveExecutionPolicy,
+} from "../../control/policy/execution-policy.ts";
 import { checkBudget } from "../../control/policy/exit-path.ts";
 import {
 	HarnessInterventionController,
@@ -614,6 +617,27 @@ async function runAgentLoopInternal(
 			? []
 			: await drainFollowUps();
 		if (pendingMessages.length > 0) continue;
+
+		const stopPolicyDecision = await evaluateStopPolicies(config.stopPolicies, {
+			messages,
+			newMessages,
+			iteration,
+			signal: config.signal,
+		});
+		if (stopPolicyDecision?.action === "finish") {
+			return finish({
+				status: stopPolicyDecision.status,
+				summary: stopPolicyDecision.summary,
+				source: "structured",
+			});
+		}
+		if (
+			stopPolicyDecision?.action === "continue" &&
+			stopPolicyDecision.messages.length > 0
+		) {
+			pendingMessages = stopPolicyDecision.messages;
+			continue;
+		}
 
 		// Deterministic verification gets one bounded repair turn. This happens
 		// only after the ordinary autonomous policy considers the work finished.

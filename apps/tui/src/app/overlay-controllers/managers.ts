@@ -3,7 +3,10 @@
 import type { AutoresearchDashboardAction } from "../../overlays/autoresearch-dashboard.ts";
 import type { McpManagerAction } from "../../overlays/mcp-manager.ts";
 import type { PluginManagerAction } from "../../overlays/plugin-manager.ts";
+import type { SessionTreeAction } from "../../overlays/session-tree.ts";
+import type { Turn } from "@logician/log-runtime/sessions";
 import type { OverlayHandlersCtx } from "./context.ts";
+import { turnsToMessages } from "../session/messages.ts";
 
 // ── Plugin manager ───────────────────────────────────────────────────────
 
@@ -204,6 +207,44 @@ export function handleAutoresearchDashboardAction(
 ): void {
 	if (action.type === "close") {
 		ctx.autoresearchDashboard.hide();
+		ctx.tui.requestRender();
+	}
+}
+
+// ── Session tree ──────────────────────────────────────────────────────────
+
+export function openSessionTree(ctx: OverlayHandlersCtx): void {
+	ctx.statusPanel.update({ phase: "sessions" });
+	ctx.sessionTree.show();
+	const overlay = ctx.tui.showOverlay(ctx.sessionTree, {
+		anchor: "aboveInput",
+		align: "left",
+		maxHeight: 18,
+	});
+	overlay.focus();
+}
+
+export function handleSessionTreeAction(
+	ctx: OverlayHandlersCtx,
+	action: SessionTreeAction,
+): void {
+	if (action.type === "close") {
+		ctx.sessionTree.hide();
+		ctx.tui.removeOverlay(ctx.sessionTree);
+		ctx.statusPanel.update({ phase: "ready" });
+		ctx.tui.requestRender();
+		return;
+	}
+	if (action.type === "navigate") {
+		// Navigate to the selected entry in the session tree.
+		const sessionId = ctx.sessionService.getCurrentSessionId();
+		if (!sessionId) return;
+		const turns: Turn[] = ctx.sessionService.checkoutTurn(sessionId, action.entryId);
+		ctx.transcript.loadTurns(turns);
+		ctx.transcriptDisplay.setTurns(turns);
+		ctx.bridge.restoreHistory(turnsToMessages(turns));
+		ctx.statusPanel.update({ phase: "ready" });
+		ctx.tui.removeOverlay(ctx.sessionTree);
 		ctx.tui.requestRender();
 	}
 }

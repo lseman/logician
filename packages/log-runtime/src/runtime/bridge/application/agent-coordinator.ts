@@ -9,7 +9,7 @@ import {
 	type ReasonerConfig,
 } from "../../../capabilities/reasoning/index.ts";
 import { EohController } from "../../eoh/controller.ts";
-import { SubagentCoordinator } from "../../subagent-coordinator.ts";
+import { SubagentCoordinator } from "../support/subagent-coordinator.ts";
 
 // ── Dependencies ───────────────────────────────────────────────────────────────
 

@@ -60,7 +60,9 @@ enforcement classes and `capabilities/`/`runtime/` code can share one
 definition without a circular dependency. Product composition — wiring
 log-core into a running agent — lives in `log-runtime`, not inside log-core
 itself. The harness uses immutable configuration revisions, an append-only
-thread ledger, a run-scoped policy controller, and a context engine.
+thread ledger, a run-scoped policy controller, and an adaptive context
+controller that plans request-scoped contributions under a token budget and
+learns source utility from run outcomes.
 
 Execution durability is split across the thread ledger, file checkpoints,
 and run-scoped policy state — see
