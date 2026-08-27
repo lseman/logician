@@ -21,15 +21,9 @@ import {
 import { withTruncationMarker } from "./content.ts";
 import { renderMarkdownLines } from "./markdown-table.ts";
 import { renderThinkingChunk } from "./thinking.ts";
-import {
-	computeBatchTally,
-	detailSection,
-	previewBlock,
-	type RenderCtx,
-	renderTool,
-} from "./tool.ts";
+import type { RenderCtx } from "./tool-context.ts";
 
-export function renderSubagentText(
+function renderSubagentText(
 	text: string,
 	width: number,
 	streaming: boolean,
@@ -50,7 +44,7 @@ export function renderSubagentText(
 	);
 }
 
-export function distinctSubagentOutputs(
+function distinctSubagentOutputs(
 	liveText: string,
 	finalText: string,
 ): string[] {
@@ -68,7 +62,7 @@ export function distinctSubagentOutputs(
 	return [live, final];
 }
 
-export function childToolExecution(call: ChildToolCall): ToolExecution {
+function childToolExecution(call: ChildToolCall): ToolExecution {
 	const parsedArgs = parseJsonMaybe(call.args);
 	const args =
 		parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
@@ -93,7 +87,7 @@ export function childToolExecution(call: ChildToolCall): ToolExecution {
  * order. Tool rows stay where they were called instead of being collected
  * into a separate activity section.
  */
-export function renderSubagentFlow(
+function renderSubagentFlow(
 	chunks: ChildChunk[],
 	width: number,
 	showAgent: boolean,
@@ -183,12 +177,12 @@ export function renderSubagentFlow(
 					: expanded;
 			const regionStart = lines.length;
 			lines.push(
-				...renderTool(
+				...(ctx.renderNestedTool?.(
 					ctx,
 					childToolExecution(chunk.tool),
 					Math.max(20, width),
 					childExpanded,
-				),
+				) ?? []),
 			);
 			if (hitRegions && childToolCallId) {
 				hitRegions.push({
@@ -291,7 +285,12 @@ export function renderSubagentDetails(
 
 	const task = stringArg(args, "task");
 	if (task) {
-		for (const line of previewBlock(ctx, task, Math.max(16, width - 4), 800)) {
+		for (const line of ctx.previewBlock?.(
+			ctx,
+			task,
+			Math.max(16, width - 4),
+			800,
+		) ?? []) {
 			lines.push(`${theme.fg("dim", "→ ")}${line}`);
 		}
 	}
@@ -364,7 +363,7 @@ export function renderSubagentDetails(
 	return lines;
 }
 
-export function renderSubagentActivity(
+function renderSubagentActivity(
 	calls: ChildToolCall[] | undefined,
 	width: number,
 	ctx: RenderCtx,
@@ -378,10 +377,10 @@ export function renderSubagentActivity(
 	const hidden = calls.length - visible.length;
 	const lines = showHeading
 		? [
-				detailSection(
+				ctx.detailSection?.(
 					"activity",
 					`${calls.length} tool call${calls.length === 1 ? "" : "s"}${hidden ? ` · latest ${visible.length}` : ""}`,
-				),
+				) ?? "",
 			]
 		: hidden
 			? [
@@ -417,34 +416,6 @@ export function renderSubagentActivity(
 }
 
 /**
- * Render live streaming output for a single (spawn_agent) subagent that is
- * still running. Called from the collapsed path so the user can follow
- * progress without manually expanding.
- *
- * Uses `childChunks`, the canonical ordered thinking/content/tool stream.
- */
-export function renderSubagentLiveOutput(
-	ctx: RenderCtx,
-	tool: ToolExecution,
-	width: number,
-): string[] {
-	// Prefer childChunks (ordered, chronological streaming).
-	const childChunks = Array.isArray(tool.details?.childChunks)
-		? (tool.details.childChunks as ChildChunk[])
-		: [];
-	if (childChunks.length > 0) {
-		const flowLines = renderSubagentFlow(childChunks, width, false, ctx, false);
-		// Drop the footer while still running.
-		if (!tool.isComplete) {
-			flowLines.pop();
-		}
-		return flowLines;
-	}
-
-	return [];
-}
-
-/**
  * Render a compact collapsed view for spawn_agents: one line per task
  * showing the task number, agent, description, and status.
  *
@@ -471,7 +442,10 @@ export function renderSubagentBatchCollapsed(
 					typeof task === "object" && task !== null,
 			)
 		: [];
-	const { liveStatus, taskElapsedMs } = computeBatchTally(ctx, tool);
+	const { liveStatus, taskElapsedMs } = ctx.computeBatchTally?.(ctx, tool) ?? {
+		liveStatus: new Map<number, "running" | "completed" | "failed">(),
+		taskElapsedMs: new Map<number, number>(),
+	};
 	const results = Array.isArray(tool.details?.results)
 		? tool.details.results.filter(
 				(r): r is Record<string, unknown> =>
@@ -601,7 +575,7 @@ export function renderSubagentBatchCollapsed(
 	return lines;
 }
 
-export function subagentCallSummary(raw: string): string {
+function subagentCallSummary(raw: string): string {
 	const text = raw.trim();
 	if (!text || text === "{}") return "";
 	const parsed = parseJsonMaybe(text);

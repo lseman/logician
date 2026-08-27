@@ -18,7 +18,7 @@ import type { StatusBar } from "../../status/status-bar.ts";
 import type { TuiHandle } from "../../terminal/core.ts";
 import type { InferenceMode } from "../inference-settings.ts";
 
-export type NotifyFn = (
+type NotifyFn = (
 	message: string,
 	level?: "info" | "success" | "warning" | "error",
 ) => void;

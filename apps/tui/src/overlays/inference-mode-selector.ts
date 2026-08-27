@@ -5,7 +5,7 @@
 import { createListSelector, type ListSelectorOverlay } from "./popup-utils.ts";
 
 // Re-exported from agent-core; imported here to avoid circular dep.
-export interface InferenceModeDef {
+interface InferenceModeDef {
 	label: string;
 	description: string;
 	thinking: boolean;
@@ -32,33 +32,6 @@ export interface InferenceModeInfo {
 export type InferenceModeSelectorAction =
 	| { type: "select"; item: InferenceModeInfo }
 	| { type: "close" };
-
-// Canonical ordering for display; unknown modes are appended alphabetically.
-const MODE_ORDER = [
-	"auto",
-	"none",
-	"thinking-general",
-	"thinking-coding",
-	"instruct-general",
-	"instruct-reasoning",
-	"instruct-coding",
-	"deterministic",
-	"creative",
-	"analytical",
-] as const;
-
-/** Return modes sorted by the canonical order, with unknown ones appended. */
-export function sortInferenceModesByIds(ids: string[]): string[] {
-	const sorted = [...ids].sort((a, b) => {
-		const ai = MODE_ORDER.indexOf(a as (typeof MODE_ORDER)[number]);
-		const bi = MODE_ORDER.indexOf(b as (typeof MODE_ORDER)[number]);
-		if (ai >= 0 && bi >= 0) return ai - bi;
-		if (ai >= 0) return -1;
-		if (bi >= 0) return 1;
-		return a.localeCompare(b);
-	});
-	return sorted;
-}
 
 // ── Inference mode definitions ──────────────────────────────────────────────
 

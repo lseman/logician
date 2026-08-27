@@ -2,7 +2,11 @@
 // Registers all GSD slash commands and provides workflow execution adapters.
 // Maps GSD's .planning/ filesystem operations to Logician's extension API.
 
-import type { ExtensionAPI, ExtensionContext, RegisteredCommand } from '../../packages/agent-core/src/extensions/types.ts';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  RegisteredCommand,
+} from "../../packages/log-core/src/extensions.ts";
 import * as state from './src/state.ts';
 import * as phase from './src/phase.ts';
 

@@ -16,7 +16,7 @@ import {
 } from "./popup-utils.ts";
 import { SelectorController } from "./selector-controller.ts";
 
-export type QueueEntryKind = "steering" | "followUp" | "nextTurn";
+type QueueEntryKind = "steering" | "followUp" | "nextTurn";
 
 export interface QueueEntry {
 	kind: QueueEntryKind;

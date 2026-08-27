@@ -12,9 +12,7 @@ export class Separator implements Component {
 			return this.cachedLines;
 		}
 		this.cachedWidth = width;
-		this.cachedLines = [
-			theme.fg("separator", "─".repeat(Math.max(0, width))),
-		];
+		this.cachedLines = [theme.fg("separator", "─".repeat(Math.max(0, width)))];
 		return this.cachedLines;
 	}
 }

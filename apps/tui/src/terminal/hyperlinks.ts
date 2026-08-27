@@ -31,7 +31,7 @@ function probeTmuxHyperlinks(): boolean {
  * disappears from the output entirely) on terminals that don't support it, so
  * being wrong in the "supports it" direction is worse than in the other.
  */
-export function detectHyperlinkSupport(
+function detectHyperlinkSupport(
 	tmuxForwardsHyperlink: () => boolean = probeTmuxHyperlinks,
 ): boolean {
 	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
@@ -77,7 +77,7 @@ export function supportsHyperlinks(): boolean {
 }
 
 /** Test-only: clears the cached capability check. */
-export function resetHyperlinkSupportCache(): void {
+function resetHyperlinkSupportCache(): void {
 	cachedSupport = null;
 }
 

@@ -22,7 +22,7 @@ export interface ChoiceItem {
 	description?: string;
 }
 
-export interface ChoicePopupOptions {
+interface ChoicePopupOptions {
 	/** The question id (unique identifier for the agent to track). */
 	questionId?: string;
 	/** The question being asked. */

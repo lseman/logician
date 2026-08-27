@@ -14,7 +14,7 @@ const UNDERLINE = "\x1b[4m";
 
 // Heading palette — distinct color + weight per level.
 // NOTE: do NOT append RESET in `color` — it is placed around the text later.
-export const getHeadingStyles = (): Array<{ color: string; deco: string }> => [
+const getHeadingStyles = (): Array<{ color: string; deco: string }> => [
 	{ color: theme.fgRaw("mdHeading"), deco: BOLD + UNDERLINE },
 	{ color: theme.fgRaw("accent"), deco: BOLD },
 	{ color: theme.fgRaw("mdHeading"), deco: BOLD },
@@ -127,7 +127,7 @@ export function extractPostEditDiagnostics(text: string | undefined): {
 	return { text: visible || undefined, blocks };
 }
 
-export function matchTagAt(text: string, i: number): number {
+function matchTagAt(text: string, i: number): number {
 	const m = /^<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?\/?>/.exec(text.slice(i, i + 200));
 	return m ? m[0].length : 0;
 }
@@ -346,7 +346,7 @@ export function formatJsonLine(rawLine: string): string[] | null {
 	return pretty.split("\n").map(colorizeJsonRow);
 }
 
-export function colorizeJsonRow(row: string): string {
+function colorizeJsonRow(row: string): string {
 	const indentMatch = row.match(/^(\s*)(.*)$/s);
 	const indent = indentMatch?.[1] ?? "";
 	let body = indentMatch?.[2] ?? row;
@@ -518,7 +518,7 @@ export function normalizeEditArgs(
 	return edits;
 }
 
-export function renderInlinePlain(text: string): string {
+function renderInlinePlain(text: string): string {
 	let out = "";
 	let i = 0;
 	while (i < text.length) {

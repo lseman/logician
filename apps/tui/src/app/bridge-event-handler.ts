@@ -111,10 +111,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 		});
 }
 
-export function handleEvent(
-	ctx: BridgeEventHandlerCtx,
-	event: RuntimeEvent,
-): void {
+function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 	// Update transcript state
 	if (isTranscriptEvent(event)) ctx.transcript.handleEvent(event);
 	ctx.turnState = reduceTurnState(ctx.turnState, event);

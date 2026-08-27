@@ -1,15 +1,6 @@
 /** Contracts used by hosts that embed the core engine. */
 
 export {
-	EventJournal,
-	type EventJournalEntry,
-	type EventJournalOptions,
-	type EventJournalQuery,
-	type EventJournalSubscriptionOptions,
-	type JournalEvent,
-} from "./runtime/events/event-journal.ts";
-
-export {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
@@ -23,14 +14,22 @@ export {
 	SessionStore,
 } from "./capabilities/session/session-store.ts";
 export { ToolRegistry } from "./capabilities/tools/registry.ts";
+export { resolveAgentSettings } from "./control/configuration/agent-settings.ts";
 export {
-	CancellationError,
-	CancellationScope,
 	type CancellationCleanup,
+	CancellationError,
 	type CancellationKind,
+	CancellationScope,
 	type CancellationScopeOptions,
 } from "./runtime/control/cancellation-scope.ts";
-export { resolveAgentSettings } from "./control/configuration/agent-settings.ts";
+export {
+	EventJournal,
+	type EventJournalEntry,
+	type EventJournalOptions,
+	type EventJournalQuery,
+	type EventJournalSubscriptionOptions,
+	type JournalEvent,
+} from "./runtime/events/event-journal.ts";
 export type { AbortResult } from "./runtime/harness/types.ts";
 export type { HarnessPhase } from "./runtime/state/runtime-state.ts";
 export { loadExtensions } from "./system/extension/loader.ts";

@@ -204,11 +204,11 @@ export function renderMarkdownLines(
 	return lines;
 }
 
-export function isMemorySummaryRow(line: string): boolean {
+function isMemorySummaryRow(line: string): boolean {
 	return parseMemorySummaryRow(line) !== null;
 }
 
-export function parseMemorySummaryRow(line: string): string[] | null {
+function parseMemorySummaryRow(line: string): string[] | null {
 	const match = line.match(
 		/^([A-Za-z]?\d+)\s+((?:\d{1,2}:\d{2}[ap])|")\s+(\S+)\s+(.+)$/,
 	);
@@ -219,29 +219,29 @@ export function parseMemorySummaryRow(line: string): string[] | null {
 }
 
 // Strip ANSI escape codes for plain-text analysis (table detection, etc.)
-export function stripAnsi(s: string): string {
+function stripAnsi(s: string): string {
 	return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-export function isTableStart(lines: string[], index: number): boolean {
+function isTableStart(lines: string[], index: number): boolean {
 	return (
 		isTableRow(lines[index] || "") && isTableSeparator(lines[index + 1] || "")
 	);
 }
 
-export function isTableRow(line: string): boolean {
+function isTableRow(line: string): boolean {
 	const plain = stripAnsi(line);
 	const trimmed = plain.trim();
 	return trimmed.includes("|") && trimmed.split("|").length >= 3;
 }
 
-export function isTableSeparator(line: string): boolean {
+function isTableSeparator(line: string): boolean {
 	const cells = splitTableRow(line);
 	if (cells.length < 2) return false;
 	return cells.every(cell => /^:?-+:?$/.test(stripAnsi(cell.trim())));
 }
 
-export function splitTableRow(line: string): string[] {
+function splitTableRow(line: string): string[] {
 	const plain = stripAnsi(line);
 	const trimmed = plain.trim();
 	const withoutEdges = trimmed.replace(/^\|/, "").replace(/\|$/, "");
@@ -270,7 +270,7 @@ export function splitTableRow(line: string): string[] {
 	return cells;
 }
 
-export function renderTable(rawLines: string[], maxLen: number): string[] {
+function renderTable(rawLines: string[], maxLen: number): string[] {
 	if (rawLines.length < 2) return rawLines;
 
 	const header = splitTableRow(rawLines[0]);
@@ -347,7 +347,7 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 	return out;
 }
 
-export function renderTableRow(
+function renderTableRow(
 	cells: string[],
 	widths: number[],
 	color: string,
@@ -377,7 +377,7 @@ export function renderTableRow(
 	return lines;
 }
 
-export function wrapPlainCell(text: string, width: number): string[] {
+function wrapPlainCell(text: string, width: number): string[] {
 	if (!text) return [""];
 	const words = text.split(/\s+/);
 	const lines: string[] = [];

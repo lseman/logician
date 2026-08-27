@@ -20,8 +20,8 @@ import {
 	configurePluginRuntimeEnv,
 	type PluginCommandResult,
 } from "../../adapters/claude-code/plugin-runtime.ts";
-import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
-import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import type { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
+import type { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
 import { LegroomGateway } from "../../capabilities/legroom/legroom-gateway.ts";
 import type {
 	CalibrationStatus,
@@ -31,19 +31,19 @@ import type {
 	WorkerHistory,
 	WorkerStats,
 } from "../../capabilities/legroom/worker.ts";
-import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
+import type { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
 import type {
 	McpSnapshotResult,
 	McpToggleResult,
 } from "../../capabilities/mcp/mcp-server-registry.ts";
-import { MemoryHost } from "../../capabilities/memory/memory.ts";
+import type { MemoryHost } from "../../capabilities/memory/memory.ts";
 import {
 	createMemoryGetTool,
 	createMemorySearchTool,
 } from "../../capabilities/memory/memory-tools.ts";
 import type { Prompt } from "../../capabilities/prompts/loader.ts";
-import { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
+import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
 import { onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type { SandboxProfile } from "../../capabilities/tools/sandbox.ts";
@@ -72,7 +72,10 @@ import {
 	runtimeToolNames,
 } from "./application/runtime-status.ts";
 import { TurnOrchestrator } from "./application/turn-orchestrator.ts";
-import { RuntimeContext } from "./capability-context.ts";
+import {
+	createRuntimeContext,
+	type RuntimeContext,
+} from "./capability-context.ts";
 import {
 	buildPluginRuntimeEnv,
 	envNumber,
@@ -215,71 +218,13 @@ export class AgentRuntime {
 				: opts.postEditDiagnostics !== false;
 		this.legroom = new LegroomGateway(opts.legroom ?? {});
 
-		// Independent capabilities — none reads another slot during
-		// construction (RuntimeContext's own contract) — mount together so
-		// downstream code (toolRouter's extraTools closures, the AgentConfig
-		// build below) can rely on every slot existing.
-		this.runtimeCtx = RuntimeContext.mount([
-			{
-				id: "repositoryMap",
-				register: () =>
-					opts.repositoryMap?.enabled !== false
-						? new RepositoryMap(this.cwd, {
-								maxTokens: opts.repositoryMap?.maxTokens,
-							})
-						: undefined,
-			},
-			{
-				id: "lsp",
-				register: () => {
-					const serverOverrides = opts.lsp?.serverOverrides;
-					return new LspClientPool(this.cwd, {
-						timeoutMs: opts.lsp?.timeoutMs ?? 2_000,
-						servers:
-							serverOverrides && Object.keys(serverOverrides).length > 0
-								? serverOverrides
-								: undefined,
-					});
-				},
-			},
-			{
-				id: "extensions",
-				register: () =>
-					new ExtensionRegistry({
-						sessionId: this.sessionId,
-						cwd: this.cwd,
-						extensionDirs: opts.extensions?.dirs,
-						projectTrusted: this.projectTrusted,
-					}),
-			},
-			{
-				id: "interactions",
-				register: () =>
-					new InteractionGateway({
-						mode: opts.permissions?.mode ?? "acceptEdits",
-						rules: opts.permissions?.rules,
-						emit: event => this.emit(event),
-					}),
-			},
-			{
-				id: "memory",
-				register: () =>
-					new MemoryHost(this.cwd, this.sessionId, {
-						memoryEnabled: opts.memory?.enabled,
-						memoryDbPath: opts.memory?.dbPath,
-						memoryExtractorModel: opts.memory?.extractorModel,
-						memoryExtractorBaseUrl: opts.memory?.extractorBaseUrl,
-						memoryCaptureTools: opts.memory?.captureTools,
-						memoryInjectContext: opts.memory?.injectContext,
-						memoryContextBudget: opts.memory?.contextBudget,
-						memoryViewerEnabled: opts.memory?.viewerEnabled,
-						memoryViewerPort: opts.memory?.viewerPort,
-						memoryEmbeddingsEnabled: opts.memory?.embeddingsEnabled,
-						memoryEmbeddingModel: opts.memory?.embeddingModel,
-						model: opts.model,
-					}),
-			},
-		]);
+		this.runtimeCtx = createRuntimeContext({
+			opts,
+			cwd: this.cwd,
+			sessionId: this.sessionId,
+			projectTrusted: this.projectTrusted,
+			emit: event => this.emit(event),
+		});
 		// Extension loading is a real side effect (reads disk, may run init
 		// hooks) — kept as an explicit statement rather than folded into
 		// register(), which the context treats as pure construction.
@@ -511,7 +456,7 @@ export class AgentRuntime {
 		this.turns = new TurnOrchestrator({
 			extensionsReady: () => this.extensions.getLoadPromise(),
 			hasSession: () => this.session !== null,
-			steer: message => this.sessions.steer(message),
+			steer: message => this.sessions.queues.steer(message),
 			emit: event => this.emit(event),
 			ensureStartup: () => this.plugins.ensureStarted(),
 			isMcpLoaded: () => this.toolRouter.isMcpLoaded(),
@@ -621,29 +566,29 @@ export class AgentRuntime {
 	// ── Queue operations (delegated to AgentSession) ─────────────────
 
 	steer(message: string): void {
-		this.sessions.steer(message);
+		this.sessions.queues.steer(message);
 	}
 
 	/** Queue steering for after the current turn (never interrupts). */
 	steerQueue(message: string): void {
-		this.sessions.steerQueue(message);
+		this.sessions.queues.steerQueue(message);
 	}
 
 	/** Immediately interrupt and apply steering (always forces abort). */
 	steerNow(message: string): void {
-		this.sessions.steerNow(message);
+		this.sessions.queues.steerNow(message);
 	}
 
 	followUp(message: string): void {
-		this.sessions.followUp(message);
+		this.sessions.queues.followUp(message);
 	}
 
 	nextTurn(message: string): void {
-		this.sessions.nextTurn(message);
+		this.sessions.queues.nextTurn(message);
 	}
 
 	setSteeringMode(mode: QueueMode): void {
-		this.sessions.setSteeringMode(mode);
+		this.sessions.queues.setSteeringMode(mode);
 	}
 
 	getSteeringInterrupt(): boolean {
@@ -670,23 +615,23 @@ export class AgentRuntime {
 	}
 
 	setFollowUpMode(mode: QueueMode): void {
-		this.sessions.setFollowUpMode(mode);
+		this.sessions.queues.setFollowUpMode(mode);
 	}
 
 	getSteeringMessages(): string[] {
-		return this.sessions.queues().steering;
+		return this.sessions.queues.snapshot().steering;
 	}
 
 	flushSteeringNow(): number {
-		return this.sessions.flushSteeringNow();
+		return this.sessions.queues.flushSteeringNow();
 	}
 
 	getFollowUpMessages(): string[] {
-		return this.sessions.queues().followUp;
+		return this.sessions.queues.snapshot().followUp;
 	}
 
 	getNextTurnMessages(): string[] {
-		return this.sessions.queues().nextTurn;
+		return this.sessions.queues.snapshot().nextTurn;
 	}
 
 	clearQueue(): {
@@ -694,11 +639,11 @@ export class AgentRuntime {
 		followUp: string[];
 		nextTurn: string[];
 	} {
-		return this.sessions.clearQueues();
+		return this.sessions.queues.clear();
 	}
 
 	dropQueuedMessage(displayIndex: number): string | undefined {
-		return this.sessions.dropQueuedMessage(displayIndex);
+		return this.sessions.queues.drop(displayIndex);
 	}
 
 	/** Abort: clear steering/follow-up queues (preserves nextTurn). */
@@ -1182,6 +1127,3 @@ export class AgentRuntime {
 }
 
 export { getSkillsDirs } from "../resource-directories.ts";
-
-/** @deprecated Import and use {@link AgentRuntime}. */
-export { AgentRuntime as AgentCoreBridge };

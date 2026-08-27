@@ -27,7 +27,7 @@ function isArrow(data: string, direction: "A" | "B" | "C" | "D"): boolean {
 
 // ── Input bar ─────────────────────────────────────────────────────────────────
 
-export interface InputBarOptions {
+interface InputBarOptions {
 	prompt?: string;
 	placeholder?: string;
 }

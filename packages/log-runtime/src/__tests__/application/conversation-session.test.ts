@@ -50,14 +50,14 @@ describe("ConversationSession", () => {
 		expect(state.contextChanges()).toBe(1);
 	});
 
-	test("owns queue mutation and clearing", () => {
+	test("delegates queue mutation and clearing to its queue collaborator", () => {
 		const { sessions } = createConversationSession();
 		sessions.ensure();
-		sessions.followUp("later");
-		sessions.nextTurn("next");
-		expect(sessions.queues().followUp).toEqual(["later"]);
-		expect(sessions.queues().nextTurn).toEqual(["next"]);
-		expect(sessions.clearQueues()).toEqual({
+		sessions.queues.followUp("later");
+		sessions.queues.nextTurn("next");
+		expect(sessions.queues.snapshot().followUp).toEqual(["later"]);
+		expect(sessions.queues.snapshot().nextTurn).toEqual(["next"]);
+		expect(sessions.queues.clear()).toEqual({
 			steering: [],
 			followUp: ["later"],
 			nextTurn: ["next"],

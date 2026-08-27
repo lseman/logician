@@ -6,8 +6,7 @@ It combines `@logician/log-core` with tools, skills, commands, MCP, memory,
 plugins, Claude Code adapters, EoH, configuration, transcript state, and
 TUI-facing application modules.
 
-Use `AgentRuntime` as the application facade. `AgentCoreBridge` remains only as a
-deprecated compatibility alias.
+Use `AgentRuntime` as the application facade.
 
 `log-runtime` may depend on feature packages; feature packages and `log-core`
 must never depend on `log-runtime`. Architecture tests enforce this package

@@ -3,7 +3,7 @@ import type { Writable } from "node:stream";
 import type { AgentProtocolNotification } from "@logician/log-core/protocol";
 
 export const EXEC_STREAM_SCHEMA = "logician.exec-stream";
-export const EXEC_STREAM_SCHEMA_VERSION = 1;
+const EXEC_STREAM_SCHEMA_VERSION = 1;
 
 export interface ExecBridge {
 	events: {

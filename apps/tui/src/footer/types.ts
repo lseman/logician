@@ -10,8 +10,8 @@ import type { ThemeColor } from "../terminal/theme.ts";
  *  Alignment & fill
  * ════════════════════════════════════════════════════════════════════════════ */
 
-export type Alignment = "left" | "middle" | "right";
-export type FillMode = "none" | "grow";
+type Alignment = "left" | "middle" | "right";
+type FillMode = "none" | "grow";
 
 /* ════════════════════════════════════════════════════════════════════════════
  *  Widget layout config — per-widget overrides the user saves
@@ -30,7 +30,7 @@ export interface WidgetLayout {
  *  Per-widget style overrides (colors)
  * ════════════════════════════════════════════════════════════════════════════ */
 
-export interface WidgetStyle {
+interface WidgetStyle {
 	iconColor?: ThemeColor; // color for the widget's icon glyph
 	textColor?: ThemeColor; // color for the widget's text content
 }

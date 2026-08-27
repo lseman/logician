@@ -581,7 +581,9 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				padToWidth(`${theme.fg("accent", "◆")} ${BOLD}LOGICIAN${RESET}`),
 				padToWidth(theme.fg("muted", location)),
 				padToWidth(""),
-				padToWidth(`${theme.fg("text", "Start typing")} ${theme.fg("dim", "or use / commands")}`),
+				padToWidth(
+					`${theme.fg("text", "Start typing")} ${theme.fg("dim", "or use / commands")}`,
+				),
 			];
 		}
 		return [
@@ -591,9 +593,15 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			padToWidth(theme.fg("dim", location)),
 			padToWidth(""),
 			padToWidth(`${theme.fg("header", `${BOLD}QUICK START${RESET}`)}`),
-			padToWidth(`${theme.fg("accent", "/")}  ${theme.fg("text", "Browse commands")}     ${theme.fg("accent", "@")}  ${theme.fg("text", "Attach a file")}`),
-			padToWidth(`${theme.fg("accent", "/sessions")}  ${theme.fg("muted", "Resume previous work")}`),
-			padToWidth(`${theme.fg("accent", "/help")}      ${theme.fg("muted", "See keys and capabilities")}`),
+			padToWidth(
+				`${theme.fg("accent", "/")}  ${theme.fg("text", "Browse commands")}     ${theme.fg("accent", "@")}  ${theme.fg("text", "Attach a file")}`,
+			),
+			padToWidth(
+				`${theme.fg("accent", "/sessions")}  ${theme.fg("muted", "Resume previous work")}`,
+			),
+			padToWidth(
+				`${theme.fg("accent", "/help")}      ${theme.fg("muted", "See keys and capabilities")}`,
+			),
 		];
 	}
 

@@ -14,129 +14,31 @@ import type {
 	TranscriptEvent,
 	TurnEndEvent,
 } from "@logician/log-core/events";
+import {
+	type AssistantChunk,
+	type AssistantMessage,
+	type ChildChunk,
+	type ChildToolCall,
+	createInitialTranscriptState,
+	type NoticeLevel,
+	type SessionState,
+	type SpawnTaskStatus,
+	type ThinkingDisplayStyle,
+	type ToolExecution,
+	type Turn,
+} from "./model.ts";
+import {
+	selectAssistantContent,
+	selectAssistantThinking,
+	selectAssistantTools,
+	selectCurrentTurn,
+	selectMessageCount,
+	selectStreamingContent,
+	selectStreamingThinking,
+	selectThinkingChunks,
+} from "./selectors.ts";
 
-export type ThinkingDisplayStyle = "collapsed" | "summary" | "expanded";
-
-// ── Tool execution (used by tool chunks) ──────────────────────────────────────
-
-export interface ToolExecution {
-	tool_name: string;
-	tool_call_id?: string;
-	args?: Record<string, unknown>;
-	result?: string;
-	partialResult?: string;
-	/** Human-readable progress emitted while the tool executes. */
-	streamOutput?: string;
-	details?: Record<string, unknown>;
-	isError: boolean;
-	isComplete: boolean;
-	startedAt?: number;
-	durationMs?: number;
-}
-
-// ── Chunk model ───────────────────────────────────────────────────────────────
-// Ordered, typed chunks replace the old clustered [thinking[], content, tools[]].
-
-export type NoticeLevel = "info" | "warn" | "error" | "success";
-
-// ── Subagent child chunks ───────────────────────────────────────────────────
-// Mirrors AssistantChunk's interleaving model for a spawn_agent/spawn_agents
-// child: thinking/content deltas and tool calls stored in true chronological
-// order (by the child's own emit-time seq), instead of the two disjoint
-// buckets (tool list + accumulated text string) used before.
-
-export interface ChildToolCall {
-	agentId: string;
-	toolCallId: string;
-	toolName: string;
-	args: string;
-	status?: "running" | "completed" | "failed";
-	isError?: boolean;
-	resultPreview?: string;
-	/** Position within a spawn_agents batch, if run as part of one. */
-	taskIndex?: number;
-}
-
-export interface ChildChunk {
-	seq: number;
-	agentId: string;
-	type: "thinking" | "content" | "tool";
-	contentText?: string; // for 'thinking' and 'content'
-	tool?: ChildToolCall; // for 'tool'
-	isComplete: boolean;
-	/** Position within a spawn_agents batch, if run as part of one. */
-	taskIndex?: number;
-}
-
-/** Structured per-task live status for a spawn_agents batch — the single
- * source of truth for status badges, replacing the old streamOutput
- * marker-string protocol. Keyed by task index. */
-export interface SpawnTaskStatus {
-	taskIndex: number;
-	agentId: string;
-	agent: string;
-	status: "running" | "completed" | "failed";
-	startedAt: number;
-	endedAt?: number;
-}
-
-export interface AssistantChunk {
-	seq: number; // insertion sequence — defines display order
-	type: "thinking" | "content" | "tool" | "notice" | "user";
-	// per-type fields
-	contentText?: string; // for 'thinking', 'content', and 'user'
-	tool?: ToolExecution; // for 'tool'
-	// for 'notice': a standalone status line (retry / error / model / stopped)
-	// rendered with its own icon + colour, not folded into assistant prose.
-	notice?: { level: NoticeLevel; label: string; text: string };
-	isComplete: boolean; // true when chunk is finalised
-}
-
-// ── Message types ─────────────────────────────────────────────────────────────
-
-export interface AssistantMessage {
-	type: "assistant";
-	chunks: AssistantChunk[]; // ordered interleaved chunks
-	isComplete: boolean;
-}
-
-export interface UserMessage {
-	type: "user";
-	content: string;
-}
-
-export interface SystemMessage {
-	type: "system";
-	content: string;
-}
-
-export type Message = UserMessage | AssistantMessage | SystemMessage;
-
-export interface Turn {
-	id: string;
-	userMessage: UserMessage | null;
-	assistantMessage: AssistantMessage | null;
-	isComplete: boolean;
-	/** Monotonically increasing content revision. Incremented on every chunk/tool mutation.
-	 * The TUI uses this for O(1) prefix-scan comparisons instead of full turnRevisionFor(). */
-	contentRevision?: number;
-}
-
-export interface SessionState {
-	turns: Turn[];
-	currentTurnId: string | null;
-	thinkingDisplayMode: ThinkingDisplayStyle;
-	thinkingLevel: string;
-}
-
-function createDefaultState(): SessionState {
-	return {
-		turns: [],
-		currentTurnId: null,
-		thinkingDisplayMode: "expanded",
-		thinkingLevel: "off",
-	};
-}
+export type * from "./model.ts";
 
 function containsTextualToolMarkup(content: string): boolean {
 	return (
@@ -146,7 +48,7 @@ function containsTextualToolMarkup(content: string): boolean {
 }
 
 export class Transcript {
-	private state: SessionState = createDefaultState();
+	private state: SessionState = createInitialTranscriptState();
 	private listeners: Array<() => void> = [];
 	/** Global content revision counter — incremented each time any turn's content changes.
 	 * The TUI tracks the last-seen value to skip prefix scans when nothing changed. */
@@ -1186,8 +1088,7 @@ export class Transcript {
 	}
 
 	private getCurrentTurn(): Turn | undefined {
-		if (!this.state.currentTurnId) return undefined;
-		return this.state.turns.find(t => t.id === this.state.currentTurnId);
+		return selectCurrentTurn(this.state);
 	}
 
 	private getTurnById(id: string): Turn | undefined {
@@ -1195,7 +1096,7 @@ export class Transcript {
 	}
 
 	clear(): void {
-		this.state = createDefaultState();
+		this.state = createInitialTranscriptState();
 		this.notify();
 	}
 
@@ -1255,16 +1156,12 @@ export class Transcript {
 
 	/** Get thinking chunks from the current (streaming) turn. */
 	getThinkingChunks(): AssistantChunk[] {
-		const turn = this.getCurrentTurn();
-		if (!turn?.assistantMessage) return [];
-		return turn.assistantMessage.chunks.filter(c => c.type === "thinking");
+		return selectThinkingChunks(this.getCurrentTurn());
 	}
 
 	/** Get thinking chunks from a completed turn. */
 	getTurnThinkingChunks(turn: Turn): AssistantChunk[] {
-		const assistant = turn.assistantMessage;
-		if (!assistant) return [];
-		return assistant.chunks.filter(c => c.type === "thinking");
+		return selectThinkingChunks(turn);
 	}
 
 	// ── Transcript query helpers ─────────────────────────────────────────
@@ -1274,26 +1171,16 @@ export class Transcript {
 	}
 
 	getMessageCount(): number {
-		return this.state.turns.reduce(
-			(count, turn) => count + 1 + (turn.assistantMessage ? 1 : 0),
-			0,
-		);
+		return selectMessageCount(this.state.turns);
 	}
 
 	getStreamingContent(): string | null {
-		const turn = this.getCurrentTurn();
-		if (!turn?.assistantMessage) return null;
-		const text = turn.assistantMessage.chunks
-			.filter(c => c.type === "content" && !c.isComplete)
-			.map(c => c.contentText)
-			.join("");
-		return text || null;
+		return selectStreamingContent(this.getCurrentTurn());
 	}
 
 	/** Return the current turn's thinking chunks as plain text. */
 	getStreamingThinking(): string[] {
-		const chunks = this.getThinkingChunks();
-		return chunks.map(c => c.contentText || "").filter(Boolean);
+		return selectStreamingThinking(this.getCurrentTurn());
 	}
 
 	hasStreamingContent(): boolean {
@@ -1307,35 +1194,15 @@ export class Transcript {
 	}
 
 	getAssistantThinking(turn: Turn): string | null {
-		const assistant = turn.assistantMessage;
-		if (!assistant) return null;
-		const thinking = assistant.chunks
-			.filter(c => c.type === "thinking")
-			.map(c => c.contentText || "")
-			.filter(Boolean);
-		if (thinking.length === 0) return null;
-		return thinking.join("\n\n");
+		return selectAssistantThinking(turn);
 	}
 
 	getAssistantContent(turn: Turn): string | null {
-		const assistant = turn.assistantMessage;
-		if (!assistant) return null;
-		const text = assistant.chunks
-			.filter(c => c.type === "content")
-			.map(c => c.contentText)
-			.join("");
-		return text.length > 0 ? text : null;
+		return selectAssistantContent(turn);
 	}
 
 	getAssistantTools(turn: Turn): ToolExecution[] {
-		const assistant = turn.assistantMessage;
-		if (!assistant) return [];
-		return (
-			assistant.chunks
-				.filter(c => c.type === "tool" && c.tool)
-				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-				.map(c => c.tool!)
-		);
+		return selectAssistantTools(turn);
 	}
 
 	// ── Listener management ────────────────────────────────────────────

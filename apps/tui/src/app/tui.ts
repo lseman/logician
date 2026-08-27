@@ -434,7 +434,8 @@ export class LogicianTUI {
 		// Initial state
 		const gitStatus = getGitStatus();
 		this.transcriptDisplay.setEmptyStateContext({
-			workspace: process.cwd().split(/[\\/]/).filter(Boolean).at(-1) ?? process.cwd(),
+			workspace:
+				process.cwd().split(/[\\/]/).filter(Boolean).at(-1) ?? process.cwd(),
 			branch: gitStatus.branch || undefined,
 		});
 		this.statusPanel.update({

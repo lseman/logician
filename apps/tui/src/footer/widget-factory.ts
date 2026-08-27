@@ -430,9 +430,9 @@ function graphicianWidget(status: WidgetFactoryStatus): WidgetData {
 function legroomWidget(status: WidgetFactoryStatus): WidgetData {
 	return styled(
 		"legroom",
-		theme.fg((status.legroomEnabled ?? false ? "success" : "dim") as any, ""),
+		theme.fg(((status.legroomEnabled ?? false) ? "success" : "dim") as any, ""),
 		"leg:",
-		status.legroomEnabled ?? false ? "sdk" : "off",
+		(status.legroomEnabled ?? false) ? "sdk" : "off",
 	);
 }
 

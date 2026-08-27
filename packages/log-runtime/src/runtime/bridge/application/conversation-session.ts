@@ -1,9 +1,4 @@
-import type {
-	AgentConfig,
-	LLMBackend,
-	Message,
-	QueueMode,
-} from "@logician/log-core";
+import type { AgentConfig, LLMBackend, Message } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	type AbortResult,
@@ -22,6 +17,7 @@ import {
 import type { ExtensionRegistry } from "../../../capabilities/extensions/extensions.ts";
 import { getTasks } from "../../../capabilities/tasks/todo.ts";
 import type { AgentBridgeOptions } from "../types.ts";
+import { ConversationQueues } from "./conversation-queues.ts";
 
 export interface ConversationSessionDependencies {
 	config: () => AgentConfig;
@@ -38,12 +34,14 @@ export class ConversationSession {
 	private currentSession: AgentSession | null = null;
 	private sessionId: string;
 	private durableSession?: SessionStore;
+	readonly queues: ConversationQueues;
 
 	constructor(
 		private readonly dependencies: ConversationSessionDependencies,
 		initialSessionId: string,
 	) {
 		this.sessionId = initialSessionId;
+		this.queues = new ConversationQueues(() => this.currentSession);
 	}
 
 	get current(): AgentSession | null {
@@ -150,60 +148,6 @@ export class ConversationSession {
 		} catch {
 			return false;
 		}
-	}
-
-	steer(message: string): void {
-		this.currentSession?.steer(message);
-	}
-
-	steerQueue(message: string): void {
-		this.currentSession?.steerQueue(message);
-	}
-
-	steerNow(message: string): void {
-		this.currentSession?.steerNow(message);
-	}
-
-	followUp(message: string): void {
-		this.currentSession?.followUp(message);
-	}
-
-	nextTurn(message: string): void {
-		this.currentSession?.nextTurn(message);
-	}
-
-	setSteeringMode(mode: QueueMode): void {
-		this.currentSession?.setSteeringMode(mode);
-	}
-
-	setFollowUpMode(mode: QueueMode): void {
-		this.currentSession?.setFollowUpMode(mode);
-	}
-
-	queues(): {
-		steering: string[];
-		followUp: string[];
-		nextTurn: string[];
-	} {
-		return (
-			this.currentSession?.getQueues() ?? {
-				steering: [],
-				followUp: [],
-				nextTurn: [],
-			}
-		);
-	}
-
-	flushSteeringNow(): number {
-		return this.currentSession?.flushSteeringNow() ?? 0;
-	}
-
-	clearQueues(): ReturnType<ConversationSession["queues"]> {
-		return this.currentSession?.clearQueues() ?? this.queues();
-	}
-
-	dropQueuedMessage(displayIndex: number): string | undefined {
-		return this.currentSession?.dropQueuedMessage(displayIndex);
 	}
 
 	async abort(): Promise<AbortResult | null> {

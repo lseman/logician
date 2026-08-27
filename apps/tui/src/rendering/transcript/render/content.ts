@@ -11,7 +11,7 @@ import { wrapText } from "../layout.ts";
 // Shows content with line numbers, collapsed to a preview when expanded,
 // with a line-number gutter like Pi's write tool.
 
-export function renderPiContent(
+function renderPiContent(
 	text: string,
 	width: number,
 	totalLines: number,
@@ -165,10 +165,7 @@ export function renderFileContent(
 }
 
 /** Extract the portion of a highlighted line corresponding to a display line. */
-export function extractHlSpan(
-	hlLine: string,
-	displayLine: string,
-): string | null {
+function extractHlSpan(hlLine: string, displayLine: string): string | null {
 	if (!hlLine || hlLine.trim().length === 0) return null;
 	// If the plain text of the hl line matches the display line, use it directly
 	const stripped = hlLine.replace(/\x1b\[[\d;]*m/g, "");

@@ -11,22 +11,42 @@ import {
 	stringArg,
 } from "../text-utils.ts";
 import { renderFileContent } from "./content.ts";
-import {
-	detailSection,
-	detailSectionFile,
-	previewBlock,
-	type RenderCtx,
-	renderDiffBlock,
-	renderMcpResultBlocks,
-	renderTerminalBlock,
-	writeFileContent,
-} from "./tool.ts";
+import type { RenderCtx } from "./tool-context.ts";
+
+export interface ToolDetailHelpers {
+	detailSection: (label: string, meta?: string) => string;
+	detailSectionFile: (path: string) => string;
+	previewBlock: (
+		ctx: RenderCtx,
+		text: string,
+		width: number,
+		maxChars?: number,
+	) => string[];
+	renderDiffBlock: (
+		ctx: RenderCtx,
+		text: string,
+		width: number,
+		language?: string,
+	) => string[];
+	renderMcpResultBlocks: (
+		ctx: RenderCtx,
+		text: string,
+		width: number,
+	) => string[];
+	renderTerminalBlock: (
+		ctx: RenderCtx,
+		text: string,
+		width: number,
+	) => string[];
+	writeFileContent: (tool: ToolExecution) => string | undefined;
+}
 
 export function renderWriteDetails(
 	ctx: RenderCtx,
 	tool: ToolExecution,
 	width: number,
 	expanded: boolean,
+	helpers: ToolDetailHelpers,
 ): string[] {
 	const lines: string[] = [];
 	const args = tool.args || {};
@@ -35,18 +55,20 @@ export function renderWriteDetails(
 		stringArg(args, "file_path") ||
 		streamedStringArg(tool.partialResult, "path") ||
 		streamedStringArg(tool.partialResult, "file_path");
-	const content = writeFileContent(tool);
+	const content = helpers.writeFileContent(tool);
 	const streaming = !tool.isComplete;
 	const appending = Boolean(args.append);
 
-	if (path) lines.push(detailSectionFile(path));
+	if (path) lines.push(helpers.detailSectionFile(path));
 
 	if (content !== undefined && content !== "") {
 		const lineCount = content.split("\n").length;
 		const meta = streaming
 			? `${DIM}${content.length} bytes · ${lineCount} lines · streaming${RESET}`
 			: `${DIM}${content.length} bytes · ${lineCount} lines${RESET}`;
-		lines.push(detailSection(appending ? "append content" : "content", meta));
+		lines.push(
+			helpers.detailSection(appending ? "append content" : "content", meta),
+		);
 		const lang = detectLanguage(path);
 		lines.push(...renderFileContent(content, width, lineCount, lang, expanded));
 	} else if (streaming) {
@@ -57,13 +79,18 @@ export function renderWriteDetails(
 	if (tool.result) {
 		const resultText = tool.result;
 		if (tool.isError) {
-			lines.push(detailSection("error"));
-			lines.push(...previewBlock(ctx, resultText, width));
+			lines.push(helpers.detailSection("error"));
+			lines.push(...helpers.previewBlock(ctx, resultText, width));
 		} else if (!content) {
 			// No content shown above; show the diff result.
-			lines.push(detailSection("result"));
+			lines.push(helpers.detailSection("result"));
 			lines.push(
-				...renderDiffBlock(ctx, resultText, width, detectLanguage(path)),
+				...helpers.renderDiffBlock(
+					ctx,
+					resultText,
+					width,
+					detectLanguage(path),
+				),
 			);
 		}
 	} else if (!streaming && !content) {
@@ -79,6 +106,7 @@ export function renderEditDetails(
 	tool: ToolExecution,
 	width: number,
 	expanded: boolean,
+	helpers: ToolDetailHelpers,
 ): string[] {
 	const lines: string[] = [];
 	const args = tool.args || {};
@@ -87,10 +115,12 @@ export function renderEditDetails(
 	const edits = normalizeEditArgs(args);
 	const language = detectLanguage(path);
 
-	if (path) lines.push(detailSectionFile(path));
+	if (path) lines.push(helpers.detailSectionFile(path));
 
 	for (let i = 0; i < edits.length; i++) {
-		lines.push(detailSection(`edit ${i + 1}`, `${i + 1} of ${edits.length}`));
+		lines.push(
+			helpers.detailSection(`edit ${i + 1}`, `${i + 1} of ${edits.length}`),
+		);
 		const oldText = edits[i].oldText;
 		const newText = edits[i].newText;
 
@@ -128,11 +158,11 @@ export function renderEditDetails(
 		const resultText = tool.result.startsWith("Error:")
 			? tool.result
 			: tool.result;
-		lines.push(detailSection(tool.isError ? "error" : "result"));
+		lines.push(helpers.detailSection(tool.isError ? "error" : "result"));
 		if (tool.isError) {
-			lines.push(...previewBlock(ctx, resultText, width));
+			lines.push(...helpers.previewBlock(ctx, resultText, width));
 		} else {
-			lines.push(...renderDiffBlock(ctx, resultText, width, language));
+			lines.push(...helpers.renderDiffBlock(ctx, resultText, width, language));
 		}
 	}
 
@@ -143,15 +173,18 @@ export function renderFileDiffDetails(
 	ctx: RenderCtx,
 	tool: ToolExecution,
 	width: number,
+	helpers: ToolDetailHelpers,
 ): string[] {
 	const args = tool.args || {};
 	const lines: string[] = [];
 	const path = stringArg(args, "path") || stringArg(args, "file_path");
-	if (path) lines.push(detailSectionFile(path));
+	if (path) lines.push(helpers.detailSectionFile(path));
 	if (args.staged) lines.push(`${DIM}staged changes${RESET}`);
 	const result = tool.result ?? tool.partialResult;
 	if (result) {
-		lines.push(...renderDiffBlock(ctx, result, width, detectLanguage(path)));
+		lines.push(
+			...helpers.renderDiffBlock(ctx, result, width, detectLanguage(path)),
+		);
 	}
 	return lines;
 }
@@ -160,14 +193,15 @@ export function renderBashDetails(
 	ctx: RenderCtx,
 	tool: ToolExecution,
 	width: number,
+	helpers: ToolDetailHelpers,
 ): string[] {
 	const args = tool.args || {};
 	const lines: string[] = [];
 	const command = stringArg(args, "command") || "";
 	const timeout = args.timeout ? `${Number(args.timeout)}ms` : "30000ms";
 	if (command) {
-		lines.push(detailSection("command", `timeout ${timeout}`));
-		lines.push(...previewBlock(ctx, command, width));
+		lines.push(helpers.detailSection("command", `timeout ${timeout}`));
+		lines.push(...helpers.previewBlock(ctx, command, width));
 	}
 	const result = tool.result ?? tool.partialResult;
 	if (result) {
@@ -176,8 +210,8 @@ export function renderBashDetails(
 				? "error output"
 				: "output"
 			: "streaming output";
-		lines.push(detailSection(label));
-		lines.push(...renderTerminalBlock(ctx, result, width));
+		lines.push(helpers.detailSection(label));
+		lines.push(...helpers.renderTerminalBlock(ctx, result, width));
 	} else {
 		lines.push(`${DIM}waiting for command output...${RESET}`);
 	}
@@ -188,13 +222,14 @@ export function renderMcpDetails(
 	ctx: RenderCtx,
 	tool: ToolExecution,
 	width: number,
+	helpers: ToolDetailHelpers,
 ): string[] {
 	const lines: string[] = [];
 	const args = tool.args || {};
 	const serverParts = tool.tool_name.replace(/^mcp__/, "").split("__");
 	if (serverParts.length >= 2) {
 		lines.push(
-			detailSection(
+			helpers.detailSection(
 				"mcp",
 				`${serverParts[0]} · ${serverParts.slice(1).join("__")}`,
 			),
@@ -202,13 +237,15 @@ export function renderMcpDetails(
 	}
 	const argText = JSON.stringify(args, null, 2);
 	if (argText && argText !== "{}") {
-		lines.push(detailSection("arguments"));
-		lines.push(...previewBlock(ctx, argText, width));
+		lines.push(helpers.detailSection("arguments"));
+		lines.push(...helpers.previewBlock(ctx, argText, width));
 	}
 	const result = tool.result ?? tool.partialResult;
 	if (result) {
-		lines.push(detailSection(tool.isError ? "mcp error" : "mcp result"));
-		lines.push(...renderMcpResultBlocks(ctx, result, width));
+		lines.push(
+			helpers.detailSection(tool.isError ? "mcp error" : "mcp result"),
+		);
+		lines.push(...helpers.renderMcpResultBlocks(ctx, result, width));
 	}
 	return lines;
 }

@@ -65,7 +65,7 @@ export interface LayoutFrame {
 	primaryScrollView?: ScrollView;
 }
 
-export interface ScrollbarGeometry {
+interface ScrollbarGeometry {
 	column: number;
 	trackTop: number;
 	trackHeight: number;
@@ -469,9 +469,7 @@ function paintScrollbarCell(
 	return `${before}${beforePad}${style(glyph, isThumb)}`;
 }
 
-export function getScrollbarGeometry(
-	box: LayoutBox,
-): ScrollbarGeometry | undefined {
+function getScrollbarGeometry(box: LayoutBox): ScrollbarGeometry | undefined {
 	if (
 		!box.scrollView?.isScrollbarVisible ||
 		box.rect.width <= 0 ||
@@ -614,7 +612,7 @@ function containsPoint(rect: LayoutRect, x: number, y: number): boolean {
 	);
 }
 
-export function getScrollViewBox(
+function getScrollViewBox(
 	frame: LayoutFrame,
 	scrollView: ScrollView,
 ): LayoutBox | undefined {

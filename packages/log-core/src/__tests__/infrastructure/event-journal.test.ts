@@ -20,7 +20,9 @@ describe("EventJournal", () => {
 		expect(journal.size).toBe(2);
 		expect(journal.latestId).toBe(3);
 		expect(journal.snapshot().map(entry => entry.id)).toEqual([2, 3]);
-		expect(journal.snapshot().map(entry => entry.recordedAt)).toEqual([101, 102]);
+		expect(journal.snapshot().map(entry => entry.recordedAt)).toEqual([
+			101, 102,
+		]);
 	});
 
 	test("queries by cursor, event type, and newest limit", () => {

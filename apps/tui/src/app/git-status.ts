@@ -16,7 +16,7 @@ export interface GitStatusSnapshot {
 	removedLines: number;
 }
 
-export function getGitBranch(): string {
+function getGitBranch(): string {
 	try {
 		return execSync("git branch --show-current", {
 			cwd: process.cwd(),

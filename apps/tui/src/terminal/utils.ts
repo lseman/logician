@@ -27,18 +27,18 @@ export const getGraphemeSegmenter = (): Intl.Segmenter => {
 	}
 };
 
-export function isWhitespaceChar(ch: string): boolean {
+function isWhitespaceChar(ch: string): boolean {
 	return ch.trim().length === 0;
 }
 
 // ── Word boundaries (for grapheme cursor) ─────────────────────────────────────
 
-export function graphemeLength(text: string): number {
+function graphemeLength(text: string): number {
 	const segmenter = getGraphemeSegmenter();
 	return [...segmenter.segment(text)].length;
 }
 
-export function graphemeSlice(text: string, from: number, to?: number): string {
+function graphemeSlice(text: string, from: number, to?: number): string {
 	const segmenter = getGraphemeSegmenter();
 	const segments = [...segmenter.segment(text)];
 	const end = to !== undefined ? to : segments.length;
@@ -50,15 +50,12 @@ export function graphemeSlice(text: string, from: number, to?: number): string {
 
 // ── Fuzzy matching (for slash commands) ───────────────────────────────────────
 
-export interface FuzzyScore {
+interface FuzzyScore {
 	index: number;
 	score: number;
 }
 
-export function fuzzyMatch(
-	query: string,
-	candidate: string,
-): FuzzyScore | null {
+function fuzzyMatch(query: string, candidate: string): FuzzyScore | null {
 	const q = query.toLowerCase();
 	const c = candidate.toLowerCase();
 
@@ -101,7 +98,7 @@ export function fuzzyMatch(
 	return null;
 }
 
-export function fuzzyFilter<T>(
+function fuzzyFilter<T>(
 	items: T[],
 	query: string,
 	getKey: (item: T) => string,

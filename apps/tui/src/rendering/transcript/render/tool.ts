@@ -5,10 +5,7 @@
 // per-tool-type detail renderers and the subagent renderers.
 
 import { highlight, highlightAuto } from "@logician/log-runtime/formatting";
-import type {
-	ThinkingDisplayStyle,
-	ToolExecution,
-} from "@logician/log-runtime/sessions";
+import type { ToolExecution } from "@logician/log-runtime/sessions";
 import {
 	BOLD,
 	clampLineToWidth,
@@ -38,6 +35,10 @@ import {
 	stripInternalHookGuidance,
 } from "../text-utils.ts";
 import { truncateText, withTruncationMarker } from "./content.ts";
+import type { RenderCtx, SanitizedStringCache } from "./tool-context.ts";
+
+export type { RenderCtx, SanitizedToolCache } from "./tool-context.ts";
+
 import {
 	renderSubagentBatchActivityTail,
 	renderSubagentBatchCollapsed,
@@ -49,40 +50,12 @@ import {
 	renderFileDiffDetails,
 	renderMcpDetails,
 	renderWriteDetails,
+	type ToolDetailHelpers,
 } from "./tool-details.ts";
 
 // ── Shared render context ────────────────────────────────────────────────────
 // TranscriptDisplay's instance state, as read by the free functions extracted
 // from it. TranscriptDisplay satisfies this shape naturally.
-
-export interface SanitizedStringCache {
-	raw?: string;
-	safe?: string;
-}
-
-export interface SanitizedToolCache {
-	result: SanitizedStringCache;
-	partialResult: SanitizedStringCache;
-	streamOutput: SanitizedStringCache;
-	argsSource?: ToolExecution["args"];
-	argsSafe?: ToolExecution["args"];
-}
-
-export interface RenderCtx {
-	toolsExpanded: boolean;
-	spinnerFrame: () => string;
-	maxMessageLength: number;
-	sanitizedToolCache: WeakMap<ToolExecution, SanitizedToolCache>;
-	sanitizationMetrics: { cacheHits: number; scannedCharacters: number };
-	currentWidth: number;
-	thinkingMode: ThinkingDisplayStyle;
-	/** Whether a specific spawn_agents task card is expanded. */
-	isAgentExpanded?: (toolCallId: string, taskIndex: number) => boolean;
-	/** Whether a specific child tool call (inside a subagent flow) is expanded. */
-	isChildToolExpanded?: (parentKey: string, childToolCallId: string) => boolean;
-	/** Populated by the renderer with per-task/per-child-tool hit regions for spawn_agent(s). */
-	_taskHitRegions?: Array<{ start: number; end: number; key: string }>;
-}
 
 export function renderTool(
 	ctx: RenderCtx,
@@ -90,6 +63,12 @@ export function renderTool(
 	width: number,
 	expanded = ctx.toolsExpanded,
 ): string[] {
+	if (!ctx.renderNestedTool) {
+		ctx.renderNestedTool = renderTool;
+		ctx.detailSection = detailSection;
+		ctx.previewBlock = previewBlock;
+		ctx.computeBatchTally = computeBatchTally;
+	}
 	// Tool results, streamed output, arguments, and nested subagent details
 	// are untrusted terminal input. Clone and remove every terminal control
 	// before any markdown, highlighting, wrapping, or ANSI styling is added.
@@ -286,7 +265,7 @@ export function renderTool(
 	return lines;
 }
 
-export function sanitizeToolForDisplay(
+function sanitizeToolForDisplay(
 	ctx: RenderCtx,
 	tool: ToolExecution,
 ): ToolExecution {
@@ -349,7 +328,7 @@ export function getSanitizationMetrics(ctx: RenderCtx): {
 	return { ...ctx.sanitizationMetrics };
 }
 
-export function collapsedToolPreview(tool: ToolExecution): string {
+function collapsedToolPreview(tool: ToolExecution): string {
 	if (tool.tool_name === "write_file") {
 		return "";
 	}
@@ -366,7 +345,7 @@ export function collapsedToolPreview(tool: ToolExecution): string {
 	return clampLineToWidth(preview, 120);
 }
 
-export function renderPostEditDiagnostics(
+function renderPostEditDiagnostics(
 	block: PostEditDiagnosticBlock,
 	width: number,
 ): string[] {
@@ -411,7 +390,7 @@ function isAppendMode(tool: ToolExecution): boolean {
 	return Boolean(args.append);
 }
 
-export function toolSummary(tool: ToolExecution): string {
+function toolSummary(tool: ToolExecution): string {
 	const args = tool.args || {};
 	const path = stringArg(args, "path") || stringArg(args, "file_path");
 	if (tool.tool_name === "write_file") {
@@ -455,7 +434,7 @@ export function toolSummary(tool: ToolExecution): string {
 	return result ? compactText(result).slice(0, 80) : "";
 }
 
-export function toolDetailLines(
+function toolDetailLines(
 	ctx: RenderCtx,
 	tool: ToolExecution,
 	width: number,
@@ -475,15 +454,19 @@ export function toolDetailLines(
 	}
 
 	if (tool.tool_name === "write_file") {
-		lines.push(...renderWriteDetails(ctx, tool, width, expanded));
+		lines.push(
+			...renderWriteDetails(ctx, tool, width, expanded, toolDetailHelpers),
+		);
 	} else if (tool.tool_name === "edit_file") {
-		lines.push(...renderEditDetails(ctx, tool, width, expanded));
+		lines.push(
+			...renderEditDetails(ctx, tool, width, expanded, toolDetailHelpers),
+		);
 	} else if (tool.tool_name === "file_diff") {
-		lines.push(...renderFileDiffDetails(ctx, tool, width));
+		lines.push(...renderFileDiffDetails(ctx, tool, width, toolDetailHelpers));
 	} else if (tool.tool_name === "bash") {
-		lines.push(...renderBashDetails(ctx, tool, width));
+		lines.push(...renderBashDetails(ctx, tool, width, toolDetailHelpers));
 	} else if (tool.tool_name.startsWith("mcp__")) {
-		lines.push(...renderMcpDetails(ctx, tool, width));
+		lines.push(...renderMcpDetails(ctx, tool, width, toolDetailHelpers));
 	} else {
 		const argText = JSON.stringify(args, null, 2);
 		if (argText && argText !== "{}") {
@@ -592,7 +575,7 @@ export function writeFileContent(tool: ToolExecution): string | undefined {
 // ── Shared low-level content-block helpers ──────────────────────────────────
 // Used by both the per-tool-type detail renderers and the subagent renderers.
 
-export function renderPermissionBlock(
+function renderPermissionBlock(
 	ctx: RenderCtx,
 	result: string,
 	width: number,
@@ -743,3 +726,13 @@ export function previewBlock(
 	}
 	return lines;
 }
+
+const toolDetailHelpers: ToolDetailHelpers = {
+	detailSection,
+	detailSectionFile,
+	previewBlock,
+	renderDiffBlock,
+	renderMcpResultBlocks,
+	renderTerminalBlock,
+	writeFileContent,
+};

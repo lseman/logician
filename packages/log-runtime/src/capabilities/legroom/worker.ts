@@ -117,26 +117,37 @@ function parseResponse(line: string): WorkerResponse | undefined {
 	return response as unknown as WorkerResponse;
 }
 
-function buildCompressResult(
-	stats: Record<string, unknown>,
-): CompressResult {
+function buildCompressResult(stats: Record<string, unknown>): CompressResult {
 	const metadata: Record<string, unknown> = {};
 	const statsMetadata = stats.metadata as Record<string, unknown> | undefined;
 	if (statsMetadata) {
-		if (statsMetadata.ccrHashes) metadata.ccrHashes = statsMetadata.ccrHashes as string[];
-		if (statsMetadata.phaseReports) metadata.phaseReports = statsMetadata.phaseReports as Record<string, unknown>[];
-		if (statsMetadata.salienceScoresBefore) metadata.salienceScoresBefore = statsMetadata.salienceScoresBefore as number[];
-		if (statsMetadata.salienceScoresAfter) metadata.salienceScoresAfter = statsMetadata.salienceScoresAfter as number[];
-		if (statsMetadata.storeStats) metadata.storeStats = statsMetadata.storeStats;
+		if (statsMetadata.ccrHashes)
+			metadata.ccrHashes = statsMetadata.ccrHashes as string[];
+		if (statsMetadata.phaseReports)
+			metadata.phaseReports = statsMetadata.phaseReports as Record<
+				string,
+				unknown
+			>[];
+		if (statsMetadata.salienceScoresBefore)
+			metadata.salienceScoresBefore =
+				statsMetadata.salienceScoresBefore as number[];
+		if (statsMetadata.salienceScoresAfter)
+			metadata.salienceScoresAfter =
+				statsMetadata.salienceScoresAfter as number[];
+		if (statsMetadata.storeStats)
+			metadata.storeStats = statsMetadata.storeStats;
 	}
 	return {
 		messages: (statsMetadata?.messages as Record<string, unknown>[]) ?? [],
-		tokensBefore: stats.tokensBefore as number ?? 0,
-		tokensAfter: stats.tokensAfter as number ?? 0,
-		tokensSaved: stats.tokensSaved as number ?? 0,
-		transformsApplied: stats.transformsApplied as string[] ?? [],
-		warnings: stats.warnings as string[] ?? [],
-		metadata: Object.keys(metadata).length > 0 ? (metadata as CompressResult["metadata"]) : undefined,
+		tokensBefore: (stats.tokensBefore as number) ?? 0,
+		tokensAfter: (stats.tokensAfter as number) ?? 0,
+		tokensSaved: (stats.tokensSaved as number) ?? 0,
+		transformsApplied: (stats.transformsApplied as string[]) ?? [],
+		warnings: (stats.warnings as string[]) ?? [],
+		metadata:
+			Object.keys(metadata).length > 0
+				? (metadata as CompressResult["metadata"])
+				: undefined,
 	};
 }
 
@@ -182,7 +193,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "compress",
@@ -219,7 +234,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "compress_with_store",
@@ -242,10 +261,7 @@ export class LegroomWorker {
 	}
 
 	/** Retrieve original content from a CCR store by hash. */
-	async storeRetrieve(
-		storeId: string,
-		hash: string,
-	): Promise<string> {
+	async storeRetrieve(storeId: string, hash: string): Promise<string> {
 		const child = this.ensureStarted();
 		const id = `legroom-${process.pid}-${++this.nextId}`;
 		const timeoutMs = this.options.timeoutMs ?? 30_000;
@@ -254,7 +270,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "store_retrieve",
@@ -284,7 +304,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "store_stats",
@@ -306,7 +330,9 @@ export class LegroomWorker {
 	// ── Cache ──────────────────────────────────────────────────────────────
 
 	/** Query the compression result cache. */
-	async cacheGet(key: string): Promise<{ hit: boolean; result?: CompressResult } | null> {
+	async cacheGet(
+		key: string,
+	): Promise<{ hit: boolean; result?: CompressResult } | null> {
 		const child = this.ensureStarted();
 		const id = `legroom-${process.pid}-${++this.nextId}`;
 		const timeoutMs = this.options.timeoutMs ?? 30_000;
@@ -315,7 +341,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "cache_get",
@@ -349,7 +379,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "calibration_record",
@@ -379,7 +413,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "calibration_status",
@@ -409,7 +447,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "worker_stats",
@@ -428,10 +470,7 @@ export class LegroomWorker {
 	}
 
 	/** Get recent request history. */
-	async workerHistory(
-		limit = 50,
-		offset = 0,
-	): Promise<WorkerHistory> {
+	async workerHistory(limit = 50, offset = 0): Promise<WorkerHistory> {
 		const child = this.ensureStarted();
 		const id = `legroom-${process.pid}-${++this.nextId}`;
 		const timeoutMs = this.options.timeoutMs ?? 30_000;
@@ -440,7 +479,11 @@ export class LegroomWorker {
 				this.pending.delete(id);
 				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve: resolve as PendingRequest["resolve"], reject, timer });
+			this.pending.set(id, {
+				resolve: resolve as PendingRequest["resolve"],
+				reject,
+				timer,
+			});
 			const payload = JSON.stringify({
 				id,
 				method: "worker_history",

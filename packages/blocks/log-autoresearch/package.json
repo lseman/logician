@@ -16,16 +16,10 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "node --test tests/compaction.test.mjs tests/jsonl-helpers.test.mjs tests/paths.test.mjs tests/run-experiment.test.mjs tests/shortcuts.test.mjs",
-		"test:legacy-extension": "node --test tests/activation.test.mjs tests/auto-resume-guards.test.mjs tests/log-params-schema.test.mjs"
-	},
-	"dependencies": {
-		"@logician/log-core": "0.2.0"
+		"test": "node --test tests/compaction.test.mjs tests/jsonl-helpers.test.mjs tests/paths.test.mjs tests/run-experiment.test.mjs tests/shortcuts.test.mjs"
 	},
 	"devDependencies": {
-		"@sinclair/typebox": "^0.34.41",
 		"@types/node": "^22.0.0",
-		"tsx": "^4.23.1",
 		"typescript": "^7.0.2"
 	}
 }

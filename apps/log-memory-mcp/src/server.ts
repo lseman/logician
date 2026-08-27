@@ -19,7 +19,7 @@ type HookPhase =
 	| "stop"
 	| "notification";
 
-export const MCP_PROTOCOL_VERSION = "2025-03-26";
+const MCP_PROTOCOL_VERSION = "2025-03-26";
 
 interface JsonRpcRequest {
 	jsonrpc?: unknown;
@@ -64,7 +64,7 @@ const HOOK_PHASES: HookPhase[] = [
 	"notification",
 ];
 
-export const MEMORY_MCP_TOOLS: ToolDefinition[] = [
+const MEMORY_MCP_TOOLS: ToolDefinition[] = [
 	{
 		name: "memory_search",
 		description:

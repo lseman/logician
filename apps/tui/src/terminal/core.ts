@@ -1402,10 +1402,10 @@ function isImageLine(line: string): boolean {
 
 /**
  /** Value that can be absolute (number) or percentage (string like "50%") */
-export type SizeValue = number | `${number}%`;
+type SizeValue = number | `${number}%`;
 
 /** Parse a SizeValue into absolute value given a reference size */
-export function parseSizeValue(
+function parseSizeValue(
 	value: SizeValue | undefined,
 	referenceSize: number,
 ): number | undefined {
@@ -1419,7 +1419,7 @@ export function parseSizeValue(
 }
 
 /** Margin configuration for overlays */
-export interface OverlayMargin {
+interface OverlayMargin {
 	top?: number;
 	right?: number;
 	bottom?: number;
@@ -1427,7 +1427,7 @@ export interface OverlayMargin {
 }
 
 /** Anchor position for overlay positioning */
-export type OverlayAnchor =
+type OverlayAnchor =
 	| "center"
 	| "top-left"
 	| "top-center"
@@ -1507,7 +1507,7 @@ export interface OverlayHandle {
 }
 
 /** Options for {@link OverlayHandle.unfocus} */
-export interface OverlayUnfocusOptions {
+interface OverlayUnfocusOptions {
 	/** Explicit target to focus after releasing this overlay */
 	target: Component | null;
 }

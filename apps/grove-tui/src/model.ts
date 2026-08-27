@@ -15,7 +15,7 @@ export interface GroveRepository {
 	list(cwd: string): readonly GroveSession[];
 }
 
-export type GroveScreen =
+type GroveScreen =
 	| { readonly kind: "forest" }
 	| { readonly kind: "tree"; readonly sessionId: string };
 

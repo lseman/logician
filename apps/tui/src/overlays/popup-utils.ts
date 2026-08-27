@@ -58,7 +58,7 @@ export function renderSeparator(popupWidth: number): string {
 
 // ── Render a left/right justified line, padded and clamped to width ─────────
 
-export function boxLine(left: string, right: string, width: number): string {
+function boxLine(left: string, right: string, width: number): string {
 	const leftWidth = visibleWidth(left);
 	const rightWidth = visibleWidth(right);
 	const gap = Math.max(1, width - leftWidth - rightWidth);
@@ -341,10 +341,7 @@ export function clampPopupLines(lines: string[], width: number): string[] {
 
 // ── Render a section divider ────────────────────────────────────────────────
 
-export function renderSectionDivider(
-	title: string,
-	innerWidth: number,
-): string {
+function renderSectionDivider(title: string, innerWidth: number): string {
 	const pad = 1;
 	const color = getHeaderFg();
 	const divider = `${color}── ${title} ──${RESET}`;
@@ -391,10 +388,7 @@ export interface ListSelectorConfig<T> {
 }
 
 /** Shared helper: find the index of the first item whose active flag is true. */
-export function findActiveIndex<T>(
-	items: T[],
-	active: (item: T) => boolean,
-): number {
+function findActiveIndex<T>(items: T[], active: (item: T) => boolean): number {
 	const idx = items.findIndex(active);
 	return idx >= 0 ? idx : 0;
 }
@@ -509,9 +503,7 @@ export class ListSelectorOverlay<T> implements Component {
 // type. Each selector passes its config and an action-key; the factory produces
 // a class whose handleInput wraps the base SelectAction into a typed variant.
 
-export type ListSelectorAction<T> =
-	| { type: "select"; item: T }
-	| { type: "close" };
+type ListSelectorAction<T> = { type: "select"; item: T } | { type: "close" };
 
 /** Constructor signature for list-selector overlays created by `createListSelector`. */
 export interface ListSelectorCtor<T> {

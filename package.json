@@ -11,20 +11,23 @@
 		"apps/*"
 	],
 	"scripts": {
+		"build:memoriam": "bun run --cwd ecosystem/memoriam build",
 		"dev": "tsx apps/tui/src/index.ts",
 		"start": "tsx apps/tui/src/index.ts",
 		"grove": "tsx apps/grove-tui/src/index.ts",
 		"graphician:check": "cd ecosystem/graphician && python -m pytest",
 		"lint": "biome check packages/ packages/blocks apps/",
 		"lint:fix": "biome check --fix packages/ packages/blocks apps/",
+		"deadcode": "knip --no-exit-code",
+		"deadcode:check": "knip --include files,dependencies,unlisted,unresolved,cycles --no-config-hints",
 		"format": "biome format --write packages/ packages/blocks apps/",
 		"format:check": "biome check --linter-enabled=false packages/ packages/blocks apps/",
 		"bench:keystroke": "tsx apps/tui/src/__tests__/benchmark-keystroke.ts",
 		"bench:latency": "tsx apps/tui/src/__tests__/benchmark-latency.ts",
 		"eval:smoke": "bun run --filter @logician/log-eval eval:smoke",
-		"test": "bun run --workspaces --if-present test",
-		"typecheck": "bun run --workspaces --if-present typecheck",
-		"ci": "bun run typecheck && bun run lint && bun run format:check && bun run test"
+		"test": "bun run build:memoriam && bun run --workspaces --if-present test",
+		"typecheck": "bun run build:memoriam && bun run --workspaces --if-present typecheck",
+		"ci": "bun run typecheck && bun run lint && bun run format:check && bun run deadcode:check && bun run test"
 	},
 	"engines": {
 		"bun": ">=1.3.14",
@@ -32,11 +35,10 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.7",
-		"@sinclair/typebox": "^0.34.41",
 		"@types/bun": "^1.3.14",
 		"bun-types": "^1.3.14",
+		"knip": "^6.32.3",
 		"tsx": "^4.23.1",
-		"tui": "^1.0.0",
 		"typescript": "^7.0.2"
 	}
 }

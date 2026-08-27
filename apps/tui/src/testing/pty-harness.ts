@@ -6,7 +6,7 @@ import {
 	type TerminalScreen,
 } from "./terminal-screen.ts";
 
-export interface PtyAction {
+interface PtyAction {
 	afterMs: number;
 	/** Bytes to write to the PTY's stdin. Mutually exclusive with `resize`. */
 	send?: string;
@@ -78,7 +78,7 @@ export async function runInPty(options: PtyRunOptions): Promise<PtyRunResult> {
 	});
 }
 
-export function stripTerminalControls(value: string): string {
+function stripTerminalControls(value: string): string {
 	return (
 		value
 			// CSI: ESC [ ... final byte

@@ -23,7 +23,7 @@ export function parseLoopInterval(args: string): ParsedLoopInterval | null {
 	return { value, unit, prompt, ms };
 }
 
-export const SANDBOX_PROFILES: Record<string, string> = {
+const SANDBOX_PROFILES: Record<string, string> = {
 	none: "No isolation — chroot to tmpdir only",
 	code: "Read-only host fs, writable /tmp, no network, no devices",
 	file: "CODE + read-only bind-mount of specified directories",

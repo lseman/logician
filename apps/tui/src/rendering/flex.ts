@@ -28,7 +28,7 @@ export interface FlexEntryOptions {
 	visible?: (viewport: LayoutViewport) => boolean;
 }
 
-export interface FlexEntry extends FlexEntryOptions {
+interface FlexEntry extends FlexEntryOptions {
 	component: Component;
 }
 

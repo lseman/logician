@@ -95,7 +95,7 @@ void test("empty transcript renders a project-aware quick-start surface", () => 
 	});
 	const output = plain(display.render(80).join("\n"));
 	assert.match(output, /◆ LOGICIAN/);
-	assert.match(output, /logician  ·  main/);
+	assert.match(output, /logician {2}· {2}main/);
 	assert.match(output, /QUICK START/);
 	assert.match(output, /\/sessions/);
 	assert.ok(display.render(80).every(line => visibleWidth(line) <= 78));

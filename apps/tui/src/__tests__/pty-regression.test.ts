@@ -215,10 +215,7 @@ void test("Ctrl+I changes and persists the execution profile", async () => {
 			LOGICIAN_MODEL: "test-model",
 			LOGICIAN_PERSIST_CONFIG: "1",
 		},
-		actions: [
-			{ afterMs: 100, send: "s\n" },
-			{ afterMs: 500, send: "\x1b[105;5u" },
-		],
+		actions: [{ afterMs: 500, send: "\x1b[105;5u" }],
 		timeoutMs: 4_000,
 		columns: 140,
 		rows: 32,
@@ -251,10 +248,7 @@ void test("Ctrl+P changes and persists act/plan mode", async () => {
 			LOGICIAN_MODEL: "test-model",
 			LOGICIAN_PERSIST_CONFIG: "1",
 		},
-		actions: [
-			{ afterMs: 100, send: "s\n" },
-			{ afterMs: 500, send: "\x10" },
-		],
+		actions: [{ afterMs: 500, send: "\x10" }],
 		timeoutMs: 4_000,
 		columns: 140,
 		rows: 32,

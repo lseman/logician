@@ -17,7 +17,7 @@ import {
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
-export interface SettingOption {
+interface SettingOption {
 	/** Label shown to the user. */
 	label: string;
 	/** Value sent back on selection (the value to apply). */

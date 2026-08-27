@@ -21,11 +21,13 @@
  * hide real build-order dependencies behind fake independence.
  */
 
-import type { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
-import type { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
-import type { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
-import type { MemoryHost } from "../../capabilities/memory/memory.ts";
-import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
+import type { RuntimeEvent } from "@logician/log-core/events";
+import { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
+import { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
+import { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
+import { MemoryHost } from "../../capabilities/memory/memory.ts";
+import { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
+import type { AgentBridgeOptions } from "./types.ts";
 
 interface RuntimeContextSlots {
 	repositoryMap: RepositoryMap | undefined;
@@ -101,4 +103,83 @@ export class RuntimeContext {
 		}
 		return ctx;
 	}
+}
+
+interface RuntimeContextOptions {
+	opts: AgentBridgeOptions;
+	cwd: string;
+	sessionId: string;
+	projectTrusted: boolean;
+	emit: (event: RuntimeEvent) => void;
+}
+
+/** Build the independent capability layer consumed by AgentRuntime. */
+export function createRuntimeContext({
+	opts,
+	cwd,
+	sessionId,
+	projectTrusted,
+	emit,
+}: RuntimeContextOptions): RuntimeContext {
+	return RuntimeContext.mount([
+		{
+			id: "repositoryMap",
+			register: () =>
+				opts.repositoryMap?.enabled !== false
+					? new RepositoryMap(cwd, {
+							maxTokens: opts.repositoryMap?.maxTokens,
+						})
+					: undefined,
+		},
+		{
+			id: "lsp",
+			register: () => {
+				const serverOverrides = opts.lsp?.serverOverrides;
+				return new LspClientPool(cwd, {
+					timeoutMs: opts.lsp?.timeoutMs ?? 2_000,
+					servers:
+						serverOverrides && Object.keys(serverOverrides).length > 0
+							? serverOverrides
+							: undefined,
+				});
+			},
+		},
+		{
+			id: "extensions",
+			register: () =>
+				new ExtensionRegistry({
+					sessionId,
+					cwd,
+					extensionDirs: opts.extensions?.dirs,
+					projectTrusted,
+				}),
+		},
+		{
+			id: "interactions",
+			register: () =>
+				new InteractionGateway({
+					mode: opts.permissions?.mode ?? "acceptEdits",
+					rules: opts.permissions?.rules,
+					emit,
+				}),
+		},
+		{
+			id: "memory",
+			register: () =>
+				new MemoryHost(cwd, sessionId, {
+					memoryEnabled: opts.memory?.enabled,
+					memoryDbPath: opts.memory?.dbPath,
+					memoryExtractorModel: opts.memory?.extractorModel,
+					memoryExtractorBaseUrl: opts.memory?.extractorBaseUrl,
+					memoryCaptureTools: opts.memory?.captureTools,
+					memoryInjectContext: opts.memory?.injectContext,
+					memoryContextBudget: opts.memory?.contextBudget,
+					memoryViewerEnabled: opts.memory?.viewerEnabled,
+					memoryViewerPort: opts.memory?.viewerPort,
+					memoryEmbeddingsEnabled: opts.memory?.embeddingsEnabled,
+					memoryEmbeddingModel: opts.memory?.embeddingModel,
+					model: opts.model,
+				}),
+		},
+	]);
 }

@@ -1,0 +1,30 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"ignoreBinaries": ["bwrap", "rtk", "xattr"],
+	"workspaces": {
+		".": {
+			"entry": ["site/**/*.js", "skills/**/*.ts"],
+			"project": ["site/**/*.js", "skills/**/*.ts"]
+		},
+		"docs": {
+			"entry": [".vitepress/config.js", ".vitepress/theme/index.js"],
+			"project": [".vitepress/**/*.js", "!.vitepress/.temp/**"]
+		},
+		"apps/*": {
+			"entry": ["src/index.ts", "src/**/*.test.ts", "src/__tests__/**/*.ts"],
+			"project": ["src/**/*.ts"]
+		},
+		"packages/*": {
+			"entry": ["src/index.ts", "src/**/*.test.ts", "src/__tests__/**/*.ts"],
+			"project": ["src/**/*.ts"]
+		},
+		"packages/blocks/*": {
+			"entry": ["src/index.ts", "src/**/*.test.ts", "tests/**/*.mjs"],
+			"project": ["src/**/*.ts", "tests/**/*.mjs"]
+		},
+		"ecosystem/memoriam": {
+			"entry": ["src/index.ts", "src/**/*.test.ts", "tests/**/*.ts"],
+			"project": ["src/**/*.ts", "tests/**/*.ts"]
+		}
+	}
+}

@@ -58,7 +58,7 @@ export function renderThinkingChunk(
  * Render thinking text in expanded mode with code block syntax highlighting.
  * Parses fenced code blocks, applies highlightAuto, and wraps plain text.
  */
-export function renderThinkingExpanded(
+function renderThinkingExpanded(
 	text: string,
 	lines: string[],
 	currentWidth: number,
@@ -100,7 +100,7 @@ export function renderThinkingExpanded(
 	}
 }
 
-export function renderThinkingCodeBlock(
+function renderThinkingCodeBlock(
 	content: string,
 	language: string | null,
 	lines: string[],
