@@ -30,15 +30,6 @@ function configuredWorkspace(): string {
 			turnTimeoutMs: 5000,
 			cacheSize: 64,
 			cacheTtlMs: 2000,
-			memory: true,
-			memoryExtractor: {
-				baseUrl: "http://memory.test:8081",
-				model: "small-extractor",
-			},
-			memoryViewer: false,
-			memoryViewerPort: 4321,
-			memoryEmbeddings: true,
-			memoryEmbeddingModel: "local/test-embedder",
 			reasoner: "reflexion",
 			reasonerConfig: { maxTrials: 2 },
 			legroom: {
@@ -47,6 +38,13 @@ function configuredWorkspace(): string {
 				failOpen: false,
 				timeoutMs: 12000,
 				config: { protect_recent: 2 },
+			},
+			memoriam: {
+				mode: "sdk",
+				python: "/opt/memoriam/bin/python",
+				failOpen: false,
+				timeoutMs: 15000,
+				config: { db_path: "~/.logician/memories.db" },
 			},
 		}),
 		"utf8",
@@ -84,15 +82,6 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.turnTimeoutMs, 5000);
 	assert.equal(resolved.bridge.cacheSize, 64);
 	assert.equal(resolved.bridge.cacheTtlMs, 2000);
-	assert.equal(
-		resolved.bridge.memory?.extractorBaseUrl,
-		"http://memory.test:8081",
-	);
-	assert.equal(resolved.bridge.memory?.extractorModel, "small-extractor");
-	assert.equal(resolved.bridge.memory?.viewerEnabled, false);
-	assert.equal(resolved.bridge.memory?.viewerPort, 4321);
-	assert.equal(resolved.bridge.memory?.embeddingsEnabled, true);
-	assert.equal(resolved.bridge.memory?.embeddingModel, "local/test-embedder");
 	assert.equal(resolved.bridge.reasoner, "reflexion");
 	assert.deepEqual(resolved.bridge.reasonerConfig, { maxTrials: 2 });
 	assert.deepEqual(resolved.bridge.legroom, {
@@ -102,13 +91,19 @@ void test("runtime resolver applies shared environment precedence", () => {
 		timeoutMs: 12000,
 		config: { protect_recent: 2 },
 	});
+	assert.deepEqual(resolved.bridge.memoriam, {
+		mode: "sdk",
+		python: "/opt/memoriam/bin/python",
+		failOpen: false,
+		timeoutMs: 15000,
+		config: { db_path: "~/.logician/memories.db" },
+	});
 });
 
 void test("reasoners are disabled by default", () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-defaults-"));
 	const resolved = resolveRuntimeConfig(cwd, {});
 	assert.equal(resolved.bridge.reasoner, "none");
-	assert.equal(resolved.bridge.memory?.embeddingsEnabled, false);
 });
 
 void test("untrusted runtime resolution ignores project configuration", () => {

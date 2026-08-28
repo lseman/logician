@@ -56,12 +56,11 @@ graph TB
 | `log-core` | Agent loop, harness, context, configuration, sessions, hooks, compaction, tools, and versioned client notifications |
 | `log-runtime` | Runtime composition: capabilities (reasoning, delegation, tasks, ask-user, RAG tools, built-in tools, memory wiring, LSP, MCP, skills) plus orchestration (bridge, session, transcript) |
 | `log-eoh` | Evolution of Heuristics — standalone optimization engine, wired into `log-runtime`'s capabilities |
-| `memoriam` | SQLite-backed persistent memory: observation capture, consolidation, retrieval |
+| `memoriam` | Standalone Python memory engine (`ecosystem/memoriam`): SQLite-backed observation capture, consolidation, retrieval; embedded via its JSON-lines SDK worker |
 | `log-rag` | Hybrid dense + BM25 retrieval, chunking, reranking, context budgets |
 | `log-autoresearch` | Measured experiment loops — run, evaluate, keep or discard |
 | `log-eval` | Outcome-grounded evaluation runner for agent trials |
 | `tui` | Terminal UI components, engine, layers, state management (`apps/tui`) |
-| `log-memory-mcp` | Stdio MCP adapter exposing `@logician/memoriam` to any MCP client (`apps/log-memory-mcp`) |
 
 ### Key concepts
 

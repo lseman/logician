@@ -231,6 +231,10 @@ export class Theme {
 		return `${ansi}${text}${RESET}`;
 	}
 
+	hasColor(color: string): color is ThemeColor {
+		return this.fgCache.has(color as ThemeColor);
+	}
+
 	bg(color: ThemeBg, text: string): string {
 		const ansi = this.bgCache.get(color);
 		if (!ansi) throw new Error(`Unknown theme bg: ${color}`);

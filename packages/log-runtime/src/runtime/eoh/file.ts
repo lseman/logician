@@ -69,7 +69,7 @@ export async function loadEohFile(
 		.slice(range.contentStart, range.contentEnd)
 		.trim();
 	const functionMatch =
-		/^\s*def\s+([A-Za-z_]\w*)\s*(\([^]*?\))\s*(?:->\s*[^:]+)?\s*:/m.exec(
+		/^\s*def\s+([A-Za-z_]\w*)\s*(\([\s\S]*?\))\s*(?:->\s*[^:]+)?\s*:/m.exec(
 			heuristicCode,
 		);
 	if (!functionMatch) {

@@ -69,19 +69,12 @@ const KNOWN_KEYS = new Set([
 	"maxParallelAgents",
 	"cwd",
 	"truncation",
-	"memory",
-	"memoryDbPath",
-	"memoryExtractorModel",
-	"memoryExtractor",
-	"memoryViewer",
-	"memoryViewerPort",
-	"memoryEmbeddings",
-	"memoryEmbeddingModel",
 	"transcriptMaxTurns",
 	"transcriptMaxRenderedLines",
 	"reasoner",
 	"reasonerConfig",
 	"legroom",
+	"memoriam",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
@@ -100,11 +93,19 @@ const TRUNCATION_KEYS = new Set([
 const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(["tool", "assistant", "default"]);
 
 const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
-const MEMORY_EXTRACTOR_KEYS = new Set(["baseUrl", "model"]);
 /** Sourced from the reasoner registry itself so this can't drift from the real set. */
 const REASONER_IDS = new Set(getReasonerIds());
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
 const LEGROOM_KEYS = new Set([
+	"mode",
+	"python",
+	"args",
+	"failOpen",
+	"timeoutMs",
+	"config",
+]);
+
+const MEMORIAM_KEYS = new Set([
 	"mode",
 	"python",
 	"args",
@@ -366,39 +367,6 @@ export function validateConfig(
 		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
 	}
 
-	if (obj.memory !== undefined) cfg.memory = configBool(obj.memory);
-	copyStrings(obj, cfg, ["memoryDbPath", "memoryExtractorModel"]);
-	if (obj.memoryExtractor !== undefined) {
-		if (
-			!obj.memoryExtractor ||
-			typeof obj.memoryExtractor !== "object" ||
-			Array.isArray(obj.memoryExtractor)
-		) {
-			warn(warnings, '"memoryExtractor" must be an object.');
-		} else {
-			const extractor = obj.memoryExtractor as Record<string, unknown>;
-			for (const key of Object.keys(extractor)) {
-				if (!MEMORY_EXTRACTOR_KEYS.has(key))
-					warn(warnings, `Unknown memoryExtractor key: "${key}".`);
-			}
-			const baseUrl =
-				extractor.baseUrl === undefined || isValidUrl(extractor.baseUrl)
-					? configString(extractor.baseUrl)
-					: undefined;
-			if (extractor.baseUrl !== undefined && !baseUrl) {
-				warn(
-					warnings,
-					'"memoryExtractor.baseUrl" must be a valid http/https URL.',
-				);
-			}
-			cfg.memoryExtractor = { baseUrl, model: configString(extractor.model) };
-		}
-	}
-	if (obj.memoryViewer !== undefined)
-		cfg.memoryViewer = configBool(obj.memoryViewer);
-	if (obj.memoryEmbeddings !== undefined)
-		cfg.memoryEmbeddings = configBool(obj.memoryEmbeddings);
-	copyStrings(obj, cfg, ["memoryEmbeddingModel"]);
 	if (obj.reasoner !== undefined) {
 		cfg.reasoner = configString(obj.reasoner)?.toLowerCase();
 		if (!cfg.reasoner) warn(warnings, '"reasoner" must be a non-empty string.');
@@ -420,11 +388,7 @@ export function validateConfig(
 			warn(warnings, '"reasonerConfig" must be an object.');
 		}
 	}
-	copyNumbers(obj, cfg, [
-		"memoryViewerPort",
-		"transcriptMaxTurns",
-		"transcriptMaxRenderedLines",
-	]);
+	copyNumbers(obj, cfg, ["transcriptMaxTurns", "transcriptMaxRenderedLines"]);
 
 	for (const [key, minimum, inclusive] of [
 		["maxRetries", 0, true],
@@ -615,6 +579,60 @@ export function validateConfig(
 					...(timeoutMs !== undefined && timeoutMs > 0 && { timeoutMs }),
 					...(compressionConfig !== undefined && {
 						config: compressionConfig,
+					}),
+				};
+			}
+		}
+	}
+
+	// Memoriam SDK worker.
+	if (obj.memoriam !== undefined) {
+		if (
+			typeof obj.memoriam !== "object" ||
+			obj.memoriam === null ||
+			Array.isArray(obj.memoriam)
+		) {
+			warn(warnings, '"memoriam" must be an object.');
+		} else {
+			const value = obj.memoriam as Record<string, unknown>;
+			for (const key of Object.keys(value)) {
+				if (!MEMORIAM_KEYS.has(key))
+					warn(warnings, `Unknown memoriam key: "${key}".`);
+			}
+			const mode = configString(value.mode);
+			if (mode !== undefined && mode !== "off" && mode !== "sdk") {
+				warn(warnings, '"memoriam.mode" must be one of: off, sdk.');
+			} else {
+				const args = Array.isArray(value.args)
+					? value.args.filter(
+							(item): item is string => typeof item === "string",
+						)
+					: undefined;
+				if (value.args !== undefined && !Array.isArray(value.args))
+					warn(warnings, '"memoriam.args" must be an array of strings.');
+				const memoriamConfig =
+					value.config &&
+					typeof value.config === "object" &&
+					!Array.isArray(value.config)
+						? (value.config as Record<string, unknown>)
+						: undefined;
+				if (value.config !== undefined && !memoriamConfig)
+					warn(warnings, '"memoriam.config" must be an object.');
+				const timeoutMs = configNumber(value.timeoutMs);
+				if (timeoutMs !== undefined && timeoutMs <= 0)
+					warn(warnings, '"memoriam.timeoutMs" must be greater than zero.');
+				cfg.memoriam = {
+					...(mode !== undefined && { mode: mode as "off" | "sdk" }),
+					...(configString(value.python) !== undefined && {
+						python: configString(value.python),
+					}),
+					...(args !== undefined && { args }),
+					...(configBool(value.failOpen) !== undefined && {
+						failOpen: configBool(value.failOpen),
+					}),
+					...(timeoutMs !== undefined && timeoutMs > 0 && { timeoutMs }),
+					...(memoriamConfig !== undefined && {
+						config: memoriamConfig,
 					}),
 				};
 			}
@@ -913,22 +931,6 @@ export interface LogicianTuiConfig {
 	truncation?: TruncationConfig;
 	/** Maximum delegated agents executing concurrently. */
 	maxParallelAgents?: number;
-	// Memory persistence settings.
-	memory?: boolean;
-	/** Path to the memory SQLite database. Default: <cwd>/.logician/memory.db */
-	memoryDbPath?: string;
-	/** Optional smaller model used for grounded semantic memory extraction. */
-	memoryExtractorModel?: string;
-	/** Dedicated OpenAI-compatible endpoint and model for semantic extraction. */
-	memoryExtractor?: { baseUrl?: string; model?: string };
-	/** Whether to start the memory viewer web dashboard on startup (default: true when memory is enabled). */
-	memoryViewer?: boolean;
-	/** Port for the memory viewer dashboard (default: 3200). */
-	memoryViewerPort?: number;
-	/** Enable local MiniLM semantic retrieval. Default: false. */
-	memoryEmbeddings?: boolean;
-	/** Optional Hugging Face feature-extraction model ID. */
-	memoryEmbeddingModel?: string;
 	/** Maximum number of turns to keep in the transcript (default: 40). */
 	transcriptMaxTurns?: number;
 	/** Maximum rendered lines before older transcript content is cut off (default: 400). */

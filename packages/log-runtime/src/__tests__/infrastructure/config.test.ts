@@ -137,17 +137,6 @@ void test("validateConfig accepts reasoner settings", () => {
 	assert.deepEqual(warnings, []);
 });
 
-void test("validateConfig accepts optional local memory embeddings", () => {
-	const warnings: string[] = [];
-	const cfg = validateConfig(
-		{ memoryEmbeddings: true, memoryEmbeddingModel: "Xenova/all-MiniLM-L6-v2" },
-		warnings,
-	);
-	assert.equal(cfg.memoryEmbeddings, true);
-	assert.equal(cfg.memoryEmbeddingModel, "Xenova/all-MiniLM-L6-v2");
-	assert.deepEqual(warnings, []);
-});
-
 void test("validateConfig ignores non-positive maxTokens/maxIterations/maxTotalTokens", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig(
@@ -433,35 +422,30 @@ void test("validateConfig validates webSearch.baseUrl and clamps maxResults rang
 	assert.ok(warnings.some(w => w.includes('"webSearch.maxResults" must be 1')));
 });
 
-void test("validateConfig accepts a dedicated memory extractor endpoint", () => {
+void test("validateConfig accepts a memoriam SDK worker block", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig(
 		{
-			memoryExtractor: {
-				baseUrl: "http://127.0.0.1:8081",
-				model: "small-extractor",
+			memoriam: {
+				mode: "sdk",
+				python: "/opt/memoriam/bin/python",
+				config: { db_path: "~/.logician/memories.db" },
 			},
 		},
 		warnings,
 	);
-	assert.deepEqual(cfg.memoryExtractor, {
-		baseUrl: "http://127.0.0.1:8081",
-		model: "small-extractor",
+	assert.deepEqual(cfg.memoriam, {
+		mode: "sdk",
+		python: "/opt/memoriam/bin/python",
+		config: { db_path: "~/.logician/memories.db" },
 	});
 	assert.deepEqual(warnings, []);
 });
 
-void test("validateConfig rejects an invalid memory extractor endpoint", () => {
+void test("validateConfig rejects an invalid memoriam mode", () => {
 	const warnings: string[] = [];
-	const cfg = validateConfig(
-		{ memoryExtractor: { baseUrl: "not-a-url", model: "small" } },
-		warnings,
-	);
-	assert.equal(cfg.memoryExtractor?.baseUrl, undefined);
-	assert.equal(cfg.memoryExtractor?.model, "small");
-	assert.ok(
-		warnings.some(warning => warning.includes("memoryExtractor.baseUrl")),
-	);
+	validateConfig({ memoriam: { mode: "bogus" } }, warnings);
+	assert.ok(warnings.some(warning => warning.includes('"memoriam.mode"')));
 });
 
 void test("validateConfig filters non-string entries from permissions.allow/deny", () => {

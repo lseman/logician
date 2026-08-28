@@ -11,15 +11,11 @@ describe("ConversationIdentity", () => {
 			cwd: "/tmp/project",
 			config: () => config,
 			sessions: () => ({
-				use: (id, store) => calls.push(`session:${id}:${store === durable}`),
+				use: (id: string, store: unknown) =>
+					calls.push(`session:${id}:${store === durable}`),
 			}),
 			events: () => ({
-				setSessionId: id => calls.push(`events:${id}`),
-			}),
-			memory: () => ({
-				onSessionChanged: (id, previous) =>
-					calls.push(`memory:${previous}->${id}`),
-				resetSession: id => calls.push(`reset:${id}`),
+				setSessionId: (id: string) => calls.push(`events:${id}`),
 			}),
 		});
 
@@ -33,7 +29,6 @@ describe("ConversationIdentity", () => {
 		expect(calls).toEqual([
 			"events:conversation-1",
 			"session:conversation-1:true",
-			"memory:provisional->conversation-1",
 		]);
 	});
 
@@ -43,8 +38,7 @@ describe("ConversationIdentity", () => {
 			cwd: "/tmp/project",
 			config: () => undefined,
 			sessions: () => undefined,
-			events: () => ({ setSessionId: id => calls.push(id) }),
-			memory: () => undefined,
+			events: () => ({ setSessionId: (id: string) => calls.push(id) }),
 		});
 		expect(identity.use("  ")).toBe(false);
 		expect(identity.id).toBe("current");

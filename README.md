@@ -82,8 +82,12 @@ Logician defaults to an OpenAI-compatible endpoint at `http://127.0.0.1:8080`. C
   "model": "your-model",
   "permissionMode": "acceptEdits",
   "executionProfile": "autonomous",
-  "memory": true,
-  "memoryEmbeddings": true
+  "memoriam": {
+    "mode": "sdk",
+    "python": "/path/to/memoriam/.venv/bin/python",
+    "args": ["-m", "memoriam.integration.sdk_worker"],
+    "config": { "db_path": "~/.logician/memories.db" }
+  }
 }
 ```
 
@@ -189,8 +193,7 @@ flowchart LR
 | `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
 | `@logician/log-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, sessions, and versioned client protocol |
 | `@logician/log-runtime` | Runtime composition: capabilities (delegation, reasoning strategies, tasks, user interaction, tools, memory, LSP, MCP, skills) and orchestration |
-| `@logician/memoriam` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
-| `@logician/log-memory-mcp` | Five-tool stdio MCP adapter for sharing workspace memory with other agents |
+| `memoriam` (`ecosystem/memoriam`) | Standalone Python memory engine — SQLite-backed observations, semantic episodes, consolidation, task-aware recall; embedded via its JSON-lines SDK worker |
 | `@logician/log-rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
 | `@logician/log-autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |
 | `@logician/log-eoh` | Evolution of Heuristics (arXiv:2401.02051) — standalone heuristic-evolution engine |

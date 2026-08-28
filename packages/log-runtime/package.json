@@ -29,7 +29,6 @@
 		"@logician/log-core": "0.2.0",
 		"@logician/log-autoresearch": "0.2.0",
 		"@logician/log-eoh": "0.1.0",
-		"@logician/memoriam": "link:@logician/memoriam",
 		"@logician/log-rag": "0.2.0",
 		"emphasize": "^7.0.0",
 		"ignore": "^7.0.5"

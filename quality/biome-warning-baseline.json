@@ -1,0 +1,13 @@
+{
+	"production|lint/correctness/noUnusedVariables": 13,
+	"production|lint/correctness/noVoidTypeReturn": 5,
+	"production|lint/style/noNonNullAssertion": 11,
+	"production|lint/suspicious/noAssignInExpressions": 2,
+	"production|lint/suspicious/noControlCharactersInRegex": 11,
+	"production|lint/suspicious/noExplicitAny": 4,
+	"production|lint/suspicious/noTemplateCurlyInString": 2,
+	"production|lint/suspicious/useIterableCallbackReturn": 2,
+	"test|lint/style/noNonNullAssertion": 2,
+	"test|lint/suspicious/noControlCharactersInRegex": 35,
+	"test|lint/suspicious/noExplicitAny": 32
+}

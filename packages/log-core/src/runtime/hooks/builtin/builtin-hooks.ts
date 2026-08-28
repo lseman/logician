@@ -6,10 +6,7 @@
 // the harness's single live instance.
 
 import { execFile } from "node:child_process";
-import {
-	COMPACTION_TARGET_FRACTION,
-	estimateChatPayloadTokens,
-} from "../../../capabilities/provider/messages.ts";
+import { estimateChatPayloadTokens } from "../../../capabilities/provider/messages.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
@@ -28,7 +25,10 @@ import type {
 	CompactableMessage,
 	Message,
 } from "../../../system/types/types-messages.ts";
-import { compactToFit } from "../../compaction/engine.ts";
+import {
+	COMPACTION_TARGET_FRACTION,
+	compactToFit,
+} from "../../compaction/engine.ts";
 import { resetToRunCheckpoint } from "../../compaction/run-checkpoint.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the

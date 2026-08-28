@@ -120,8 +120,8 @@ export function createRuntimeContext({
 			register: () =>
 				opts.repositoryMap?.enabled !== false
 					? new RepositoryMap(cwd, {
-						maxTokens: opts.repositoryMap?.maxTokens,
-					})
+							maxTokens: opts.repositoryMap?.maxTokens,
+						})
 					: undefined,
 		},
 		{

@@ -212,9 +212,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -237,9 +235,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -253,9 +249,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -275,9 +269,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -293,9 +285,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -315,9 +305,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -334,9 +322,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -357,9 +343,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -373,9 +357,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -395,9 +377,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -423,9 +403,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -451,9 +429,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -470,9 +446,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -493,9 +467,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -512,9 +484,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -535,9 +505,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -551,9 +519,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -573,9 +539,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -589,9 +553,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -610,9 +572,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -637,9 +597,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -664,9 +622,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -680,9 +636,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -702,9 +656,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -718,9 +670,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -740,9 +690,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -756,9 +704,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -778,9 +724,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -797,9 +741,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -820,9 +762,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -836,9 +776,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -858,9 +796,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -880,9 +816,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -904,9 +838,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -924,9 +856,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -948,9 +878,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -964,9 +892,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -986,9 +912,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -1006,9 +930,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1028,20 +950,14 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
 	}
 
 	async autoForget(
-		opts: {
-			ttlMs?: number;
-			minImportance?: number;
-			maxDeletes?: number;
-		} = {},
+		opts: { ttlMs?: number; minImportance?: number; maxDeletes?: number } = {},
 	): Promise<Record<string, unknown>> {
 		const child = this.ensureStarted();
 		const id = `memoriam-${process.pid}-${++this.nextId}`;
@@ -1050,9 +966,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1074,9 +988,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -1097,9 +1009,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1122,9 +1032,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -1138,9 +1046,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1160,9 +1066,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -1178,9 +1082,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1199,15 +1101,16 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
 	}
 
-	async importData(data: ExportData, onConflict: string): Promise<ImportResult> {
+	async importData(
+		data: ExportData,
+		onConflict: string,
+	): Promise<ImportResult> {
 		const child = this.ensureStarted();
 		const id = `memoriam-${process.pid}-${++this.nextId}`;
 		const timeoutMs = this.options.timeoutMs ?? 30_000;
@@ -1215,9 +1118,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1238,9 +1139,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -1262,9 +1161,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1288,9 +1185,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -1307,9 +1202,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1328,16 +1221,17 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
 	}
 
 	/** Get recent request history. */
-	async workerHistory(limit: number, offset: number): Promise<Record<string, unknown>> {
+	async workerHistory(
+		limit: number,
+		offset: number,
+	): Promise<Record<string, unknown>> {
 		const child = this.ensureStarted();
 		const id = `memoriam-${process.pid}-${++this.nextId}`;
 		const timeoutMs = this.options.timeoutMs ?? 30_000;
@@ -1345,9 +1239,7 @@ export class MemoriamWorker {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(
-					new Error(
-						`Memoriam SDK request timed out after ${timeoutMs}ms`,
-					),
+					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
 				);
 			}, timeoutMs);
 			this.pending.set(id, {
@@ -1368,9 +1260,7 @@ export class MemoriamWorker {
 				clearTimeout(pending.timer);
 				this.pending.delete(id);
 				pending.reject(
-					new Error(
-						`Unable to write to Memoriam SDK worker: ${error.message}`,
-					),
+					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
 				);
 			});
 		});
@@ -1384,10 +1274,7 @@ export class MemoriamWorker {
 		this.stderrTail = "";
 		const child = spawn(
 			this.options.python ?? "python3",
-			this.options.args ?? [
-				"-m",
-				"memoriam.integration.sdk_worker",
-			],
+			this.options.args ?? ["-m", "memoriam.integration.sdk_worker"],
 			{ stdio: ["pipe", "pipe", "pipe"] },
 		);
 		this.process = child;
@@ -1409,6 +1296,18 @@ export class MemoriamWorker {
 				);
 			}
 		});
+		// Hand the worker its configuration (db_path, fail_open) up front. The
+		// worker also accepts config on `init`, so fire-and-forget: the response
+		// is ignored and later requests queue behind it on the same pipe.
+		if (this.options.config && Object.keys(this.options.config).length > 0) {
+			const initId = `memoriam-${process.pid}-init-${++this.nextId}`;
+			const initPayload = JSON.stringify({
+				id: initId,
+				method: "init",
+				config: this.options.config,
+			});
+			child.stdin.write(`${initPayload}\n`, () => {});
+		}
 		return child;
 	}
 
@@ -1421,9 +1320,7 @@ export class MemoriamWorker {
 		this.pending.delete(response.id);
 		if (!response.ok) {
 			pending.reject(
-				new Error(
-					response.error ?? "Memoriam SDK request failed",
-				),
+				new Error(response.error ?? "Memoriam SDK request failed"),
 			);
 			return;
 		}

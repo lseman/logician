@@ -134,8 +134,10 @@ The presentation layer. Handles:
 ### memoriam and log-rag
 
 Workspace-scoped durable memory and document/repository retrieval, with hybrid
-ranking, provenance, context budgets, and component evaluation.
-Memory claims also use gated lifecycles, executable validity predicates, and
+ranking, provenance, context budgets, and component evaluation. `memoriam` is a
+standalone Python engine (`ecosystem/memoriam`) that the runtime embeds as an
+out-of-process JSON-lines SDK worker, mirroring the `legroom` integration.
+Memory claims use gated lifecycles, executable validity predicates, and
 outcome-linked shadow learning; see [Evolving memory](./evolving-memory.md).
 
 ### log-autoresearch and log-eval

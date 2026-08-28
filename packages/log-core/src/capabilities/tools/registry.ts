@@ -7,7 +7,7 @@
 
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { CancellationScope } from "../../runtime/control/cancellation-scope.ts";
+import { CancellationScope } from "../../system/lifecycle/cancellation-scope.ts";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AskUserContext,

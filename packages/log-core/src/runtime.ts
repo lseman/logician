@@ -16,13 +16,6 @@ export {
 export { ToolRegistry } from "./capabilities/tools/registry.ts";
 export { resolveAgentSettings } from "./control/configuration/agent-settings.ts";
 export {
-	type CancellationCleanup,
-	CancellationError,
-	type CancellationKind,
-	CancellationScope,
-	type CancellationScopeOptions,
-} from "./runtime/control/cancellation-scope.ts";
-export {
 	EventJournal,
 	type EventJournalEntry,
 	type EventJournalOptions,
@@ -34,3 +27,10 @@ export type { AbortResult } from "./runtime/harness/types.ts";
 export type { HarnessPhase } from "./runtime/state/runtime-state.ts";
 export { loadExtensions } from "./system/extension/loader.ts";
 export { ExtensionRunner } from "./system/extension/runner.ts";
+export {
+	type CancellationCleanup,
+	CancellationError,
+	type CancellationKind,
+	CancellationScope,
+	type CancellationScopeOptions,
+} from "./system/lifecycle/cancellation-scope.ts";

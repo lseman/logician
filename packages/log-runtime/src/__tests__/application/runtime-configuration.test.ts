@@ -3,7 +3,6 @@ import type { AgentConfig } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import {
 	RuntimeConfiguration,
-	type RuntimeSettingsMemory,
 	type RuntimeSettingsSession,
 	type RuntimeSettingsTools,
 } from "../../runtime/bridge/application/runtime-configuration.ts";
@@ -38,13 +37,15 @@ class FakeTools implements RuntimeSettingsTools {
 	}
 }
 
-class FakeMemory implements RuntimeSettingsMemory {
-	enabled: Array<{ enabled: boolean; sessionId: string }> = [];
-	getStore(): unknown {
-		return {};
+class FakeMemoriam {
+	enabled = true;
+	closes = 0;
+	isEnabled(): boolean {
+		return this.enabled;
 	}
-	setEnabled(enabled: boolean, sessionId: string): void {
-		this.enabled.push({ enabled, sessionId });
+	setEnabled(enabled: boolean): void {
+		this.enabled = enabled;
+		if (!enabled) this.closes++;
 	}
 }
 
@@ -58,7 +59,7 @@ function createRuntimeConfiguration() {
 	} as AgentConfig;
 	const session = new FakeSession();
 	const tools = new FakeTools();
-	const memory = new FakeMemory();
+	const memoriam = new FakeMemoriam();
 	const backendLevels: string[] = [];
 	const events: RuntimeEvent[] = [];
 	let legroomCloses = 0;
@@ -72,7 +73,6 @@ function createRuntimeConfiguration() {
 		sessionId: () => "session-1",
 		tools,
 		interactions: { mode: "acceptEdits" },
-		memory,
 		legroom: {
 			isEnabled: () => legroomEnabled,
 			setEnabled: enabled => {
@@ -80,10 +80,7 @@ function createRuntimeConfiguration() {
 				if (!enabled) legroomCloses++;
 			},
 		},
-		memoriam: {
-			isEnabled: () => true,
-			setEnabled: () => {},
-		},
+		memoriam,
 		defaultTools: () => config.tools,
 		setReasoner: () => {},
 		emit: event => events.push(event),
@@ -94,7 +91,7 @@ function createRuntimeConfiguration() {
 		config,
 		session,
 		tools,
-		memory,
+		memoriam,
 		backendLevels,
 		events,
 		legroomCloses: () => legroomCloses,
@@ -122,10 +119,9 @@ describe("RuntimeConfiguration", () => {
 
 	test("owns feature lifecycle side effects and notices", () => {
 		const state = createRuntimeConfiguration();
-		state.runtime.update({ memoryEnabled: false, legroomEnabled: false });
-		expect(state.memory.enabled).toEqual([
-			{ enabled: false, sessionId: "session-1" },
-		]);
+		state.runtime.update({ memoriamEnabled: false, legroomEnabled: false });
+		expect(state.memoriam.enabled).toBe(false);
+		expect(state.memoriam.closes).toBe(1);
 		expect(state.legroomCloses()).toBe(1);
 		expect(state.events).toHaveLength(2);
 		expect(state.runtime.read().legroomEnabled).toBe(false);

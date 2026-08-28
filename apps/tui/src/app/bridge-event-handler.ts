@@ -61,13 +61,18 @@ export interface BridgeEventHandlerCtx {
 	evaluateGoal: (goalState: Readonly<GoalState>) => Promise<void>;
 }
 
-export function setupBridge(ctx: BridgeEventHandlerCtx): void {
+export function setupBridge(ctx: BridgeEventHandlerCtx): () => void {
+	let disposed = false;
 	const eventHandler = (event: RuntimeEvent): void => {
+		if (disposed) return;
 		handleEvent(ctx, event);
 	};
 
-	ctx.bridge.events.subscribe(notification => eventHandler(notification.event));
-	ctx.bridge.events.onError(err => {
+	const unsubscribeEvents = ctx.bridge.events.subscribe(notification =>
+		eventHandler(notification.event),
+	);
+	const unsubscribeErrors = ctx.bridge.events.onError(err => {
+		if (disposed) return;
 		// Also display in transcript so the user sees connection/server errors
 		ctx.transcript.addSystemMessage(`Connection error: ${err.message}`);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
@@ -78,11 +83,12 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 	ctx.bridge
 		.init()
 		.then(state => {
+			if (disposed) return;
 			ctx.statusPanel.update({
 				contextTokens: Number(state.context_tokens || 0),
 				contextMaxTokens: Number(state.context_max_tokens || 0) || undefined,
 				sandboxMode: ctx.bridge.getSandboxMode(),
-				memoryEnabled: ctx.bridge.getSettingsData().memoryEnabled,
+				memoriamEnabled: ctx.bridge.getSettingsData().memoriamEnabled,
 			});
 			registerRuntimeCommandContributions(ctx);
 			// Don't add startup message when restoring a session — user history
@@ -103,12 +109,20 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 			}
 		})
 		.catch(err => {
+			if (disposed) return;
 			// Display init/connection errors in transcript so the user knows
 			// the agent couldn't start (e.g. server unreachable).
 			ctx.transcript.addSystemMessage(`Failed to start agent: ${err.message}`);
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			ctx.tui.requestRender();
 		});
+
+	return () => {
+		if (disposed) return;
+		disposed = true;
+		unsubscribeEvents();
+		unsubscribeErrors();
+	};
 }
 
 function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
@@ -353,9 +367,9 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 					});
 					ctx.tui.requestRender();
 				});
-			} else if (event.label === "Memory") {
+			} else if (event.label === "Memoriam") {
 				ctx.statusPanel.update({
-					memoryEnabled: ctx.bridge.getSettingsData().memoryEnabled,
+					memoriamEnabled: ctx.bridge.getSettingsData().memoriamEnabled,
 				});
 			}
 			break;

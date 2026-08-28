@@ -65,21 +65,6 @@ export interface LspCapabilityConfig {
 	>;
 }
 
-export interface MemoryCapabilityConfig {
-	enabled?: boolean;
-	dbPath?: string;
-	extractorModel?: string;
-	extractorBaseUrl?: string;
-	captureTools?: boolean;
-	injectContext?: boolean;
-	contextBudget?: number;
-	viewerEnabled?: boolean;
-	viewerPort?: number;
-	viewerHost?: string;
-	embeddingsEnabled?: boolean;
-	embeddingModel?: string;
-}
-
 export interface RepositoryMapCapabilityConfig {
 	enabled?: boolean;
 	maxTokens?: number;
@@ -157,7 +142,6 @@ export interface AgentBridgeOptions {
 	memoriam?: MemoriamSdkConfig;
 
 	lsp?: LspCapabilityConfig;
-	memory?: MemoryCapabilityConfig;
 	repositoryMap?: RepositoryMapCapabilityConfig;
 	permissions?: PermissionsCapabilityConfig;
 	extensions?: ExtensionsCapabilityConfig;

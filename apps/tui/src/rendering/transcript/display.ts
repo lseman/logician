@@ -190,6 +190,11 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		}
 	}
 
+	dispose(): void {
+		this.stopAnimation();
+		this.onAnimationTick = null;
+	}
+
 	setThinkingMode(mode: ThinkingDisplayStyle): void {
 		if (this.thinkingMode === mode) return;
 		this.thinkingMode = mode;

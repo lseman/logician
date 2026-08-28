@@ -44,6 +44,9 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	force: false,
 };
 
+/** Payload fraction targeted after summarizing compaction. */
+export const COMPACTION_TARGET_FRACTION = 0.65;
+
 // ============================================================================
 // Token estimation — dual-mode: provider usage when available, char heuristic fallback
 // ============================================================================

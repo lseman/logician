@@ -17,7 +17,6 @@
 		"@logician/log-core": "0.2.0",
 		"@logician/log-runtime": "0.2.0",
 		"@logician/log-autoresearch": "0.2.0",
-		"@logician/memoriam": "link:@logician/memoriam",
 		"string-width": "^8.2.2"
 	},
 	"devDependencies": {

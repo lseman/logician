@@ -50,10 +50,6 @@ import type {
 } from "../../system/types/types-messages.ts";
 import type { CompactionSettings } from "../compaction/engine.ts";
 import {
-	runCompaction,
-	shouldAutoCompact,
-} from "../compaction/orchestration.ts";
-import {
 	type AgentRuntimeState,
 	createRuntimeState,
 	type HarnessPhase,
@@ -71,6 +67,7 @@ import {
 import { HarnessEventRouter } from "./internal/event-router.ts";
 import { HarnessModelController } from "./internal/model-controller.ts";
 import { HarnessObservation } from "./internal/observation.ts";
+import { SessionCompactor } from "./internal/session-compactor.ts";
 import { SessionState } from "./internal/session-state.ts";
 import { HarnessTurnController } from "./internal/turn-controller.ts";
 import type { ExtensionRuntimeDeps } from "./live/extension-runtime.ts";
@@ -151,6 +148,7 @@ export class AgentSession {
 	private readonly turn = new HarnessTurnController();
 	private loopConfig: AgentConfig | null = null;
 	private readonly session: SessionState;
+	private readonly compactor: SessionCompactor;
 	private readonly contextController = new AdaptiveContextController(messages =>
 		estimateChatPayloadTokens([...messages]),
 	);
@@ -162,13 +160,6 @@ export class AgentSession {
 	private runController = new AgentRunController();
 	private observation: HarnessObservation;
 	private readonly eventRouter: HarnessEventRouter;
-	private autoCompactionSettings: CompactionSettings = {
-		enabled: false,
-		reserveTokens: 16_384,
-		keepRecentTokens: 20_000,
-		contextWindow: 128_000,
-	};
-
 	// ── Output Guard ─────────────────────────────────────────────────────
 	private outputGuard: OutputGuard;
 	private _hooksEnabled: boolean;
@@ -272,6 +263,31 @@ export class AgentSession {
 				sessionId: this.session.id ?? "",
 				cwd: this.cwd ?? "",
 			}),
+		});
+		this.compactor = new SessionCompactor({
+			backend: () => this.backend,
+			history: () => this.session.conversation.history,
+			commitHistory: (expected, replacement) => {
+				if (this.session.conversation.history !== expected) return false;
+				this.session.conversation.history = replacement;
+				return true;
+			},
+			config: () => this.config,
+			identity: () => ({
+				sessionId: this.session.id || "",
+				cwd: this.cwd || "",
+			}),
+			extensionRunner: () => this._extensionRunner,
+			beforeCompact: context => this.emitPreCompact(context),
+			afterCompact: () => this.emitPostCompact(),
+			persistCompaction: (summary, tokensBefore, firstKeptEntryId) =>
+				this.session.store?.appendCompaction(
+					summary,
+					tokensBefore,
+					firstKeptEntryId,
+				),
+			estimateTokens: () => this.estimatePayloadTokens(),
+			emit: event => this.emitToSubscribers(event),
 		});
 	}
 
@@ -402,7 +418,7 @@ export class AgentSession {
 		options: HarnessPromptOptions = {},
 	): Promise<Message[]> {
 		this.assertIdle("prompt");
-		if (this.autoCompactionSettings.enabled) {
+		if (this.compactor.enabled) {
 			const compacted = await this.runAutoCompaction("auto");
 			if (compacted) {
 				return this.prompt(userMessage, options);
@@ -542,7 +558,10 @@ export class AgentSession {
 				},
 				onContextCompacted: messages => {
 					onContextCompacted(messages);
-					this.persistCompactedContext(messages, this.estimatePayloadTokens());
+					this.compactor.recordCompaction(
+						messages,
+						this.estimatePayloadTokens(),
+					);
 				},
 			},
 			async event => {
@@ -616,12 +635,7 @@ export class AgentSession {
 				objective: request.text,
 				maxInjectedTokens: Math.max(
 					2_048,
-					Math.min(
-						16_384,
-						Math.floor(
-							(this.autoCompactionSettings.contextWindow ?? 128_000) / 8,
-						),
-					),
+					Math.min(16_384, Math.floor(this.compactor.contextWindow / 8)),
 				),
 				contributions: [
 					...(options?.contextContributions ?? []),
@@ -975,14 +989,11 @@ export class AgentSession {
 	// ── Auto-compaction ────────────────────────────────────────────────────
 
 	setAutoCompactionSettings(settings: Partial<CompactionSettings>): void {
-		this.autoCompactionSettings = {
-			...this.autoCompactionSettings,
-			...settings,
-		};
+		this.compactor.configure(settings);
 	}
 
 	enableAutoCompaction(enabled: boolean): void {
-		this.autoCompactionSettings.enabled = enabled;
+		this.compactor.enable(enabled);
 	}
 
 	// ── Session & history ──────────────────────────────────────────────────
@@ -1101,148 +1112,24 @@ export class AgentSession {
 		return this.session.listBranches();
 	}
 
-	// ── Conversation management ────────────────────────────────────────────
-
-	private persistCompactedContext(
-		messages: Message[],
-		tokensBefore: number,
-	): void {
-		const summary = messages.find(
-			message => String(message.role) === "compactionSummary",
-		)?.content;
-		if (typeof summary !== "string" || !summary.trim()) return;
-		const firstKeptEntryId = messages
-			.map(message => message as Message & { entryId?: string })
-			.find(
-				message =>
-					String(message.role) !== "compactionSummary" && message.entryId,
-			)?.entryId;
-		this.session.store?.appendCompaction(
-			summary,
-			tokensBefore,
-			firstKeptEntryId,
-		);
-	}
-
 	// ── Compaction ─────────────────────────────────────────────────────────
 
 	async compact(): Promise<number | null> {
 		this.assertIdle("compact");
 		if (!this.session.conversation.history.length) return null;
 		return this.runInPhase("compaction", "compact", () =>
-			this.performCompaction("manual", /* force */ true),
+			this.compactor.compact("manual", /* force */ true),
 		);
 	}
 
 	private async runAutoCompaction(reason: "auto" | "manual"): Promise<boolean> {
 		const messages = this.session.conversation.history;
-		if (!messages.length || !this.autoCompactionSettings.enabled) return false;
+		if (!messages.length || !this.compactor.enabled) return false;
 		return this.runInPhase("compaction", "autoCompact", () =>
-			this.performCompaction(reason, /* force */ false).then(
-				saved => saved !== 0,
-			),
+			this.compactor
+				.compact(reason, /* force */ false)
+				.then(saved => saved !== 0),
 		);
-	}
-
-	/**
-	 * Shared compaction transaction used by both the manual `compact()` API
-	 * and threshold-triggered auto-compaction. `force` skips the
-	 * `shouldCompact` threshold check (manual compaction always attempts it);
-	 * both paths otherwise run the identical pre-compact/run/commit/post-compact
-	 * sequence. Returns tokens saved (0 if nothing changed).
-	 */
-	private async performCompaction(
-		reason: "auto" | "manual",
-		force: boolean,
-	): Promise<number> {
-		const messages = this.session.conversation.history;
-		this.emitToSubscribers({ type: "compaction", reason });
-
-		if (!force && !this.shouldCompact(messages)) {
-			await this.emitPostCompact();
-			this.emitToSubscribers({
-				type: "compaction",
-				reason,
-				tokensBefore: this.estimatePayloadTokens(),
-				tokensAfter: this.estimatePayloadTokens(),
-			});
-			return 0;
-		}
-
-		const before = this.estimatePayloadTokens();
-		const preResult = await this.emitPreCompact({
-			messages,
-			tokensBefore: before,
-			reason,
-		});
-		if (preResult?.cancel) {
-			await this.emitPostCompact();
-			this.emitToSubscribers({
-				type: "compaction",
-				reason,
-				tokensBefore: before,
-				tokensAfter: before,
-			});
-			return 0;
-		}
-
-		await this._extensionRunner?.emit({
-			type: "session_before_compact",
-			context: {
-				sessionId: this.session.id || "",
-				cwd: this.cwd || "",
-				reason,
-				tokensBefore: before,
-				messages: [...messages],
-			},
-		});
-
-		const result = await runCompaction(this.backend, messages, before, {
-			reason,
-			presetSummary: preResult?.summary,
-			temperature: this.config.temperature,
-			maxTokens: this.config.maxTokens,
-			thinkingLevel: this.config.thinkingLevel,
-		});
-
-		if (
-			this.session.conversation.history !== messages ||
-			!result.changed ||
-			result.tokensAfter >= before
-		) {
-			await this.emitPostCompact();
-			this.emitToSubscribers({
-				type: "compaction",
-				reason,
-				tokensBefore: before,
-				tokensAfter: before,
-			});
-			return 0;
-		}
-
-		this.session.conversation.history = result.messages;
-		const after = result.tokensAfter;
-		this.persistCompactedContext(result.messages, before);
-		await this.emitPostCompact();
-		await this._extensionRunner?.emit({
-			type: "session_compact",
-			context: {
-				sessionId: this.session.id || "",
-				cwd: this.cwd || "",
-				reason,
-				tokensBefore: before,
-				tokensAfter: after,
-				changed: true,
-				messages: [...result.messages],
-			},
-		});
-		this.emitToSubscribers({
-			type: "compaction",
-			reason,
-			tokensBefore: before,
-			tokensAfter: after,
-		});
-		return before - after;
 	}
 
 	// ── Tool registry ──────────────────────────────────────────────────────
@@ -1362,10 +1249,6 @@ export class AgentSession {
 			this.messages,
 			this.idleTools?.toToolDefinitions?.(),
 		);
-	}
-
-	private shouldCompact(messages: Message[]): boolean {
-		return shouldAutoCompact(this.autoCompactionSettings, messages);
 	}
 
 	private forwardQueueEvents(config: AgentConfig): AgentConfig {

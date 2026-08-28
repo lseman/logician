@@ -77,7 +77,6 @@ export type BuiltinWidgetId =
 	| "memoriam" // Memoriam SDK memory retrieval status
 	| "graphician" // Graphician code-graph tool status
 	| "fffgrep" // fff indexed grep status
-	| "memory" // memory subsystem status
 	// Misc / config
 	| "goal" // active goal condition with turns/time
 	| "execution-profile" // autonomous / minimal execution profile
@@ -332,13 +331,6 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 			enabled: true,
 			row: 0,
 			position: 11,
-			align: "right",
-			fill: "none",
-		},
-		memory: {
-			enabled: true,
-			row: 0,
-			position: 12,
 			align: "right",
 			fill: "none",
 		},

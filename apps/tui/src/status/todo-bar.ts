@@ -41,6 +41,10 @@ const TRANSITION_FRAMES: Record<TaskItem["status"], string[]> = {
 };
 const TRANSITION_TICKS = 4;
 const TRANSITION_INTERVAL_MS = 90;
+const ANSI_CSI_SEQUENCE = new RegExp(
+	`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
+	"g",
+);
 
 function statusMark(status: TaskItem["status"], frame?: number): string {
 	const s = STATUS[status];
@@ -142,6 +146,11 @@ export class TodoBar implements Component {
 			clearInterval(this.timer);
 			this.timer = null;
 		}
+	}
+
+	dispose(): void {
+		this.stopAnimation();
+		this.onInvalidate = null;
 	}
 
 	render(width: number): string[] {
@@ -253,7 +262,7 @@ function pad(line: string, width: number): string {
 
 function normalizeLabel(value: unknown): string {
 	return String(value ?? "")
-		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+		.replace(ANSI_CSI_SEQUENCE, "")
 		.replace(/[\p{Cc}\p{Cf}]/gu, " ")
 		.replace(/\s+/g, " ")
 		.trim();

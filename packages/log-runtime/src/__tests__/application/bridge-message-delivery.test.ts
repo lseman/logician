@@ -467,45 +467,6 @@ void test("/context omits terminal handoff state", () => {
 	assert.doesNotMatch(bridge.getContext(), /<task_state>/);
 });
 
-void test("/context renders request-time memory injection", () => {
-	const bridge = new AgentRuntime({
-		baseUrl: "http://127.0.0.1:1",
-		model: "test",
-		runtimeHooksEnabled: false,
-		memory: {
-			dbPath: `/tmp/logician-context-memory-${process.pid}-${Date.now()}.db`,
-			viewerEnabled: false,
-		},
-	});
-	const store = bridge.getMemoryStore()!;
-	const memory = store.create(
-		"Authentication retries use bounded exponential backoff",
-		{
-			strength: 9,
-			concepts: ["authentication", "retries"],
-		},
-	);
-	store.update(memory.id, { title: "Authentication retry policy" });
-	const internal = bridge as unknown as Record<string, any>;
-	internal.harness = {
-		messages: [{ role: "user", content: "Fix authentication retries" }],
-		getMemoryPrompt: () => "",
-	};
-
-	const context = bridge.getContext();
-
-	assert.match(
-		context,
-		/Retrieved memory: ~\d+ tokens — request-time compact index/,
-	);
-	assert.match(context, /\[SYSTEM\] Memory Context/);
-	assert.match(context, /# Memory Context/);
-	assert.match(context, new RegExp(memory.id));
-	assert.match(context, /Authentication retry policy/);
-	assert.match(context, /Call `memory_get` once/);
-	bridge.getMemoryStore()?.close();
-});
-
 void test("loaded skills are exposed as a persistent discovery catalog", async () => {
 	// The compact catalog supports discovery and read_skill. Strongly relevant
 	// skill bodies are also selected separately when each turn is prepared.

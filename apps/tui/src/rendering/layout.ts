@@ -352,21 +352,24 @@ function layoutComponent(
 		);
 		let childY = y;
 		for (let index = 0; index < entries.length; index++) {
+			const entry = entries[index];
+			if (!entry) continue;
+			const childHeight = sizes[index] ?? 0;
 			box.children.push(
 				withParent(
 					layoutComponent(
 						context,
-						entries[index]?.component,
+						entry.component,
 						x,
 						childY,
 						safeWidth,
-						sizes[index]!,
+						childHeight,
 						box.clip,
 					),
 					box,
 				),
 			);
-			childY += sizes[index]! + node.gap;
+			childY += childHeight + node.gap;
 		}
 		return box;
 	}
@@ -383,7 +386,7 @@ function layoutComponent(
 		node.gap,
 	);
 	const intrinsicHeights = entries.map((entry, index) =>
-		measureHeight(context, entry.component, Math.max(1, widths[index]!)),
+		measureHeight(context, entry.component, Math.max(1, widths[index] ?? 0)),
 	);
 	const allocatedHeight =
 		height === undefined
@@ -408,7 +411,9 @@ function layoutComponent(
 	);
 	let childX = x;
 	for (let index = 0; index < entries.length; index++) {
-		const naturalChildHeight = intrinsicHeights[index]!;
+		const entry = entries[index];
+		if (!entry) continue;
+		const naturalChildHeight = intrinsicHeights[index] ?? 0;
 		const childHeight =
 			node.align === "stretch"
 				? allocatedHeight
@@ -417,11 +422,11 @@ function layoutComponent(
 		if (node.align === "center")
 			childY += Math.floor((allocatedHeight - childHeight) / 2);
 		else if (node.align === "end") childY += allocatedHeight - childHeight;
-		const childWidth = widths[index]!;
+		const childWidth = widths[index] ?? 0;
 		if (childWidth === 0) {
 			box.children.push(
 				allocateBox(
-					entries[index]?.component,
+					entry.component,
 					childX,
 					childY,
 					0,
@@ -438,7 +443,7 @@ function layoutComponent(
 				withParent(
 					layoutComponent(
 						context,
-						entries[index]?.component,
+						entry.component,
 						childX,
 						childY,
 						childWidth,
@@ -610,21 +615,6 @@ function containsPoint(rect: LayoutRect, x: number, y: number): boolean {
 		y >= rect.y &&
 		y < rect.y + rect.height
 	);
-}
-
-function getScrollViewBox(
-	frame: LayoutFrame,
-	scrollView: ScrollView,
-): LayoutBox | undefined {
-	const visit = (box: LayoutBox): LayoutBox | undefined => {
-		if (box.scrollView === scrollView) return box;
-		for (const child of box.children) {
-			const match = visit(child);
-			if (match) return match;
-		}
-		return undefined;
-	};
-	return visit(frame.root);
 }
 
 /**

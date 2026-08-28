@@ -330,15 +330,18 @@ void test("bringToFront moves an existing overlay above later registrations", ()
 	tui.showOverlay(currentRenderer);
 	tui.bringToFront(dashboard);
 
-	const stack = (
+	const lines = (
 		tui as unknown as {
-			overlayStack: Array<{ component: Component }>;
+			composeOverlays(
+				lines: string[],
+				termWidth: number,
+				termHeight: number,
+				transcriptHeight: number,
+			): string[];
 		}
-	).overlayStack;
-	assert.deepEqual(
-		stack.map(entry => entry.component),
-		[currentRenderer, dashboard],
-	);
+	).composeOverlays([" ".repeat(40)], 40, 1, 1);
+	assert.ok(lines[0].includes("dashboard"));
+	assert.ok(!lines[0].includes("current"));
 });
 
 void test("overlays replace the occupied screen cells instead of rendering past them", () => {

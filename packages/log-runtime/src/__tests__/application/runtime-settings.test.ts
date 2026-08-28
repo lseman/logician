@@ -25,7 +25,6 @@ describe("SettingsGateway", () => {
 			setToggle: (key, enabled) => toggles.push([key, enabled]),
 			permissionMode: () => "ask",
 			postEditDiagnostics: () => true,
-			memoryEnabled: () => false,
 			legroomEnabled: () => true,
 			memoriamEnabled: () => true,
 		});

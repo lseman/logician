@@ -15,15 +15,14 @@ The current flat runtime keys include:
 {
   "baseUrl": "http://127.0.0.1:8080",
   "model": "model-id",
-  "memory": false,
-  "memoryEmbeddings": false,
-  "memoryEmbeddingModel": "Xenova/all-MiniLM-L6-v2",
-  "memoryExtractor": {
-    "baseUrl": "http://127.0.0.1:8081",
-    "model": "small-model-id"
+  "memoriam": {
+    "mode": "sdk",
+    "python": "/path/to/memoriam/.venv/bin/python",
+    "args": ["-m", "memoriam.integration.sdk_worker"],
+    "failOpen": true,
+    "timeoutMs": 30000,
+    "config": { "db_path": "~/.logician/memories.db" }
   },
-  "memoryViewer": true,
-  "memoryViewerPort": 3200,
   "reasoner": "none",
   "reasonerConfig": {},
   "thinkingLevel": "off",
@@ -35,7 +34,7 @@ The current flat runtime keys include:
 
 `thinkingLevel` defaults to `off`. `inferenceMode` defaults to `none`, labeled **Provider** in the UI, which omits Logician's sampling presets and lets the provider use its defaults.
 
-`memoryEmbeddings` defaults to `false`. When enabled, Logician lazily loads the configured local embedding model and fuses its semantic results with SQLite FTS memory retrieval. Lexical retrieval remains available while the model warms.
+`memoriam` wires the standalone [memoriam](https://github.com/lseman/memoriam) memory engine in as an out-of-process JSON-lines SDK worker (same pattern as `legroom`). Omit it or set `"mode": "off"` to run without persistent memory. `failOpen` (default `true`) keeps the agent turn alive if the worker is unreachable; `config.db_path` is the SQLite database path.
 
 ## Common settings
 

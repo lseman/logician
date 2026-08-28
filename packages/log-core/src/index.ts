@@ -22,13 +22,6 @@ export {
 export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
 export { stripAcceptanceReport } from "./control/guards/acceptance-contract.ts";
 export {
-	type CancellationCleanup,
-	CancellationError,
-	type CancellationKind,
-	CancellationScope,
-	type CancellationScopeOptions,
-} from "./runtime/control/cancellation-scope.ts";
-export {
 	EventJournal,
 	type EventJournalEntry,
 	type EventJournalOptions,
@@ -49,6 +42,13 @@ export {
 	type AdaptiveContextRequest,
 	type ContextOutcome,
 } from "./system/context/adaptive-context-controller.ts";
+export {
+	type CancellationCleanup,
+	CancellationError,
+	type CancellationKind,
+	CancellationScope,
+	type CancellationScopeOptions,
+} from "./system/lifecycle/cancellation-scope.ts";
 export type { AcceptanceConfig } from "./system/types/acceptance.ts";
 export {
 	type AgentConfig,

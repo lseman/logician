@@ -10,8 +10,7 @@ export function parseMetricLines(output: string): Map<string, number> {
 		`^${METRIC_LINE_PREFIX}\\s+([\\w.µ]+)=(\\S+)\\s*$`,
 		"gm",
 	);
-	let match;
-	while ((match = regex.exec(output)) !== null) {
+	for (const match of output.matchAll(regex)) {
 		const name = match[1];
 		if (DENIED_METRIC_NAMES.has(name)) continue;
 		const value = Number(match[2]);

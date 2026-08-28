@@ -347,11 +347,6 @@ export async function openSettingsSelector(
 					data.progressStopEnabled,
 					"Stop when useful token growth flattens",
 				],
-				[
-					"Memory",
-					data.memoryEnabled,
-					"Persist and retrieve cross-session memories",
-				],
 			].map(([name, enabled, description]) => ({
 				name: String(name),
 				currentValue: enabled ? "on" : "off",
@@ -562,8 +557,7 @@ export function handleSettingsSelectorAction(
 		case "failure-loop guard":
 		case "continuation":
 		case "auto-compact on full context":
-		case "progress early-stop":
-		case "memory": {
+		case "progress early-stop": {
 			const on = value === "true";
 			const runtimeKeys = {
 				"duplicate-call guard": "duplicateGuardEnabled",
@@ -571,7 +565,6 @@ export function handleSettingsSelectorAction(
 				continuation: "continuationEnabled",
 				"auto-compact on full context": "autoRetryEnabled",
 				"progress early-stop": "progressStopEnabled",
-				memory: "memoryEnabled",
 			} as const;
 			const configKey =
 				runtimeKeys[settingName.toLowerCase() as keyof typeof runtimeKeys];

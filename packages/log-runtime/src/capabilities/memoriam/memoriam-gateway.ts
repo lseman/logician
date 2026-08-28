@@ -7,10 +7,10 @@ context retrieval).
 
 import type { AgentConfig } from "@logician/log-core";
 import type {
+	CompressedObservation,
 	MemoriamSdkConfig,
 	Memory,
 	Session,
-	CompressedObservation,
 } from "./worker.ts";
 import { MemoriamWorker } from "./worker.ts";
 
@@ -39,9 +39,7 @@ export class MemoriamGateway {
 	- `beforeProviderPayload`: retrieve memory context and prepend it to the
 	  conversation so the model sees relevant memories every turn.
 	*/
-	createHooks(
-		existingHooks: AgentConfig["hooks"],
-	): AgentConfig["hooks"] {
+	createHooks(existingHooks: AgentConfig["hooks"]): AgentConfig["hooks"] {
 		return {
 			...existingHooks,
 			beforeProviderPayload: async context => {
@@ -51,10 +49,9 @@ export class MemoriamGateway {
 				// Retrieve memory context and inject it as a system note.
 				const sessionIds = context.hookSessionId ? [context.hookSessionId] : [];
 				if (!sessionIds.length) return { payload };
-				const query =
-					(payload as { messages?: unknown[] })?.messages?.length
-						? "all"
-						: "recent";
+				const query = (payload as { messages?: unknown[] })?.messages?.length
+					? "all"
+					: "recent";
 				try {
 					const contextText = await this.worker.getContext(
 						sessionIds[0],
@@ -65,7 +62,10 @@ export class MemoriamGateway {
 					);
 					if (!contextText) return { payload };
 					// Prepend a system-level memory context block.
-					const messages = payload.messages as { role: string; content: string }[];
+					const messages = payload.messages as {
+						role: string;
+						content: string;
+					}[];
 					if (!Array.isArray(messages)) return { payload };
 					const injectMsg = {
 						role: "system" as const,
@@ -102,9 +102,7 @@ export class MemoriamGateway {
 		return this.worker.getSession(id);
 	}
 
-	async listSessions(
-		query?: Record<string, unknown>,
-	): Promise<Session[]> {
+	async listSessions(query?: Record<string, unknown>): Promise<Session[]> {
 		this.assertEnabled();
 		return this.worker.listSessions(query ?? null);
 	}
@@ -147,10 +145,7 @@ export class MemoriamGateway {
 		return this.worker.listObservations(sessionId, limit);
 	}
 
-	async searchObservations(
-		query: string,
-		limit: number,
-	): Promise<unknown[]> {
+	async searchObservations(query: string, limit: number): Promise<unknown[]> {
 		this.assertEnabled();
 		return this.worker.searchObservations(query, limit);
 	}
@@ -226,14 +221,18 @@ export class MemoriamGateway {
 
 	// ── Working memory ───────────────────────────────────────────────────
 
-	async autoTier(config?: Record<string, unknown>): Promise<Record<string, string>> {
+	async autoTier(
+		config?: Record<string, unknown>,
+	): Promise<Record<string, string>> {
 		this.assertEnabled();
 		return this.worker.autoTier(config);
 	}
 
-	async autoForget(
-		opts?: { ttlMs?: number; minImportance?: number; maxDeletes?: number },
-	): Promise<Record<string, unknown>> {
+	async autoForget(opts?: {
+		ttlMs?: number;
+		minImportance?: number;
+		maxDeletes?: number;
+	}): Promise<Record<string, unknown>> {
 		this.assertEnabled();
 		return this.worker.autoForget(opts);
 	}
@@ -262,10 +261,7 @@ export class MemoriamGateway {
 		return this.worker.exportData();
 	}
 
-	async importData(
-		data: unknown,
-		onConflict: string,
-	): Promise<unknown> {
+	async importData(data: unknown, onConflict: string): Promise<unknown> {
 		this.assertEnabled();
 		return this.worker.importData(data as any, onConflict);
 	}
@@ -296,7 +292,10 @@ export class MemoriamGateway {
 		return this.worker.workerStats();
 	}
 
-	async workerHistory(limit: number, offset: number): Promise<Record<string, unknown>> {
+	async workerHistory(
+		limit: number,
+		offset: number,
+	): Promise<Record<string, unknown>> {
 		this.assertEnabled();
 		return this.worker.workerHistory(limit, offset);
 	}

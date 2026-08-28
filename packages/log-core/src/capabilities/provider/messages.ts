@@ -1,9 +1,3 @@
-import {
-	microCompactCompactableMessages,
-	type PrunedToolOutputsResult,
-	type PruneHistoricalToolOutputsOptions,
-	pruneHistoricalToolOutputs,
-} from "../../runtime/compaction/engine.ts";
 import type {
 	AgentMessage,
 	BashExecutionMessage,
@@ -348,33 +342,3 @@ export function estimateChatPayloadTokens(
 		}),
 	);
 }
-
-// Shared compaction target: summarizing compaction aims to bring the payload
-// down to this fraction of the context window. Referenced by the proactive
-// builtin hook, the loop's context-full path, and the harness's manual compact.
-export const COMPACTION_TARGET_FRACTION = 0.65;
-
-export interface CompactionResult {
-	messages: Message[];
-	tokensBefore: number;
-	tokensAfter: number;
-	changed: boolean;
-}
-
-// Delegates to the single micro-compaction implementation in
-// compaction/engine.ts (role-aware caps, keeps recent messages intact).
-export function microCompactMessages(messages: Message[]): CompactionResult {
-	const result = microCompactCompactableMessages(messages);
-	return {
-		messages: result.messages as Message[],
-		tokensBefore: result.tokensBefore,
-		tokensAfter: result.tokensAfter,
-		changed: result.changed,
-	};
-}
-
-export {
-	type PrunedToolOutputsResult,
-	type PruneHistoricalToolOutputsOptions,
-	pruneHistoricalToolOutputs,
-};

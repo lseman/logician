@@ -34,7 +34,6 @@ function createLifecycle() {
 		ensureSession: record("ensure-session"),
 		loadMcp: recordAsync("mcp"),
 		reportMcpError: record("mcp-error"),
-		waitForMemory: recordAsync("memory-settled"),
 		closeResources: recordAsync("resources-closed"),
 		resetActivity: record("reset-activity"),
 		publishUsage: record("publish-usage"),
@@ -62,12 +61,11 @@ describe("RuntimeLifecycle", () => {
 		]);
 	});
 
-	test("shutdown settles memory and hooks before closing resources", async () => {
+	test("shutdown settles hooks before closing resources", async () => {
 		const state = createLifecycle();
 		await state.lifecycle.stop();
 		expect(state.calls).toEqual([
 			"cancel",
-			"memory-settled",
 			"end:shutdown",
 			"resources-closed",
 			"reset-turns",

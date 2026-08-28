@@ -1,12 +1,12 @@
 // ── Plugin, MCP, and autoresearch dashboard manager controllers ────────────
 
+import type { Turn } from "@logician/log-runtime/sessions";
 import type { AutoresearchDashboardAction } from "../../overlays/autoresearch-dashboard.ts";
 import type { McpManagerAction } from "../../overlays/mcp-manager.ts";
 import type { PluginManagerAction } from "../../overlays/plugin-manager.ts";
 import type { SessionTreeAction } from "../../overlays/session-tree.ts";
-import type { Turn } from "@logician/log-runtime/sessions";
-import type { OverlayHandlersCtx } from "./context.ts";
 import { turnsToMessages } from "../session/messages.ts";
+import type { OverlayHandlersCtx } from "./context.ts";
 
 // ── Plugin manager ───────────────────────────────────────────────────────
 
@@ -239,7 +239,10 @@ export function handleSessionTreeAction(
 		// Navigate to the selected entry in the session tree.
 		const sessionId = ctx.sessionService.getCurrentSessionId();
 		if (!sessionId) return;
-		const turns: Turn[] = ctx.sessionService.checkoutTurn(sessionId, action.entryId);
+		const turns: Turn[] = ctx.sessionService.checkoutTurn(
+			sessionId,
+			action.entryId,
+		);
 		ctx.transcript.loadTurns(turns);
 		ctx.transcriptDisplay.setTurns(turns);
 		ctx.bridge.restoreHistory(turnsToMessages(turns));

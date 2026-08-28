@@ -469,7 +469,7 @@ void describe("StatusBar", () => {
 		const bar = new StatusBar(createDefaultConfig());
 		const config = createDefaultConfig();
 		config.rows = 2;
-		config.widgets.memory = {
+		config.widgets.memoriam = {
 			enabled: true,
 			row: 1,
 			position: 0,
@@ -477,7 +477,7 @@ void describe("StatusBar", () => {
 			fill: "none",
 		};
 		bar.setConfig(config);
-		bar.update({ memoryEnabled: true });
+		bar.update({ memoriamEnabled: true });
 		assert.strictEqual(bar.render(160).length, 2);
 		assert.strictEqual(bar.render(160).length, 2);
 	});

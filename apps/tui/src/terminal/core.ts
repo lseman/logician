@@ -1,6 +1,7 @@
 // ── Minimal TUI core ──────────────────────────────────────────────────────────
 // Differential rendering engine — minimal, no external deps
 
+export type { OverlayHandle, OverlayOptions } from "./overlay-types.ts";
 // Component/Container/CURSOR_MARKER/ANSI string utilities live in
 // primitives.ts, which the layout engine (rendering/layout.ts and its
 // dependents) also imports. core.ts must not import the layout engine at
@@ -34,6 +35,13 @@ import {
 	type LayoutRect,
 	renderLayoutFrame,
 } from "../rendering/layout.ts";
+import { OverlayManager } from "./overlay-manager.ts";
+import type {
+	OverlayAnchor,
+	OverlayHandle,
+	OverlayOptions,
+	OverlaySize,
+} from "./overlay-types.ts";
 import {
 	type Component,
 	Container,
@@ -69,20 +77,25 @@ const EMPTY_RENDERER_METRICS: RendererMetrics = {
  * distinguishable from Tab and Enter and can reach their dedicated bindings.
  */
 export function normalizeKeyboardInput(data: string): string {
-	return (
-		data
-			// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal CSI escape sequence
-			.replace(/\x1b\[27(?:;1)?u/g, "\x1b")
-			.replace(/\x1b\[(\d+);([56])u/g, (sequence, codepointText: string) => {
-				const codepoint = Number(codepointText);
-				const lowerCodepoint =
-					codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
-				if (lowerCodepoint === 105 || lowerCodepoint === 109) return sequence;
-				if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
-				return String.fromCharCode(lowerCodepoint & 0x1f);
-			})
-	);
+	return data
+		.replace(CSI_ESCAPE_KEY, ESCAPE)
+		.replace(CSI_CTRL_KEY, (sequence, codepointText: string) => {
+			const codepoint = Number(codepointText);
+			const lowerCodepoint =
+				codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
+			if (lowerCodepoint === 105 || lowerCodepoint === 109) return sequence;
+			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
+			return String.fromCharCode(lowerCodepoint & 0x1f);
+		});
 }
+
+const ESCAPE = String.fromCharCode(27);
+const CSI_ESCAPE_KEY = new RegExp(`${ESCAPE}\\[27(?:;1)?u`, "g");
+const CSI_CTRL_KEY = new RegExp(`${ESCAPE}\\[(\\d+);([56])u`, "g");
+const CSI_NAVIGATION_KEY = new RegExp(
+	`${ESCAPE}\\[(?:5~|6~|1;5H|1;5F|H|F)`,
+	"g",
+);
 
 import { Buffer } from "node:buffer";
 import { appendFileSync } from "node:fs";
@@ -128,8 +141,11 @@ export class TUI extends Container {
 	private started = false;
 	private stopped = false;
 	private focusedComponent: Component | null = null;
-	private overlayStack: OverlayStackEntry[] = [];
-	private focusOrderCounter = 0;
+	private readonly overlays = new OverlayManager({
+		getFocus: () => this.focusedComponent,
+		setFocus: component => this.setFocus(component),
+		requestRender: () => this.requestRender(),
+	});
 	private inputListeners: Set<
 		(data: string) => { consume?: boolean; data?: string } | undefined
 	> = new Set();
@@ -193,142 +209,23 @@ export class TUI extends Container {
 	}
 
 	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
-		const entry: OverlayStackEntry = {
-			component,
-			options,
-			preFocus: this.focusedComponent,
-			hidden: false,
-			focusOrder: ++this.focusOrderCounter,
-		};
-		this.overlayStack.push(entry);
-		this.requestRender();
-
-		return {
-			hide: () => {
-				const idx = this.overlayStack.indexOf(entry);
-				if (idx >= 0) {
-					this.overlayStack.splice(idx, 1);
-					// Restore focus if this overlay had focus
-					if (this.focusedComponent === component) {
-						const topVisible = this.getTopmostVisibleOverlay();
-						this.setFocus(topVisible?.component ?? entry.preFocus);
-					}
-				}
-				this.requestRender();
-			},
-			setHidden: (hidden: boolean) => {
-				if (entry.hidden === hidden) return;
-				entry.hidden = hidden;
-				// Update focus when hiding/showing
-				if (hidden) {
-					// If this overlay had focus, move focus to next visible or preFocus
-					if (this.focusedComponent === component) {
-						const topVisible = this.getTopmostVisibleOverlay();
-						this.setFocus(topVisible?.component ?? entry.preFocus);
-					}
-				} else {
-					// Restore focus to this overlay when showing (if it's actually visible)
-					if (!options?.nonCapturing && this.isOverlayVisible(entry)) {
-						entry.focusOrder = ++this.focusOrderCounter;
-						this.setFocus(component);
-					}
-				}
-				this.requestRender();
-			},
-			isHidden: () => entry.hidden,
-			isFocused: () => this.focusedComponent === component,
-			focus: () => {
-				if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry))
-					return;
-				entry.focusOrder = ++this.focusOrderCounter;
-				this.setFocus(component);
-				this.requestRender();
-			},
-			unfocus: (target?: Component | null) => {
-				if (this.focusedComponent !== component) return;
-				const topVisible = this.getTopmostVisibleOverlay();
-				this.setFocus(target ?? topVisible?.component ?? entry.preFocus);
-				this.requestRender();
-			},
-		};
+		return this.overlays.show(component, options);
 	}
 
 	hideOverlay(): void {
-		const overlay = this.overlayStack[this.overlayStack.length - 1];
-		if (!overlay) return;
-		this.overlayStack.pop();
-		if (this.focusedComponent === overlay.component) {
-			const topVisible = this.getTopmostVisibleOverlay();
-			this.setFocus(topVisible?.component ?? overlay.preFocus);
-		}
-		this.requestRender();
+		this.overlays.hideTop();
 	}
 
 	/** Move a pre-registered overlay's stack entry to the top so it paints
 	 * over other overlays instead of staying pinned at its construction-time
 	 * stack position. No-op if the component isn't on the stack. */
 	bringToFront(component: Component): void {
-		const idx = this.overlayStack.findIndex(e => e.component === component);
-		if (idx < 0 || idx === this.overlayStack.length - 1) return;
-		const [entry] = this.overlayStack.splice(idx, 1);
-		this.overlayStack.push(entry);
-		this.requestRender();
+		this.overlays.bringToFront(component);
 	}
 
 	/** Remove a specific overlay from the stack and restore focus to its pre-focus target. */
 	removeOverlay(component: Component): void {
-		const idx = this.overlayStack.findIndex(e => e.component === component);
-		if (idx >= 0) {
-			const entry = this.overlayStack[idx];
-			this.overlayStack.splice(idx, 1);
-			// Mark component invisible so input listeners stop consuming keys
-			if (
-				"visible" in entry.component &&
-				typeof (entry.component as { visible?: unknown }).visible === "boolean"
-			) {
-				(entry.component as { visible: boolean }).visible = false;
-			}
-			// Restore focus to whatever was focused before this overlay was shown
-			if (this.focusedComponent === component) {
-				const topVisible = this.getTopmostVisibleOverlay();
-				this.setFocus(topVisible?.component ?? entry.preFocus);
-			}
-			this.requestRender();
-		}
-	}
-
-	// ── Overlay helpers ───────────────────────────────────────────────────
-
-	/** Check if an overlay entry is currently visible */
-	private isOverlayVisible(entry: OverlayStackEntry): boolean {
-		if (entry.hidden) return false;
-		// Components like the slash popup / file mention popup / plugin manager
-		// stay mounted as overlays for the whole session but only actually show
-		// content once invoked; their own `visible` flag is the real signal.
-		if (
-			"visible" in entry.component &&
-			typeof (entry.component as { visible?: unknown }).visible === "boolean"
-		) {
-			return (entry.component as { visible: boolean }).visible;
-		}
-		if (entry.options?.visible) {
-			// We'll use default dimensions during layout; actual dimensions come from doRender
-			return true;
-		}
-		return true;
-	}
-
-	/** Find the visual-frontmost visible capturing overlay, if any */
-	private getTopmostVisibleOverlay(): OverlayStackEntry | undefined {
-		let topmost: OverlayStackEntry | undefined;
-		for (const overlay of this.overlayStack) {
-			if (overlay.options?.nonCapturing || !this.isOverlayVisible(overlay))
-				continue;
-			if (!topmost || overlay.focusOrder > topmost.focusOrder) {
-				topmost = overlay;
-			}
-		}
-		return topmost;
+		this.overlays.remove(component);
 	}
 
 	addInputListener(
@@ -482,7 +379,7 @@ export class TUI extends Container {
 	private static readonly WHEEL_STEP = 2;
 
 	private handleInput(data: string): void {
-		const hasVisibleOverlay = this.overlayStack.some(entry => {
+		const hasVisibleOverlay = this.overlays.entries.some(entry => {
 			if (entry.hidden) return false;
 			if (
 				"visible" in entry.component &&
@@ -497,17 +394,17 @@ export class TUI extends Container {
 		// can batch several wheel ticks; coalesce them into one scroll so fast wheel
 		// spins move proportionally without queuing a render per tick.
 		if (data.startsWith("\x1b[<")) {
-			const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
+			const re = new RegExp(`${ESCAPE}\\[<(\\d+);(\\d+);(\\d+)([Mm])`, "g");
 			let net = 0; // +down / -up, in wheel ticks
 			let consumed = 0;
 			let clicked = false;
 			let wheelColumn = 0;
 			let wheelRow = 0;
-			let m: RegExpExecArray | null;
-			while ((m = re.exec(data)) !== null) {
-				const btn = parseInt(m[1], 10);
-				const column = parseInt(m[2], 10) - 1;
-				const row = parseInt(m[3], 10) - 1;
+			let match = re.exec(data);
+			while (match) {
+				const btn = parseInt(match[1], 10);
+				const column = parseInt(match[2], 10) - 1;
+				const row = parseInt(match[3], 10) - 1;
 				if (btn === 64) {
 					net -= 1; // wheel up → older content
 					wheelColumn = column;
@@ -516,7 +413,7 @@ export class TUI extends Container {
 					net += 1; // wheel down → newer content
 					wheelColumn = column;
 					wheelRow = row;
-				} else if (btn === 0 && m[4] === "M") {
+				} else if (btn === 0 && match[4] === "M") {
 					if (this.layoutRoot) {
 						clicked =
 							this.routeClick(column, row, hasVisibleOverlay) || clicked;
@@ -530,7 +427,8 @@ export class TUI extends Container {
 							clicked;
 					}
 				}
-				consumed += m[0].length;
+				consumed += match[0].length;
+				match = re.exec(data);
 			}
 			// Pure mouse chunk → apply coalesced scroll once, then stop.
 			if (net !== 0 && consumed === data.length) {
@@ -559,7 +457,7 @@ export class TUI extends Container {
 		// sequences one at a time when the whole chunk is made of 2+ of them.
 		// Arrow keys are excluded — input-bar.ts already splits and handles a
 		// pure arrow-key batch with input/history-navigation semantics.
-		const navBatch = data.match(/\x1b\[(?:5~|6~|1;5H|1;5F|H|F)/g);
+		const navBatch = data.match(CSI_NAVIGATION_KEY);
 		if (navBatch && navBatch.length > 1 && navBatch.join("") === data) {
 			for (const key of navBatch) this.handleInput(key);
 			return;
@@ -643,8 +541,9 @@ export class TUI extends Container {
 			if (result?.consume) return;
 		}
 		// Fallback for overlays not owned by an application-level listener.
-		if (data === "\x1b" && this.overlayStack.length > 0) {
-			const top = this.overlayStack[this.overlayStack.length - 1];
+		if (data === "\x1b" && this.overlays.entries.length > 0) {
+			const top = this.overlays.entries.at(-1);
+			if (!top) return;
 			const comp = top.component;
 			if (
 				!top.hidden &&
@@ -1042,7 +941,7 @@ export class TUI extends Container {
 		const result = [...lines];
 		this.paintedOverlayClickRects = [];
 
-		const visibleEntries = this.overlayStack.filter(e => {
+		const visibleEntries = this.overlays.entries.filter(e => {
 			if (e.options?.anchor === "aboveInput") return false;
 			if (e.hidden) return false;
 			if (e.options?.visible && !e.options.visible(termWidth, termHeight)) {
@@ -1184,7 +1083,7 @@ export class TUI extends Container {
 	}
 
 	private renderAboveInputOverlays(termWidth: number): string[] {
-		const entries = this.overlayStack.filter(entry => {
+		const entries = this.overlays.entries.filter(entry => {
 			if (entry.hidden || entry.options?.anchor !== "aboveInput") return false;
 			if (entry.options?.visible) {
 				// For aboveInput overlays, always pass a large height since they float above input
@@ -1400,13 +1299,9 @@ function isImageLine(line: string): boolean {
 	return line.includes("\x1b_G") || line.includes("\x1b]1337;");
 }
 
-/**
- /** Value that can be absolute (number) or percentage (string like "50%") */
-type SizeValue = number | `${number}%`;
-
 /** Parse a SizeValue into absolute value given a reference size */
 function parseSizeValue(
-	value: SizeValue | undefined,
+	value: OverlaySize | undefined,
 	referenceSize: number,
 ): number | undefined {
 	if (value === undefined) return undefined;
@@ -1417,108 +1312,6 @@ function parseSizeValue(
 	}
 	return undefined;
 }
-
-/** Margin configuration for overlays */
-interface OverlayMargin {
-	top?: number;
-	right?: number;
-	bottom?: number;
-	left?: number;
-}
-
-/** Anchor position for overlay positioning */
-type OverlayAnchor =
-	| "center"
-	| "top-left"
-	| "top-center"
-	| "top-right"
-	| "bottom-left"
-	| "bottom-center"
-	| "bottom-right"
-	| "left-center"
-	| "right-center"
-	| "top"
-	| "bottom"
-	| "aboveInput";
-
-/**
- * Options for overlay positioning and sizing.
- * Values can be absolute numbers or percentage strings (e.g., "50%").
- */
-export interface OverlayOptions {
-	// === Sizing ===
-	/** Width in terminal columns, or percentage of terminal width (e.g., "50%") */
-	width?: SizeValue;
-	/** Minimum width in columns */
-	minWidth?: number;
-	/** Maximum height in rows, or percentage of terminal height (e.g., "50%") */
-	maxHeight?: SizeValue;
-
-	// === Positioning - anchor-based ===
-	/** Anchor point for positioning (default: 'center') */
-	anchor?: OverlayAnchor;
-	/** Horizontal offset from anchor position (positive = right) */
-	offsetX?: number;
-	/** Vertical offset from anchor position (positive = down) */
-	offsetY?: number;
-
-	// === Positioning - explicit row/col ===
-	/** Row position: absolute number, or percentage (e.g., "25%" = 25% from top) */
-	row?: SizeValue;
-	/** Column position: absolute number, or percentage (e.g., "50%" = centered) */
-	col?: SizeValue;
-
-	// === Margin from terminal edges ===
-	/** Margin from terminal edges. Number applies to all sides. */
-	margin?: OverlayMargin | number;
-
-	// === Alignment (for left/right anchored overlays) ===
-	/** Horizontal alignment within the overlay's bounding box */
-	align?: "center" | "left";
-
-	// === Visibility ===
-	/**
-	 * Control overlay visibility based on terminal dimensions.
-	 * If provided, overlay is only rendered when this returns true.
-	 * Called each render cycle with current terminal dimensions.
-	 */
-	visible?: (termWidth: number, termHeight: number) => boolean;
-	/** If true, don't capture keyboard focus when shown */
-	nonCapturing?: boolean;
-	/** Invoked when a mouse click lands within this overlay's composited
-	 * screen rect. Only wired up in layout-engine mode (setLayoutRoot). */
-	onClick?: () => void;
-}
-
-/** Handle returned by showOverlay for controlling the overlay */
-export interface OverlayHandle {
-	/** Permanently remove the overlay */
-	hide(): void;
-	/** Temporarily hide or show the overlay */
-	setHidden(hidden: boolean): void;
-	/** Check if overlay is temporarily hidden */
-	isHidden(): boolean;
-	/** Focus this overlay and bring it to the visual front */
-	focus(): void;
-	/** Release focus to the next visible overlay or a specific target */
-	unfocus(target?: Component | null): void;
-	/** Check if this overlay currently has focus */
-	isFocused(): boolean;
-}
-
-/** Options for {@link OverlayHandle.unfocus} */
-interface OverlayUnfocusOptions {
-	/** Explicit target to focus after releasing this overlay */
-	target: Component | null;
-}
-
-type OverlayStackEntry = {
-	component: Component;
-	options?: OverlayOptions;
-	preFocus: Component | null;
-	hidden: boolean;
-	focusOrder: number;
-};
 
 // ── Shared renderer surface ──────────────────────────────────────────────────
 // The narrow slice of TUI that app/*.ts "Ctx" interfaces actually call

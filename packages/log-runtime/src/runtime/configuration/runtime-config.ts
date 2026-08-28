@@ -36,12 +36,12 @@ export function mergeRuntimeConfigLayers(
 		"webSearch",
 		"permissions",
 		"compaction",
-		"memoryExtractor",
 		"reasonerConfig",
 		"mcp",
 		"mcpServers",
 		"plugins",
 		"legroom",
+		"memoriam",
 	] as const) {
 		const value = mergeObject(
 			global[key] as Record<string, unknown> | undefined,
@@ -162,26 +162,6 @@ export function resolveRuntimeConfig(
 			turnTimeoutMs: configNumber(config.turnTimeoutMs),
 			cacheSize: configNumber(config.cacheSize),
 			cacheTtlMs: configNumber(config.cacheTtlMs),
-			memory: {
-				enabled: configBool(config.memory, false),
-				dbPath: configString(config.memoryDbPath),
-				extractorModel:
-					environment.LOGICIAN_MEMORY_EXTRACTOR_MODEL ||
-					configString(config.memoryExtractor?.model) ||
-					configString(config.memoryExtractorModel),
-				extractorBaseUrl:
-					environment.LOGICIAN_MEMORY_EXTRACTOR_URL ||
-					configString(config.memoryExtractor?.baseUrl),
-				viewerEnabled: configBool(config.memoryViewer, true),
-				viewerPort: configNumber(config.memoryViewerPort),
-				embeddingsEnabled:
-					environment.LOGICIAN_MEMORY_EMBEDDINGS !== undefined
-						? configBool(environment.LOGICIAN_MEMORY_EMBEDDINGS, false)
-						: configBool(config.memoryEmbeddings, false),
-				embeddingModel:
-					environment.LOGICIAN_MEMORY_EMBEDDING_MODEL ||
-					configString(config.memoryEmbeddingModel),
-			},
 			reasoner:
 				environment.LOGICIAN_REASONER ||
 				configString(config.reasoner) ||

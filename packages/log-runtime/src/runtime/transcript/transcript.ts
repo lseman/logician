@@ -15,14 +15,21 @@ import type {
 	TurnEndEvent,
 } from "@logician/log-core/events";
 import {
+	getChildChunks,
+	getChildToolCalls,
+	getSpawnTaskStatuses,
+	getToolDetails,
+} from "./internal/transcript-details.ts";
+import {
+	findLastChildToolChunk,
+	findLastToolChunk,
+} from "./internal/transcript-lookups.ts";
+import {
 	type AssistantChunk,
 	type AssistantMessage,
-	type ChildChunk,
-	type ChildToolCall,
 	createInitialTranscriptState,
 	type NoticeLevel,
 	type SessionState,
-	type SpawnTaskStatus,
 	type ThinkingDisplayStyle,
 	type ToolExecution,
 	type Turn,
@@ -545,13 +552,11 @@ export class Transcript {
 			toolChunk = chunk;
 		}
 		if (!toolChunk?.tool) return;
-		const details = (toolChunk.tool.details ??= {});
+		const details = getToolDetails(toolChunk.tool);
 
 		if (toolChunk.tool.tool_name === "spawn_agents") {
 			if (event.taskIndex === undefined) return;
-			const taskStatus =
-				(details.taskStatus as Record<number, SpawnTaskStatus>) ??
-				(details.taskStatus = {});
+			const taskStatus = getSpawnTaskStatuses(toolChunk.tool);
 			if (event.phase === "start") {
 				taskStatus[event.taskIndex] = {
 					taskIndex: event.taskIndex,
@@ -622,10 +627,7 @@ export class Transcript {
 		const toolChunk = this.findOpenSubagentToolChunk();
 		if (!toolChunk?.tool) return;
 
-		const details = (toolChunk.tool.details ??= {});
-		const childToolCalls =
-			(details.childToolCalls as ChildToolCall[]) ??
-			(details.childToolCalls = []);
+		const childToolCalls = getChildToolCalls(toolChunk.tool);
 		const text = event.text.trim();
 		const match = /^([▶✓✗])\s+(\S+)\s+(\S+)(?:\s+([\s\S]*))?$/.exec(text);
 		const marker = match?.[1];
@@ -666,28 +668,22 @@ export class Transcript {
 	private findOpenSubagentToolChunk(): AssistantChunk | undefined {
 		const turn = this.getCurrentTurn();
 		if (!turn?.assistantMessage) return undefined;
-		const chunks = turn.assistantMessage.chunks.slice().reverse();
+		const chunks = turn.assistantMessage.chunks;
 		// 1. Incomplete (still streaming)
-		for (const c of chunks) {
-			if (
-				c.type === "tool" &&
-				["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? "") &&
-				!c.isComplete
-			) {
-				return c;
-			}
-		}
+		const open = findLastToolChunk(
+			chunks,
+			chunk =>
+				["spawn_agent", "spawn_agents"].includes(chunk.tool?.tool_name ?? "") &&
+				!chunk.isComplete,
+		);
+		if (open) return open;
 		// 2. Recently completed (direct-mode /spawn: tool_end fires before lifecycle)
-		for (const c of chunks) {
-			if (
-				c.type === "tool" &&
-				["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? "") &&
-				c.isComplete
-			) {
-				return c;
-			}
-		}
-		return undefined;
+		return findLastToolChunk(
+			chunks,
+			chunk =>
+				["spawn_agent", "spawn_agents"].includes(chunk.tool?.tool_name ?? "") &&
+				chunk.isComplete,
+		);
 	}
 
 	/**
@@ -702,9 +698,7 @@ export class Transcript {
 		if (!toolChunk?.tool) return;
 
 		const turn = this.getCurrentTurn();
-		const details = (toolChunk.tool.details ??= {});
-		const childChunks =
-			(details.childChunks as ChildChunk[]) ?? (details.childChunks = []);
+		const childChunks = getChildChunks(toolChunk.tool);
 
 		if (event.kind === "thinking" || event.kind === "content") {
 			const last = childChunks[childChunks.length - 1];
@@ -732,14 +726,10 @@ export class Transcript {
 		}
 
 		if (event.kind === "tool_call_id_update") {
-			const existing = childChunks
-				.slice()
-				.reverse()
-				.find(
-					chunk =>
-						chunk.type === "tool" &&
-						chunk.tool?.toolCallId === event.previousToolCallId,
-				);
+			const existing = findLastChildToolChunk(
+				childChunks,
+				event.previousToolCallId,
+			);
 			if (existing?.tool) {
 				existing.tool.toolCallId = event.toolCallId;
 				existing.seq = Math.max(existing.seq, event.seq);
@@ -752,12 +742,7 @@ export class Transcript {
 			// Providers emit both tool_call_start and tool_execution_start for
 			// the same call. Reuse by toolCallId so each child tool renders once.
 			const existingStart = event.toolCallId
-				? childChunks
-						.slice()
-						.reverse()
-						.find(
-							c => c.type === "tool" && c.tool?.toolCallId === event.toolCallId,
-						)
+				? findLastChildToolChunk(childChunks, event.toolCallId)
 				: undefined;
 			if (existingStart?.tool) {
 				if (event.args) existingStart.tool.args = event.args;
@@ -795,12 +780,7 @@ export class Transcript {
 
 		// tool_end — also dedupe: tool_call_end and tool_execution_end both fire.
 		const existingEnd = event.toolCallId
-			? childChunks
-					.slice()
-					.reverse()
-					.find(
-						c => c.type === "tool" && c.tool?.toolCallId === event.toolCallId,
-					)
+			? findLastChildToolChunk(childChunks, event.toolCallId)
 			: undefined;
 		if (existingEnd?.tool) {
 			existingEnd.tool.status = event.isError ? "failed" : "completed";
@@ -844,8 +824,7 @@ export class Transcript {
 		const lastThinking = this.lastStreamingChunkOfType("thinking", msg.chunks);
 
 		if (lastThinking) {
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-			lastThinking.contentText! += token;
+			lastThinking.contentText = (lastThinking.contentText ?? "") + token;
 		} else {
 			msg.chunks.push({
 				seq: msg.chunks.length,

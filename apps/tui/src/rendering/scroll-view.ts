@@ -121,6 +121,11 @@ export class ScrollView extends Container {
 		this.scrollbarHideTimer = undefined;
 	}
 
+	dispose(): void {
+		this.hideTransientScrollbar();
+		this.requestRenderCallback = undefined;
+	}
+
 	setScrollbarActive(active: boolean): void {
 		if (active === this.scrollbarActive) return;
 		this.scrollbarActive = active;

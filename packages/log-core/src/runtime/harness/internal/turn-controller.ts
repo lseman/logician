@@ -1,4 +1,4 @@
-import { CancellationScope } from "../../control/cancellation-scope.ts";
+import { CancellationScope } from "../../../system/lifecycle/cancellation-scope.ts";
 
 /** Owns abort signaling and settlement for one active harness turn. */
 export class HarnessTurnController {

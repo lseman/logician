@@ -139,9 +139,10 @@ export class Flex extends Container {
 			if (index > 0) {
 				for (let gap = 0; gap < this.gap; gap++) lines.push("");
 			}
-			const childLines = rendered[index]?.slice(0, sizes[index]);
+			const size = sizes[index] ?? 0;
+			const childLines = (rendered[index] ?? []).slice(0, size);
 			lines.push(...childLines);
-			for (let padding = childLines.length; padding < sizes[index]!; padding++)
+			for (let padding = childLines.length; padding < size; padding++)
 				lines.push("");
 		}
 		return lines;
@@ -163,9 +164,10 @@ export class Flex extends Container {
 			safeWidth,
 			this.gap,
 		);
-		const rendered = entries.map((entry, index) =>
-			widths[index] === 0 ? [] : entry.component.render(widths[index]!),
-		);
+		const rendered = entries.map((entry, index) => {
+			const width = widths[index] ?? 0;
+			return width === 0 ? [] : entry.component.render(width);
+		});
 		const height = rendered.reduce(
 			(max, lines) => Math.max(max, lines.length),
 			0,
@@ -173,8 +175,8 @@ export class Flex extends Container {
 		const result = Array.from({ length: height }, () => "");
 		let x = 0;
 		for (let index = 0; index < rendered.length; index++) {
-			const lines = rendered[index]!;
-			const childWidth = widths[index]!;
+			const lines = rendered[index] ?? [];
+			const childWidth = widths[index] ?? 0;
 			let offset = 0;
 			if (this.align === "center")
 				offset = Math.floor((height - lines.length) / 2);
@@ -183,8 +185,8 @@ export class Flex extends Container {
 				const target = row + offset;
 				if (target < 0 || target >= result.length) continue;
 				result[target] = compositeTuiLine(
-					result[target]!,
-					lines[row]!,
+					result[target] ?? "",
+					lines[row] ?? "",
 					x,
 					childWidth,
 					safeWidth,
@@ -204,12 +206,18 @@ export function visibleFlexEntries(
 }
 
 function clampSize(size: number, entry: StackLayoutEntry): number {
-	const min = Math.max(0, Math.floor(entry.minSize ?? 0));
+	const min = normalizeSize(entry.minSize, 0);
 	const max = Math.max(
 		min,
-		Math.floor(entry.maxSize ?? Number.MAX_SAFE_INTEGER),
+		normalizeSize(entry.maxSize, Number.MAX_SAFE_INTEGER),
 	);
-	return Math.max(min, Math.min(max, Math.max(0, Math.floor(size))));
+	return Math.max(min, Math.min(max, normalizeSize(size, 0)));
+}
+
+interface DistributionCandidate {
+	index: number;
+	weight: number;
+	capacity: number;
 }
 
 function distribute(
@@ -218,50 +226,61 @@ function distribute(
 	amount: number,
 	mode: "grow" | "shrink",
 ): void {
-	let remaining = amount;
+	let remaining = normalizeSize(amount, 0);
 	while (remaining > 0) {
-		const candidates = entries
-			.map((entry, index) => ({ entry, index }))
-			.filter(({ entry, index }) => {
-				if (mode === "grow") {
-					return (
-						(entry.grow ?? 0) > 0 &&
-						sizes[index]! < (entry.maxSize ?? Number.MAX_SAFE_INTEGER)
-					);
-				}
-				return (entry.shrink ?? 1) > 0 && sizes[index]! > (entry.minSize ?? 0);
-			});
+		const candidates: DistributionCandidate[] = [];
+		for (let index = 0; index < entries.length; index++) {
+			const entry = entries[index];
+			if (!entry) continue;
+			const size = sizes[index] ?? 0;
+			const factor = mode === "grow" ? (entry.grow ?? 0) : (entry.shrink ?? 1);
+			const limit =
+				mode === "grow"
+					? normalizeSize(entry.maxSize, Number.MAX_SAFE_INTEGER)
+					: normalizeSize(entry.minSize, 0);
+			const capacity = mode === "grow" ? limit - size : size - limit;
+			const weight = mode === "grow" ? factor : factor * Math.max(1, size);
+			if (factor > 0 && capacity > 0 && weight > 0) {
+				candidates.push({ index, weight, capacity });
+			}
+		}
 		if (candidates.length === 0) return;
 
-		const totalWeight = candidates.reduce((sum, { entry, index }) => {
-			return (
-				sum +
-				(mode === "grow"
-					? (entry.grow ?? 0)
-					: (entry.shrink ?? 1) * Math.max(1, sizes[index]!))
-			);
-		}, 0);
-		let distributed = 0;
-		for (const { entry, index } of candidates) {
-			if (remaining <= 0) break;
-			const weight =
-				mode === "grow"
-					? (entry.grow ?? 0)
-					: (entry.shrink ?? 1) * Math.max(1, sizes[index]!);
-			const proposed = Math.max(
-				1,
-				Math.floor((remaining * weight) / totalWeight),
-			);
-			const capacity =
-				mode === "grow"
-					? (entry.maxSize ?? Number.MAX_SAFE_INTEGER) - sizes[index]!
-					: sizes[index]! - (entry.minSize ?? 0);
-			const delta = Math.min(remaining, proposed, capacity);
-			if (delta <= 0) continue;
-			sizes[index] = sizes[index]! + (mode === "grow" ? delta : -delta);
-			remaining -= delta;
-			distributed += delta;
+		const totalWeight = candidates.reduce((sum, item) => sum + item.weight, 0);
+		const roundAmount = remaining;
+		const allocations = candidates.map(candidate => {
+			const ideal = (roundAmount * candidate.weight) / totalWeight;
+			return {
+				...candidate,
+				ideal,
+				delta: Math.min(candidate.capacity, Math.floor(ideal)),
+			};
+		});
+		let distributed = allocations.reduce((sum, item) => sum + item.delta, 0);
+		let remainder = Math.min(
+			roundAmount - distributed,
+			allocations.reduce(
+				(sum, item) => sum + Math.max(0, item.capacity - item.delta),
+				0,
+			),
+		);
+		allocations.sort(
+			(a, b) =>
+				b.ideal - Math.floor(b.ideal) - (a.ideal - Math.floor(a.ideal)) ||
+				a.index - b.index,
+		);
+		for (const item of allocations) {
+			if (remainder <= 0) break;
+			if (item.delta >= item.capacity) continue;
+			item.delta++;
+			remainder--;
+			distributed++;
 		}
+		for (const { index, delta } of allocations) {
+			const size = sizes[index] ?? 0;
+			sizes[index] = size + (mode === "grow" ? delta : -delta);
+		}
+		remaining -= distributed;
 		if (distributed === 0) return;
 	}
 }
@@ -282,9 +301,10 @@ export function allocateFlexSizes(
 	);
 	if (availableSize === undefined) return sizes;
 
+	const safeGap = normalizeSize(gap, 0);
 	const contentSize = Math.max(
 		0,
-		Math.floor(availableSize) - Math.max(0, entries.length - 1) * gap,
+		normalizeSize(availableSize, 0) - Math.max(0, entries.length - 1) * safeGap,
 	);
 	const total = sizes.reduce((sum, size) => sum + size, 0);
 	if (total < contentSize)

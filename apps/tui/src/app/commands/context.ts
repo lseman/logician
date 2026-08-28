@@ -14,7 +14,6 @@ import type {
 	Transcript,
 	TuiSessionService,
 } from "@logician/log-runtime/sessions";
-import type { MemoryStore } from "@logician/memoriam";
 import type { ChoicePopup } from "../../overlays/choice-popup.ts";
 import type { SlashPopup } from "../../overlays/slash-popup.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
@@ -64,5 +63,4 @@ export interface SlashCommandsCtx {
 	_autoSaveTurn: () => void;
 	stop: () => Promise<void>;
 	requestExit: () => void;
-	getMemoryStore: () => MemoryStore | null;
 }

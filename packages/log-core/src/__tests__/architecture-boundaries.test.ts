@@ -2,6 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
+const MODULE_DEPTH = new Map([
+	["system", 0],
+	["capabilities", 1],
+	["control", 2],
+	["runtime", 3],
+]);
+
 async function sourceFiles(root: string): Promise<string[]> {
 	const entries = await readdir(root, { withFileTypes: true });
 	return (
@@ -20,6 +27,11 @@ function relativeImports(source: string): string[] {
 	return [...source.matchAll(/(?:from\s+|import\s*)["'](\.[^"']+)["']/g)].map(
 		match => match[1],
 	);
+}
+
+async function scannedImports(source: string): Promise<string[]> {
+	const scan = await new Bun.Transpiler({ loader: "ts" }).scan(source);
+	return scan.imports.map(item => item.path);
 }
 
 describe("core architecture boundaries", () => {
@@ -48,6 +60,33 @@ describe("core architecture boundaries", () => {
 			}
 		}
 		expect(offenders).toEqual([]);
+	});
+
+	test("foundational modules never depend on orchestration modules", async () => {
+		const sourceRoot = path.resolve(import.meta.dir, "../");
+		const violations: string[] = [];
+		for (const file of await sourceFiles(sourceRoot)) {
+			if (file.includes(`${path.sep}__tests__${path.sep}`)) continue;
+			const sourceModule = path.relative(sourceRoot, file).split(path.sep)[0];
+			const sourceDepth = MODULE_DEPTH.get(sourceModule);
+			if (sourceDepth === undefined) continue;
+
+			for (const specifier of await scannedImports(
+				await readFile(file, "utf8"),
+			)) {
+				if (!specifier.startsWith(".")) continue;
+				const target = path.resolve(path.dirname(file), specifier);
+				const targetModule = path
+					.relative(sourceRoot, target)
+					.split(path.sep)[0];
+				const targetDepth = MODULE_DEPTH.get(targetModule);
+				if (targetDepth === undefined || targetDepth <= sourceDepth) continue;
+				violations.push(
+					`${path.relative(sourceRoot, file)} -> ${specifier} (${sourceModule} -> ${targetModule})`,
+				);
+			}
+		}
+		expect(violations.sort()).toEqual([]);
 	});
 
 	test("protocol types are self-contained (no workspace deps)", async () => {

@@ -27,8 +27,8 @@ export interface CancellationScopeOptions {
 export type CancellationCleanup = () => void | Promise<void>;
 
 /**
- * Owns cancellation, deadlines, and cleanup for one runtime operation.
- * Child modules receive only its AbortSignal; lifecycle mechanics stay here.
+ * Owns cancellation, deadlines, and cleanup for one operation.
+ * Callers receive only its AbortSignal; lifecycle mechanics stay here.
  */
 export class CancellationScope {
 	private readonly controller = new AbortController();

@@ -108,8 +108,62 @@ void test("strips stray markers when no surrounding prose exists", () => {
 });
 
 void test("does not promote source code that resembles an unknown tool call", () => {
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: fixture contains literal source code.
 	const content = 'assert.match(catalog, new RegExp(`name="${skill.name}"`));';
 	const calls = parseTextToolCalls(content, name => name === "read_file");
 
 	assert.deepEqual(calls, []);
+});
+
+void test("preserves source order across mixed tool-call syntaxes", () => {
+	const content = [
+		'first(path="/a,b")',
+		'<function=second>{"nested":{"values":[1,2]}}</function>',
+		'[{"name":"third","arguments":{"query":{"must":[{"term":"x"}]}}}]',
+		'[[tool_call(id=fourth, expression="fn(a,b)", flags={"deep":true})]]',
+	].join("\n");
+
+	const calls = parseTextToolCalls(content);
+
+	assert.deepEqual(
+		calls.map(call => call.name),
+		["first", "second", "third", "fourth"],
+	);
+	assert.deepEqual(JSON.parse(calls[0].arguments), { path: "/a,b" });
+	assert.deepEqual(JSON.parse(calls[1].arguments), {
+		nested: { values: [1, 2] },
+	});
+	assert.deepEqual(JSON.parse(calls[2].arguments), {
+		query: { must: [{ term: "x" }] },
+	});
+	assert.deepEqual(JSON.parse(calls[3].arguments), {
+		expression: "fn(a,b)",
+		flags: { deep: true },
+	});
+});
+
+void test("strips every promoted syntax without leaving nested fragments", () => {
+	const content = [
+		"before",
+		'first(expression="fn(a,b)")',
+		'[[tool_call(id=second, payload={"items":[1,2]})]]',
+		'[{"name":"third","arguments":{"nested":{"ok":true}}}]',
+		"after",
+	].join("\n");
+
+	assert.equal(stripTextToolCalls(content), "before\n\n\n\nafter");
+});
+
+void test("uses collision-resistant ids and ignores malformed partial calls", () => {
+	const first = parseTextToolCalls("read_file(path=/tmp/a)")[0];
+	const second = parseTextToolCalls("read_file(path=/tmp/a)")[0];
+	assert.ok(first.id.startsWith("tc_"));
+	assert.ok(second.id.startsWith("tc_"));
+	assert.notEqual(first.id, second.id);
+	assert.deepEqual(
+		parseTextToolCalls(
+			'<function=broken>{"x":1}\n[[tool_call(id=also_broken, value=(1,2)]',
+		),
+		[],
+	);
 });

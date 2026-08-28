@@ -142,6 +142,8 @@ import {
 export class LogicianTUI {
 	private exitHandler: (() => void) | null = null;
 	private stopPromise: Promise<void> | null = null;
+	private readonly disposers: Array<() => void> = [];
+	private transcriptScroll: ScrollView | null = null;
 	// Not private: read/written by the extracted app/*.ts functions through
 	// their Ctx interfaces, which LogicianTUI satisfies structurally. Typed as
 	// the narrow surface TUI implements — see TuiHandle in terminal/core.ts
@@ -480,7 +482,6 @@ export class LogicianTUI {
 			memoriamEnabled: runtimeConfig.bridge.memoriam?.mode === "sdk",
 			graphicianEnabled: runtimeConfig.bridge.graphicianEnabled ?? true,
 			fffgrepEnabled: runtimeConfig.bridge.fffgrepEnabled ?? true,
-			memoryEnabled: runtimeConfig.bridge.memory?.enabled ?? false,
 			// MCP discovery starts in the background the moment the bridge is
 			// constructed (ToolRouter's constructor), so it's typically already
 			// in flight by the time this status line renders. The "MCP" notice
@@ -503,13 +504,13 @@ export class LogicianTUI {
 	// ── Bridge setup ─────────────────────────────────────────────────────────
 
 	private setupBridge(): void {
-		setupBridgeImpl(this);
+		this.disposers.push(setupBridgeImpl(this));
 	}
 
 	// ── Transcript setup ─────────────────────────────────────────────────────
 
 	private setupTranscript(): void {
-		this.transcript.onChange(() => {
+		const unsubscribe = this.transcript.onChange(() => {
 			this.transcriptDisplay.setTurns(this.transcript.getTurns());
 			this.transcriptDisplay.setThinkingMode(
 				this.transcript.getThinkingDisplayMode(),
@@ -521,6 +522,7 @@ export class LogicianTUI {
 			// the new max scroll position on every layout pass as content grows.
 			this.tui.requestRender();
 		});
+		this.disposers.push(unsubscribe);
 	}
 
 	// ── Input handling ─────────────────────────────────────────────────────
@@ -641,6 +643,7 @@ export class LogicianTUI {
 			scrollbarStyle: (glyph, isThumb) =>
 				isThumb ? theme.fg("selected", glyph) : theme.fg("separator", glyph),
 		});
+		this.transcriptScroll = transcriptScroll;
 		this.transcriptDisplay.setScrollView(transcriptScroll);
 		this.tui.showOverlay(new NewOutputIndicator(this.transcriptDisplay), {
 			anchor: "bottom",
@@ -819,7 +822,14 @@ export class LogicianTUI {
 	stop(): Promise<void> {
 		if (!this.stopPromise) {
 			this.stopPromise = (async () => {
+				for (const dispose of this.disposers.splice(0).reverse()) dispose();
 				this.researchManager.shutdown();
+				this.transcriptScroll?.dispose();
+				this.transcriptScroll = null;
+				this.transcriptDisplay.dispose();
+				this.todoBar.dispose();
+				this.statusPanel.dispose();
+				this.notifications.dispose();
 				this.tui.stop();
 				await this.bridge.stop();
 			})();
@@ -831,16 +841,6 @@ export class LogicianTUI {
 		return this.currentSessionId
 			? `run \`logician --session ${this.currentSessionId}\` to recover this session\n`
 			: null;
-	}
-
-	// ── Memory forwarding ────────────────────────────────────────────────
-
-	getMemoryStore() {
-		return this.bridge.getMemoryStore();
-	}
-
-	getMemoryStats() {
-		return this.bridge.getMemoryStats();
 	}
 
 	// ── Goal evaluation ──────────────────────────────────────────────────

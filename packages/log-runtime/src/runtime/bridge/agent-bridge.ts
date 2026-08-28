@@ -1,12 +1,6 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
-import type {
-	AgentConfig,
-	AgentEvent,
-	Message,
-	QueueMode,
-	Tool,
-} from "@logician/log-core";
+import type { AgentConfig, Message, QueueMode, Tool } from "@logician/log-core";
 import { OpenAIBackend } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import type { PermissionMode } from "@logician/log-core/permissions";
@@ -51,9 +45,7 @@ import {
 } from "../context/context-inspector.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
-import { ModelSelector } from "./support/model-selector.ts";
-import { buildToolRegistry } from "./support/runtime-context.ts";
-import { ToolRouter } from "./support/tool-router.ts";
+import { createAgentConfig } from "./application/agent-config-factory.ts";
 import { AgentCoordinator } from "./application/agent-coordinator.ts";
 import { CommandDispatcher } from "./application/command-dispatcher.ts";
 import { ConversationIdentity } from "./application/conversation-identity.ts";
@@ -75,11 +67,12 @@ import {
 } from "./capability-context.ts";
 import {
 	buildPluginRuntimeEnv,
-	envNumber,
-	eventLogPathFor,
 	resolveWebSearchConfig,
 } from "./environment.ts";
 import { SessionRunner } from "./session-runner.ts";
+import { ModelSelector } from "./support/model-selector.ts";
+import { buildToolRegistry } from "./support/runtime-context.ts";
+import { ToolRouter } from "./support/tool-router.ts";
 
 export { findJbPrompt } from "./project-prompt.ts";
 
@@ -179,6 +172,7 @@ export class AgentRuntime {
 		return this.runtimeCtx.repositoryMap;
 	}
 	private readonly compactionSettings?: AgentBridgeOptions["compaction"];
+	private readonly unsubscribeTodos: () => void;
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
 
@@ -234,7 +228,9 @@ export class AgentRuntime {
 			baseUrl: opts.webSearch?.baseUrl || defaultWebSearch.baseUrl,
 			maxResults: opts.webSearch?.maxResults ?? defaultWebSearch.maxResults,
 		};
-		const extraTools = opts.extraTools?.length ? [...opts.extraTools] : undefined;
+		const extraTools = opts.extraTools?.length
+			? [...opts.extraTools]
+			: undefined;
 		this.toolRouter = new ToolRouter({
 			cwd: this.cwd,
 			projectTrusted: this.projectTrusted,
@@ -268,56 +264,15 @@ export class AgentRuntime {
 			this.backend.setDefaultThinkingLevel(opts.thinkingLevel);
 		}
 
-		this.config = {
-			baseUrl: opts.baseUrl,
-			model: opts.model,
-			models: opts.models,
+		this.config = createAgentConfig({
+			bridge: opts,
+			cwd: this.cwd,
+			sessionId: this.sessionId,
+			transcriptPath: this.transcriptPath,
 			systemPrompt: this.baseSystemPrompt,
 			tools: this._defaultTools,
 			webSearch,
-			cwd: this.cwd,
-			maxIterations: opts.maxIterations || 30,
-			executionProfile: opts.executionProfile,
-			temperature: opts.temperature,
-			maxTokens: opts.maxTokens,
-			thinkingLevel: opts.thinkingLevel ?? "off",
-			inferenceMode: opts.inferenceMode ?? "none",
-			// Parallel scheduling is transparent to the model. Tools that require
-			// exclusivity declare executionMode: "sequential" and become barriers.
-			toolExecution: opts.toolExecution ?? "parallel",
-			contextWindowTokens:
-				envNumber("LOGICIAN_CONTEXT_WINDOW") ||
-				envNumber("LOGICIAN_CTX_SIZE") ||
-				opts.contextWindowTokens,
-			runtimeHooksEnabled:
-				opts.runtimeHooksEnabled ?? process.env.LOGICIAN_HOOKS !== "0",
-			hookSessionId: this.sessionId,
-			hookTranscriptPath: this.transcriptPath,
-			eventLogPath: eventLogPathFor(this.transcriptPath),
-			steeringInterrupt: opts.steeringInterrupt,
-			maxTotalTokens: opts.maxTotalTokens,
 			permissions: this.interactions.permissions,
-			guardsEnabled: opts.guardsEnabled,
-			duplicateGuardEnabled: opts.duplicateGuardEnabled,
-			failureGuardEnabled: opts.failureGuardEnabled,
-			duplicateToolThreshold: opts.duplicateToolThreshold,
-			toolFailureLoopThreshold: opts.toolFailureLoopThreshold,
-			progressStopEnabled: opts.progressStopEnabled,
-			proactiveCompactionEnabled: opts.proactiveCompactionEnabled,
-			continuationEnabled: opts.continuationEnabled,
-			rtkProxyEnabled: opts.rtkProxyEnabled,
-			graphicianEnabled: opts.graphicianEnabled ?? true,
-			fffgrepEnabled: opts.fffgrepEnabled ?? true,
-			autoRetryEnabled: opts.autoRetryEnabled,
-			maxRetries: opts.maxRetries,
-			retryBaseDelayMs: opts.retryBaseDelayMs,
-			turnTimeoutMs: opts.turnTimeoutMs,
-			cacheSize: opts.cacheSize,
-			cacheTtlMs: opts.cacheTtlMs,
-			streamOptions: opts.streamOptions,
-			allowedPaths: opts.allowedPaths,
-			allowAllPaths: opts.allowAllPaths,
-			truncation: opts.truncation,
 			onPermissionRequest: context =>
 				this.interactions.requestPermission(context),
 			onQuestionRequest: context => this.interactions.requestQuestion(context),
@@ -334,13 +289,9 @@ export class AgentRuntime {
 					),
 				),
 			),
-			turnEndCallback: (turnId: string) => {
-				this.emit({ type: "turn_end", turnId });
-			},
-			onEvent: (event: AgentEvent) => {
-				this.activity.handle(event);
-			},
-		};
+			onTurnEnd: turnId => this.emit({ type: "turn_end", turnId }),
+			onEvent: event => this.activity.handle(event),
+		});
 		this.activity = new RuntimeActivity({
 			emit: event => this.emit(event),
 			runPhase: () => this.session?.phase,
@@ -372,7 +323,7 @@ export class AgentRuntime {
 			() => this.config,
 			() => this.session,
 		);
-		onTodosChanged(todos => {
+		this.unsubscribeTodos = onTodosChanged(todos => {
 			this.emit({ type: "todos", todos });
 		});
 
@@ -1098,7 +1049,11 @@ export class AgentRuntime {
 	}
 
 	async stop(): Promise<void> {
-		await this.lifecycle.stop();
+		try {
+			await this.lifecycle.stop();
+		} finally {
+			this.unsubscribeTodos();
+		}
 	}
 
 	isActive(): boolean {

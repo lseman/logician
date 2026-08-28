@@ -22,18 +22,18 @@ tsx apps/tui/src/index.ts
 
 ### Memory MCP server
 
-`@logician/log-memory-mcp` (`apps/log-memory-mcp`) is a stdio MCP server that
-exposes `@logician/memoriam` — search, capture, and consolidation — to any
-MCP client, independent of the TUI or headless bridge. It requires an
-explicit `--workspace`; the default database is
-`<workspace>/.logician/memory.db`.
+`memoriam` ships its own stdio MCP server (`ecosystem/memoriam`,
+`memoriam.mcp.server`) that exposes memory search, capture, and consolidation
+to any MCP client, independent of the TUI or headless bridge. The database
+path defaults to `~/.logician/memories.db` and can be overridden with the
+`MEMORIAM_DB_PATH` environment variable.
 
 ```sh
-bun run apps/log-memory-mcp/src/index.ts --workspace /absolute/project/path
+ecosystem/memoriam/.venv/bin/python -m memoriam.mcp.server
 ```
 
-See [apps/log-memory-mcp/README.md](https://github.com/lseman/logician/blob/main/apps/log-memory-mcp/README.md)
-for the full tool list and MCP client configuration.
+See [ecosystem/memoriam/README.md](https://github.com/lseman/memoriam) for the
+full tool list and MCP client configuration.
 
 ### Headless (programmatic)
 

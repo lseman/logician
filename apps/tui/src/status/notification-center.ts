@@ -74,6 +74,13 @@ export class NotificationCenter implements Component {
 		this.onInvalidate?.();
 	}
 
+	dispose(): void {
+		for (const timer of this.timers.values()) clearTimeout(timer);
+		this.timers.clear();
+		this.notifications = [];
+		this.onInvalidate = null;
+	}
+
 	render(width: number): string[] {
 		if (
 			this.cachedLines !== null &&

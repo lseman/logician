@@ -16,6 +16,7 @@
 // a failing extension is identifiable; a thrown handler is skipped and
 // reported via `onError` rather than aborting the chain.
 
+import { CancellationScope } from "../../system/lifecycle/cancellation-scope.ts";
 import type {
 	AfterProviderResponseContext,
 	AfterToolCallContext,
@@ -40,7 +41,6 @@ import type {
 	TransformContext,
 	TransformContextResult,
 } from "../../system/types/types-messages.ts";
-import { CancellationScope } from "../control/cancellation-scope.ts";
 
 export type HookEventName = keyof AgentHooks;
 

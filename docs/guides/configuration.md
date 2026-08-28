@@ -92,10 +92,6 @@ Logician also loads `~/.logician/.env` at startup. Use it for secrets referenced
 | `LOGICIAN_SYSTEM_PROMPT` | System prompt override | configured prompt |
 | `LOGICIAN_CONTEXT_WINDOW` | Context-window token count | provider/config value |
 | `LOGICIAN_HOOKS` | Enable runtime hooks (`0` disables) | config value |
-| `LOGICIAN_MEMORY_EXTRACTOR_URL` | Dedicated semantic-memory model endpoint | Primary LLM endpoint |
-| `LOGICIAN_MEMORY_EXTRACTOR_MODEL` | Model used for semantic-memory extraction | Active model |
-| `LOGICIAN_MEMORY_EMBEDDINGS` | Enable local semantic memory retrieval | `false` |
-| `LOGICIAN_MEMORY_EMBEDDING_MODEL` | Local embedding model | `Xenova/all-MiniLM-L6-v2` |
 | `LOGICIAN_REASONER` | Structured pre-reasoner ID | `none` |
 
 ## Structured reasoners
@@ -113,46 +109,40 @@ Reasoners are opt-in and disabled by default. When enabled, the selected reasone
 
 Available IDs are `ssr`, `tot`, `got`, `reflexion`, `self_consistency`, `best_of_n`, `auto_cot`, `in_context_cot`, and `cover`. Use `none` to disable them. The `/reasoner` command changes and persists the active mode.
 
-## Dedicated memory extractor
+## Persistent memory (memoriam)
 
-Memory extraction can run against a smaller model on a separate OpenAI-compatible endpoint:
+Persistent memory is provided by the standalone
+[memoriam](https://github.com/lseman/memoriam) engine, embedded as an
+out-of-process JSON-lines SDK worker (the same pattern as Legroom above).
+Enable it with a `memoriam` block:
 
 ```json
 {
-  "memory": true,
-  "memoryExtractor": {
-    "baseUrl": "http://127.0.0.1:8081",
-    "model": "mistralai/Ministral-3-3B-Instruct-2512"
+  "memoriam": {
+    "mode": "sdk",
+    "python": "/path/to/memoriam/.venv/bin/python",
+    "args": ["-m", "memoriam.integration.sdk_worker"],
+    "failOpen": true,
+    "timeoutMs": 30000,
+    "config": { "db_path": "~/.logician/memories.db" }
   }
 }
 ```
 
-The primary agent continues using `baseUrl` and `model`. Extraction runs through a durable SQLite-backed background queue, so it does not delay turn completion and unfinished jobs recover after restart. Evidence payloads are bounded and redacted before persistence. If the extractor endpoint is unavailable or returns invalid or ungrounded output, memory creation falls back to deterministic synthesis.
+Omit the block or set `"mode": "off"` to run without persistent memory.
+`failOpen` (default `true`) keeps the agent turn alive if the worker is
+unreachable or slow; `config.db_path` is the SQLite database path.
 
-## Local semantic memory retrieval
+Each turn, the worker retrieves a compact memory context and the runtime
+prepends it to the provider payload. `/memory` and `/obs` in the TUI drive the
+worker directly — listing, searching, consolidating, and clearing memories and
+observations. Memory retrieval searches both durable memories and the episodic
+observation store; current-session observations are never reinjected because
+they already exist in the active transcript, so retrieval surfaces prior
+sessions' knowledge instead.
 
-Semantic retrieval is optional and disabled by default. Enable it alongside memory with:
-
-```json
-{
-  "memory": true,
-  "memoryEmbeddings": true,
-  "memoryEmbeddingModel": "Xenova/all-MiniLM-L6-v2"
-}
-```
-
-The quantized embedding model loads lazily and is cached by the local Transformers runtime. Its first enablement may download model files. Logician continues using fast SQLite FTS retrieval while the model warms, then fuses lexical and semantic ranks without requiring a separate vector service. New episodes and consolidated memories are embedded in the background.
-
-Retrieved context injects compact summaries of relevant durable memories. The agent can call the read-only `memory_get` tool with up to 20 displayed memory or observation IDs when it needs complete rationale or evidence, keeping routine prompts smaller.
-
-Memory retrieval searches both durable memories and the episodic observation store, using reciprocal-rank fusion with task, file, phase, recency, and semantic signals. Durable memories are injected by default. Current-session observations are never reinjected because they already exist in the active transcript; up to three strongly relevant prior observations are used only when no durable memory answers the retrieval query. Every injected entry is a compact stable-ID card that can be expanded with `memory_get`.
-
-Model-extracted claims are probationary until corroborated by independent
-evidence. Retrieval outcome feedback updates a versioned contextual policy in
-shadow mode only, so learned recommendations cannot change prompts without a
-separate repeated evaluation gate. See
-[Evolving memory](../architecture/evolving-memory.md) for lifecycle, validity,
-security, and rollout details.
+See [Evolving memory](../architecture/evolving-memory.md) for lifecycle,
+validity, and consolidation details.
 
 ## Runtime settings
 

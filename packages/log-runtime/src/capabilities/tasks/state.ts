@@ -19,8 +19,8 @@ let tasks: Task[] = [];
 let nextTaskId = 1;
 const listeners = new Set<(tasks: Task[]) => void>();
 
-function snapshotTasks(): Task[] {
-	return tasks.map(task => ({
+function cloneTasks(source: readonly Task[] = tasks): Task[] {
+	return source.map(task => ({
 		...task,
 		blockedBy: task.blockedBy ? [...task.blockedBy] : undefined,
 		metadata: task.metadata ? { ...task.metadata } : undefined,
@@ -28,7 +28,7 @@ function snapshotTasks(): Task[] {
 }
 
 export function getTasks(): Task[] {
-	return snapshotTasks();
+	return cloneTasks();
 }
 
 export function onTodosChanged(cb: (tasks: Task[]) => void): () => void {
@@ -36,21 +36,44 @@ export function onTodosChanged(cb: (tasks: Task[]) => void): () => void {
 	return () => listeners.delete(cb);
 }
 
-/** Mutable list reserved for the todo tool's action handlers. */
-export function getTasksMutable(): Task[] {
-	return tasks;
+export interface TaskMutationContext {
+	tasks: Task[];
+	allocateId: () => number;
+	resetIds: () => void;
 }
 
-export function allocateTaskId(): number {
-	return nextTaskId++;
+export interface TaskMutationResult<T> {
+	value: T;
+	changed: boolean;
 }
 
-export function replaceTasks(next: Task[]): void {
-	tasks = next;
-	nextTaskId = 1;
-}
+/**
+ * Apply one atomic task-state transaction. Failed/no-op actions discard the
+ * draft and allocated ids; successful actions publish one immutable snapshot.
+ */
+export function mutateTasks<T>(
+	mutation: (context: TaskMutationContext) => TaskMutationResult<T>,
+): T {
+	const draft = cloneTasks();
+	let draftNextTaskId = nextTaskId;
+	const result = mutation({
+		tasks: draft,
+		allocateId: () => draftNextTaskId++,
+		resetIds: () => {
+			draftNextTaskId = 1;
+		},
+	});
+	if (!result.changed) return result.value;
 
-export function notifyTodosChanged(): void {
-	const snapshot = snapshotTasks();
-	for (const cb of listeners) cb(snapshot);
+	tasks = draft;
+	nextTaskId = draftNextTaskId;
+	const snapshot = cloneTasks();
+	for (const listener of listeners) {
+		try {
+			listener(cloneTasks(snapshot));
+		} catch (error) {
+			console.error("[todo] change listener failed:", error);
+		}
+	}
+	return result.value;
 }

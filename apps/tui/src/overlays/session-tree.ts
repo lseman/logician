@@ -62,11 +62,14 @@ export class SessionTreeOverlay implements Component {
 	show(sessionId?: string): void {
 		this.sessionId = sessionId ?? this.store?.getCurrentSessionId() ?? null;
 		const storeNodes = this.sessionId
-			? this.store?.getTurnTree(this.sessionId) ?? []
+			? (this.store?.getTurnTree(this.sessionId) ?? [])
 			: [];
 		this.nodes = this.buildFlatTree(storeNodes);
 		const current = this.nodes.findIndex(node => node.isCurrent);
-		this.selection.set(current >= 0 ? current : Math.max(0, this.nodes.length - 1), this.nodes.length);
+		this.selection.set(
+			current >= 0 ? current : Math.max(0, this.nodes.length - 1),
+			this.nodes.length,
+		);
 		this.summarySelection.set(0, 3);
 		this.selectedEntryId = null;
 		this.customPrompt = "";
@@ -120,7 +123,8 @@ export class SessionTreeOverlay implements Component {
 			return;
 		}
 		if (this.mode === "custom") return this.handleCustomInput(data);
-		const controller = this.mode === "tree" ? this.selection : this.summarySelection;
+		const controller =
+			this.mode === "tree" ? this.selection : this.summarySelection;
 		const count = this.mode === "tree" ? this.nodes.length : 3;
 		if (data === "\x1b[A" || data === "\x1bOA" || data === "k") {
 			controller.move(-1, count);
@@ -154,7 +158,8 @@ export class SessionTreeOverlay implements Component {
 
 	private handleCustomInput(data: string): void {
 		if (data === "\r" || data === "\n") {
-			if (this.customPrompt.trim()) this.navigate("custom", this.customPrompt.trim());
+			if (this.customPrompt.trim())
+				this.navigate("custom", this.customPrompt.trim());
 			return;
 		}
 		if (data === "\x7f" || data === "\b") {
@@ -165,7 +170,10 @@ export class SessionTreeOverlay implements Component {
 		this.invalidate();
 	}
 
-	private navigate(summaryMode: SessionTreeSummaryMode, customPrompt?: string): void {
+	private navigate(
+		summaryMode: SessionTreeSummaryMode,
+		customPrompt?: string,
+	): void {
 		if (!this.selectedEntryId) return;
 		this.actionCallback?.({
 			type: "navigate",
@@ -193,7 +201,9 @@ export class SessionTreeOverlay implements Component {
 		const lines: string[] = [`${header}${"─".repeat(width)}${RESET}`];
 
 		if (this.mode === "tree") {
-			lines.push(`${header} ${BOLD}Session Tree${RESET}${theme.fg("muted", "  ↑/↓ select · Enter navigate · Esc close")}`);
+			lines.push(
+				`${header} ${BOLD}Session Tree${RESET}${theme.fg("muted", "  ↑/↓ select · Enter navigate · Esc close")}`,
+			);
 			lines.push(renderSeparator(width));
 
 			const labelWidth = Math.max(1, width - POPUP_FRAME_OVERHEAD - 4);
@@ -210,9 +220,10 @@ export class SessionTreeOverlay implements Component {
 
 				// Truncate label to fit
 				const indicatorLen = branchIndicator.length;
-				const label = node.label.length > labelWidth - indicatorLen
-					? node.label.slice(0, labelWidth - indicatorLen - 1) + "…"
-					: node.label;
+				const label =
+					node.label.length > labelWidth - indicatorLen
+						? node.label.slice(0, labelWidth - indicatorLen - 1) + "…"
+						: node.label;
 
 				const line = `${isSelected ? theme.fg("selected", "> ") : "  "}${label}${branchIndicator}${node.isCurrent ? " ●" : ""}`;
 				lines.push(line);
@@ -222,17 +233,36 @@ export class SessionTreeOverlay implements Component {
 				lines.push(`  No completed turns in this session.`);
 			}
 		} else if (this.mode === "summary") {
-			const options = ["No summary", "Summarize", "Summarize with custom prompt"];
+			const options = [
+				"No summary",
+				"Summarize",
+				"Summarize with custom prompt",
+			];
 			lines.push(`${header} ${BOLD}Summarize abandoned branch?${RESET}`);
 			lines.push(renderSeparator(width));
 			for (const [index, option] of options.entries()) {
-				lines.push(renderStatusLine(`${index === this.summarySelection.index ? ">" : " "} ${option}`, Math.max(1, width - POPUP_FRAME_OVERHEAD)));
+				lines.push(
+					renderStatusLine(
+						`${index === this.summarySelection.index ? ">" : " "} ${option}`,
+						Math.max(1, width - POPUP_FRAME_OVERHEAD),
+					),
+				);
 			}
 		} else {
 			lines.push(`${header} ${BOLD}Custom summarization instructions${RESET}`);
 			lines.push(renderSeparator(width));
-			lines.push(renderStatusLine(`${this.customPrompt}${theme.fg("selected", "_")}`, Math.max(1, width - POPUP_FRAME_OVERHEAD)));
-			lines.push(renderStatusLine("Enter confirm · Esc back", Math.max(1, width - POPUP_FRAME_OVERHEAD)));
+			lines.push(
+				renderStatusLine(
+					`${this.customPrompt}${theme.fg("selected", "_")}`,
+					Math.max(1, width - POPUP_FRAME_OVERHEAD),
+				),
+			);
+			lines.push(
+				renderStatusLine(
+					"Enter confirm · Esc back",
+					Math.max(1, width - POPUP_FRAME_OVERHEAD),
+				),
+			);
 		}
 
 		lines.push(renderSeparator(width));

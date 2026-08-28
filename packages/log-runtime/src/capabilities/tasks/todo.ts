@@ -5,13 +5,13 @@
 
 import type { Tool } from "@logician/log-core";
 import {
-	allocateTaskId,
-	getTasksMutable,
-	notifyTodosChanged,
-	replaceTasks,
+	getTasks,
+	mutateTasks,
 	type Task,
+	type TaskMutationResult,
 	type TaskStatus,
 } from "./state.ts";
+import { hasDependencyCycle, resolvedDependents } from "./task-graph.ts";
 
 export type { Task, TaskStatus } from "./state.ts";
 export { getTasks, onTodosChanged } from "./state.ts";
@@ -32,6 +32,10 @@ const VALID_STATUSES: ReadonlySet<TaskStatus> = new Set([
 	"completed",
 	"deleted",
 ]);
+const ANSI_CSI_SEQUENCE = new RegExp(
+	`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
+	"g",
+);
 
 function validTransition(from: TaskStatus, to: TaskStatus): boolean {
 	// pending → in_progress, pending → completed (finish without starting)
@@ -47,99 +51,85 @@ function validTransition(from: TaskStatus, to: TaskStatus): boolean {
 	return false;
 }
 
-// Cycle detection via DFS
-function detectCycle(tasks: Task[], taskId: number): boolean {
-	const visited = new Set<number>();
-	const stack = new Set<number>();
+function unchanged(value: string): TaskMutationResult<string> {
+	return { value, changed: false };
+}
 
-	function dfs(id: number): boolean {
-		if (stack.has(id)) return true;
-		if (visited.has(id)) return false;
-		visited.add(id);
-		stack.add(id);
-		const task = tasks.find(t => t.id === id);
-		if (task?.blockedBy) {
-			for (const dep of task.blockedBy) {
-				if (dfs(dep)) return true;
-			}
-		}
-		stack.delete(id);
-		return false;
-	}
-
-	return dfs(taskId);
+function changed(value: string): TaskMutationResult<string> {
+	return { value, changed: true };
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 
 function stripNewlines(s: string): string {
 	return s
-		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+		.replace(ANSI_CSI_SEQUENCE, "")
 		.replace(/[\p{Cc}\p{Cf}]/gu, " ")
 		.replace(/\s+/g, " ")
 		.trim();
 }
 
 function actionCreate(params: Record<string, unknown>): string {
-	const tasks = getTasksMutable();
 	const subject = stripNewlines(String(params.subject ?? ""));
 	if (!subject) return "Error: subject is required for create.";
-
-	// Check for duplicate: if a non-deleted task with the same subject exists,
-	// tell the agent instead of creating a duplicate.
-	const existing = tasks.find(
-		t =>
-			t.status !== "deleted" &&
-			t.subject.toLowerCase() === subject.toLowerCase(),
-	);
-	if (existing) {
-		return `Task already on the list: #${existing.id} - ${existing.subject} (${existing.status})`;
+	if (
+		params.metadata !== undefined &&
+		(!params.metadata ||
+			typeof params.metadata !== "object" ||
+			Array.isArray(params.metadata))
+	) {
+		return "Error: metadata must be an object.";
 	}
 
-	const task: Task = {
-		id: allocateTaskId(),
-		subject,
-		status: "pending",
-	};
-
-	if (params.description) task.description = String(params.description);
-	if (params.activeForm)
-		task.activeForm = stripNewlines(String(params.activeForm));
-	if (params.owner) task.owner = stripNewlines(String(params.owner));
-	if (params.metadata)
-		task.metadata = params.metadata as Record<string, unknown>;
-
-	if (Array.isArray(params.blockedBy)) {
-		const blockedBy: number[] = [];
-		for (const depId of params.blockedBy) {
-			if (typeof depId !== "number") continue;
-			const dep = tasks.find(t => t.id === depId);
-			if (!dep) return `Error: blockedBy #${depId} not found.`;
-			if (dep.status === "deleted")
-				return `Error: blockedBy #${depId} is deleted.`;
-			blockedBy.push(depId);
+	return mutateTasks(({ tasks, allocateId }) => {
+		const existing = tasks.find(
+			task =>
+				task.status !== "deleted" &&
+				task.subject.toLowerCase() === subject.toLowerCase(),
+		);
+		if (existing) {
+			return unchanged(
+				`Task already on the list: #${existing.id} - ${existing.subject} (${existing.status})`,
+			);
 		}
-		if (blockedBy.length) {
-			task.blockedBy = blockedBy;
-			// Reject if adding these deps would create a cycle
-			if (detectCycle([...tasks, task], task.id)) {
-				task.blockedBy = undefined;
-				return "Error: blockedBy would create a dependency cycle.";
+
+		const task: Task = {
+			id: allocateId(),
+			subject,
+			status: "pending",
+		};
+		if (params.description) task.description = String(params.description);
+		if (params.activeForm)
+			task.activeForm = stripNewlines(String(params.activeForm));
+		if (params.owner) task.owner = stripNewlines(String(params.owner));
+		if (params.metadata)
+			task.metadata = { ...(params.metadata as Record<string, unknown>) };
+
+		if (Array.isArray(params.blockedBy)) {
+			const blockedBy: number[] = [];
+			for (const dependencyId of params.blockedBy) {
+				if (typeof dependencyId !== "number") continue;
+				const dependency = tasks.find(item => item.id === dependencyId);
+				if (!dependency)
+					return unchanged(`Error: blockedBy #${dependencyId} not found.`);
+				if (dependency.status === "deleted")
+					return unchanged(`Error: blockedBy #${dependencyId} is deleted.`);
+				if (!blockedBy.includes(dependencyId)) blockedBy.push(dependencyId);
+			}
+			if (blockedBy.length) task.blockedBy = blockedBy;
+			if (hasDependencyCycle([...tasks, task], task.id)) {
+				return unchanged("Error: blockedBy would create a dependency cycle.");
 			}
 		}
-	}
 
-	tasks.push(task);
-	return `Created task #${task.id}: ${subject}`;
+		tasks.push(task);
+		return changed(`Created task #${task.id}: ${subject}`);
+	});
 }
 
 function actionUpdate(params: Record<string, unknown>): string {
-	const tasks = getTasksMutable();
 	const id = params.id as number | undefined;
 	if (id === undefined) return "Error: id is required for update.";
-	const idx = tasks.findIndex(t => t.id === id);
-	if (idx === -1) return `Error: task #${id} not found.`;
-
 	const hasMutation =
 		params.subject !== undefined ||
 		params.description !== undefined ||
@@ -150,110 +140,111 @@ function actionUpdate(params: Record<string, unknown>): string {
 		params.addBlockedBy ||
 		params.removeBlockedBy;
 	if (!hasMutation) return "Error: update requires at least one mutable field.";
+	if (
+		params.metadata !== undefined &&
+		(!params.metadata ||
+			typeof params.metadata !== "object" ||
+			Array.isArray(params.metadata))
+	) {
+		return "Error: metadata must be an object.";
+	}
 
-	const task = tasks[idx];
-	let newStatus = task.status;
+	return mutateTasks(({ tasks }) => {
+		const index = tasks.findIndex(task => task.id === id);
+		if (index === -1) return unchanged(`Error: task #${id} not found.`);
+		const task = tasks[index];
+		let newStatus = task.status;
 
-	if (params.status !== undefined) {
-		const to = params.status as TaskStatus;
-		if (!VALID_STATUSES.has(to)) {
-			return `Error: invalid status '${to}'. Use: pending, in_progress, completed, deleted.`;
+		if (params.status !== undefined) {
+			const targetStatus = params.status as TaskStatus;
+			if (!VALID_STATUSES.has(targetStatus)) {
+				return unchanged(
+					`Error: invalid status '${targetStatus}'. Use: pending, in_progress, completed, deleted.`,
+				);
+			}
+			if (!validTransition(task.status, targetStatus)) {
+				return unchanged(
+					`Error: illegal status transition ${task.status} → ${targetStatus}.`,
+				);
+			}
+			newStatus = targetStatus;
 		}
-		if (!validTransition(task.status, to)) {
-			return `Error: illegal status transition ${task.status} → ${to}.`;
+
+		let newBlockedBy = task.blockedBy ? [...task.blockedBy] : [];
+		if (Array.isArray(params.removeBlockedBy)) {
+			const remove = new Set(params.removeBlockedBy);
+			newBlockedBy = newBlockedBy.filter(
+				dependencyId => !remove.has(dependencyId),
+			);
 		}
-		newStatus = to;
-	}
-
-	let newBlockedBy: number[] = task.blockedBy ? [...task.blockedBy] : [];
-
-	if (params.removeBlockedBy && Array.isArray(params.removeBlockedBy)) {
-		const removeSet = new Set(params.removeBlockedBy);
-		newBlockedBy = newBlockedBy.filter(d => !removeSet.has(d));
-	}
-
-	if (params.addBlockedBy && Array.isArray(params.addBlockedBy)) {
-		for (const depId of params.addBlockedBy) {
-			if (typeof depId !== "number") continue;
-			if (depId === id) return `Error: cannot block #${id} on itself.`;
-			const dep = tasks.find(t => t.id === depId);
-			if (!dep) return `Error: addBlockedBy #${depId} not found.`;
-			if (dep.status === "deleted")
-				return `Error: addBlockedBy #${depId} is deleted.`;
-			if (!newBlockedBy.includes(depId)) newBlockedBy.push(depId);
+		if (Array.isArray(params.addBlockedBy)) {
+			for (const dependencyId of params.addBlockedBy) {
+				if (typeof dependencyId !== "number") continue;
+				if (dependencyId === id)
+					return unchanged(`Error: cannot block #${id} on itself.`);
+				const dependency = tasks.find(item => item.id === dependencyId);
+				if (!dependency)
+					return unchanged(`Error: addBlockedBy #${dependencyId} not found.`);
+				if (dependency.status === "deleted")
+					return unchanged(`Error: addBlockedBy #${dependencyId} is deleted.`);
+				if (!newBlockedBy.includes(dependencyId))
+					newBlockedBy.push(dependencyId);
+			}
+			const candidate = { ...task, blockedBy: newBlockedBy };
+			const candidateTasks = [...tasks];
+			candidateTasks[index] = candidate;
+			if (hasDependencyCycle(candidateTasks, id)) {
+				return unchanged(
+					"Error: addBlockedBy would create a dependency cycle.",
+				);
+			}
 		}
-		// Check cycles
-		const candidate = { ...task, blockedBy: newBlockedBy };
-		if (
-			detectCycle(
-				[...tasks.slice(0, idx), candidate, ...tasks.slice(idx + 1)],
-				id,
-			)
-		) {
-			return "Error: addBlockedBy would create a dependency cycle.";
+
+		if (params.subject !== undefined) {
+			const newSubject = stripNewlines(String(params.subject));
+			if (!newSubject) return unchanged("Error: subject cannot be empty.");
+			task.subject = newSubject;
 		}
-	}
+		if (params.description !== undefined)
+			task.description = String(params.description);
+		if (params.activeForm !== undefined)
+			task.activeForm = stripNewlines(String(params.activeForm));
+		if (params.owner !== undefined)
+			task.owner = stripNewlines(String(params.owner));
 
-	// Apply mutations
-	if (params.subject !== undefined) {
-		const newSubject = stripNewlines(String(params.subject));
-		if (!newSubject) return "Error: subject cannot be empty.";
-		task.subject = newSubject;
-	}
-	if (params.description !== undefined)
-		task.description = String(params.description);
-	if (params.activeForm !== undefined)
-		task.activeForm = stripNewlines(String(params.activeForm));
-	if (params.owner !== undefined)
-		task.owner = stripNewlines(String(params.owner));
-
-	// Metadata merge (null removes key)
-	if (params.metadata !== undefined) {
-		const merged = { ...(task.metadata ?? {}) };
-		for (const [k, v] of Object.entries(
-			params.metadata as Record<string, unknown>,
-		)) {
-			if (v === null) delete merged[k];
-			else merged[k] = v;
+		if (params.metadata !== undefined) {
+			const merged = { ...(task.metadata ?? {}) };
+			for (const [key, value] of Object.entries(
+				params.metadata as Record<string, unknown>,
+			)) {
+				if (value === null) delete merged[key];
+				else merged[key] = value;
+			}
+			task.metadata = Object.keys(merged).length ? merged : undefined;
 		}
-		task.metadata = Object.keys(merged).length ? merged : undefined;
-	}
 
-	// Update status and blockedBy
-	const statusWas = task.status;
-	task.status = newStatus;
-	if (newBlockedBy.length) task.blockedBy = newBlockedBy;
-	else task.blockedBy = undefined;
+		const statusWas = task.status;
+		task.status = newStatus;
+		task.blockedBy = newBlockedBy.length ? newBlockedBy : undefined;
+		const dependents =
+			statusWas !== "completed" && newStatus === "completed"
+				? resolvedDependents(tasks, id)
+				: [];
 
-	// Auto-complete dependent tasks: if this task was completed and some tasks
-	// blocked by it have no other blockers, unblock them.
-	const dependents = tasks.filter(
-		t =>
-			t.status === "in_progress" &&
-			t.blockedBy?.includes(id) &&
-			t.blockedBy.every(d => {
-				const dep = tasks.find(x => x.id === d);
-				return dep?.status === "completed" || dep?.id === id;
-			}),
-	);
-
-	const lines: string[] = [];
-	lines.push(`Updated task #${id}: ${task.subject}`);
-	if (statusWas !== newStatus) {
-		lines.push(`  Status: ${statusWas} → ${newStatus}`);
-	}
-	if (dependents.length) {
-		for (const dep of dependents) {
-			lines.push(`  → Unblocked #${dep.id}: ${dep.subject}`);
-			dep.status = "pending";
+		const lines = [`Updated task #${id}: ${task.subject}`];
+		if (statusWas !== newStatus)
+			lines.push(`  Status: ${statusWas} → ${newStatus}`);
+		for (const dependent of dependents) {
+			lines.push(`  → Unblocked #${dependent.id}: ${dependent.subject}`);
+			dependent.status = "pending";
 		}
-	}
 
-	return lines.join("\n");
+		return changed(lines.join("\n"));
+	});
 }
 
 function actionList(params: Record<string, unknown>): string {
-	const tasks = getTasksMutable();
+	const tasks = getTasks();
 	let filtered = [...tasks];
 	const status = params.status as TaskStatus | undefined;
 	const includeDeleted = params.includeDeleted === true;
@@ -293,26 +284,26 @@ function actionList(params: Record<string, unknown>): string {
 
 	if (groups.in_progress.length > 0) {
 		lines.push("── In Progress ──");
-		groups.in_progress.forEach(t => lines.push(fmt(t)));
+		for (const task of groups.in_progress) lines.push(fmt(task));
 	}
 	if (groups.pending.length > 0) {
 		lines.push("── Pending ──");
-		groups.pending.forEach(t => lines.push(fmt(t)));
+		for (const task of groups.pending) lines.push(fmt(task));
 	}
 	if (groups.completed.length > 0 && includeDeleted) {
 		lines.push("── Completed ──");
-		groups.completed.forEach(t => lines.push(fmt(t)));
+		for (const task of groups.completed) lines.push(fmt(task));
 	}
 	if (groups.deleted.length > 0) {
 		lines.push("── Deleted ──");
-		groups.deleted.forEach(t => lines.push(fmt(t)));
+		for (const task of groups.deleted) lines.push(fmt(task));
 	}
 
 	return lines.join("\n");
 }
 
 function actionGet(params: Record<string, unknown>): string {
-	const tasks = getTasksMutable();
+	const tasks = getTasks();
 	const id = params.id as number | undefined;
 	if (id === undefined) return "Error: id is required for get.";
 	const task = tasks.find(t => t.id === id);
@@ -332,29 +323,34 @@ function actionGet(params: Record<string, unknown>): string {
 }
 
 function actionDelete(params: Record<string, unknown>): string {
-	const tasks = getTasksMutable();
 	const id = params.id as number | undefined;
 	if (id === undefined) return "Error: id is required for delete.";
-	const idx = tasks.findIndex(t => t.id === id);
-	if (idx === -1) return `Error: task #${id} not found.`;
-	if (tasks[idx].status === "deleted")
-		return `Error: task #${id} is already deleted.`;
+	return mutateTasks(({ tasks }) => {
+		const task = tasks.find(item => item.id === id);
+		if (!task) return unchanged(`Error: task #${id} not found.`);
+		if (task.status === "deleted")
+			return unchanged(`Error: task #${id} is already deleted.`);
 
-	tasks[idx].status = "deleted";
-	// Remove from any other task's blockedBy
-	for (const t of tasks) {
-		if (t.blockedBy?.includes(id)) {
-			t.blockedBy = t.blockedBy.filter(d => d !== id);
+		task.status = "deleted";
+		for (const dependent of tasks) {
+			if (dependent.blockedBy?.includes(id)) {
+				dependent.blockedBy = dependent.blockedBy.filter(
+					dependencyId => dependencyId !== id,
+				);
+				if (dependent.blockedBy.length === 0) dependent.blockedBy = undefined;
+			}
 		}
-	}
-
-	return `Deleted task #${id}: ${tasks[idx].subject}`;
+		return changed(`Deleted task #${id}: ${task.subject}`);
+	});
 }
 
 function actionClear(): string {
-	const count = getTasksMutable().length;
-	replaceTasks([]);
-	return `Cleared ${count} task(s).`;
+	return mutateTasks(({ tasks, resetIds }) => {
+		const count = tasks.length;
+		tasks.length = 0;
+		resetIds();
+		return { value: `Cleared ${count} task(s).`, changed: count > 0 };
+	});
 }
 
 // ── Tool definition ──────────────────────────────────────────────────────────
@@ -491,7 +487,6 @@ export const todo_tool: Tool = {
 				return `Error: unknown action '${action}'. Use: create, update, list, get, delete, clear.`;
 		}
 
-		notifyTodosChanged();
 		return result;
 	},
 };

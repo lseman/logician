@@ -28,7 +28,6 @@ async function workspacePackageRoots(workspaceRoot: string): Promise<string[]> {
 			roots.push(path.join(parent, entry.name));
 		}
 	}
-	roots.push(path.join(workspaceRoot, "ecosystem", "memoriam"));
 	return roots;
 }
 

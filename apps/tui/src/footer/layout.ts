@@ -74,11 +74,17 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 	) {
 		base.animationIntervalMs = obj.animationIntervalMs;
 	}
-	if (typeof obj.defaultTextColor === "string") {
-		base.defaultTextColor = obj.defaultTextColor as any;
+	if (
+		typeof obj.defaultTextColor === "string" &&
+		theme.hasColor(obj.defaultTextColor)
+	) {
+		base.defaultTextColor = obj.defaultTextColor;
 	}
-	if (typeof obj.defaultIconColor === "string") {
-		base.defaultIconColor = obj.defaultIconColor as any;
+	if (
+		typeof obj.defaultIconColor === "string" &&
+		theme.hasColor(obj.defaultIconColor)
+	) {
+		base.defaultIconColor = obj.defaultIconColor;
 	}
 
 	// Merge per-widget layouts
@@ -100,10 +106,10 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 					layout.row = w.row;
 				if (typeof w.position === "number") layout.position = w.position;
 				if (w.align === "left" || w.align === "middle" || w.align === "right") {
-					layout.align = w.align as any;
+					layout.align = w.align;
 				}
 				if (w.fill === "none" || w.fill === "grow") {
-					layout.fill = w.fill as any;
+					layout.fill = w.fill;
 				}
 				if (typeof w.minWidth === "number" && w.minWidth > 0) {
 					layout.minWidth = w.minWidth;
@@ -253,7 +259,10 @@ function layoutWidgets(
 
 const SEP = ` ${DIM}│${RESET} `;
 const SEP_WIDTH = 3;
-const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_RE = new RegExp(
+	`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
+	"g",
+);
 
 function renderWidget(
 	widget: GroupedWidget,
@@ -317,7 +326,6 @@ function renderGroupedRow(
 		permission: 13,
 		rtk: 14,
 		legroom: 15,
-		memory: 16,
 	};
 	while (visibleWidth(line) > width && visibleWidgets.length > 3) {
 		let dropIndex = -1;
@@ -667,6 +675,12 @@ export class StatusBar implements Component {
 		}
 		this.tick = 0;
 		this._invalidate();
+	}
+
+	dispose(): void {
+		if (this._timer) clearInterval(this._timer);
+		this._timer = null;
+		this.onInvalidate = null;
 	}
 
 	// ── Component.render ───────────────────────────────────────────────────

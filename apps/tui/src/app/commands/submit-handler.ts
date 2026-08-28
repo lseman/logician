@@ -226,15 +226,11 @@ export function createSlashSubmitHandler(
 					const { spawnSync } = await import("node:child_process");
 					const { existsSync } = await import("node:fs");
 					const pathMod = await import("node:path");
-					const bwrapPath = process.env.PATH?.split(pathMod.delimiter).find(d =>
-						existsSync(pathMod.join(d, "bwrap")),
-					)
-						? pathMod.join(
-								process.env.PATH?.split(pathMod.delimiter).find(d =>
-									existsSync(pathMod.join(d, "bwrap")),
-								)!,
-								"bwrap",
-							)
+					const bwrapDirectory = (process.env.PATH ?? "")
+						.split(pathMod.delimiter)
+						.find(d => existsSync(pathMod.join(d, "bwrap")));
+					const bwrapPath = bwrapDirectory
+						? pathMod.join(bwrapDirectory, "bwrap")
 						: null;
 
 					let bwrapVersion = "unknown";

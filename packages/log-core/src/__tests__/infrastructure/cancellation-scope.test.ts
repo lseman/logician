@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	CancellationError,
 	CancellationScope,
-} from "../../runtime/control/cancellation-scope.ts";
+} from "../../system/lifecycle/cancellation-scope.ts";
 
 describe("CancellationScope", () => {
 	test("propagates a parent reason and detaches through close", async () => {

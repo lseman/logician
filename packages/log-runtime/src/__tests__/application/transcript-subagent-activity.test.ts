@@ -322,3 +322,53 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 	assert.equal(chunks[2].tool?.resultPreview, "file contents");
 	assert.equal(chunks[3].contentText, "Inspection complete.");
 });
+
+void test("subagent mutations repair malformed restored detail collections", () => {
+	const transcript = new Transcript();
+	transcript.addTurn("Delegate");
+	transcript.handleEvent({
+		type: "tool_execution_start",
+		toolName: "spawn_agents",
+		toolCallId: "batch",
+		args: { tasks: [{ agent: "explorer", task: "Inspect it" }] },
+	});
+	const tool = transcript.getAssistantTools(transcript.getTurns()[0])[0];
+	tool.details = {
+		childChunks: "invalid restored value",
+		childToolCalls: { invalid: true },
+		taskStatus: [],
+	};
+
+	transcript.handleEvent({
+		type: "notice",
+		level: "info",
+		label: "↳ explorer-1",
+		text: "▶ read-1 read_file path=src/index.ts",
+	});
+	transcript.handleEvent({
+		type: "subagent_chunk",
+		agentId: "explorer-1",
+		taskIndex: 0,
+		seq: 1,
+		kind: "content",
+		delta: "Inspecting.",
+	});
+	transcript.handleEvent({
+		type: "subagent_lifecycle",
+		phase: "start",
+		agentId: "explorer-1",
+		agent: "explorer",
+		task: "Inspect it",
+		taskIndex: 0,
+	});
+
+	assert.equal(Array.isArray(tool.details?.childToolCalls), true);
+	assert.equal(Array.isArray(tool.details?.childChunks), true);
+	const taskStatus = tool.details?.taskStatus as Record<
+		number,
+		{ agentId: string; status: string; startedAt: number }
+	>;
+	assert.equal(taskStatus[0].agentId, "explorer-1");
+	assert.equal(taskStatus[0].status, "running");
+	assert.equal(typeof taskStatus[0].startedAt, "number");
+});
