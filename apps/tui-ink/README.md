@@ -43,7 +43,6 @@ This is a separate Ink-based TUI implementation for Logician, coexisting alongsi
 | `Ctrl+Y` or `Ctrl+Shift+Z` | Redo |
 | `Ctrl+Shift+V` or `Ctrl+_` | Paste from kill ring |
 | `Ctrl+←` `Ctrl+→` | Jump by word (left / right) |
-| `Ctrl+K` | Kill to end of line |
 | `PageUp` / `Ctrl+U` | Scroll up in transcript |
 | `PageDown` / `Ctrl+D` | Scroll down (follow mode) |
 | `Home` | Toggle follow mode (auto-scroll) |
@@ -187,11 +186,10 @@ from the session manager.
 ### Deferred (parity phase)
 
 
-- [ ] Subagent chunk rendering
+- [ ] Subagent chunk rendering (child agent thinking/content/tool flow)
 - [ ] Todo bar, work surface, steer-queue status widget
 - [ ] Goal runner + plan-mode approval flow
 - [ ] Autoresearch dashboard live data; MCP / plugin manager CRUD
-- [ ] Undo/redo + kill-ring in the input bar
 - [ ] Virtualization for large overlay lists
 - [ ] Trust-prompt overlay; headless exec mode
 
