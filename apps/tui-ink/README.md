@@ -36,8 +36,13 @@ This is a separate Ink-based TUI implementation for Logician, coexisting alongsi
 | `Escape` | Close overlay (or interrupt the running turn) |
 | `Ctrl+C` | Exit TUI |
 | `←` `→` `Ctrl+A` `Ctrl+E` | Move cursor / home / end |
-| `Ctrl+U` | Clear input (or Page Up in transcript) |
-| `Ctrl+W` | Delete previous word |
+| `Ctrl+U` | Clear input to cursor (pushes to kill ring) |
+| `Ctrl+W` | Delete previous word (pushes to kill ring) |
+| `Ctrl+K` | Kill to end of line (pushes to kill ring) |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Y` or `Ctrl+Shift+Z` | Redo |
+| `Ctrl+Shift+V` or `Ctrl+_` | Paste from kill ring |
+| `Ctrl+←` `Ctrl+→` | Jump by word (left / right) |
 | `Ctrl+K` | Kill to end of line |
 | `PageUp` / `Ctrl+U` | Scroll up in transcript |
 | `PageDown` / `Ctrl+D` | Scroll down (follow mode) |
@@ -175,6 +180,9 @@ from the session manager.
       and "↓ new output below" indicator
 - [x] Markdown rendering: headings, bold/italic, code blocks with syntax
       highlighting (via emphasize), tables, lists, blockquotes, links
+- [x] Input bar: undo/redo stack (Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z), kill ring
+      (Ctrl+U/W/K push to ring, Ctrl+Shift+V paste), word navigation
+      (Ctrl+Left/Right)
 
 ### Deferred (parity phase)
 

@@ -1,4 +1,4 @@
-// ── Ink TUI — Input Bar ───────────────────────────────────────────────────────
+// ── Ink TUI — Input Bar (with undo/redo + kill ring) ─────────────────────────
 
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
@@ -12,6 +12,67 @@ interface InputBarProps {
 	placeholder?: string;
 }
 
+// ── Undo/Redo Stack ──────────────────────────────────────────────────────────
+
+interface UndoEntry {
+	value: string;
+	cursor: number;
+}
+
+class UndoStack {
+	private past: UndoEntry[] = [];
+	private future: UndoEntry[] = [];
+
+	push(entry: UndoEntry): void {
+		this.past.push(entry);
+		this.future = []; // clear redo on new edit
+	}
+
+	undo(): UndoEntry | null {
+		if (this.past.length <= 1) return null;
+		const current = this.past.pop()!;
+		const previous = this.past[this.past.length - 1]!;
+		this.future.push(current);
+		return previous;
+	}
+
+	redo(): UndoEntry | null {
+		if (this.future.length === 0) return null;
+		const next = this.future.pop()!;
+		this.past.push(next);
+		return next;
+	}
+
+	get length(): number {
+		return this.past.length;
+	}
+}
+
+// ── Kill Ring ────────────────────────────────────────────────────────────────
+
+class KillRing {
+	private entries: string[] = [];
+	private latest: string | null = null; // text from most recent kill
+
+	push(text: string): void {
+		if (!text) return;
+		this.entries.push(text);
+		if (this.entries.length > 20) this.entries.shift();
+		this.latest = text;
+	}
+
+	paste(): string | null {
+		if (this.entries.length === 0) return null;
+		return this.entries[this.entries.length - 1]!;
+	}
+
+	get latestKill(): string | null {
+		return this.latest;
+	}
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 /** Index of the start of the word left of `pos` (whitespace-delimited). */
 function wordStartLeft(text: string, pos: number): number {
 	let i = pos;
@@ -19,6 +80,23 @@ function wordStartLeft(text: string, pos: number): number {
 	while (i > 0 && !/\s/.test(text[i - 1]!)) i--;
 	return i;
 }
+
+/** Index of the start of the word right of `pos` (whitespace-delimited). */
+function wordStartRight(text: string, pos: number): number {
+	let i = pos;
+	while (i < text.length && /\s/.test(text[i]!)) i++;
+	while (i < text.length && !/\s/.test(text[i]!)) i++;
+	return i;
+}
+
+// ── Shared singleton instances ───────────────────────────────────────────────
+
+const undoStack = new UndoStack();
+const killRing = new KillRing();
+
+export { undoStack, killRing };
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export const InputBar: React.FC<InputBarProps> = ({
 	value,
@@ -31,6 +109,8 @@ export const InputBar: React.FC<InputBarProps> = ({
 	const [cursor, setCursor] = useState(0);
 	const safeCursor = Math.min(cursor, value.length);
 
+	const saveState = (): UndoEntry => ({ value, cursor: safeCursor });
+
 	const setBoth = (next: string, nextCursor: number): void => {
 		onValueChange(next);
 		setCursor(Math.max(0, Math.min(nextCursor, next.length)));
@@ -40,13 +120,24 @@ export const InputBar: React.FC<InputBarProps> = ({
 		(input, key) => {
 			if (key.return) {
 				onSubmit();
-				setCursor(0);
 				return;
 			}
 
-			// Cursor movement
+			// ── Undo / Redo ────────────────────────────────────────────────
+			if (key.ctrl && input === "z") {
+				const entry = undoStack.undo();
+				if (entry) setBoth(entry.value, Math.min(entry.cursor, entry.value.length));
+				return;
+			}
+			if ((key.ctrl && key.shift && input === "z") || (key.ctrl && input === "y")) {
+				const entry = undoStack.redo();
+				if (entry) setBoth(entry.value, Math.min(entry.cursor, entry.value.length));
+				return;
+			}
+
+			// ── Cursor movement ────────────────────────────────────────────
 			if (key.leftArrow) {
-				setCursor(c => Math.max(0, Math.min(c, value.length) - 1));
+				setCursor(c => Math.max(0, c - 1));
 				return;
 			}
 			if (key.rightArrow) {
@@ -62,45 +153,99 @@ export const InputBar: React.FC<InputBarProps> = ({
 				return;
 			}
 
-			// Deletion
+			// Word navigation
+			if (key.ctrl && key.leftArrow) {
+				const start = wordStartLeft(value, safeCursor);
+				setBoth(value, start);
+				return;
+			}
+			if (key.ctrl && key.rightArrow) {
+				const end = wordStartRight(value, safeCursor);
+				setBoth(value, end);
+				return;
+			}
+
+			// ── Deletion with kill ring ────────────────────────────────────
 			if (key.backspace) {
 				if (safeCursor > 0) {
+					const deleted = value[safeCursor - 1]!;
+					const snapshot = saveState();
 					setBoth(
 						value.slice(0, safeCursor - 1) + value.slice(safeCursor),
 						safeCursor - 1,
 					);
+					undoStack.push(snapshot);
+					killRing.push(deleted);
 				}
 				return;
 			}
 			if (key.delete) {
-				// Some terminals map the Backspace key to `delete`.
+				const snapshot = saveState();
 				if (safeCursor > 0 && safeCursor >= value.length) {
 					setBoth(value.slice(0, safeCursor - 1), safeCursor - 1);
+					undoStack.push(snapshot);
+					killRing.push(value[safeCursor - 1]!);
 				} else if (safeCursor < value.length) {
-					setBoth(value.slice(0, safeCursor) + value.slice(safeCursor + 1), safeCursor);
+					const deleted = value.slice(safeCursor, safeCursor + 1);
+					setBoth(
+						value.slice(0, safeCursor) + value.slice(safeCursor + 1),
+						safeCursor,
+					);
+					undoStack.push(snapshot);
+					killRing.push(deleted);
 				}
 				return;
 			}
+
+			// Kill operations (push to kill ring)
 			if (key.ctrl && input === "u") {
+				const killed = value.slice(0, safeCursor);
+				const snapshot = saveState();
 				setBoth("", 0);
+				undoStack.push(snapshot);
+				killRing.push(killed);
 				return;
 			}
 			if (key.ctrl && input === "w") {
 				const start = wordStartLeft(value, safeCursor);
+				const killed = value.slice(start, safeCursor);
+				const snapshot = saveState();
 				setBoth(value.slice(0, start) + value.slice(safeCursor), start);
+				undoStack.push(snapshot);
+				killRing.push(killed);
 				return;
 			}
 			if (key.ctrl && input === "k") {
+				const killed = value.slice(safeCursor);
+				const snapshot = saveState();
 				setBoth(value.slice(0, safeCursor), safeCursor);
+				undoStack.push(snapshot);
+				killRing.push(killed);
 				return;
 			}
 
-			// Printable input (ignore other control chords)
+			// Paste from kill ring (Ctrl+Shift+V or Ctrl+_ on some layouts)
+			if ((key.ctrl && key.shift && input === "v") || (key.ctrl && input === "_")) {
+				const pasted = killRing.paste();
+				if (pasted) {
+					const snapshot = saveState();
+					setBoth(
+						value.slice(0, safeCursor) + pasted + value.slice(safeCursor),
+						safeCursor + pasted.length,
+					);
+					undoStack.push(snapshot);
+				}
+				return;
+			}
+
+			// ── Printable input ────────────────────────────────────────────
 			if (input && !key.ctrl && !key.meta && !key.escape) {
+				const snapshot = saveState();
 				setBoth(
 					value.slice(0, safeCursor) + input + value.slice(safeCursor),
 					safeCursor + input.length,
 				);
+				undoStack.push(snapshot);
 			}
 		},
 		{ isActive },
