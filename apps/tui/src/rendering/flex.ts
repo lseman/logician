@@ -1,17 +1,12 @@
 // ── Flex — single flexbox-style stack ──────────────────────────────────────
-// One implementation covers both directions: `direction: "column"` stacks
-// children top-to-bottom, while `"row"` composes them left-to-right on shared
-// rows. Only "column" has a live caller today, but the
-// layout engine (rendering/layout.ts) already models both as one node type
-// (`StackLayoutNode.type: "vstack" | "hstack"`), so keeping "row" here costs
-// nothing and avoids re-deriving the algorithm if a row layout is needed.
+// `direction: "column"` stacks children top-to-bottom, `"row"` composes them
+// left-to-right; the choice only selects the `StackLayoutNode.type`
+// (`"vstack" | "hstack"`) emitted from `[LAYOUT_NODE]()`. Flex has no render
+// path of its own — the layout engine (rendering/layout.ts) consumes the node
+// and drives sizing through `allocateFlexSizes`. Outside the layout engine it
+// falls back to `Container`'s naive vertical concatenation.
 
-import {
-	type Component,
-	Container,
-	compositeTuiLine,
-	visibleWidth,
-} from "../terminal/primitives.ts";
+import { type Component, Container } from "../terminal/primitives.ts";
 import {
 	LAYOUT_NODE,
 	type LayoutViewport,
@@ -111,90 +106,6 @@ export class Flex extends Container {
 			gap: this.gap,
 			align: this.align,
 		};
-	}
-
-	override render(width: number): string[] {
-		return this.direction === "column"
-			? this.renderColumn(width)
-			: this.renderRow(width);
-	}
-
-	private renderColumn(width: number): string[] {
-		const viewport = {
-			width: Math.max(1, width),
-			height: Number.MAX_SAFE_INTEGER,
-		};
-		const entries = visibleFlexEntries(this.entries, viewport);
-		const rendered = entries.map(entry =>
-			entry.component.render(viewport.width),
-		);
-		const sizes = allocateFlexSizes(
-			entries,
-			rendered.map(lines => lines.length),
-			undefined,
-			this.gap,
-		);
-		const lines: string[] = [];
-		for (let index = 0; index < entries.length; index++) {
-			if (index > 0) {
-				for (let gap = 0; gap < this.gap; gap++) lines.push("");
-			}
-			const size = sizes[index] ?? 0;
-			const childLines = (rendered[index] ?? []).slice(0, size);
-			lines.push(...childLines);
-			for (let padding = childLines.length; padding < size; padding++)
-				lines.push("");
-		}
-		return lines;
-	}
-
-	private renderRow(width: number): string[] {
-		const safeWidth = Math.max(1, width);
-		const viewport = { width: safeWidth, height: Number.MAX_SAFE_INTEGER };
-		const entries = visibleFlexEntries(this.entries, viewport);
-		if (entries.length === 0) return [];
-
-		const intrinsicWidths = entries.map(entry => {
-			const lines = entry.component.render(safeWidth);
-			return lines.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
-		});
-		const widths = allocateFlexSizes(
-			entries,
-			intrinsicWidths,
-			safeWidth,
-			this.gap,
-		);
-		const rendered = entries.map((entry, index) => {
-			const width = widths[index] ?? 0;
-			return width === 0 ? [] : entry.component.render(width);
-		});
-		const height = rendered.reduce(
-			(max, lines) => Math.max(max, lines.length),
-			0,
-		);
-		const result = Array.from({ length: height }, () => "");
-		let x = 0;
-		for (let index = 0; index < rendered.length; index++) {
-			const lines = rendered[index] ?? [];
-			const childWidth = widths[index] ?? 0;
-			let offset = 0;
-			if (this.align === "center")
-				offset = Math.floor((height - lines.length) / 2);
-			else if (this.align === "end") offset = height - lines.length;
-			for (let row = 0; row < lines.length; row++) {
-				const target = row + offset;
-				if (target < 0 || target >= result.length) continue;
-				result[target] = compositeTuiLine(
-					result[target] ?? "",
-					lines[row] ?? "",
-					x,
-					childWidth,
-					safeWidth,
-				);
-			}
-			x += childWidth + this.gap;
-		}
-		return result;
 	}
 }
 

@@ -1,7 +1,7 @@
 {
-	"production|lint/correctness/noUnusedVariables": 13,
+	"production|lint/correctness/noUnusedVariables": 12,
 	"production|lint/correctness/noVoidTypeReturn": 5,
-	"production|lint/style/noNonNullAssertion": 11,
+	"production|lint/style/noNonNullAssertion": 6,
 	"production|lint/suspicious/noAssignInExpressions": 2,
 	"production|lint/suspicious/noControlCharactersInRegex": 11,
 	"production|lint/suspicious/noExplicitAny": 4,

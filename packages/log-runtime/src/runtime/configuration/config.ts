@@ -4,7 +4,9 @@ import {
 	type AgentModelConfig,
 	INFERENCE_MODE_ORDER,
 	isValidInferenceMode,
+	THINKING_FORMATS,
 	THINKING_LEVELS,
+	type ThinkingFormat,
 	type ThinkingLevel,
 	type TruncationConfig,
 } from "@logician/log-core";
@@ -30,6 +32,7 @@ const KNOWN_KEYS = new Set([
 	"maxTokens",
 	"maxIterations",
 	"thinkingLevel",
+	"thinkingFormat",
 	"executionProfile",
 	"autoRetryEnabled",
 	"maxRetries",
@@ -365,6 +368,15 @@ export function validateConfig(
 				`"thinkingLevel" must be one of: ${THINKING_LEVELS.join(", ")}.`,
 			);
 		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
+	}
+	if (obj.thinkingFormat !== undefined) {
+		const fmt = configString(obj.thinkingFormat);
+		if (!fmt || !THINKING_FORMATS.includes(fmt as ThinkingFormat)) {
+			warn(
+				warnings,
+				`"thinkingFormat" must be one of: ${THINKING_FORMATS.join(", ")}.`,
+			);
+		} else cfg.thinkingFormat = fmt as LogicianTuiConfig["thinkingFormat"];
 	}
 
 	if (obj.reasoner !== undefined) {
@@ -833,6 +845,7 @@ export interface LogicianTuiConfig {
 	maxTokens?: number;
 	maxIterations?: number;
 	thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	thinkingFormat?: "qwen" | "qwen-chat-template";
 	executionProfile?: "autonomous" | "minimal";
 	toolExecution?: "sequential" | "parallel";
 	contextWindow?: number;

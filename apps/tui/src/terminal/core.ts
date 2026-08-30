@@ -1,6 +1,7 @@
 // ── Minimal TUI core ──────────────────────────────────────────────────────────
 // Differential rendering engine — minimal, no external deps
 
+export { normalizeKeyboardInput } from "./input-protocol.ts";
 export type { OverlayHandle, OverlayOptions } from "./overlay-types.ts";
 // Component/Container/CURSOR_MARKER/ANSI string utilities live in
 // primitives.ts, which the layout engine (rendering/layout.ts and its
@@ -35,6 +36,11 @@ import {
 	type LayoutRect,
 	renderLayoutFrame,
 } from "../rendering/layout.ts";
+import {
+	normalizeKeyboardInput,
+	parseSgrMouseInput,
+	splitNavigationBatch,
+} from "./input-protocol.ts";
 import { OverlayManager } from "./overlay-manager.ts";
 import type {
 	OverlayAnchor,
@@ -70,32 +76,6 @@ const EMPTY_RENDERER_METRICS: RendererMetrics = {
 	layoutTimeMs: 0,
 	writeTimeMs: 0,
 };
-
-/**
- * Translate Kitty CSI-u Ctrl+letter reports back to the C0 bytes consumed by
- * existing keybindings. Ctrl+I and Ctrl+M stay encoded so they remain
- * distinguishable from Tab and Enter and can reach their dedicated bindings.
- */
-export function normalizeKeyboardInput(data: string): string {
-	return data
-		.replace(CSI_ESCAPE_KEY, ESCAPE)
-		.replace(CSI_CTRL_KEY, (sequence, codepointText: string) => {
-			const codepoint = Number(codepointText);
-			const lowerCodepoint =
-				codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
-			if (lowerCodepoint === 105 || lowerCodepoint === 109) return sequence;
-			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
-			return String.fromCharCode(lowerCodepoint & 0x1f);
-		});
-}
-
-const ESCAPE = String.fromCharCode(27);
-const CSI_ESCAPE_KEY = new RegExp(`${ESCAPE}\\[27(?:;1)?u`, "g");
-const CSI_CTRL_KEY = new RegExp(`${ESCAPE}\\[(\\d+);([56])u`, "g");
-const CSI_NAVIGATION_KEY = new RegExp(
-	`${ESCAPE}\\[(?:5~|6~|1;5H|1;5F|H|F)`,
-	"g",
-);
 
 import { Buffer } from "node:buffer";
 import { appendFileSync } from "node:fs";
@@ -393,60 +373,39 @@ export class TUI extends Container {
 		// Handle SGR mouse events: \x1b[<button;column;row(M|m). A single stdin read
 		// can batch several wheel ticks; coalesce them into one scroll so fast wheel
 		// spins move proportionally without queuing a render per tick.
-		if (data.startsWith("\x1b[<")) {
-			const re = new RegExp(`${ESCAPE}\\[<(\\d+);(\\d+);(\\d+)([Mm])`, "g");
-			let net = 0; // +down / -up, in wheel ticks
-			let consumed = 0;
+		const mouse = parseSgrMouseInput(data);
+		if (mouse) {
 			let clicked = false;
-			let wheelColumn = 0;
-			let wheelRow = 0;
-			let match = re.exec(data);
-			while (match) {
-				const btn = parseInt(match[1], 10);
-				const column = parseInt(match[2], 10) - 1;
-				const row = parseInt(match[3], 10) - 1;
-				if (btn === 64) {
-					net -= 1; // wheel up → older content
-					wheelColumn = column;
-					wheelRow = row;
-				} else if (btn === 65) {
-					net += 1; // wheel down → newer content
-					wheelColumn = column;
-					wheelRow = row;
-				} else if (btn === 0 && match[4] === "M") {
-					if (this.layoutRoot) {
-						clicked =
-							this.routeClick(column, row, hasVisibleOverlay) || clicked;
-					} else if (
-						!hasVisibleOverlay &&
-						row >= 0 &&
-						row < this._viewportHeight
-					) {
-						clicked =
-							this.scrollableComponent?.handleMouse?.(column, row) === true ||
-							clicked;
-					}
+			for (const { column, row } of mouse.clicks) {
+				if (this.layoutRoot) {
+					clicked = this.routeClick(column, row, hasVisibleOverlay) || clicked;
+				} else if (
+					!hasVisibleOverlay &&
+					row >= 0 &&
+					row < this._viewportHeight
+				) {
+					clicked =
+						this.scrollableComponent?.handleMouse?.(column, row) === true ||
+						clicked;
 				}
-				consumed += match[0].length;
-				match = re.exec(data);
 			}
 			// Pure mouse chunk → apply coalesced scroll once, then stop.
-			if (net !== 0 && consumed === data.length) {
+			if (mouse.wheel.ticks !== 0 && mouse.consumedLength === data.length) {
 				if (this.layoutRoot) {
 					// ScrollView.scrollBy: positive moves toward the end (down),
 					// negative toward the start (up) — same sign as `net` already
 					// uses (wheel up is -1, wheel down is +1), so no negation here.
-					const delta = net * TUI.WHEEL_STEP;
-					this.routeWheel(wheelColumn, wheelRow, delta);
-				} else if (net > 0) {
-					this.scrollDown(net * TUI.WHEEL_STEP);
+					const delta = mouse.wheel.ticks * TUI.WHEEL_STEP;
+					this.routeWheel(mouse.wheel.column, mouse.wheel.row, delta);
+				} else if (mouse.wheel.ticks > 0) {
+					this.scrollDown(mouse.wheel.ticks * TUI.WHEEL_STEP);
 				} else {
-					this.scrollUp(-net * TUI.WHEEL_STEP);
+					this.scrollUp(-mouse.wheel.ticks * TUI.WHEEL_STEP);
 				}
 				return;
 			}
-			if (clicked && consumed === data.length) return;
-			if (consumed === data.length) return; // mouse-only chunk, nothing to scroll
+			if (clicked && mouse.consumedLength === data.length) return;
+			if (mouse.consumedLength === data.length) return;
 		}
 
 		// Fast repeated key presses (PageUp/PageDown/Home/End, held or double-
@@ -457,8 +416,8 @@ export class TUI extends Container {
 		// sequences one at a time when the whole chunk is made of 2+ of them.
 		// Arrow keys are excluded — input-bar.ts already splits and handles a
 		// pure arrow-key batch with input/history-navigation semantics.
-		const navBatch = data.match(CSI_NAVIGATION_KEY);
-		if (navBatch && navBatch.length > 1 && navBatch.join("") === data) {
+		const navBatch = splitNavigationBatch(data);
+		if (navBatch) {
 			for (const key of navBatch) this.handleInput(key);
 			return;
 		}

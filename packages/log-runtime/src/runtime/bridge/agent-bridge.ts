@@ -259,6 +259,7 @@ export class AgentRuntime {
 			baseUrl: opts.baseUrl,
 			model: opts.model,
 			chatTemplate: opts.chatTemplate,
+			thinkingFormat: opts.thinkingFormat,
 		});
 		if (opts.thinkingLevel) {
 			this.backend.setDefaultThinkingLevel(opts.thinkingLevel);

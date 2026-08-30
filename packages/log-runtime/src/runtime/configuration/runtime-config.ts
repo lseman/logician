@@ -114,6 +114,7 @@ export function resolveRuntimeConfig(
 			maxTokens: configNumber(config.maxTokens),
 			maxIterations: configNumber(config.maxIterations),
 			thinkingLevel: config.thinkingLevel,
+			thinkingFormat: config.thinkingFormat,
 			inferenceMode: config.inferenceMode,
 			executionProfile: config.executionProfile,
 			toolExecution:

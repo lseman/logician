@@ -30,6 +30,19 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
 	"xhigh",
 ];
 
+/**
+ * Wire format for thinking control on OpenAI-compatible chat-completions
+ * endpoints (mirrors pi's compat.thinkingFormat). Needed because hybrid-
+ * thinking models (Qwen3 family) default to thinking ON in their chat
+ * templates, so "off" must be an explicit disable rather than an omission.
+ */
+export type ThinkingFormat = "qwen" | "qwen-chat-template";
+
+export const THINKING_FORMATS: readonly ThinkingFormat[] = [
+	"qwen",
+	"qwen-chat-template",
+];
+
 export const VALID_TOOL_EXECUTION: readonly string[] = [
 	"sequential",
 	"parallel",

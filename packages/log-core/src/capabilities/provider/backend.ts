@@ -2,7 +2,10 @@
 // OpenAI-compatible HTTP client for streaming LLM responses.
 // Mirrors Python LlamaCppClient/VLLMClient but simplified for TS.
 
-import type { ThinkingLevel } from "../../system/types/types-config.ts";
+import type {
+	ThinkingFormat,
+	ThinkingLevel,
+} from "../../system/types/types-config.ts";
 import type { ToolCall } from "../../system/types/types-messages.ts";
 
 // ── Typed backend errors ───────────────────────────────────────────────────
@@ -306,6 +309,7 @@ export function createLLMBackend(options: {
 	chatTemplate?: string;
 	stop?: string[];
 	thinkingLevel?: ThinkingLevel;
+	thinkingFormat?: ThinkingFormat;
 }): LLMBackend {
 	return new OpenAIBackend(options);
 }
@@ -316,6 +320,7 @@ export class OpenAIBackend implements LLMBackend {
 	private chatTemplate?: string;
 	private stop?: string[];
 	private defaultThinkingLevel: ThinkingLevel = "off";
+	private thinkingFormat?: ThinkingFormat;
 
 	constructor(options: {
 		baseUrl: string;
@@ -323,12 +328,14 @@ export class OpenAIBackend implements LLMBackend {
 		chatTemplate?: string;
 		stop?: string[];
 		thinkingLevel?: ThinkingLevel;
+		thinkingFormat?: ThinkingFormat;
 	}) {
 		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.model = options.model;
 		this.chatTemplate = options.chatTemplate;
 		this.stop = options.stop;
 		this.defaultThinkingLevel = options.thinkingLevel ?? "off";
+		this.thinkingFormat = options.thinkingFormat;
 	}
 
 	/** Clone this backend bound to a different model (LLMBackend.withModel). */
@@ -339,6 +346,7 @@ export class OpenAIBackend implements LLMBackend {
 			chatTemplate: this.chatTemplate,
 			stop: this.stop,
 			thinkingLevel: this.defaultThinkingLevel,
+			thinkingFormat: this.thinkingFormat,
 		});
 	}
 
@@ -349,6 +357,7 @@ export class OpenAIBackend implements LLMBackend {
 			chatTemplate: this.chatTemplate,
 			stop: this.stop,
 			thinkingLevel: this.defaultThinkingLevel,
+			thinkingFormat: this.thinkingFormat,
 		});
 	}
 
@@ -414,11 +423,25 @@ export class OpenAIBackend implements LLMBackend {
 			}),
 		};
 
-		// Pass reasoning/thinking level to OpenAI-compatible providers.
-		// "off" = omit reasoning field entirely.
+		// Pass thinking control to OpenAI-compatible chat-completions providers.
 		const effectiveLevel = thinkingLevel ?? this.defaultThinkingLevel;
-		if (effectiveLevel !== "off") {
-			body.reasoning = { effort: effectiveLevel };
+		if (this.thinkingFormat === "qwen") {
+			// Qwen3-family hybrid-thinking models (e.g. served by llama.cpp)
+			// default to thinking ON in their chat templates, so "off" must be
+			// an explicit disable — omission leaves the server default in place.
+			body.enable_thinking = effectiveLevel !== "off";
+			if (effectiveLevel !== "off") {
+				body.reasoning_effort = effectiveLevel;
+			}
+		} else if (this.thinkingFormat === "qwen-chat-template") {
+			// Older llama.cpp builds only expose the chat template kwargs.
+			body.chat_template_kwargs = {
+				enable_thinking: effectiveLevel !== "off",
+				preserve_thinking: true,
+			};
+		} else if (effectiveLevel !== "off") {
+			// Top-level field for /v1/chat/completions (GPT-5, vLLM, llama.cpp).
+			body.reasoning_effort = effectiveLevel;
 		}
 
 		if (tools && tools.length > 0) {

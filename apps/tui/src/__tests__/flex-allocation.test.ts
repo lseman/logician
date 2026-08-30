@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { allocateFlexSizes, Flex } from "../rendering/flex.ts";
+import { allocateFlexSizes } from "../rendering/flex.ts";
 import type { StackLayoutEntry } from "../rendering/layout-node.ts";
-import { type Component, visibleWidth } from "../terminal/primitives.ts";
+import type { Component } from "../terminal/primitives.ts";
 
 const component: Component = { render: () => [] };
 const entry = (
@@ -44,18 +44,13 @@ test("scaled shrink stays proportional and respects minimum sizes", () => {
 	).toEqual([5, 10]);
 });
 
-test("row rendering remains width-safe after allocation", () => {
-	const left: Component = { render: width => ["L".repeat(width)] };
-	const right: Component = { render: width => ["R".repeat(width)] };
-	const flex = new Flex(
-		[
-			{ component: left, basis: 0, grow: 1 },
-			{ component: right, basis: 0, grow: 1 },
-		],
-		{ direction: "row", gap: 1 },
+test("allocation fills exactly the width left by the gap", () => {
+	const widths = allocateFlexSizes(
+		[entry({ basis: 0, grow: 1 }), entry({ basis: 0, grow: 1 })],
+		[0, 0],
+		11,
+		1,
 	);
-	const [line] = flex.render(11);
-	expect(visibleWidth(line ?? "")).toBe(11);
-	expect(line).toContain("LLLLL");
-	expect(line).toContain("RRRRR");
+	expect(widths).toEqual([5, 5]);
+	expect(widths.reduce((sum, w) => sum + w, 0) + 1).toBe(11);
 });

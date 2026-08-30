@@ -1,6 +1,7 @@
 import type {
 	AgentConfig,
 	AgentModelConfig,
+	ThinkingFormat,
 	Tool,
 	TruncationConfig,
 	WebSearchConfig,
@@ -94,6 +95,8 @@ export interface AgentBridgeOptions {
 	maxTokens?: number;
 	maxIterations?: number;
 	thinkingLevel?: AgentConfig["thinkingLevel"];
+	/** Wire format for thinking control on the LLM endpoint (pi compat.thinkingFormat). */
+	thinkingFormat?: ThinkingFormat;
 	inferenceMode?: AgentConfig["inferenceMode"];
 	executionProfile?: AgentConfig["executionProfile"];
 	contextWindowTokens?: number;
