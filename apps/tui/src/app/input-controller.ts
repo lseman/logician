@@ -5,6 +5,7 @@ import {
 	type SlashCommandDef,
 } from "@logician/log-runtime/commands";
 import { beginPendingTurn } from "../state/turn-state.ts";
+import { logInputTrace } from "../terminal/input-protocol.ts";
 import type { LogicianTUI } from "./tui.ts";
 
 /** Ctrl+Enter encodings emitted by terminals with CSI-u or modifyOtherKeys. */
@@ -87,6 +88,29 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 
 	// Global input listener
 	ctx.tui.addInputListener((data: string) => {
+		if (data === "\x03" || data === "\x1b") {
+			logInputTrace("interrupt-route", data, {
+				active: ctx.hasActiveTurn(),
+				bridgeActive: ctx.bridge.isActive(),
+				phase: ctx.turnState.phase,
+			});
+		}
+		// Raw-mode Ctrl+C is a byte, not necessarily SIGINT. Interrupt active work;
+		// while idle, preserve the conventional Ctrl+C exit behavior.
+		if (data === "\x03") {
+			if (ctx.hasActiveTurn()) void ctx.cancelActiveTurn();
+			else ctx.requestExit();
+			return { consume: true };
+		}
+
+		// Match pi's active-run behavior: one Escape interrupts immediately,
+		// regardless of focus or overlays. When idle, let the normal overlay and
+		// focused-composer routes handle Escape for dismiss/clear semantics.
+		if (data === "\x1b" && ctx.hasActiveTurn()) {
+			void ctx.cancelActiveTurn();
+			return { consume: true };
+		}
+
 		if (ctx.pluginManager.isVisibleOverlay()) {
 			const action = ctx.pluginManager.handleInput(data);
 			if (action) {

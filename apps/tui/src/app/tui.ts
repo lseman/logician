@@ -75,7 +75,11 @@ import { ScrollView } from "../rendering/scroll-view.ts";
 import { Separator } from "../rendering/separator.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { NewOutputIndicator } from "../rendering/transcript/new-output-indicator.ts";
-import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
+import {
+	INITIAL_TURN_STATE,
+	type TurnState,
+	turnPhaseIsActive,
+} from "../state/turn-state.ts";
 import {
 	NotificationCenter,
 	type NotificationLevel,
@@ -207,8 +211,12 @@ export class LogicianTUI {
 		this.notifications.show(message, level);
 	}
 
+	hasActiveTurn(): boolean {
+		return this.bridge.isActive() || turnPhaseIsActive(this.turnState.phase);
+	}
+
 	async cancelActiveTurn(): Promise<void> {
-		if (this.cancellationPending || !this.bridge.isActive()) return;
+		if (this.cancellationPending || !this.hasActiveTurn()) return;
 		this.cancellationPending = true;
 		this.pendingPermission = null;
 		const activeTurn = this.transcript.getTurns().at(-1);

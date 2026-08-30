@@ -37,29 +37,29 @@ export const PermissionPopup: React.FC<PermissionPopupProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.warning as string}
+			borderColor={theme.fg.warning}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={48}
 		>
-			<Text color={theme.fg.warning as string} bold>
+			<Text color={theme.fg.warning} bold>
 				⚠ Permission required
 			</Text>
-			<Text color={theme.fg.primary as string}>{`Tool: ${toolName}`}</Text>
+			<Text color={theme.fg.text}>{`Tool: ${toolName}`}</Text>
 			{preview ? (
-				<Text color={theme.fg.secondary as string} wrap="truncate-end">
+				<Text color={theme.fg.muted} wrap="truncate-end">
 					{preview}
 				</Text>
 			) : null}
 			<Box flexDirection="row">
-				<Text color={theme.fg.success as string} bold>
+				<Text color={theme.fg.success} bold>
 					{"[a] allow once  "}
 				</Text>
-				<Text color={theme.fg.info as string} bold>
+				<Text color={theme.fg.info} bold>
 					{"[s] always  "}
 				</Text>
-				<Text color={theme.fg.error as string} bold>
+				<Text color={theme.fg.error} bold>
 					{"[d] deny"}
 				</Text>
 			</Box>

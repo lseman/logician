@@ -100,6 +100,32 @@ import { runInPty, screenFromPtyResult } from "../testing/pty-harness.ts";
 const repoRoot = path.resolve(import.meta.dirname, "../../../..");
 const bun = process.execPath;
 const entry = path.join(repoRoot, "apps", "tui", "src", "index.ts");
+void test("raw Ctrl+C exits an idle TUI", async () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-interrupt-"));
+	const themeDir = path.join(home, ".logician", "themes");
+	mkdirSync(themeDir, { recursive: true });
+	writeFileSync(path.join(themeDir, "dark.json"), DARK_THEME_JSON);
+	const result = await runInPty({
+		command: bun,
+		args: ["run", entry],
+		cwd: repoRoot,
+		env: {
+			HOME: home,
+			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
+			LOGICIAN_MCP: "0",
+			LOGICIAN_HOOKS: "0",
+			LOGICIAN_MODEL: "test-model",
+		},
+		actions: [{ afterMs: 500, send: "\x03" }],
+		timeoutMs: 4_000,
+		columns: 120,
+		rows: 32,
+	});
+
+	assert.equal(result.exitCode, 0);
+});
+
 void test("TUI starts in a real terminal and Ctrl+M opens mode selection", async () => {
 	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
 	const themeDir = path.join(home, ".logician", "themes");
@@ -319,6 +345,36 @@ void test("Escape reaches the dialog owner before the core overlay fallback", ()
 
 	assert.equal(dismissed, true);
 	assert.equal(dialog.visible, false);
+});
+
+void test("raw interrupt keys reach a consuming global listener exactly once", () => {
+	const tui = new TUI({} as NodeJS.WriteStream);
+	const received: string[] = [];
+	let focusedCalls = 0;
+	const focused: Component & {
+		focused: boolean;
+		handleInput(data: string): void;
+	} = {
+		focused: false,
+		render: () => [],
+		handleInput: () => {
+			focusedCalls++;
+		},
+	};
+	tui.setFocus(focused);
+	tui.addInputListener(data => {
+		received.push(data);
+		return { consume: true };
+	});
+
+	const handleInput = (
+		tui as unknown as { handleInput(data: string): void }
+	).handleInput.bind(tui);
+	handleInput(normalizeKeyboardInput("\x1b[27u"));
+	handleInput(normalizeKeyboardInput("\x1b[99;5u"));
+
+	assert.deepEqual(received, ["\x1b", "\x03"]);
+	assert.equal(focusedCalls, 0);
 });
 
 void test("bringToFront moves an existing overlay above later registrations", () => {

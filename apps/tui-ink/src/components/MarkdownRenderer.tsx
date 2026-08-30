@@ -1,7 +1,8 @@
 // ── Ink TUI — Markdown Renderer (synchronous) ────────────────────────────────
-// Renders markdown as Ink React components using marked's lexer (AST).
-// Supports: headings, bold, italic, code spans, fenced code blocks, lists,
-// blockquotes, links, horizontal rules, paragraphs, tables.
+// Renders markdown with the same semantic color tokens as the old TUI:
+//   mdHeading, mdCode, mdCodeBlock, mdCodeBlockBg, mdCodeBlockBorder,
+//   mdLink, mdQuote, mdListBullet, jsonKey/jsonString/jsonNumber/
+//   jsonKeyword/jsonPunctuation, diffAdded/diffRemoved/diffHunk/diffMeta.
 
 import React from "react";
 import { Box, Text } from "ink";
@@ -21,7 +22,63 @@ function ensureHighlight(): void {
 	}
 }
 
-/** Render a code block with optional syntax highlighting. */
+/** Colorize a single inline token for the old TUI's renderInline behavior. */
+function colorizeInlineToken(
+	token: any,
+	baseColor: string | undefined,
+	opts: RenderOptions,
+): React.ReactNode[] {
+	const theme = getCurrentTheme();
+	switch (token.type) {
+		case "text":
+			return [
+				<Text key={token.raw} color={baseColor} wrap="wrap">
+					{String(token.text ?? "").slice(0, opts.maxLength || 4000)}
+				</Text>,
+			];
+
+		case "strong":
+			return [
+				<Text key={token.raw} bold color={baseColor} wrap="wrap">
+					{colorizeInlineToken(token.tokens || [], baseColor, opts)}
+				</Text>,
+			];
+
+		case "em":
+			return [
+				<Text key={token.raw} color={baseColor} italic wrap="wrap">
+					{colorizeInlineToken(token.tokens || [], baseColor, opts)}
+				</Text>,
+			];
+
+		case "codespan": {
+			const code = String(token.text ?? "");
+			return [
+				<Text key={token.raw} color={theme.fg.mdCode} bold wrap="wrap">
+					{`\`${code}\``}
+				</Text>,
+			];
+		}
+
+		case "link": {
+			const text = String(token.text || token.href);
+			return [
+				<Text key={token.raw} color={theme.fg.mdLink} wrap="wrap">
+					{text}
+				</Text>,
+			];
+		}
+
+		default:
+			return [
+				<Text key={token.raw} color={baseColor} wrap="wrap">
+					{String(token.text ?? "")}
+				</Text>,
+			];
+	}
+}
+
+/** Render a code block with syntax highlighting, matching old TUI style. */
 function renderCodeBlock(code: string, lang: string): React.ReactNode[] {
 	const lines = code.split("\n");
 	if (!highlightFn || !lang) {
@@ -43,74 +100,46 @@ function renderCodeBlock(code: string, lang: string): React.ReactNode[] {
 	}
 }
 
-// ── AST walker → React nodes ────────────────────────────────────────────────
+// ── Heading styles — per-level color + decoration (matches old TUI) ──────────
+
+interface HeadingStyle {
+	color: string | undefined;
+	decoration: "bold-underline" | "bold" | "dim" | "none";
+}
+
+function getHeadingStyles(): HeadingStyle[] {
+	const theme = getCurrentTheme();
+	return [
+		{ color: theme.fg.mdHeading, decoration: "bold-underline" }, // H1
+		{ color: theme.fg.accent, decoration: "bold" },              // H2
+		{ color: theme.fg.mdHeading, decoration: "bold" },           // H3
+		{ color: theme.fg.warning, decoration: "none" },             // H4
+		{ color: theme.fg.muted, decoration: "none" },               // H5
+		{ color: theme.fg.dim, decoration: "dim" },                  // H6
+	];
+}
+
+// ── Block-level token rendering ──────────────────────────────────────────────
 
 interface RenderOptions {
 	maxLength?: number;
-}
-
-function renderInlineTokens(tokens: any[], opts: RenderOptions): React.ReactNode[] {
-	if (!tokens) return [];
-	const theme = getCurrentTheme();
-	return tokens.map((token: any) => {
-		switch (token.type) {
-			case "text":
-				return (
-					<Text key={token.raw} wrap="wrap">
-						{String(token.text ?? "").slice(0, opts.maxLength || 4000)}
-					</Text>
-				);
-
-			case "strong":
-				return (
-					<Text key={token.raw} bold wrap="wrap">
-						{renderInlineTokens(token.tokens || [], opts)}
-					</Text>
-				);
-
-			case "em":
-				return (
-					<Text key={token.raw} dimColor wrap="wrap">
-						{renderInlineTokens(token.tokens || [], opts)}
-					</Text>
-				);
-
-			case "codespan":
-				return (
-					<Text key={token.raw} color={theme.fg.info as string} wrap="wrap">
-						{String(token.text ?? "")}
-					</Text>
-				);
-
-			case "link":
-				return (
-					<Text key={token.raw} color={theme.fg.accent as string} wrap="wrap">
-						{String(token.text || token.href)}
-					</Text>
-				);
-
-			default:
-				return (
-					<Text key={token.raw} wrap="wrap">
-						{String(token.text ?? "")}
-					</Text>
-				);
-		}
-	});
+	baseColor?: string; // base text color for inline content (e.g. assistantText)
 }
 
 function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 	const theme = getCurrentTheme();
 	const maxLen = opts.maxLength || 4000;
+	const baseColor = opts.baseColor ?? theme.fg.text ?? "";
 
 	switch (token.type) {
 		case "heading": {
 			const depth = token.depth || 1;
+			const style = getHeadingStyles()[Math.min(depth - 1, 5)];
+			const marker = depth <= 2 ? "▌ " : "";
 			return (
 				<Box key={token.raw} flexDirection="column" marginBottom={1}>
-					<Text color={theme.fg.accent as string} bold wrap="wrap">
-						{"#".repeat(depth)} {" "}
-						{renderInlineTokens(token.tokens || [], opts)}
+					<Text color={style.color} bold wrap="wrap">
+						{marker}{renderInlineTokens(token.tokens || [], baseColor, opts)}
 					</Text>
 				</Box>
 			);
@@ -121,8 +150,8 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 			if (!text) return null;
 			return (
 				<Box key={token.raw} flexDirection="column" marginBottom={1}>
-					<Text color={theme.fg.primary as string} wrap="wrap">
-						{renderInlineTokens(token.tokens || [], opts)}
+					<Text color={baseColor} wrap="wrap">
+						{renderInlineTokens(token.tokens || [], baseColor, opts)}
 					</Text>
 				</Box>
 			);
@@ -132,8 +161,26 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 			const lines = renderCodeBlock(token.text, token.lang || "");
 			return (
 				<Box key={token.raw} flexDirection="column" marginBottom={1}>
-					<Box borderStyle="single" borderColor={theme.fg.muted as string} paddingX={1}>
+					<Box borderStyle="single" borderColor={theme.fg.mdCodeBlockBorder} paddingX={1}>
 						{lines}
+					</Box>
+				</Box>
+			);
+		}
+
+		case "code-block": {
+			const fenceLang = token.lang || "";
+			const lines = renderCodeBlock(token.text, fenceLang);
+			return (
+				<Box key={token.raw} flexDirection="column" marginBottom={1}>
+					<Box borderStyle="single" borderColor={theme.fg.mdCodeBlockBorder} paddingX={1}>
+						<Text color={theme.fg.dim} dimColor wrap="wrap">
+							{"┌─ "}{fenceLang || "code"}
+						</Text>
+						{lines}
+						<Text color={theme.fg.dim} dimColor wrap="wrap">
+							{"\n└─ "}{token.text.split("\n").length} line{token.text.split("\n").length === 1 ? "" : "s"}
+						</Text>
 					</Box>
 				</Box>
 			);
@@ -142,7 +189,7 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 		case "list": {
 			return (
 				<Box key={token.raw} flexDirection="column" marginBottom={1}>
-					{(token.items || []).map((item: any, i: number) => renderListItem(item, opts))}
+					{(token.items || []).map((item: any, i: number) => renderListItem(item, baseColor, opts))}
 				</Box>
 			);
 		}
@@ -150,9 +197,9 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 		case "blockquote": {
 			return (
 				<Box key={token.raw} flexDirection="column" marginBottom={1} paddingLeft={2}>
-					<Text color={theme.fg.secondary as string} wrap="wrap">
-						{"│ "}
-						{renderInlineTokens(token.tokens || [], opts)}
+					<Text color={theme.fg.mdQuote} dimColor wrap="wrap">
+						{"▏ "}
+						{renderInlineTokens(token.tokens || [], baseColor, opts)}
 					</Text>
 				</Box>
 			);
@@ -161,7 +208,7 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 		case "hr":
 			return (
 				<Box key={token.raw} marginBottom={1}>
-					<Text color={theme.fg.muted as string} wrap="wrap">{"─".repeat(40)}</Text>
+					<Text color={theme.fg.dim} dimColor wrap="wrap">{"─".repeat(40)}</Text>
 				</Box>
 			);
 
@@ -171,34 +218,74 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 			if (headerCells.length === 0) return null;
 
 			const lines: React.ReactNode[] = [];
+			const borderColor = theme.fg.borderMuted;
+
+			// Top frame
+			lines.push(
+				<Box key="top" flexDirection="row">
+					<Text color={borderColor} wrap="wrap">{"┌"}</Text>
+					{headerCells.map((_: any, i: number) => (
+						<Text key={`top-${i}`} color={borderColor} wrap="wrap">{"─".repeat(20)}</Text>
+					))}
+					<Text key="top-r" color={borderColor} wrap="wrap">{"┐"}</Text>
+				</Box>,
+			);
+
+			// Header row
 			lines.push(
 				<Box key="hdr" flexDirection="row">
+					<Text color={borderColor} wrap="wrap">{"│"}</Text>
 					{headerCells.map((cell: any, i: number) => (
-						<Text key={i} color={theme.fg.accent as string} bold wrap="truncate-end">
-							{String(cell.text ?? "").slice(0, 30)}{"\t"}
+						<Text key={i} color={theme.fg.assistantText} bold wrap="truncate-end">
+							{` ${String(cell.text ?? "").slice(0, 30)} `}
 						</Text>
 					))}
+					<Text color={borderColor} wrap="wrap">{"│"}</Text>
 				</Box>,
 			);
+
+			// Separator
 			lines.push(
 				<Box key="sep" flexDirection="row">
-					<Text color={theme.fg.muted as string} wrap="wrap">{"─".repeat(Math.min(80, headerCells.length * 20))}</Text>
+					<Text color={borderColor} wrap="wrap">{"├"}</Text>
+					{headerCells.map((_: any, i: number) => (
+						<Text key={`sep-${i}`} color={borderColor} wrap="wrap">{"─".repeat(20)}</Text>
+					))}
+					<Text key="sep-r" color={borderColor} wrap="wrap">{"┤"}</Text>
 				</Box>,
 			);
+
+			// Data rows
 			for (const row of rows.slice(0, 20)) {
+				const isAlt = rows.indexOf(row) % 2 === 1;
+				const rowColor = isAlt ? theme.fg.dim : theme.fg.assistantText;
 				lines.push(
-					<Box key={`row-${row[0]}`} flexDirection="row">
+					<Box key={`row-${rows.indexOf(row)}`} flexDirection="row">
+						<Text color={borderColor} wrap="wrap">{"│"}</Text>
 						{row.map((cell: any, i: number) => (
-							<Text key={i} color={theme.fg.primary as string} wrap="truncate-end">
-								{String(cell ?? "").slice(0, 30)}{"\t"}
+							<Text key={i} color={rowColor} wrap="truncate-end">
+								{` ${String(cell ?? "").slice(0, 30)} `}
 							</Text>
 						))}
+						<Text color={borderColor} wrap="wrap">{"│"}</Text>
 					</Box>,
 				);
 			}
+
+			// Bottom frame
+			lines.push(
+				<Box key="bot" flexDirection="row">
+					<Text color={borderColor} wrap="wrap">{"└"}</Text>
+					{headerCells.map((_: any, i: number) => (
+						<Text key={`bot-${i}`} color={borderColor} wrap="wrap">{"─".repeat(20)}</Text>
+					))}
+					<Text key="bot-r" color={borderColor} wrap="wrap">{"┘"}</Text>
+				</Box>,
+			);
+
 			if (rows.length > 20) {
 				lines.push(
-					<Text key="more" color={theme.fg.muted as string} wrap="wrap">
+					<Text key="more" color={theme.fg.dim} dimColor wrap="wrap">
 						{`… ${rows.length - 20} more rows`}
 					</Text>,
 				);
@@ -215,7 +302,7 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 			const text = String(token.text ?? "").slice(0, maxLen);
 			if (!text) return null;
 			return (
-				<Text key={token.raw} color={theme.fg.primary as string} wrap="wrap">
+				<Text key={token.raw} color={baseColor} wrap="wrap">
 					{text}
 				</Text>
 			);
@@ -223,17 +310,70 @@ function renderToken(token: any, opts: RenderOptions): React.ReactNode {
 	}
 }
 
-function renderListItem(item: any, opts: RenderOptions): React.ReactNode {
+function renderListItem(item: any, baseColor: string, opts: RenderOptions): React.ReactNode {
 	const theme = getCurrentTheme();
 	const marker = item.ordered ? `${item.start || 1}.` : "•";
 	return (
 		<Box key={item.raw} flexDirection="row" marginBottom={0}>
-			<Text color={theme.fg.secondary as string} bold>{marker}</Text>
-			<Text color={theme.fg.primary as string} wrap="wrap">
-				{" "}{renderInlineTokens(item.tokens || [], opts)}
+			<Text color={theme.fg.mdListBullet} bold>{marker}</Text>
+			<Text color={baseColor} wrap="wrap">
+				{" "}{renderInlineTokens(item.tokens || [], baseColor, opts)}
 			</Text>
 		</Box>
 	);
+}
+
+function renderInlineTokens(tokens: any[], baseColor: string | undefined, opts: RenderOptions): React.ReactNode {
+	if (!tokens) return [];
+	return tokens.map((token: any) => {
+		switch (token.type) {
+			case "text":
+				return (
+					<Text key={token.raw} color={baseColor} wrap="wrap">
+						{String(token.text ?? "").slice(0, opts.maxLength || 4000)}
+					</Text>
+				);
+
+			case "strong":
+				return (
+					<Text key={token.raw} bold color={baseColor} wrap="wrap">
+						{renderInlineTokens(token.tokens || [], baseColor, opts)}
+					</Text>
+				);
+
+			case "em":
+				return (
+					<Text key={token.raw} color={baseColor} italic wrap="wrap">
+						{renderInlineTokens(token.tokens || [], baseColor, opts)}
+					</Text>
+				);
+
+			case "codespan": {
+				const code = String(token.text ?? "");
+				return (
+					<Text key={token.raw} color={getCurrentTheme().fg.mdCode} bold wrap="wrap">
+						{`\`${code}\``}
+					</Text>
+				);
+			}
+
+			case "link": {
+				const text = String(token.text || token.href);
+				return (
+					<Text key={token.raw} color={getCurrentTheme().fg.mdLink} wrap="wrap">
+						{text}
+					</Text>
+				);
+			}
+
+			default:
+				return (
+					<Text key={token.raw} color={baseColor} wrap="wrap">
+						{String(token.text ?? "")}
+					</Text>
+				);
+		}
+	});
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -243,6 +383,8 @@ export interface MarkdownRendererProps {
 	markdown: string;
 	/** Max characters to render (truncation). */
 	maxLength?: number;
+	/** Base color for content text (defaults to assistantText). */
+	baseColor?: string;
 }
 
 /**
@@ -252,22 +394,24 @@ export interface MarkdownRendererProps {
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 	markdown,
 	maxLength = 4000,
+	baseColor,
 }) => {
 	ensureHighlight();
 
 	const theme = getCurrentTheme();
 	const truncated = markdown.length > maxLength ? markdown.slice(0, maxLength) + "…" : markdown;
+	const effectiveBaseColor = baseColor ?? theme.fg.assistantText;
 
 	try {
 		const tokens = marked.lexer(truncated, { gfm: true });
 		return (
 			<Box flexDirection="column">
-				{tokens.map(token => renderToken(token, { maxLength }))}
+				{tokens.map(token => renderToken(token, { maxLength, baseColor: effectiveBaseColor }))}
 			</Box>
 		);
 	} catch {
 		return (
-			<Text color={theme.fg.primary as string} wrap="wrap">
+			<Text color={effectiveBaseColor} wrap="wrap">
 				{truncated}
 			</Text>
 		);

@@ -13,7 +13,7 @@ import { buildSlashCommands, dispatchSlash } from "../slash.ts";
 import { listFileSuggestions } from "../utils.ts";
 import { TranscriptDisplay } from "./TranscriptDisplay.tsx";
 import { InputBar } from "./InputBar.tsx";
-import { StatusBar } from "./StatusBar.tsx";
+import { FooterBar } from "./FooterBar.tsx";
 import { SlashPopup } from "../overlays/SlashPopup.tsx";
 import { ChoicePopup } from "../overlays/ChoicePopup.tsx";
 import { PermissionPopup } from "../overlays/PermissionPopup.tsx";
@@ -232,10 +232,6 @@ export const App: React.FC<AppProps> = ({
 				</Box>
 			)}
 
-			<Box>
-				<Text color={theme.fg.secondary}>{"─".repeat(Math.min(width, 120))}</Text>
-			</Box>
-
 			<Box flexDirection="row">
 				<Text color={theme.fg.accent} bold>
 					{state.workflowMode === "plan" ? "plan> " : "> "}
@@ -248,7 +244,7 @@ export const App: React.FC<AppProps> = ({
 				/>
 			</Box>
 
-			<StatusBar state={state} config={config} width={width} />
+			<FooterBar state={state} config={config} width={width} />
 
 			{overlay === "slash" && (
 				<SlashPopup

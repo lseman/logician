@@ -261,10 +261,10 @@ export const InputBar: React.FC<InputBarProps> = ({
 			{value.length === 0 ? (
 				<>
 					<Text inverse>{" "}</Text>
-					<Text color={theme.fg.muted}>{placeholder}</Text>
+					<Text color={theme.fg.inputPlaceholder}>{placeholder}</Text>
 				</>
 			) : (
-				<Text color={theme.fg.primary}>
+				<Text color={theme.fg.inputText}>
 					{before}
 					<Text inverse>{at}</Text>
 					{after}

@@ -254,7 +254,12 @@ async function main(): Promise<void> {
 		process.exit(0);
 	};
 	tui.setExitHandler(() => void shutdown());
-	process.on("SIGINT", () => void shutdown());
+	// Bun can surface Ctrl+C as SIGINT even while stdin is in raw mode. Treat
+	// that path exactly like the raw \x03 path: interrupt active work first.
+	process.on("SIGINT", () => {
+		if (tui.hasActiveTurn()) void tui.cancelActiveTurn();
+		else void shutdown();
+	});
 	process.on("SIGTERM", () => void shutdown());
 }
 

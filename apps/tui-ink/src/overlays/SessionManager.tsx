@@ -46,20 +46,20 @@ export const SessionManager: React.FC<SessionManagerProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={52}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Sessions
 			</Text>
-			<Text color={theme.fg.muted as string}>
+			<Text color={theme.fg.muted}>
 				↑↓ move · ⏎ open · n new · d delete · esc close
 			</Text>
 			{sessions.length === 0 ? (
-				<Text color={theme.fg.muted as string}>no sessions yet</Text>
+				<Text color={theme.fg.muted}>no sessions yet</Text>
 			) : (
 				sessions.map((session, i) => (
 					<Text
@@ -67,7 +67,7 @@ export const SessionManager: React.FC<SessionManagerProps> = ({
 						color={
 							i === index
 								? (theme.fg.selected as string)
-								: (theme.fg.primary as string)
+								: (theme.fg.text as string)
 						}
 						bold={i === index}
 					>

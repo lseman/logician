@@ -43,17 +43,17 @@ export const SlashPopup: React.FC<SlashPopupProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={48}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				{`/${query}`}
 			</Text>
 			{filtered.length === 0 ? (
-				<Text color={theme.fg.muted as string}>no matching commands</Text>
+				<Text color={theme.fg.muted}>no matching commands</Text>
 			) : (
 				filtered.map((cmd, i) => (
 					<Box key={cmd.command} flexDirection="row">
@@ -61,13 +61,13 @@ export const SlashPopup: React.FC<SlashPopupProps> = ({
 							color={
 								i === index
 									? (theme.fg.selected as string)
-									: (theme.fg.primary as string)
+									: (theme.fg.text as string)
 							}
 							bold={i === index}
 						>
 							{`${i === index ? "▸ " : "  "}${cmd.command}`}
 						</Text>
-						<Text color={theme.fg.muted as string}>
+						<Text color={theme.fg.muted}>
 							{cmd.argHint ? ` ${cmd.argHint}` : ""}
 							{`  ${cmd.description}`}
 						</Text>

@@ -65,17 +65,17 @@ export const ChoicePopup: React.FC<ChoicePopupProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={48}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				{question.header ?? "Choose"}
 				{questions.length > 1 ? `  (${step + 1}/${questions.length})` : ""}
 			</Text>
-			<Text color={theme.fg.primary as string} wrap="wrap">
+			<Text color={theme.fg.text} wrap="wrap">
 				{question.question}
 			</Text>
 			<Box flexDirection="column" marginTop={1}>
@@ -85,7 +85,7 @@ export const ChoicePopup: React.FC<ChoicePopupProps> = ({
 						color={
 							i === index
 								? (theme.fg.selected as string)
-								: (theme.fg.primary as string)
+								: (theme.fg.text as string)
 						}
 						bold={i === index}
 					>

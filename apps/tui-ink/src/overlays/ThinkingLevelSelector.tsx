@@ -39,20 +39,20 @@ export const ThinkingLevelSelector: React.FC<ThinkingLevelSelectorProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={36}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Thinking Level
 			</Text>
 			{LEVELS.map((level, i) => (
 				<Text
 					key={level}
 					color={
-						i === index ? (theme.fg.selected as string) : (theme.fg.primary as string)
+						i === index ? (theme.fg.selected as string) : (theme.fg.text as string)
 					}
 					bold={i === index}
 				>

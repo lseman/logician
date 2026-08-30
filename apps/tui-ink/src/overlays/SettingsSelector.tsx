@@ -94,29 +94,29 @@ export const SettingsSelector: React.FC<SettingsSelectorProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={48}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Settings
 			</Text>
-			<Text color={theme.fg.muted as string}>↑↓ move · ⏎ cycle value · esc close</Text>
+			<Text color={theme.fg.muted}>↑↓ move · ⏎ cycle value · esc close</Text>
 			{rows.map((row, i) => (
 				<Box key={row.label} flexDirection="row">
 					<Text
 						color={
 							i === index
 								? (theme.fg.selected as string)
-								: (theme.fg.secondary as string)
+								: (theme.fg.muted as string)
 						}
 						bold={i === index}
 					>
 						{`${i === index ? "▸ " : "  "}${row.label}: `}
 					</Text>
-					<Text color={theme.fg.primary as string} bold={i === index}>
+					<Text color={theme.fg.text} bold={i === index}>
 						{row.value}
 					</Text>
 				</Box>

@@ -63,20 +63,20 @@ export const FileMentionPopup: React.FC<FileMentionPopupProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={40}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				{`@${query}`}
 			</Text>
 			{matches.map((path, i) => (
 				<Text
 					key={path}
 					color={
-						i === index ? (theme.fg.selected as string) : (theme.fg.primary as string)
+						i === index ? (theme.fg.selected as string) : (theme.fg.text as string)
 					}
 					bold={i === index}
 				>

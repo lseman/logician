@@ -26,25 +26,25 @@ export const AutoresearchDashboard: React.FC<AutoresearchDashboardProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={44}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Autoresearch
 			</Text>
-			<Text color={active ? (theme.fg.success as string) : (theme.fg.muted as string)}>
+			<Text color={active ? theme.fg.success : theme.fg.muted}>
 				{active ? "● active" : "○ inactive"}
 				{`  ·  iteration ${iteration}`}
 			</Text>
 			{status ? (
-				<Text color={theme.fg.primary as string} wrap="wrap">
+				<Text color={theme.fg.text} wrap="wrap">
 					{status}
 				</Text>
 			) : null}
-			<Text color={theme.fg.muted as string}>esc / ⏎ to close</Text>
+			<Text color={theme.fg.muted}>esc / ⏎ to close</Text>
 		</Box>
 	);
 };

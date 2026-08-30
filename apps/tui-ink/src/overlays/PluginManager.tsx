@@ -47,21 +47,21 @@ export const PluginManager: React.FC<PluginManagerProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={40}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Plugins
 			</Text>
 			{lines.map((l, i) => (
-				<Text key={i} color={theme.fg.primary as string}>
+				<Text key={i} color={theme.fg.text}>
 					{l}
 				</Text>
 			))}
-			<Text color={theme.fg.muted as string}>esc / ⏎ to close</Text>
+			<Text color={theme.fg.muted}>esc / ⏎ to close</Text>
 		</Box>
 	);
 };

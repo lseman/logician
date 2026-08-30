@@ -37,9 +37,11 @@ import {
 	renderLayoutFrame,
 } from "../rendering/layout.ts";
 import {
+	logInputTrace,
 	normalizeKeyboardInput,
 	parseSgrMouseInput,
 	splitNavigationBatch,
+	TerminalInputBuffer,
 } from "./input-protocol.ts";
 import { OverlayManager } from "./overlay-manager.ts";
 import type {
@@ -130,6 +132,7 @@ export class TUI extends Container {
 		(data: string) => { consume?: boolean; data?: string } | undefined
 	> = new Set();
 	private stdinHandler: ((data: string | Buffer) => void) | null = null;
+	private stdinBuffer: TerminalInputBuffer | null = null;
 	private resizeHandler: (() => void) | null = null;
 	private wasRaw = false;
 	private _scrollOffsetInternal: number = 0;
@@ -236,12 +239,18 @@ export class TUI extends Container {
 			}
 		}
 		process.stdin.resume();
+		this.stdinBuffer = new TerminalInputBuffer(sequence => {
+			const normalized = normalizeKeyboardInput(sequence);
+			logInputTrace("sequence", sequence, {
+				normalizedHex: Buffer.from(normalized, "utf8").toString("hex"),
+			});
+			this.handleInput(normalized);
+			this.requestRender(false, true);
+		});
 		this.stdinHandler = (data: string | Buffer) => {
 			const str = Buffer.isBuffer(data) ? data.toString("utf-8") : data;
-			this.handleInput(normalizeKeyboardInput(str));
-			// Composer/navigation feedback should not wait behind the streaming frame
-			// budget. Upgrade any already-scheduled render to an immediate frame.
-			this.requestRender(false, true);
+			logInputTrace("stdin", str);
+			this.stdinBuffer?.process(str);
 		};
 		process.stdin.on("data", this.stdinHandler);
 
@@ -280,6 +289,8 @@ export class TUI extends Container {
 			process.stdin.removeListener("data", this.stdinHandler);
 			this.stdinHandler = null;
 		}
+		this.stdinBuffer?.destroy();
+		this.stdinBuffer = null;
 		if (this.resizeHandler) {
 			process.stdout.removeListener("resize", this.resizeHandler);
 			this.resizeHandler = null;

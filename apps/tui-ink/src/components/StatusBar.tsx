@@ -49,13 +49,13 @@ export const StatusBar: React.FC<StatusBarProps> = ({ state, config, width }) =>
 	// Git status
 	if (gitStr) {
 		leftSections.push(
-			<Text key="git" color={theme.fg.secondary} dimColor>{" "}{gitStr}</Text>,
+			<Text key="git" color={theme.fg.muted} dimColor>{" "}{gitStr}</Text>,
 		);
 	}
 
 	// Right: session, thinking level, inference mode
 	rightSections.push(
-		<Text key="session" color={theme.fg.secondary} dimColor>{state.sessionTitle}</Text>,
+		<Text key="session" color={theme.fg.muted} dimColor>{state.sessionTitle}</Text>,
 	);
 
 	if (state.thinkingLevel !== "off") {

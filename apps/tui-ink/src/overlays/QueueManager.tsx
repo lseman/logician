@@ -44,24 +44,24 @@ export const QueueManager: React.FC<QueueManagerProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={48}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				{`Steer Queue (${messages.length})`}
 			</Text>
-			<Text color={theme.fg.muted as string}>⏎ flush now · d drop · esc close</Text>
+			<Text color={theme.fg.muted}>⏎ flush now · d drop · esc close</Text>
 			{messages.length === 0 ? (
-				<Text color={theme.fg.muted as string}>queue is empty</Text>
+				<Text color={theme.fg.muted}>queue is empty</Text>
 			) : (
 				messages.map((msg, i) => (
 					<Text
 						key={msg.id}
 						color={
-							i === index ? (theme.fg.selected as string) : (theme.fg.primary as string)
+							i === index ? (theme.fg.selected as string) : (theme.fg.text as string)
 						}
 						bold={i === index}
 					>

@@ -33,20 +33,20 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={36}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Select Theme
 			</Text>
 			{names.map((name, i) => (
 				<Text
 					key={name}
 					color={
-						i === index ? (theme.fg.selected as string) : (theme.fg.primary as string)
+						i === index ? (theme.fg.selected as string) : (theme.fg.text as string)
 					}
 					bold={i === index}
 				>

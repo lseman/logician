@@ -279,6 +279,7 @@ async function main(): Promise<void> {
 			onCancel={handleCancel}
 			onExit={handleExit}
 		/>,
+		{ exitOnCtrlC: false },
 	);
 
 	// Update state with bridge reference

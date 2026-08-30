@@ -23,19 +23,19 @@ export const ReasonerSelector: React.FC<ReasonerSelectorProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={36}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Reasoner
 			</Text>
-			<Text color={theme.fg.primary as string}>
+			<Text color={theme.fg.text}>
 				{`${reasoner.active ? "● " : "○ "}${reasoner.name}`}
 			</Text>
-			<Text color={theme.fg.muted as string}>esc / ⏎ to close</Text>
+			<Text color={theme.fg.muted}>esc / ⏎ to close</Text>
 		</Box>
 	);
 };

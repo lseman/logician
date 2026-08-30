@@ -54,17 +54,17 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
 	return (
 		<Box
-			borderColor={theme.fg.accent as string}
+			borderColor={theme.fg.border}
 			borderStyle="round"
 			paddingX={1}
 			flexDirection="column"
 			minWidth={44}
 		>
-			<Text color={theme.fg.accent as string} bold>
+			<Text color={theme.fg.header} bold>
 				Select Model
 			</Text>
 			{models.length === 0 ? (
-				<Text color={theme.fg.muted as string}>no models configured</Text>
+				<Text color={theme.fg.muted}>no models configured</Text>
 			) : (
 				models.map((model, i) => (
 					<Text
@@ -72,7 +72,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 						color={
 							i === index
 								? (theme.fg.selected as string)
-								: (theme.fg.primary as string)
+								: (theme.fg.text as string)
 						}
 						bold={i === index}
 					>
