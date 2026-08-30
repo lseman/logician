@@ -36,9 +36,13 @@ This is a separate Ink-based TUI implementation for Logician, coexisting alongsi
 | `Escape` | Close overlay (or interrupt the running turn) |
 | `Ctrl+C` | Exit TUI |
 | `←` `→` `Ctrl+A` `Ctrl+E` | Move cursor / home / end |
-| `Ctrl+U` | Clear input |
+| `Ctrl+U` | Clear input (or Page Up in transcript) |
 | `Ctrl+W` | Delete previous word |
 | `Ctrl+K` | Kill to end of line |
+| `PageUp` / `Ctrl+U` | Scroll up in transcript |
+| `PageDown` / `Ctrl+D` | Scroll down (follow mode) |
+| `Home` | Toggle follow mode (auto-scroll) |
+| `End` | Disable follow mode (scroll manually) |
 | `/` | Slash commands (real runtime registry) |
 | `@` | File-mention autocomplete |
 | `Shift+Tab` | Toggle act / plan workflow mode |
@@ -167,11 +171,14 @@ from the session manager.
 - [x] File-mention autocomplete (shallow project walk)
 - [x] Permission (`allow` / `always` / `deny`) and question prompts
 - [x] Session persistence + reload
+- [x] Transcript scrollback with virtual scrolling, follow-mode toggle,
+      and "↓ new output below" indicator
+- [x] Markdown rendering: headings, bold/italic, code blocks with syntax
+      highlighting (via emphasize), tables, lists, blockquotes, links
 
 ### Deferred (parity phase)
 
-- [ ] Transcript scrollback / follow-mode / new-output indicator
-- [ ] Markdown + syntax highlighting + table rendering
+
 - [ ] Subagent chunk rendering
 - [ ] Todo bar, work surface, steer-queue status widget
 - [ ] Goal runner + plan-mode approval flow

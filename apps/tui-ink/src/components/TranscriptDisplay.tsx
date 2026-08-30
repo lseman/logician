@@ -1,23 +1,82 @@
-// ── Ink TUI — Transcript Display ──────────────────────────────────────────────
+// ── Ink TUI — Transcript Display (with scrollback) ────────────────────────────
 
 import React from "react";
 import { Box, Text } from "ink";
 import type { Turn, ThinkingDisplayMode, AssistantChunk } from "../types";
 import { getCurrentTheme } from "../theme";
 import { ellipsis } from "../utils";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface TranscriptDisplayProps {
 	turns: Turn[];
 	thinkingMode: ThinkingDisplayMode;
 	maxMessageLength?: number;
+	/** Number of turns to skip from the top (scroll offset). */
+	scrollOffset?: number;
+	/** Maximum number of turns to render at once. */
+	maxVisibleTurns?: number;
+	/** Whether there is content below the visible window. */
+	hasNewOutputBelow?: boolean;
 }
 
 export const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({
 	turns,
 	thinkingMode,
 	maxMessageLength,
+	scrollOffset = 0,
+	maxVisibleTurns = 60,
+	hasNewOutputBelow = false,
 }) => {
 	const theme = getCurrentTheme();
+
+	// ── Estimate line count for a turn (used by scroll logic) ──────────────
+	const estimateLinesForTurn = (turn: Turn): number => {
+		let lines = 0;
+		if (turn.userMessage) lines += 2;
+		if (turn.assistantMessage) {
+			lines += 1; // "Assistant" header
+			for (const chunk of turn.assistantMessage.chunks) {
+				switch (chunk.type) {
+					case "thinking":
+						lines += thinkingMode === "collapsed" ? 0 : (thinkingMode === "summary" ? 2 : 4);
+						break;
+					case "tool":
+						lines += 1 + (chunk.tool?.streamOutput && !chunk.tool.isComplete ? 1 : 0) + (chunk.tool?.result ? 1 : 0);
+						break;
+					case "notice":
+						lines += 1;
+						break;
+					default:
+						lines += Math.max(1, Math.ceil((chunk.contentText?.length ?? 0) / 80));
+				}
+			}
+		}
+		return Math.max(1, lines);
+	};
+
+	// ── Compute visible turn range ────────────────────────────────────────
+	const totalLines = turns.reduce((sum, t) => sum + estimateLinesForTurn(t), 0);
+	let startIdx = 0;
+	if (scrollOffset > 0 && totalLines > maxVisibleTurns) {
+		// Walk forward accumulating lines until we pass scrollOffset
+		let accumulated = 0;
+		for (let i = 0; i < turns.length; i++) {
+			accumulated += estimateLinesForTurn(turns[i]!);
+			if (accumulated >= scrollOffset) {
+				startIdx = i;
+				break;
+			}
+		}
+	}
+
+	const visibleTurns = turns.slice(startIdx, startIdx + maxVisibleTurns);
+	const renderedStartLines = (() => {
+		let sum = 0;
+		for (let i = 0; i < startIdx && i < turns.length; i++) {
+			sum += estimateLinesForTurn(turns[i]!);
+		}
+		return sum;
+	})();
 
 	const renderChunk = (chunk: AssistantChunk, index: number): React.ReactNode => {
 		switch (chunk.type) {
@@ -91,7 +150,18 @@ export const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({
 				);
 			}
 
-			case "content":
+			case "content": {
+				const text = chunk.contentText || "";
+				if (!text) return null;
+				return (
+					<MarkdownRenderer
+						key={`content-${index}`}
+						markdown={text}
+						maxLength={maxMessageLength || 4000}
+					/>
+				);
+			}
+
 			case "user":
 			default: {
 				const text = chunk.contentText || "";
@@ -156,14 +226,34 @@ export const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({
 		);
 	};
 
+	const hasContent = visibleTurns.length > 0 || turns.length === 0;
+
 	return (
-		<Box flexGrow={1} flexDirection="column" overflow="hidden">
-			{turns.length === 0 ? (
+		<Box flexDirection="column" flexGrow={1} overflow="hidden">
+			{/* Spacer for scrolled-off content */}
+			{renderedStartLines > 0 && (
+				<Text color={theme.fg.muted} wrap="wrap">
+					{`… ${renderedStartLines} lines above …`}
+				</Text>
+			)}
+
+			{hasContent ? (
+				<Box flexDirection="column">
+					{visibleTurns.map((turn, index) => renderTurn(turn, startIdx + index))}
+				</Box>
+			) : (
 				<Box justifyContent="center" alignItems="center" height={10}>
 					<Text color={theme.fg.muted}>{"Logician TUI — Ready"}</Text>
 				</Box>
-			) : (
-				<Box flexDirection="column">{turns.map((turn, index) => renderTurn(turn, index))}</Box>
+			)}
+
+			{/* New output indicator */}
+			{hasNewOutputBelow && (
+				<Box justifyContent="center">
+					<Text color={theme.fg.accent} bold>
+						{"↓ new output below"}
+					</Text>
+				</Box>
 			)}
 		</Box>
 	);

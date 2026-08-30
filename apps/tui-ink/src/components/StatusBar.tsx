@@ -76,6 +76,18 @@ export const StatusBar: React.FC<StatusBarProps> = ({ state, config, width }) =>
 		);
 	}
 
+	// Turn count
+	if (state.transcriptTurns.length > 0) {
+		rightSections.push(
+			<Text key="turns" color={theme.fg.muted} dimColor>{" "}{`${state.transcriptTurns.length}t`}</Text>,
+		);
+	}
+
+	// Scroll mode indicator
+	rightSections.push(
+		<Text key="scroll" color={theme.fg.muted} dimColor>{" "}{state.followMode ? "follow" : "scrolled"}</Text>,
+	);
+
 	return (
 		<Box flexDirection="row" justifyContent="space-between" paddingX={1}>
 			<Box flexDirection="row">

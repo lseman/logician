@@ -100,6 +100,10 @@ export class TuiState extends EventEmitter {
 	fileMentionQuery = "";
 	fileSuggestions: string[] = [];
 
+	// Transcript scrollback
+	scrollOffset = 0;
+	followMode = true;
+
 	// Transcript turns (synced from transcript object)
 	transcriptTurns: Turn[] = [];
 
@@ -362,13 +366,45 @@ export class TuiState extends EventEmitter {
 		this.bridge = bridge;
 	}
 
-	setTranscriptTurns(turns: Turn[]): void {
+	setTranscriptTurns(turns: Turn[], follow?: boolean): void {
 		this.transcriptTurns = turns;
+		if (follow ?? this.followMode) this.scrollOffset = 0;
 		this.scheduleRender();
 	}
 
-	addTranscriptTurn(turn: Turn): void {
+	addTranscriptTurn(turn: Turn, follow?: boolean): void {
 		this.transcriptTurns = [...this.transcriptTurns, turn];
+		if (follow ?? this.followMode) this.scrollOffset = 0;
+		this.scheduleRender();
+	}
+
+	setFollowMode(follow: boolean): void {
+		this.followMode = follow;
+		if (follow) this.scrollOffset = 0;
+		this.scheduleRender();
+	}
+
+	scrollUp(n: number): void {
+		this.scrollOffset = Math.max(0, this.scrollOffset - n);
+		this.followMode = false;
+		this.scheduleRender();
+	}
+
+	scrollDown(n: number): void {
+		this.scrollOffset = Math.max(0, this.scrollOffset - n);
+		this.followMode = true;
+		this.scheduleRender();
+	}
+
+	pageUp(): void {
+		this.scrollOffset += 15;
+		this.followMode = false;
+		this.scheduleRender();
+	}
+
+	pageDown(): void {
+		this.scrollOffset = Math.max(0, this.scrollOffset - 15);
+		this.followMode = true;
 		this.scheduleRender();
 	}
 

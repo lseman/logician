@@ -116,6 +116,24 @@ export const App: React.FC<AppProps> = ({
 				if (bridge.isActive()) void onCancel();
 				return;
 			}
+			// Scroll shortcuts
+			if (key.pageUp || (key.ctrl && input === "u")) {
+				state.pageUp();
+				return;
+			}
+			if (key.pageDown || (key.ctrl && input === "d")) {
+				state.pageDown();
+				return;
+			}
+			// Follow mode toggle
+			if (key.home) {
+				state.setFollowMode(true);
+				return;
+			}
+			if (key.end) {
+				state.setFollowMode(false);
+				return;
+			}
 			if (key.shift && key.tab) {
 				const next = state.workflowMode === "plan" ? "act" : "plan";
 				state.setWorkflowMode(next);
@@ -189,6 +207,9 @@ export const App: React.FC<AppProps> = ({
 					turns={state.transcriptTurns}
 					thinkingMode={state.thinkingDisplayMode}
 					maxMessageLength={config.source.truncation?.transcriptMessageMaxChars}
+					scrollOffset={state.scrollOffset}
+					maxVisibleTurns={stdout ? Math.max(5, stdout.rows - 12) : 60}
+					hasNewOutputBelow={!state.followMode && state.transcriptTurns.length > 0}
 				/>
 			</Box>
 
