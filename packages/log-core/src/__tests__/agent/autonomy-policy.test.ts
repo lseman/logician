@@ -4,15 +4,6 @@ import { decideAutonomousContinuation } from "../../control/policy/autonomy-poli
 
 const pendingTask = { id: "1", subject: "Run tests", status: "in_progress" };
 
-void test("autonomy pauses when the assistant asks the user", () => {
-	assert.equal(
-		decideAutonomousContinuation({
-			assistantText: "Which environment should I test?",
-			tasks: [pendingTask],
-		}),
-		undefined,
-	);
-});
 
 void test("autonomy recovers a truncated provider response", () => {
 	const decision = decideAutonomousContinuation({

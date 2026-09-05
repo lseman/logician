@@ -234,6 +234,7 @@ export async function executeToolBatch(
 		const { prepared, args } = plan;
 		let resultText = plan.immediateContent;
 		let isError = plan.immediateError;
+		let resultDetails: Record<string, unknown> | undefined;
 		let terminate = false;
 		let accepting = true;
 		let executed = false;
@@ -258,6 +259,7 @@ export async function executeToolBatch(
 			accepting = false;
 			resultText = result.content;
 			isError = result.isError === true;
+			resultDetails = result.details;
 			terminate = result.terminate === true;
 			executed = true;
 		}
@@ -292,6 +294,7 @@ export async function executeToolBatch(
 				prepared.call.name,
 				resultText,
 				isError,
+				resultDetails,
 			),
 			terminate: after?.terminate ?? terminate,
 			executed,

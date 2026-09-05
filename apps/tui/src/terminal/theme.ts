@@ -91,8 +91,7 @@ export type ThemeColor =
 	| "memoryId"
 	| "memoryContent"
 	| "memoryCount";
-
-export type ThemeBg = "mdCodeBlockBg";
+export type ThemeBg = "mdCodeBlockBg" | "toolBlockBg";
 
 // ── Schema types ──────────────────────────────────────────────────────────────
 
@@ -456,7 +455,7 @@ function buildThemeFromJson(
 		"memoryCount",
 	];
 
-	const bgKeys: ThemeBg[] = ["mdCodeBlockBg"];
+	const bgKeys: ThemeBg[] = ["mdCodeBlockBg", "toolBlockBg"];
 	const labelFallbacks: Partial<Record<ThemeColor, ThemeColor>> = {
 		userLabel: "accent",
 		responseLabel: "assistantText",
@@ -478,6 +477,11 @@ function buildThemeFromJson(
 			const resolved = resolveVarRefs(raw as string | number, vars);
 			bgColors.set(key, valueToAnsi(resolved, mode, true));
 		}
+	}
+	// Custom/older theme files predating "toolBlockBg" fall back to the
+	// existing code-block background rather than failing to render tool cards.
+	if (!bgColors.has("toolBlockBg") && bgColors.has("mdCodeBlockBg")) {
+		bgColors.set("toolBlockBg", bgColors.get("mdCodeBlockBg") as string);
 	}
 
 	return new Theme(json.name, mode, fgColors, bgColors);

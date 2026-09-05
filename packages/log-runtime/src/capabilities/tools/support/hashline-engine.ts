@@ -4,8 +4,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import type { EditStore } from "./edit-store.js";
-import { createEditStore } from "./edit-store.js";
 import type { MutationSession } from "../mutation/session.js";
+import { mutationReceipt } from "../mutation/session.js";
 import {
 	type HashlineEdit,
 	type HashlineEditResult,
@@ -86,17 +86,21 @@ function applyLineEdits(original: string, edits: HashlineEdit[]): { content: str
 	return { content, linesChanged };
 }
 
+/**
+ * Execute hashline edits: parse, validate, and apply file mutations through
+ * the mutation session. This is the write path — files are committed atomically.
+ */
 export async function executeHashlineEdit(
 	input: string,
 	store: EditStore,
 	mutation: MutationSession,
 	cwd: string,
-	dryRun = true,
 	targetPath?: string,
 ): Promise<HashlineEditResult> {
 	let filesAffected = 0;
 	let linesChanged = 0;
 	let diff = "";
+	const receipts: HashlineEditResult["receipts"] = [];
 	try {
 		const files = parseDocument(input, cwd, targetPath);
 		const plans = files.map(file => {
@@ -109,16 +113,7 @@ export async function executeHashlineEdit(
 			const result = applyLineEdits(original, file.edits);
 			return { ...file, original, ...result };
 		}).filter(plan => plan.original !== plan.content);
-		if (!plans.length) return { applied: false, filesAffected: 0, linesChanged: 0, diff: "" };
-
-		if (dryRun) {
-			return {
-				applied: false,
-				filesAffected: plans.length,
-				linesChanged: plans.reduce((sum, plan) => sum + plan.linesChanged, 0),
-				diff: plans.map(plan => generateEditDiffs(plan.path, plan.original, plan.content).diff).join("\n"),
-			};
-		}
+		if (!plans.length) return { applied: false, filesAffected: 0, linesChanged: 0, diff: "", receipts };
 
 		for (const plan of plans) {
 			if (fs.readFileSync(plan.path, "utf8") !== plan.original) {
@@ -131,6 +126,7 @@ export async function executeHashlineEdit(
 				after: plan.content,
 			};
 			const result = await mutation.apply(proposal);
+			receipts.push(mutationReceipt(result));
 			if (!result.applied) {
 				throw new Error(result.error || `Mutation failed for ${plan.path}`);
 			}
@@ -138,15 +134,74 @@ export async function executeHashlineEdit(
 			linesChanged += plan.linesChanged;
 			diff += result.diff + "\n";
 		}
-		return { applied: true, filesAffected, linesChanged, diff: diff.trimEnd() };
+		return { applied: true, filesAffected, linesChanged, diff: diff.trimEnd(), receipts };
 	} catch (error) {
 		return {
 			applied: false, filesAffected, linesChanged, diff,
+			receipts,
 			error: error instanceof Error ? error.message : String(error),
 		};
 	}
 }
 
-export function createDefaultEditStore(): EditStore {
-	return createEditStore();
+/**
+ * Preview hashline edits: parse, validate, and generate diff/receipts without
+ * writing to disk. The file is never mutated.
+ */
+export async function previewHashlineEdit(
+	input: string,
+	store: EditStore,
+	cwd: string,
+	targetPath?: string,
+): Promise<HashlineEditResult> {
+	let filesAffected = 0;
+	let linesChanged = 0;
+	let diff = "";
+	const receipts: HashlineEditResult["receipts"] = [];
+	try {
+		const files = parseDocument(input, cwd, targetPath);
+		const plans = files.map(file => {
+			const original = fs.readFileSync(file.path, "utf8");
+			const stale = store.checkStale(file.path);
+			if (stale) throw new Error(stale);
+			if (hashlineHash(original) !== file.tag) {
+				throw new Error(`Stale hashline anchor for ${file.path}. Read it again before editing.`);
+			}
+			const result = applyLineEdits(original, file.edits);
+			return { ...file, original, ...result };
+		}).filter(plan => plan.original !== plan.content);
+		if (!plans.length) return { applied: false, filesAffected: 0, linesChanged: 0, diff: "", receipts };
+
+		for (const plan of plans) {
+			receipts.push({
+				kind: "mutation",
+				applied: false,
+				changed: true,
+				paths: [plan.path],
+				filesAffected: 1,
+				revisions: [{
+					path: plan.path,
+					beforeHash: createHash("sha256").update(plan.original, "utf8").digest("hex"),
+					afterHash: createHash("sha256").update(plan.content, "utf8").digest("hex"),
+				}],
+			});
+			filesAffected++;
+			linesChanged += plan.linesChanged;
+			diff += generateEditDiffs(plan.path, plan.original, plan.content).diff + "\n";
+		}
+		return {
+			applied: false,
+			filesAffected,
+			linesChanged,
+			diff: diff.trimEnd(),
+			receipts,
+		};
+	} catch (error) {
+		return {
+			applied: false, filesAffected, linesChanged, diff,
+			receipts,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
 }
+

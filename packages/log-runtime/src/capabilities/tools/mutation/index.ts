@@ -8,4 +8,5 @@ export type {
 	MutationResult,
 	MutationPathPolicy,
 	MutationDiagnosticEvent,
+	mutationReceipt,
 } from "./session.js";

@@ -4,7 +4,7 @@
 
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
-import { stripAcceptanceReport, stripTextToolCalls } from "@logician/log-core";
+import { stripTextToolCalls } from "@logician/log-core";
 import type { AssistantChunk } from "@logician/log-runtime/sessions";
 import { BOLD, DIM, RESET } from "../../terminal/core.ts";
 import { hyperlink, supportsHyperlinks } from "../../terminal/hyperlinks.ts";
@@ -53,16 +53,6 @@ export function stripThinkingToolMarkup(text: string): string {
 		.trimEnd();
 }
 
-export function stripAcceptanceForDisplay(text: string): string {
-	const marker = text.indexOf("```acceptance-report");
-	if (marker < 0) return text;
-	const stripped = stripAcceptanceReport(text);
-	// While the report is still streaming there is no closing fence to strip.
-	// Hide the internal report from its opening marker onward.
-	return stripped === text
-		? text.slice(0, marker).trimEnd()
-		: stripped.trimEnd();
-}
 
 export function stripInternalHookGuidance(
 	text: string | undefined,

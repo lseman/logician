@@ -166,6 +166,57 @@ export class EditStore {
 	getRegister(name: string): Register | undefined {
 		return this.#registers.get(name);
 	}
+	// ── No-op loop guard ───────────────────────────────────────────────────────
+	// Detect when the agent repeatedly makes edits that produce no changes.
+	// This is a common failure pattern: the agent keeps "editing" a file but
+	// the edit always produces identical content, wasting tokens.
+
+	/** Consecutive no-op edits per file path. */
+	readonly #noopCounts = new Map<string, number>();
+	/** Threshold before flagging a no-op loop. */
+	readonly noopThreshold: number;
+
+	constructor(noopThreshold: number = 3) {
+		this.noopThreshold = noopThreshold;
+	}
+
+	/**
+	 * Record a no-op edit for a file path.
+	 * Returns a warning message if the threshold is exceeded.
+	 */
+	recordNoop(path: string): string | undefined {
+		const count = (this.#noopCounts.get(path) ?? 0) + 1;
+		this.#noopCounts.set(path, count);
+
+		if (count >= this.noopThreshold) {
+			return (
+				`Warning: ${path} has had ${count} consecutive edits that produced no changes. ` +
+				`The edit tool is likely stuck in a no-op loop. Try reading the file again or changing your approach.`
+			);
+		}
+		return undefined;
+	}
+
+	/**
+	 * Record a successful edit for a file path, resetting its no-op counter.
+	 */
+	recordSuccess(path: string): void {
+		this.#noopCounts.delete(path);
+	}
+
+	/**
+	 * Clear no-op counters for a file (e.g., after compaction or manual reset).
+	 */
+	clearNoop(path: string): void {
+		this.#noopCounts.delete(path);
+	}
+
+	/**
+	 * Clear all no-op counters.
+	 */
+	clearAllNoop(): void {
+		this.#noopCounts.clear();
+	}
 
 	// ── Staged edits ───────────────────────────────────────────────────────────
 

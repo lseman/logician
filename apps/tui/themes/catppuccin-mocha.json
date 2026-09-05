@@ -3,6 +3,7 @@
 	"vars": {
 		"canvas": "#1e1e2e",
 		"canvasInset": "#181825",
+		"canvasSubtle": "#1c1c2b",
 		"border": "#45475a",
 		"borderMuted": "#313244",
 		"fg": "#cdd6f4",
@@ -42,6 +43,7 @@
 		"mdCode": "blueMuted",
 		"mdCodeBlock": "fgMuted",
 		"mdCodeBlockBg": "canvasInset",
+		"toolBlockBg": "canvasSubtle",
 		"mdCodeBlockBorder": "separatorGray",
 		"mdLink": "blue",
 		"mdQuote": "mutedGray",

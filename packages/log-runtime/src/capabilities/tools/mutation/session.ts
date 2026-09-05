@@ -50,6 +50,27 @@ export interface MutationResult {
 	error?: string;
 }
 
+export function mutationReceipt(result: MutationResult) {
+	return {
+		kind: "mutation" as const,
+		applied: result.applied,
+		changed: result.changed,
+		paths: result.filesAffected > 0 ? [result.path] : [],
+		filesAffected: result.filesAffected,
+		revisions:
+			result.filesAffected > 0
+				? [
+						{
+							path: result.path,
+							beforeHash: result.beforeHash,
+							afterHash: result.afterHash,
+						},
+					]
+				: [],
+		...(result.error ? { error: result.error } : {}),
+	};
+}
+
 export interface MutationHandle {
 	/** Monotonically increasing version for this path. */
 	version: number;

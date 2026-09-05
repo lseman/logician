@@ -5,11 +5,12 @@
 // untouched regions are never rewritten) → line-trimmed with indentation re-application.
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
-import type { Tool, ToolResult } from "@logician/log-core";
+import type { MutationReceipt, Tool, ToolResult } from "@logician/log-core";
 import { createHash } from "node:crypto";
 import { executeHashlineEdit } from "./support/hashline-engine.js";
 import { createEditStore } from "./support/edit-store.js";
 import { createMutationSession } from "./mutation/session.js";
+import { mutationReceipt } from "./mutation/session.js";
 import { withFileMutationQueue } from "./support/mutation-queue.js";
 import {
 	hasBeenRead,
@@ -339,6 +340,18 @@ function editLabel(editIndex: number, totalEdits: number): string {
 	return totalEdits === 1 ? "the exact text" : `edits[${editIndex}]`;
 }
 
+function combineMutationReceipts(receipts: MutationReceipt[]): MutationReceipt {
+	return {
+		kind: "mutation",
+		applied: receipts.some(receipt => receipt.applied),
+		changed: receipts.some(receipt => receipt.changed),
+		paths: receipts.flatMap(receipt => receipt.paths),
+		filesAffected: receipts.reduce((total, receipt) => total + receipt.filesAffected, 0),
+		revisions: receipts.flatMap(receipt => receipt.revisions),
+		error: receipts.find(receipt => receipt.error)?.error,
+	};
+}
+
 function getNotFoundError(
 	path: string,
 	editIndex: number,
@@ -519,10 +532,6 @@ export function applyEditsToNormalizedContent(
 const editSchema = {
 	type: "object",
 	properties: {
-		input: {
-			type: "string",
-			description: "Hashline edits for path: [path#hash] followed by PUT >N:text, PUT <N:text, PUT N.=M:text, or CUT N.=M. Use the hash from read_file. Operations apply sequentially; content after the colon is literal. Cannot be combined with edits/oldText.",
-		},
 		path: {
 			type: "string",
 			description: "File path to edit (relative or absolute)",
@@ -690,14 +699,21 @@ export const edit_file: Tool = {
 					);
 				}
 				if (input) {
-					const result = await executeHashlineEdit(input, store, mutation, ctx.cwd || process.cwd(), false, resolved);
-					if (result.error) return `Error: ${result.error}`;
-					if (!result.applied) return "No changes made: hashline edits matched the current content.";
+					const result = await executeHashlineEdit(input, store, mutation, ctx.cwd || process.cwd(), resolved);
+					const receipt = combineMutationReceipts(result.receipts ?? []);
+					if (result.error) return { content: `Error: ${result.error}`, isError: true, details: { mutation: receipt } };
+					if (!result.applied) {
+						const noopWarning = store.recordNoop(resolved);
+						if (noopWarning) return { content: noopWarning, details: { mutation: receipt } };
+						return { content: "No changes made: hashline edits matched the current content.", details: { mutation: receipt } };
+					}
+					store.recordSuccess(resolved);
 					refreshAfterWrite(resolved);
 					return {
 						content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
 							(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
 						details: {
+							mutation: receipt,
 							diff: result.diff,
 							linesChanged: result.linesChanged,
 							filesAffected: result.filesAffected,
@@ -725,8 +741,14 @@ export const edit_file: Tool = {
 				const result = await mutation.apply(proposal);
 				refreshAfterWrite(resolved);
 
-				if (result.error) return `Error: ${result.error}`;
-				if (!result.applied) return "No changes made: the edit produced identical content.";
+				const receipt = mutationReceipt(result);
+				if (result.error) return { content: `Error: ${result.error}`, isError: true, details: { mutation: receipt } };
+				if (!result.applied) {
+					const noopWarning = store.recordNoop(resolved);
+					if (noopWarning) return { content: noopWarning, details: { mutation: receipt } };
+					return { content: "No changes made: the edit produced identical content.", details: { mutation: receipt } };
+				}
+				store.recordSuccess(resolved);
 
 				const diffResult = generateEditDiffs(path, baseContent, newContent);
 				return {
@@ -734,6 +756,7 @@ export const edit_file: Tool = {
 						`Successfully replaced ${edits.length} block(s) in ${path}.\n` +
 						(diffResult.diff ? `\nDiff:\n${diffResult.diff}` : ""),
 					details: {
+									mutation: receipt,
 						diff: diffResult.diff,
 						patch: diffResult.patch,
 						firstChangedLine: diffResult.firstChangedLine,

@@ -6,7 +6,6 @@ import {
 	type LLMBackend,
 	type Message,
 	runAgentLoop,
-	stripAcceptanceReport,
 	type Tool,
 } from "@logician/log-core";
 
@@ -226,14 +225,13 @@ export async function runDelegatedAgent(params: {
 				if (event.type === "acceptance_complete") {
 					validationAttempts++;
 					acceptancePassed = event.status === "passed";
-					ledger = event.report as AcceptanceLedger | undefined;
 					if (!acceptancePassed) status = "failed";
 				}
 				params.onEvent(event);
 			},
 		);
 		messages = [...messages, ...produced];
-		// A validated acceptance report is the authoritative delegated outcome.
+		// A successful verification run is the authoritative delegated outcome.
 		if (acceptance && acceptancePassed) status = "completed";
 		if (acceptancePassed || !acceptance || signal?.aborted) break;
 		if (attempt + 1 >= maxAttempts || turns >= params.maxIterations) break;
@@ -241,9 +239,8 @@ export async function runDelegatedAgent(params: {
 			{
 				role: "user",
 				content:
-					"The delegated result failed its acceptance contract. Correct the result, " +
-					"provide concrete evidence for every required criterion, and emit a new " +
-					"acceptance-report. Do not repeat work that is already complete.",
+					"The delegated result failed verification. Correct the underlying issue " +
+					"and try again. Do not repeat work that is already complete.",
 				timestamp: Date.now(),
 			},
 		];
@@ -255,7 +252,7 @@ export async function runDelegatedAgent(params: {
 	const raw = final?.content?.trim() || "(subagent produced no final message)";
 	if (counters.violation) status = "failed";
 	return {
-		content: acceptance ? stripAcceptanceReport(raw).trim() || raw : raw,
+		content: raw,
 		messages,
 		status,
 		turns,

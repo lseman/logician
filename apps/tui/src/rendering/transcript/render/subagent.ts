@@ -15,7 +15,6 @@ import {
 	formatDurationMs,
 	parseJsonMaybe,
 	stringArg,
-	stripAcceptanceForDisplay,
 	stripThinkTags,
 } from "../text-utils.ts";
 import { withTruncationMarker } from "./content.ts";
@@ -30,8 +29,7 @@ function renderSubagentText(
 	ctx: RenderCtx,
 	expanded = ctx.toolsExpanded,
 ): string[] {
-	const visibleText = stripAcceptanceForDisplay(text);
-	if (!visibleText) return [];
+	const visibleText = text;
 	const markdown =
 		!expanded && visibleText.length > 800
 			? withTruncationMarker(visibleText.slice(0, 800))
@@ -48,8 +46,8 @@ function distinctSubagentOutputs(
 	liveText: string,
 	finalText: string,
 ): string[] {
-	const live = stripAcceptanceForDisplay(liveText).trim();
-	const final = stripAcceptanceForDisplay(finalText).trim();
+	const live = liveText.trim();
+	const final = finalText.trim();
 	if (!final) return live ? [live] : [];
 	if (!live || live === final) return [final];
 	// `live` may be a fuller transcript that already contains `final` as a
@@ -127,7 +125,7 @@ function renderSubagentFlow(
 		if (lastWasThinking) {
 			lines.push(`${theme.fgRaw("separator")}${DIM}─── response ───${RESET}`);
 		}
-		const visible = stripAcceptanceForDisplay(stripThinkTags(contentBuffer));
+		const visible = stripThinkTags(contentBuffer);
 		for (const line of renderMarkdownLines(
 			visible,
 			Math.max(16, width),

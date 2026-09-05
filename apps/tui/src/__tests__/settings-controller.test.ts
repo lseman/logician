@@ -59,13 +59,13 @@ void test("settings exposes tri-state guards and every inference provider mode",
 
 	const guards = settings.find(setting => setting.name === "Guards");
 	assert.deepEqual(
-		guards?.options.map(option => option.value),
+		guards?.options?.map(option => option.value) ?? [],
 		["auto", "on", "off"],
 	);
 	assert.equal(guards?.currentValue, "auto");
 	const inference = settings.find(setting => setting.name === "Inference mode");
-	assert.ok(inference?.options.some(option => option.value === "auto"));
-	assert.ok(inference?.options.some(option => option.value === "none"));
+	assert.ok(inference?.options?.some(option => option.value === "auto"));
+	assert.ok(inference?.options?.some(option => option.value === "none"));
 	assert.equal(
 		settings.find(setting => setting.name === "Legroom SDK")?.currentValue,
 		"on",
@@ -74,7 +74,7 @@ void test("settings exposes tri-state guards and every inference provider mode",
 	assert.ok(budgetStop);
 	const save = spyOn(configuration, "saveConfigField").mockReturnValue(true);
 	try {
-		for (const option of budgetStop.options) {
+		for (const option of budgetStop.options ?? []) {
 			handleSettingsSelectorAction(ctx, { type: "change", settingName: budgetStop.name, value: option.value });
 			assert.deepEqual(updates.at(-1), { progressStopEnabled: option.value === "true" });
 			assert.deepEqual(save.mock.calls.at(-1), ["progressStopEnabled", option.value === "true"]);

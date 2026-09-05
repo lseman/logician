@@ -11,8 +11,23 @@ export interface Message {
 	content: string | null;
 	tool_call_id?: string;
 	tool_calls?: ToolCall[];
+	details?: Record<string, unknown>;
 	name?: string;
 	timestamp?: number;
+}
+
+export interface MutationReceipt {
+	kind: "mutation";
+	applied: boolean;
+	changed: boolean;
+	paths: string[];
+	filesAffected: number;
+	revisions: Array<{
+		path: string;
+		beforeHash: string;
+		afterHash: string;
+	}>;
+	error?: string;
 }
 
 /** Loose message type compatible with both Message and AgentMessage. Used by compaction. */
@@ -209,6 +224,7 @@ export type AgentEventBody =
 			messages?: Message[];
 			status?: RunOutcomeStatus;
 			summary?: string;
+			stepCount?: number;
 	  }
 	| { type: "agent_settled"; nextTurnCount?: number }
 	| {
@@ -519,6 +535,19 @@ export interface GetSteeringMessagesContext {
 	messages: Message[];
 	iteration: number;
 }
+export interface GetToolChoiceContext {
+	messages: Message[];
+	iteration: number;
+	availableTools: string[];
+}
+
+/**
+ * Tool choice directive for one turn: either a hard provider tool_choice or
+ * a soft requirement that injects reminders and escalates after failures.
+ */
+export type ToolChoiceDirective =
+	| { hard: true; toolChoice: string }
+	| SoftToolRequirement;
 
 export interface TransformContext {
 	messages: AgentMessage[];
@@ -667,6 +696,10 @@ export interface AgentHooks {
 		ctx: GetSteeringMessagesContext,
 		signal?: AbortSignal,
 	) => Promise<Message[] | undefined> | Message[] | undefined;
+	getToolChoice?: (
+		ctx: GetToolChoiceContext,
+		signal?: AbortSignal,
+	) => Promise<ToolChoiceDirective | undefined> | ToolChoiceDirective | undefined;
 	getFollowUpMessages?: (
 		ctx: GetFollowUpMessagesContext,
 		signal?: AbortSignal,
@@ -678,4 +711,43 @@ export interface AgentHooks {
 		| Promise<BeforeCompactResult | undefined>
 		| BeforeCompactResult
 		| undefined;
+}
+// ── Soft Tool Requirement ────────────────────────────────────────────────────
+// Remind-then-escalate pattern: inject reminder messages when a specific tool
+// should be called before the agent yields or calls other tools. Avoids the
+// message-cache invalidation cost of forcing tool_choice up front.
+
+/**
+ * A soft tool requirement: the harness wants `toolName` called before the loop
+ * runs other tools or yields, but WITHOUT forcing tool_choice (which invalidates
+ * the provider message cache). The loop injects `reminder` once when a new `id`
+ * becomes active and escalates to a one-turn forced choice only if the model
+ * fails to call `toolName`. Auto-clears when the host stops returning it.
+ */
+export interface SoftToolRequirement {
+	/** Discriminates a soft requirement from a hard ToolChoice. */
+	soft: true;
+	/**
+	 * Stable id of the current requirement. The loop injects `reminder` when
+	 * this id first becomes active and again whenever it changes, but never
+	 * re-injects for an unchanged id across turns.
+	 */
+	id: string;
+	/** Tool that must be called before the loop runs other tools or yields. */
+	toolName: string;
+	/**
+	 * Per-call compliance check: a turn satisfies the requirement only when
+	 * every tool call passes. Defaults to `name === toolName`.
+	 */
+	satisfies?(toolCall: { name: string; arguments?: Record<string, unknown> }): boolean;
+	/** Host-owned reminder messages, injected once per id activation. */
+	reminder: Message[];
+}
+
+/** Mutable soft-requirement lifecycle retained across tool-call batches. */
+export interface SoftToolRequirementState {
+	/** Current active requirement (or undefined when none is active). */
+	requirement: SoftToolRequirement | undefined;
+	/** Number of consecutive escalations for the current requirement. */
+	escalations: number;
 }

@@ -386,7 +386,10 @@ void test("keyboard navigation focuses and toggles individual tool cards", () =>
 
 	display.render(80);
 	assert.deepEqual(display.focusTool(1), { index: 1, total: 2 });
-	assert.match(plain(display.render(80).join("\n")), /› ✓ bash done/);
+	// Line 0 of a tool card is always its top border; the focus cursor points
+	// at line 1, the header row, just below it.
+	assert.match(plain(display.render(80).join("\n")), /\u203A \u2502 \u2713 bash done/);
+	assert.doesNotMatch(plain(display.render(80).join("\n")), /\u203A \u250C/);
 	assert.equal(display.toggleFocusedTool(), true);
 	assert.match(
 		plain(display.render(80).join("\n")),
@@ -1425,9 +1428,8 @@ void test("expanded completed subagent does not repeat its final report", () => 
 							args: { task: "Review it", agent: "reviewer" },
 							result: "**Final report:** all checks passed.",
 							details: {
-								streamTranscript:
-									"Inspecting files...\n\n**Final report:** all checks passed.\n\n" +
-									'```acceptance-report\n{"criteriaSatisfied":[]}\n```',
+							streamTranscript:
+								"Inspecting files...\n\n**Final report:** all checks passed.",
 							},
 							isError: false,
 							isComplete: true,
@@ -1464,8 +1466,8 @@ void test("collapsed completed subagent formats its final report as markdown", (
 							result:
 								"**Approved** with `zero errors`.\n\n```ts\nconst valid = true;\n```",
 							details: {
-								streamTranscript:
-									'Working...\n```acceptance-report\n{"criteriaSatisfied":[]}\n```',
+							streamTranscript:
+								"Working...",
 							},
 							isError: false,
 							isComplete: true,
@@ -1490,7 +1492,6 @@ void test("collapsed completed subagent formats its final report as markdown", (
 	assert.match(outputExpanded, /Approved.*zero errors/);
 	assert.match(renderedExpanded, /\x1b\[1mApproved/);
 	assert.match(renderedExpanded, /\x1b\[38;5;\d+mconst/);
-	assert.doesNotMatch(outputExpanded, /acceptance-report|criteriaSatisfied/);
 });
 
 void test("post-edit diagnostics render as a dedicated formatted block", () => {
@@ -2747,9 +2748,13 @@ void test("edit_file result highlights code inside the diff", () => {
 	]);
 	const rendered = display.render(100).join("\n");
 
+	// The diff marker keeps its own semantic color, reset, then the
+	// syntax-highlighted code. The optional bg code in between is the
+	// surrounding tool card reasserting its own continuous background,
+	// which the reset would otherwise have cut short.
 	assert.match(
 		rendered,
-		/\x1b\[38;5;\d+m\+\x1b\[0m\x1b\[48;5;\d+m\x1b\[0m\x1b\[38;5;141mconst/,
+		/\x1b\[38;5;\d+m\+\x1b\[0m(?:\x1b\[48;5;\d+m)?\x1b\[38;5;141mconst/,
 	);
 	assert.match(plain(rendered), /\+const answer = "yes";/);
 });

@@ -6,8 +6,7 @@ import type { ToolContext, ToolResult } from "@logician/log-core";
 import { edit_file } from "../../capabilities/tools/edit-file.ts";
 import { read_file } from "../../capabilities/tools/read-file.ts";
 import { createEditStore } from "../../capabilities/tools/support/edit-store.ts";
-import { executeHashlineEdit } from "../../capabilities/tools/support/hashline-engine.ts";
-import { createMutationSession } from "../../capabilities/tools/mutation/session.js";
+import { previewHashlineEdit } from "../../capabilities/tools/support/hashline-engine.ts";
 import { hashlineHash } from "../../capabilities/tools/support/hashline.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
 
@@ -36,6 +35,14 @@ test("read → hashline edit changes the file and runs post-edit diagnostics", a
 	const result = await edit_file.execute(args, f.ctx);
 	expect(readFileSync(f.file, "utf8")).toBe("{invalid\n");
 	expect(text(result)).toStartWith("Applied 1 line change(s) across 1 file(s).");
+	if (typeof result === "string") throw new Error("expected structured edit result");
+	expect(result.details?.mutation).toMatchObject({
+		kind: "mutation",
+		applied: true,
+		changed: true,
+		paths: [f.file],
+		filesAffected: 1,
+	});
 	const hook = createPostEditDiagnosticHooks(f.cwd).afterToolCall!;
 	const diagnostic = await hook({ toolCall: { id: "edit", name: "edit_file", arguments: JSON.stringify(args) }, args, result: text(result), isError: false, iteration: 0 });
 	expect(diagnostic?.content).toContain("<post_edit_diagnostics");
@@ -52,7 +59,7 @@ test("multiple operations keep their target and preserve CRLF, BOM, and literal 
 
 test("preview never writes and no-op is not reported as applied", async () => {
 	const f = fixture();
-	const preview = await executeHashlineEdit(f.input("PUT >1:middle"), createEditStore(), createMutationSession(createEditStore(), f.cwd), f.cwd);
+	const preview = await previewHashlineEdit(f.input("PUT >1:middle"), createEditStore(), f.cwd);
 	expect(preview.applied).toBe(false);
 	expect(preview.diff).toContain("middle");
 	expect(readFileSync(f.file, "utf8")).toBe("first\nlast\n");

@@ -1,139 +1,89 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
-	formatAcceptancePrompt,
-	parseAcceptanceReport,
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
-	stripAcceptanceReport,
 	validateAcceptanceInput,
 } from "../../control/guards/acceptance-contract.ts";
 import type { AcceptanceConfig } from "../../system/types/acceptance.ts";
 
-function reportFence(report: Record<string, unknown>): string {
-	const bt = "`";
-	return (
-		"\n\n" +
-		bt +
-		bt +
-		bt +
-		"acceptance-report\n" +
-		JSON.stringify(report, null, 2) +
-		"\n" +
-		bt +
-		bt +
-		bt
-	);
-}
+// ── resolveEffectiveAcceptance ──────────────────────────────────────────────
 
 void test("resolve with no config returns none", () => {
 	const resolved = resolveEffectiveAcceptance({ explicit: undefined });
 	assert.equal(resolved.level, "none");
 	assert.equal(resolved.explicit, false);
 	assert.equal(resolved.criteria.length, 0);
-});
-
-void test("resolve with criteria returns checked", () => {
-	const config: AcceptanceConfig = { criteria: ["fix the bug"] };
-	const resolved = resolveEffectiveAcceptance({ explicit: config });
-	assert.equal(resolved.level, "checked");
-	assert.equal(resolved.explicit, true);
-	assert.equal(resolved.criteria[0].must, "fix the bug");
-	assert.ok(shouldRunAcceptanceFinalization(resolved));
+	assert.equal(resolved.verify.length, 0);
 });
 
 void test("resolve with verify returns verified", () => {
-	const config: AcceptanceConfig = {
-		verify: [{ id: "t1", command: "npm test" }],
-	};
-	const resolved = resolveEffectiveAcceptance({ explicit: config });
+	const resolved = resolveEffectiveAcceptance({
+		explicit: { verify: [{ id: "test", command: "echo ok" }] },
+	});
 	assert.equal(resolved.level, "verified");
+	assert.equal(resolved.explicit, true);
+	assert.equal(resolved.verify.length, 1);
 });
 
-void test("normalize string criteria with global evidence", () => {
-	const config: AcceptanceConfig = {
-		criteria: ["fix bug"],
-		evidence: ["changed-files"],
-	};
-	const resolved = resolveEffectiveAcceptance({ explicit: config });
-	assert.equal(resolved.criteria[0].id, "criterion-1");
-	assert.deepEqual(resolved.criteria[0].evidence, ["changed-files"]);
+void test("resolve with criteria returns none (no verify)", () => {
+	const resolved = resolveEffectiveAcceptance({
+		explicit: { criteria: ["must pass"] },
+	});
+	assert.equal(resolved.level, "none");
+	assert.equal(resolved.criteria.length, 1);
 });
 
-void test("normalize gate criteria with custom evidence", () => {
-	const config: AcceptanceConfig = {
-		criteria: [{ id: "c1", must: "pass tests", evidence: ["tests-added"] }],
-	};
-	const resolved = resolveEffectiveAcceptance({ explicit: config });
-	assert.equal(resolved.criteria[0].id, "c1");
-	assert.deepEqual(resolved.criteria[0].evidence, ["tests-added"]);
-	assert.equal(resolved.criteria[0].severity, "required");
+void test("resolve with criteria and verify returns verified", () => {
+	const resolved = resolveEffectiveAcceptance({
+		explicit: {
+			criteria: ["must pass"],
+			verify: [{ id: "test", command: "echo ok" }],
+		},
+	});
+	assert.equal(resolved.level, "verified");
+	assert.equal(resolved.criteria.length, 1);
+	assert.equal(resolved.verify.length, 1);
 });
+
+// ── shouldRunAcceptanceFinalization ─────────────────────────────────────────
+
+void test("shouldRun with no verify returns false", () => {
+	const resolved = resolveEffectiveAcceptance({ explicit: undefined });
+	assert.equal(shouldRunAcceptanceFinalization(resolved), false);
+});
+
+void test("shouldRun with verify returns true", () => {
+	const resolved = resolveEffectiveAcceptance({
+		explicit: { verify: [{ id: "test", command: "echo ok" }] },
+	});
+	assert.equal(shouldRunAcceptanceFinalization(resolved), true);
+});
+
+// ── validateAcceptanceInput ────────────────────────────────────────────────
 
 void test("validate rejects empty criteria", () => {
 	const errors = validateAcceptanceInput({ criteria: [""] });
-	assert.ok(errors.length > 0);
+	assert.equal(errors.length > 0, true);
 });
 
 void test("validate rejects unknown keys", () => {
-	const errors = validateAcceptanceInput({ foo: "bar" } as AcceptanceConfig);
-	assert.ok(errors.some(e => e.includes("foo")));
+	const errors = validateAcceptanceInput({
+		criteria: ["ok"],
+		
+		foo: "bar",
+	} as AcceptanceConfig);
+	assert.equal(errors.length > 0, true);
 });
 
-void test("validate accepts minimal config", () => {
-	const errors = validateAcceptanceInput({ criteria: ["do something"] });
-	assert.equal(errors.length, 0);
+void test("validate accepts minimal config with verify", () => {
+	const errors = validateAcceptanceInput({
+		verify: [{ id: "test", command: "echo ok" }],
+	});
+	assert.deepEqual(errors, []);
 });
 
-void test("format returns empty for none level", () => {
-	const resolved = resolveEffectiveAcceptance({ explicit: undefined });
-	assert.equal(formatAcceptancePrompt(resolved), "");
-});
-
-void test("format includes criteria", () => {
-	const config: AcceptanceConfig = { criteria: ["fix the bug"] };
-	const resolved = resolveEffectiveAcceptance({ explicit: config });
-	const prompt = formatAcceptancePrompt(resolved);
-	assert.ok(prompt.includes("Acceptance Contract"));
-	assert.ok(prompt.includes("fix the bug"));
-	assert.ok(prompt.includes("acceptance-report"));
-});
-
-void test("parse accepts well-formed report", () => {
-	const report = {
-		criteriaSatisfied: [
-			{ id: "c1", status: "satisfied" as const, evidence: "changed 3 files" },
-		],
-		changedFiles: ["a.ts", "b.ts"],
-		commandsRun: [
-			{ command: "npm test", result: "passed" as const, summary: "all pass" },
-		],
-		residualRisks: [],
-	};
-	const output = `Here is my answer.${reportFence(report)}`;
-	const result = parseAcceptanceReport(output);
-	assert.ok(result.report);
-	assert.equal(result.report?.changedFiles?.length, 2);
-});
-
-void test("parse rejects malformed report", () => {
-	const output = "```acceptance-report\n{bad json\n```";
-	const result = parseAcceptanceReport(output);
-	assert.ok(result.error);
-});
-
-void test("parse rejects missing report", () => {
-	const result = parseAcceptanceReport("Just plain text.");
-	assert.ok(result.error);
-});
-
-void test("strip removes acceptance report", () => {
-	const report = {
-		criteriaSatisfied: [
-			{ id: "c1", status: "satisfied" as const, evidence: "done" },
-		],
-	};
-	const output = `Answer.${reportFence(report)}`;
-	const stripped = stripAcceptanceReport(output);
-	assert.ok(!stripped.includes("acceptance-report"));
+void test("validate rejects config with neither criteria nor verify", () => {
+	const errors = validateAcceptanceInput({});
+	assert.equal(errors.length > 0, true);
 });

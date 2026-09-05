@@ -968,12 +968,14 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					const toolLines = renderTool(
 						this,
 						chunk.tool,
-						width,
+						contentWidth,
 						this.toolsExpanded || this.expandedToolKeys.has(toolKey),
 					);
 					for (let lineIndex = 0; lineIndex < toolLines.length; lineIndex++) {
+						// toolLines[0] is always the box's top border — the focus
+						// cursor should point at the header row just below it.
 						const prefix =
-							lineIndex === 0 && toolKey === this.focusedToolKey
+							lineIndex === 1 && toolKey === this.focusedToolKey
 								? `${theme.fg("selected", "›")} `
 								: "  ";
 						lines.push(padToWidth(`${prefix}${toolLines[lineIndex]}`));

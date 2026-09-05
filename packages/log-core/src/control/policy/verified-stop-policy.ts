@@ -2,6 +2,7 @@ import type {
 	NamedAgentStopPolicy,
 	StopPolicyContext,
 } from "./execution-policy.ts";
+import type { MutationReceipt } from "../../system/types/types-messages.ts";
 
 const MUTATION_TOOLS = new Set(["apply_patch", "edit_file", "write_file"]);
 const VERIFICATION_TOOLS = new Set(["bash", "sandbox"]);
@@ -12,15 +13,11 @@ const FAILED_RESULT =
 
 function verificationMissing(context: StopPolicyContext): boolean {
 	let lastMutation = -1;
-	const calls = new Map<string, { index: number; verification: boolean }>();
+	const calls = new Map<string, { index: number; name: string; verification: boolean }>();
 	let verifiedAfterMutation = false;
 
 	for (const [index, message] of context.newMessages.entries()) {
 		for (const call of message.tool_calls ?? []) {
-			if (MUTATION_TOOLS.has(call.name)) {
-				lastMutation = index;
-				verifiedAfterMutation = false;
-			}
 			let args = "";
 			try {
 				args = JSON.stringify(JSON.parse(call.arguments));
@@ -29,12 +26,20 @@ function verificationMissing(context: StopPolicyContext): boolean {
 			}
 			calls.set(call.id, {
 				index,
+				name: call.name,
 				verification:
 					VERIFICATION_TOOLS.has(call.name) && VERIFICATION_COMMAND.test(args),
 			});
 		}
 		if (message.role !== "tool" || !message.tool_call_id) continue;
 		const call = calls.get(message.tool_call_id);
+		const receipt = message.details?.mutation as MutationReceipt | undefined;
+		if (call && MUTATION_TOOLS.has(call.name) && receipt?.kind === "mutation") {
+			if (receipt.applied && receipt.changed) {
+				lastMutation = call.index;
+				verifiedAfterMutation = false;
+			}
+		}
 		if (
 			call?.verification &&
 			call.index > lastMutation &&

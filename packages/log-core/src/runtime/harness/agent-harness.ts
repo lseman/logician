@@ -11,8 +11,6 @@ import { ToolRegistry } from "../../capabilities/tools/registry.ts";
 import { ToolResultCache } from "../../capabilities/tools/tool-result-cache.ts";
 import { resolveAgentSettings } from "../../control/configuration/agent-settings.ts";
 import {
-	evaluateAcceptanceReport,
-	formatAcceptancePrompt,
 	formatVerificationRepair,
 	type ResolvedAcceptance,
 	resolveEffectiveAcceptance,
@@ -31,6 +29,9 @@ import {
 import { RunBudgetController } from "../../control/policy/run-budget.ts";
 import { AgentRunController } from "../../control/policy/run-controller.ts";
 import { createVerifiedStopPolicy } from "../../control/policy/verified-stop-policy.ts";
+import { MAX_ESCALATIONS, SoftToolRequirementExceededError, SoftToolRequirementManager } from "../../control/guards/soft-tool-requirement.ts";
+import { StablePrefix } from "../../control/guards/stable-prefix.ts";
+import { TextLoopDetector } from "../../control/guards/text-loop-detector.ts";
 import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import type { RunBudgetDecision } from "../../system/types/run-budget.ts";
 import type {
@@ -123,6 +124,7 @@ async function runAgentLoopInternal(
 			messages: newMessages,
 			status: outcome.status,
 			summary: outcome.summary,
+			stepCount: iteration,
 		});
 		return newMessages;
 	};
@@ -166,7 +168,6 @@ async function runAgentLoopInternal(
 		...prompts,
 	]);
 	let contextWasCompacted = false;
-	let acceptanceReported = false;
 	let acceptanceFailed = false;
 	let cachedVerificationResults:
 		| Awaited<ReturnType<typeof verifyAcceptanceCommands>>
@@ -183,6 +184,8 @@ async function runAgentLoopInternal(
 		consumption =>
 			config.onBudgetConsumed?.(consumption.resource, consumption.amount),
 	);
+	const textLoopDetector = new TextLoopDetector();
+	const softToolManager = new SoftToolRequirementManager();
 
 	async function finishForBudgetExhaustion(
 		decision: RunBudgetDecision,
@@ -268,30 +271,16 @@ async function runAgentLoopInternal(
 	if (beforeAgentStartResult?.systemPrompt) {
 		context.systemPrompt = beforeAgentStartResult.systemPrompt;
 	}
-
-	// ── Inject acceptance contract into system prompt ──────────────────
 	const resolved = executionPolicy.embeddedPoliciesEnabled
 		? resolveAcceptance()
 		: resolveEffectiveAcceptance({ explicit: undefined });
-	if (shouldRunAcceptanceFinalization(resolved)) {
-		const accPrompt = formatAcceptancePrompt(resolved);
-		if (accPrompt) {
-			const existingSystem = messages
-				.filter(m => m.role === "system")
-				.map(m => m.content)
-				.join("\n\n");
-			messages = [
-				{
-					role: "system" as const,
-					content: existingSystem
-						? `${existingSystem}\n\n${accPrompt}`
-						: accPrompt,
-					timestamp: Date.now(),
-				},
-				...messages.filter(m => m.role !== "system"),
-			];
-		}
-	}
+
+	// ── Build stable prefix ────────────────────────────────────────
+	// Freeze the system prompt + tool spec into a cached prefix.
+	// Subsequent turns reuse it if the fingerprint hasn't changed.
+	const stablePrefix = new StablePrefix();
+	const systemPromptText = messages.find(m => m.role === "system")?.content ?? "";
+	stablePrefix.build(systemPromptText, registry.list());
 
 	while (iteration < maxIterations) {
 		if (config.signal?.aborted) {
@@ -328,6 +317,35 @@ async function runAgentLoopInternal(
 					await emitMessagePair(emit, turnId, pending);
 				}
 				pendingMessages = [];
+			}
+			// ── Soft tool requirement reminder injection ────────────────
+			// If a new soft requirement activated, inject its reminder messages
+			// before the model call. This avoids the cache-invalidating cost of
+			// forcing tool_choice up front.
+			{
+				const reminder = softToolManager.getReminder();
+				if (reminder && reminder.length > 0) {
+					for (const msg of reminder) {
+						messages.push(msg);
+						newMessages.push(msg);
+						await emitMessagePair(emit, turnId, msg);
+					}
+				}
+			}
+			// ── Soft tool requirement: resolve from host ─────────────────
+			// Call getToolChoice to let the host set a soft requirement or
+			// hard tool choice for this turn. The manager tracks the active
+			// requirement and injects reminders on activation.
+			{
+				const toolNames = registry.list().map(t => t.name);
+				const toolChoice = await config.hooks?.getToolChoice?.({
+					messages: messages as Message[],
+					iteration,
+					availableTools: toolNames,
+				});
+				if (toolChoice && "soft" in toolChoice && toolChoice.soft) {
+					softToolManager.setRequirement(toolChoice);
+				}
 			}
 
 			// transformContext is request-scoped only (ExtensionHooks, not
@@ -400,6 +418,26 @@ async function runAgentLoopInternal(
 				if (toolCalls.length > 0) {
 					performedToolWork = true;
 				}
+				// Text-level loop detection on assistant content
+				const assistantText = assistant.content ?? "";
+				if (assistantText.length > 200) {
+					const loopHit = textLoopDetector.check(assistantText);
+					if (loopHit) {
+						await intervene({
+							kind: "loop",
+							cause: "text_stagnation",
+							detector: "text_loop_detector",
+							message: `Text stagnation detected: ${loopHit}`,
+							iteration,
+							action: "change_strategy",
+						});
+						return finish({
+							status: "blocked",
+							summary: "Agent entered a text stagnation loop — repeating content without progress.",
+							source: "runtime",
+						});
+					}
+				}
 			} else {
 				return finish({
 					status: "failed",
@@ -443,6 +481,39 @@ async function runAgentLoopInternal(
 				newMessages.push(toolResult);
 				await emitMessagePair(emit, turnId, toolResult);
 				hasMoreToolCalls = true;
+			}
+			// ── Soft tool requirement compliance ────────────────────────
+			{
+				const toolCallObjects = toolCalls.map(tc => {
+					let args: Record<string, unknown> = {};
+					try {
+						args = JSON.parse(tc.arguments ?? "{}");
+					} catch {
+						args = {};
+					}
+					return { name: tc.name, arguments: args };
+				});
+				try {
+					softToolManager.checkCompliance(toolCallObjects);
+				} catch (err) {
+					if (err instanceof SoftToolRequirementExceededError) {
+						const toolName = err.message.split("'")[1];
+						await intervene({
+							kind: "loop",
+							cause: "soft_tool_requirement_exceeded",
+							detector: "soft_tool_requirement",
+							message: `Soft tool requirement for '${toolName}' was not satisfied after ${MAX_ESCALATIONS} forced turns; aborting.`,
+							iteration,
+							action: "stop",
+						});
+						return finish({
+							status: "blocked",
+							summary: "Soft tool requirement was not met after repeated escalations.",
+							source: "runtime",
+						});
+					}
+					throw err;
+				}
 			}
 			if (permissionEscalation) {
 				await intervene({
@@ -704,10 +775,7 @@ async function runAgentLoopInternal(
 	}
 
 	// ── Acceptance finalization ────────────────────────────────────────
-	if (shouldRunAcceptanceFinalization(resolved) && !acceptanceReported) {
-		const finalText = lastAssistantContent(finalMessagesForConclusion);
-
-		// Run verification commands
+	if (shouldRunAcceptanceFinalization(resolved)) {
 		const verificationResults =
 			cachedVerificationResults ??
 			(await verifyAcceptanceCommands(resolved, {
@@ -715,34 +783,26 @@ async function runAgentLoopInternal(
 				signal: config.signal,
 			}));
 
-		// Validate criteria and build ledger
-		const report = evaluateAcceptanceReport(
-			finalText,
-			resolved,
-			verificationResults,
-		);
-		for (const criterion of resolved.criteria) {
-			const result = report.ledger.report?.criteriaSatisfied.find(
-				item => item.id === criterion.id,
-			);
+		// Emit verification events
+		for (const result of verificationResults) {
 			await emit({
-				type: "acceptance_check",
-				criterionId: criterion.id,
-				status: result?.status ?? "failed",
-				severity: criterion.severity ?? "required",
+				type: "acceptance_verify",
+				command: result.command,
+				result: result.result,
+				summary: result.summary,
 			});
 		}
 
-		acceptanceReported = true;
+		const hasFailures = verificationResults.some(
+			r => r.result === "failed" && !resolved.verify.find(v => v.command === r.command)?.allowFailure,
+		);
+
+		acceptanceFailed = hasFailures;
+
 		await emit({
 			type: "acceptance_complete",
-			status: report.status,
-			report: report.ledger as unknown as Record<string, unknown>,
+			status: hasFailures ? "failed" : "passed",
 		});
-
-		if (report.status === "failed") {
-			acceptanceFailed = true;
-		}
 	}
 
 	// Final output guard reset when agent ends

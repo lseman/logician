@@ -255,6 +255,8 @@ export interface HashlineEditResult {
 	error?: string;
 	/** Diff of the changes (unified format). */
 	diff?: string;
+	/** Structured receipts for each planned file mutation. */
+	receipts?: import("@logician/log-core").MutationReceipt[];
 	/** Stale anchor error: which anchor(s) are stale. */
 	staleAnchors?: Array<{ path: string; expectedTag: string; computedTag: string }>;
 }

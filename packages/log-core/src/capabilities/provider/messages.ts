@@ -159,12 +159,14 @@ export function createToolResultMessage(
 	toolName: string,
 	result: string,
 	_isError: boolean = false,
+	details?: Record<string, unknown>,
 ): Message {
 	return {
 		role: "tool",
 		content: result,
 		tool_call_id: toolCallId,
 		name: toolName,
+		...(details ? { details } : {}),
 		timestamp: Date.now(),
 	};
 }

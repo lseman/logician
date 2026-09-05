@@ -17,6 +17,7 @@
 		"mdCode": 28,
 		"mdCodeBlock": 101,
 		"mdCodeBlockBg": 253,
+		"toolBlockBg": 253,
 		"mdCodeBlockBorder": 250,
 		"mdLink": 31,
 		"mdQuote": 101,

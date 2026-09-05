@@ -4,7 +4,6 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { LoopDetector } from "../../control/guards/loop-detector.ts";
-import { awaitsUserInput } from "../../control/guards/response-patterns.ts";
 import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
 import { ProgressTracker } from "../../control/policy/progress-tracker.ts";
 import {
@@ -43,29 +42,6 @@ esac
 		rmSync(root, { recursive: true, force: true });
 	}
 }
-
-// ── awaitsUserInput: detects final questions and direct input requests ──────
-
-void test("awaitsUserInput: detects final questions and direct input requests", () => {
-	assert.ok(
-		awaitsUserInput("I found two valid approaches. Which one do you prefer?"),
-	);
-	assert.ok(awaitsUserInput("Please choose one of the options below:"));
-	assert.ok(awaitsUserInput("I need your confirmation."));
-	assert.ok(
-		awaitsUserInput(
-			"Which environment should I use?\n\n1. Staging\n2. Production",
-		),
-	);
-});
-
-void test("awaitsUserInput: ignores questions followed by continued work", () => {
-	assert.ok(
-		!awaitsUserInput("What caused this? I will inspect the stack trace next."),
-	);
-	assert.ok(!awaitsUserInput("The tests answer the question. Task complete."));
-	assert.ok(!awaitsUserInput(""));
-});
 
 void test("minimal profile keeps mechanism hooks and omits built-in policies", () => {
 	const hooks = buildBuiltinHooks({

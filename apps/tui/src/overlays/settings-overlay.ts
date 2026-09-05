@@ -22,12 +22,23 @@ export interface SettingOption {
 
 export interface SettingDef {
 	name: string;
+	/** Display name (may differ from internal name). */
+	label?: string;
 	currentValue: string;
+	/** Human-readable description shown in the settings list. */
 	description?: string;
+	/** Warning text shown when the setting has a problematic value. */
 	warning?: string;
+	/** Tab grouping for the settings overlay UI. */
 	tab?: string;
+	/** Section grouping within a tab. */
 	section?: string;
-	options: SettingOption[];
+	/** Display type for rendering: "text", "select", "toggle", "number", "credential". */
+	displayType?: "text" | "select" | "toggle" | "number" | "credential";
+	/** Available options for select/toggle display types. */
+	options?: SettingOption[];
+	/** When true, redact value in UI (for passwords/API keys). */
+	redact?: boolean;
 }
 
 export type SettingsSelectorAction =
@@ -272,7 +283,7 @@ export class SettingsSelectorOverlay implements Component {
 				return { type: "open", settingName: s.name };
 			}
 			this._inDetailView = true;
-			this._selectedOptionIndex = Math.max(0, s.options.findIndex(option => option.current));
+			this._selectedOptionIndex = s.options ? Math.max(0, s.options.findIndex(option => option.current)) : 0;
 			this.invalidate();
 			return null;
 		}
@@ -325,7 +336,7 @@ export class SettingsSelectorOverlay implements Component {
 		}
 
 		if (data === "\r" || data === "\n" || data === " ") {
-			const opt = s.options[this._selectedOptionIndex];
+			const opt = s.options?.[this._selectedOptionIndex];
 			if (opt) {
 				return { type: "change", settingName: s.name, value: opt.value };
 			}
@@ -381,7 +392,7 @@ export class SettingsSelectorOverlay implements Component {
 	private moveOptionSelection(delta: number): void {
 		const s = this._filtered[this._selectedIndex];
 		if (!s) return;
-		const n = s.options.length;
+		const n = s.options?.length ?? 0;
 		if (!n) return;
 		this._selectedOptionIndex = ((this._selectedOptionIndex + delta) % n + n) % n;
 		this.invalidate();
@@ -481,9 +492,10 @@ export class SettingsSelectorOverlay implements Component {
 		if (!setting) return Array.from({ length: height }, () => "");
 		const lines = [`${getHeader()}${BOLD}${setting.section ?? setting.tab ?? "General"}${RESET} ${getMuted()}/ ${setting.name}${RESET}`, ""];
 		const count = Math.max(1, height - lines.length);
-		const start = Math.max(0, Math.min(this._selectedOptionIndex - Math.floor(count / 2), setting.options.length - count));
-		for (let i = start; i < Math.min(setting.options.length, start + count); i++) {
-			const option = setting.options[i];
+		const options = setting.options ?? [];
+		const start = Math.max(0, Math.min(this._selectedOptionIndex - Math.floor(count / 2), options.length - count));
+		for (let i = start; i < Math.min(options.length, start + count); i++) {
+			const option = options[i];
 			const selected = i === this._selectedOptionIndex;
 			const color = selected ? getWarning() + BOLD : theme.fgRaw("text");
 			const mark = typeof option.toggleOn === "boolean"

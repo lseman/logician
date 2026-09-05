@@ -3,6 +3,36 @@ import { createVerifiedStopPolicy } from "../../control/policy/verified-stop-pol
 
 const policy = createVerifiedStopPolicy();
 
+test("verified-stop ignores a no-op mutation receipt", async () => {
+	const decision = await policy.evaluate({
+		messages: [],
+		iteration: 1,
+		newMessages: [
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "edit", name: "edit_file", arguments: "{}" }],
+			},
+			{
+				role: "tool",
+				tool_call_id: "edit",
+				content: "No changes made",
+				details: {
+					mutation: {
+						kind: "mutation",
+						applied: false,
+						changed: false,
+						paths: [],
+						filesAffected: 0,
+						revisions: [],
+					},
+				},
+			},
+		],
+	});
+	expect(decision).toBeUndefined();
+});
+
 test("verified-stop requests verification after an edit", async () => {
 	const decision = await policy.evaluate({
 		messages: [],
@@ -14,6 +44,21 @@ test("verified-stop requests verification after an edit", async () => {
 				tool_calls: [
 					{ id: "edit", name: "edit_file", arguments: '{"path":"a.ts"}' },
 				],
+			},
+			{
+				role: "tool",
+				tool_call_id: "edit",
+				content: "Applied",
+				details: {
+					mutation: {
+						kind: "mutation",
+						applied: true,
+						changed: true,
+						paths: ["a.ts"],
+						filesAffected: 1,
+						revisions: [{ path: "a.ts", beforeHash: "before", afterHash: "after" }],
+					},
+				},
 			},
 		],
 	});
@@ -31,6 +76,21 @@ test("verified-stop accepts successful verification after the final edit", async
 				tool_calls: [
 					{ id: "edit", name: "edit_file", arguments: '{"path":"a.ts"}' },
 				],
+			},
+			{
+				role: "tool",
+				tool_call_id: "edit",
+				content: "Applied",
+				details: {
+					mutation: {
+						kind: "mutation",
+						applied: true,
+						changed: true,
+						paths: ["a.ts"],
+						filesAffected: 1,
+						revisions: [{ path: "a.ts", beforeHash: "before", afterHash: "after" }],
+					},
+				},
 			},
 			{
 				role: "assistant",
@@ -64,6 +124,21 @@ test("verified-stop rejects failed or stale verification", async () => {
 				tool_calls: [
 					{ id: "edit", name: "write_file", arguments: '{"path":"a.ts"}' },
 				],
+			},
+			{
+				role: "tool",
+				tool_call_id: "edit",
+				content: "Applied",
+				details: {
+					mutation: {
+						kind: "mutation",
+						applied: true,
+						changed: true,
+						paths: ["a.ts"],
+						filesAffected: 1,
+						revisions: [{ path: "a.ts", beforeHash: "before", afterHash: "after" }],
+					},
+				},
 			},
 		],
 	});

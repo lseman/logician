@@ -14,6 +14,7 @@ import {
 	visibleWidth,
 } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
+import type { ThemeColor } from "../../../terminal/theme.ts";
 import {
 	sanitizeTerminalText,
 	sanitizeTerminalValue,
@@ -36,8 +37,18 @@ import {
 } from "../text-utils.ts";
 import { truncateText, withTruncationMarker } from "./content.ts";
 import type { RenderCtx, SanitizedStringCache } from "./tool-context.ts";
-
 export type { RenderCtx, SanitizedToolCache } from "./tool-context.ts";
+// ── Box-drawing characters for card-style tool blocks ───────────────────────
+const BOX = {
+	tl: "┌",
+	horiz: "─",
+	tr: "┐",
+	vert: "│",
+	bl: "└",
+	br: "┘",
+	teeLeft: "├",
+	teeRight: "┤",
+} as const;
 
 import {
 	renderSubagentBatchActivityTail,
@@ -82,11 +93,31 @@ export function renderTool(
 		result: stripInternalHookGuidance(postEdit.text),
 		partialResult: stripInternalHookGuidance(tool.partialResult),
 	};
-	const lines: string[] = [];
 	const subagent = tool.tool_name === "spawn_agent";
 	const subagentBatch = tool.tool_name === "spawn_agents";
 	const batchTally = subagentBatch ? computeBatchTally(ctx, tool) : null;
 	const batchFailed = batchTally?.failed ?? 0;
+	// Border color reflects tool state: errors and partial batch failures stay
+	// loud, in-flight tools use the running accent, and finished tools settle
+	// into a muted border so a transcript of successes doesn't turn into a
+	// wall of colored boxes.
+	const borderColor: ThemeColor = tool.isError
+		? "toolError"
+		: tool.isComplete && batchFailed > 0
+			? "warning"
+			: tool.isComplete
+				? "borderMuted"
+				: "toolRunning";
+	const lines: string[] = [];
+	lines.push(blockTop(borderColor, width));
+	// Every exit path below must close the box that was just opened.
+	const finish = (): string[] => {
+		lines.push(blockBottom(borderColor, width));
+		return lines;
+	};
+	// Content width available inside the box: 2 border columns + 1 space of
+	// padding on each side.
+	const contentWidth = Math.max(20, width - 4);
 	const glyph = tool.isError
 		? theme.fg("toolError", "×")
 		: tool.isComplete && batchFailed > 0
@@ -145,14 +176,16 @@ export function renderTool(
 				? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${hyperlinkedFilePath(filePath, `${DIM}${filePath}${RESET}`)} ${status}`
 				: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
 	const middle = summary ? `${DIM}${summary}${RESET}` : "";
+
 	const right = elapsed ? `${DIM}${elapsed}${RESET}` : "";
 	let row = [base, middle].filter(Boolean).join(` ${DIM}·${RESET} `);
 	if (right) {
-		const available = Math.max(1, width - 4);
+		const available = Math.max(1, contentWidth);
 		const gap = available - visibleWidth(row) - visibleWidth(right);
 		row = gap >= 2 ? `${row}${" ".repeat(gap)}${right}` : `${row} ${right}`;
 	}
-	lines.push(clampLineToWidth(row, Math.max(1, width - 4)) + RESET);
+	lines.push(blockLine(borderColor, clampLineToWidth(row, contentWidth), width));
+	lines.push(blockDivider(borderColor, width));
 
 	// Edits keep their compact diff preview. File writes and appends report
 	// their live line count in the header and reveal content on expand.
@@ -164,22 +197,17 @@ export function renderTool(
 		if (tool.isError) {
 			const resultLines = resultText.split("\n");
 			lines.push(
-				`${theme.fg("toolError", "│ ")}${BOLD}${theme.fg("toolError", label)}${RESET} ${resultLines[0]}`,
+				blockLine(borderColor, `${BOLD}${theme.fg("toolError", label)}${RESET} ${resultLines[0]}`, width),
 			);
 			for (let ri = 1; ri < resultLines.length; ri++) {
-				lines.push(`${theme.fg("toolError", "│ ")}${resultLines[ri]}`);
+				lines.push(blockLine(borderColor, resultLines[ri], width));
 			}
 		} else {
 			// Syntax-highlight the diff in collapsed view.
-			const diffLines = renderDiffBlock(
-				ctx,
-				resultText,
-				Math.max(20, width - 4),
-				detectLanguage(filePath),
-			);
-			lines.push(`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET}`);
+			const diffLines = renderDiffBlock(ctx, resultText, contentWidth, detectLanguage(filePath));
+			lines.push(blockLine(borderColor, `${BOLD}${label}${RESET}`, width));
 			for (const dl of diffLines) {
-				lines.push(`${theme.fg("dim", "│ ")}${dl}`);
+				lines.push(blockLine(borderColor, dl, width));
 			}
 		}
 	}
@@ -194,16 +222,19 @@ export function renderTool(
 				? theme.fg("toolRunning", "live")
 				: theme.fg("muted", "output");
 		lines.push(
-			clampLineToWidth(
-				`${theme.fg("dim", "└─")} ${label} ${compactPreview}${RESET}`,
-				Math.max(1, width - 4),
+			blockLine(
+				borderColor,
+				clampLineToWidth(`${theme.fg("dim", "└─")} ${label} ${compactPreview}${RESET}`, contentWidth),
+				width,
 			),
 		);
 	}
 	for (const block of postEdit.blocks) {
-		lines.push(...renderPostEditDiagnostics(block, Math.max(20, width - 4)));
+		for (const dl of renderPostEditDiagnostics(block, contentWidth)) {
+			lines.push(blockLine(borderColor, dl, width));
+		}
 	}
-	if (!expanded && !subagent && !subagentBatch) return lines;
+	if (!expanded && !subagent && !subagentBatch) return finish();
 	// Spawn_agents always shows compact per-task status cards, each
 	// independently clickable to expand/collapse. Once the whole tool is
 	// expanded (Ctrl+O / row click), the chronological child flow / activity
@@ -245,24 +276,25 @@ export function renderTool(
 				}
 			}
 		}
-		return lines;
+		return finish();
 	}
 	// /spawn and LLM-mode spawn_agent start collapsed: header only.
 	// Click / Ctrl+O expands to the live stream, child tools, and final report.
 	if (!expanded && subagent) {
-		return lines;
+		return finish();
 	}
-	if (!subagent && !subagentBatch) {
-		lines.push(`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`);
-	}
-	for (const detailLine of toolDetailLines(ctx, tool, width - 2, expanded)) {
-		const wrapped = wrapText(detailLine, Math.max(20, width - 4));
+	lines.push(blockLine(borderColor, theme.fg("active", "◆ details"), width));
+	for (const detailLine of toolDetailLines(ctx, tool, contentWidth, expanded)) {
+		const wrapped = wrapText(detailLine, contentWidth);
 		for (const line of wrapped) {
-			lines.push(`${theme.fg("dim", "│ ")}${line}`);
+			lines.push(blockLine(borderColor, line, width));
 		}
 	}
-
-	return lines;
+	// Add block footer for expanded tools.
+	if (expanded && !subagent) {
+		lines.push(blockLine(borderColor, "", width));
+	}
+	return finish();
 }
 
 function sanitizeToolForDisplay(
@@ -351,25 +383,25 @@ function renderPostEditDiagnostics(
 ): string[] {
 	const count = block.diagnostics.length;
 	const lines = [
-		`${theme.fg("dim", "│ ")}${theme.fg("warning", "◆")} ${BOLD}${theme.fg("warning", "DIAGNOSTICS")}${RESET} ${DIM}${count} issue${count === 1 ? "" : "s"}${RESET}`,
-		`${theme.fg("dim", "│ ")}${theme.fg("muted", block.file)}${RESET}`,
+		`${theme.fg("warning", "◆")} ${BOLD}${theme.fg("warning", "DIAGNOSTICS")}${RESET} ${DIM}${count} issue${count === 1 ? "" : "s"}${RESET}`,
+		`${theme.fg("muted", block.file)}${RESET}`,
 	];
 	if (count === 0) {
 		lines.push(
-			`${theme.fg("dim", "│ ")}${DIM}Diagnostics were reported but could not be parsed.${RESET}`,
+			`${DIM}Diagnostics were reported but could not be parsed.${RESET}`,
 		);
 		return lines;
 	}
 	for (const diagnostic of block.diagnostics) {
 		const label = diagnostic.label ? ` ${diagnostic.label}` : "";
 		lines.push(
-			`${theme.fg("dim", "│ ")}${theme.fg("toolError", "×")} ${theme.fg("active", `${diagnostic.line}:${diagnostic.column}`)}${theme.fg("muted", label)}${RESET}`,
+			`${theme.fg("toolError", "×")} ${theme.fg("active", `${diagnostic.line}:${diagnostic.column}`)}${theme.fg("muted", label)}${RESET}`,
 		);
 		for (const messageLine of wrapText(
 			diagnostic.message,
 			Math.max(16, width - 6),
 		)) {
-			lines.push(`${theme.fg("dim", "│   ")}${messageLine}${RESET}`);
+			lines.push(`  ${messageLine}${RESET}`);
 		}
 	}
 	return lines;
@@ -625,8 +657,6 @@ function renderDiffBlock(
 	if (!diff.trim()) return [`${DIM}(no diff)${RESET}`];
 	const rawLines = truncateText(diff, ctx.maxMessageLength).split("\n");
 	const lines: string[] = [];
-	const bg = theme.bg("mdCodeBlockBg", "");
-	const bgReset = RESET;
 
 	for (const raw of rawLines) {
 		const color = diffLineColor(raw);
@@ -646,9 +676,7 @@ function renderDiffBlock(
 					: highlightAuto(codeText);
 				if (highlighted.value && highlighted.value !== codeText) {
 					if (visibleWidth(content) <= width) {
-						lines.push(
-							`${bg}${color}${prefix}${RESET}${bg}${highlighted.value}${bgReset}`,
-						);
+						lines.push(`${color}${prefix}${RESET}${highlighted.value}`);
 						continue;
 					}
 				}
@@ -658,15 +686,33 @@ function renderDiffBlock(
 		}
 
 		if (visibleWidth(content) <= width) {
-			lines.push(`${bg}${color}${content}${bgReset}`);
+			lines.push(`${color}${content}${RESET}`);
 		} else {
 			for (const wrapped of wrapText(content, width)) {
-				lines.push(`${bg}${color}${wrapped}${bgReset}`);
+				lines.push(`${color}${wrapped}${RESET}`);
 			}
 		}
 	}
 
 	return lines;
+}
+
+function stripInternalMarkers(text: string): string {
+	// Remove post-tool-use-hook and its entire content
+	let cleaned = text.replace(
+		/<\/?post-tool-use-hook(\s[^>]*)?>([\s\S]*?)<\/post-tool-use-hook>/gi,
+		"",
+	);
+	cleaned = cleaned.replace(
+		/<\/?context_guidance(\s[^>]*)?>([\s\S]*?)<\/context_guidance>/gi,
+		"",
+	);
+	// Remove tip element and its content
+	cleaned = cleaned.replace(
+		/<\/?tip(\s[^>]*)?>([\s\S]*?)<\/tip>/gi,
+		"",
+	);
+	return cleaned;
 }
 
 function renderTerminalBlock(
@@ -675,20 +721,18 @@ function renderTerminalBlock(
 	width: number,
 ): string[] {
 	if (!text) return [`${DIM}(no output)${RESET}`];
-	const rawLines = truncateText(text, ctx.maxMessageLength).split("\n");
+	const rawLines = truncateText(stripInternalMarkers(text), ctx.maxMessageLength).split("\n");
 	const lines: string[] = [];
-	const bg = theme.bg("mdCodeBlockBg", "");
-	const bgReset = RESET;
 	for (const raw of rawLines) {
 		const content = raw.length ? raw.replace(/\t/g, "    ") : " ";
 		const color = raw.startsWith("Error:")
 			? theme.fgRaw("diffRemoved")
 			: theme.fgRaw("terminalOutput");
 		if (visibleWidth(content) <= width) {
-			lines.push(`${bg}${color}${content}${bgReset}`);
+			lines.push(`${color}${content}${RESET}`);
 		} else {
 			for (const wrapped of wrapText(content, width)) {
-				lines.push(`${bg}${color}${wrapped}${bgReset}`);
+				lines.push(`${color}${wrapped}${RESET}`);
 			}
 		}
 	}
@@ -702,14 +746,13 @@ function previewBlock(
 	maxChars = ctx.maxMessageLength,
 ): string[] {
 	if (!text) return [`${DIM}(empty)${RESET}`];
+	const cleaned = stripInternalMarkers(text);
 	const preview =
-		text.length > maxChars
-			? withTruncationMarker(text.slice(0, maxChars))
-			: text;
+		cleaned.length > maxChars
+			? withTruncationMarker(cleaned.slice(0, maxChars))
+			: cleaned;
 	const rawLines = preview.split("\n");
 	const lines: string[] = [];
-	const bg = theme.bg("mdCodeBlockBg", "");
-	const bgReset = RESET;
 	let prevEmpty = false;
 	for (const raw of rawLines) {
 		const isEmpty = raw.length === 0;
@@ -717,10 +760,10 @@ function previewBlock(
 		if (isEmpty && prevEmpty) continue; // collapse consecutive blanks
 		prevEmpty = isEmpty;
 		if (visibleWidth(formatted) <= width) {
-			lines.push(`${bg}${formatted}${bgReset}`);
+			lines.push(formatted);
 		} else {
 			for (const wrapped of wrapText(formatted, width)) {
-				lines.push(`${bg}${wrapped}${bgReset}`);
+				lines.push(wrapped);
 			}
 		}
 	}
@@ -736,3 +779,42 @@ const toolDetailHelpers: ToolDetailHelpers = {
 	renderTerminalBlock,
 	writeFileContent,
 };
+
+// ── Tool block styling ──────────────────────────────────────────────────────
+// Every rendered line inside a tool box must have the exact same visible
+// width so the vertical borders line up regardless of content length.
+
+/**
+ * Paint a fully-composed box row with the tool-block background. Content
+ * inside the row commonly carries its own `RESET` (e.g. `${DIM}...${RESET}`),
+ * which would otherwise cut the background short mid-line — reapply it after
+ * every reset, and end on SGR 49 (background-only reset) rather than a full
+ * `RESET` so the row's own foreground colors survive to the end of the line.
+ */
+function paintBlockBg(row: string): string {
+	const bg = theme.bgRaw("toolBlockBg");
+	const stabilized = row.replace(/\x1b\[0m/g, `$&${bg}`);
+	return `${bg}${stabilized}\x1b[49m`;
+}
+
+function blockTop(color: ThemeColor, width: number): string {
+	return paintBlockBg(theme.fg(color, `${BOX.tl}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.tr}`));
+}
+
+function blockBottom(color: ThemeColor, width: number): string {
+	return paintBlockBg(theme.fg(color, `${BOX.bl}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.br}`));
+}
+
+/** Divider separating the tool call's header row from the rest of the box. */
+function blockDivider(color: ThemeColor, width: number): string {
+	return paintBlockBg(theme.fg(color, `${BOX.teeLeft}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.teeRight}`));
+}
+
+/** One content row inside a tool box, padded and clamped so both borders align. */
+function blockLine(color: ThemeColor, content: string, width: number): string {
+	const innerWidth = Math.max(1, width - 2);
+	const clamped = clampLineToWidth(` ${content}`, innerWidth);
+	const pad = " ".repeat(Math.max(0, innerWidth - visibleWidth(clamped)));
+	const v = theme.fg(color, BOX.vert);
+	return paintBlockBg(`${v}${clamped}${pad}${v}`);
+}

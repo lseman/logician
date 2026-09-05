@@ -1,5 +1,3 @@
-import { awaitsUserInput } from "../guards/response-patterns.ts";
-
 export interface AutonomousTask {
 	id: string | number;
 	subject: string;
@@ -20,15 +18,17 @@ export type AutonomousContinuation = {
 /**
  * Decide whether an otherwise-finished turn needs one more model call.
  *
- * This is intentionally the whole autonomous policy: pause on an explicit
- * user handoff, recover provider truncation, and honor the model's task ledger.
- * Iteration and provider-call budgets remain enforcement concerns of the loop.
+ * Handles:
+ * - Provider truncation recovery
+ * - Unfinished todo continuation
+ *
+ * User handoff detection is handled by the steering mechanism (live user
+ * input pauses the loop). Text-parsing heuristics for "awaitsUserInput"
+ * are removed — they produce unreliable results and OMP does not use them.
  */
 export function decideAutonomousContinuation(
 	input: AutonomousContinuationInput,
 ): AutonomousContinuation | undefined {
-	if (awaitsUserInput(input.assistantText)) return undefined;
-
 	if (input.stopReason === "length") {
 		return {
 			reason: "length_truncation",

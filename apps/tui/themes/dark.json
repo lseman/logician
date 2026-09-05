@@ -29,20 +29,18 @@
 		"text": "text",
 		"border": "border",
 		"borderMuted": "borderMuted",
-
 		"userText": "text",
 		"assistantText": "text",
 		"systemText": "muted",
-
 		"mdHeading": "blue",
 		"mdCode": "blueSoft",
 		"mdCodeBlock": "textSoft",
 		"mdCodeBlockBg": "surface",
+		"toolBlockBg": "surface",
 		"mdCodeBlockBorder": "separator",
 		"mdLink": "blue",
 		"mdQuote": "muted",
 		"mdListBullet": "blueSoft",
-
 		"toolTitle": "cyanBright",
 		"toolRunning": "orange",
 		"toolSuccess": "green",
@@ -50,18 +48,15 @@
 		"toolStreaming": "cyanBright",
 		"toolOutput": "textSoft",
 		"pluginStartup": "muted",
-
 		"diffAdded": "green",
 		"diffRemoved": "red",
 		"diffContext": "textSoft",
 		"diffHunk": "blue",
 		"diffMeta": "muted",
 		"terminalOutput": "textSoft",
-
 		"reasoningLabel": "cyanBright",
 		"thinkingText": "textSoft",
 		"responseLabel": "blueBright",
-
 		"phaseReady": "green",
 		"phaseThinking": "purple",
 		"phaseTool": "cyanBright",
@@ -69,17 +64,14 @@
 		"phaseStreaming": "blueBright",
 		"phaseCompacting": "purple",
 		"phaseBranching": "purple",
-
 		"contextGood": "green",
 		"contextWarning": "orange",
 		"contextCritical": "red",
-
 		"levelOff": "dim",
 		"levelLow": "muted",
 		"levelMedium": "blueSoft",
 		"levelHigh": "orange",
 		"levelXhigh": "red",
-
 		"separator": "separator",
 		"prompt": "blue",
 		"inputText": "text",
@@ -87,13 +79,11 @@
 		"selected": "blue",
 		"header": "text",
 		"active": "green",
-
 		"jsonKey": "blue",
 		"jsonString": "green",
 		"jsonNumber": "orange",
 		"jsonKeyword": "purple",
 		"jsonPunctuation": "muted",
-
 		"memoryTag": "purple",
 		"memoryId": "blueSoft",
 		"memoryContent": "textSoft",
