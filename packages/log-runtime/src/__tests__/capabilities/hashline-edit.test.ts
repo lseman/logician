@@ -7,6 +7,7 @@ import { edit_file } from "../../capabilities/tools/edit-file.ts";
 import { read_file } from "../../capabilities/tools/read-file.ts";
 import { createEditStore } from "../../capabilities/tools/support/edit-store.ts";
 import { executeHashlineEdit } from "../../capabilities/tools/support/hashline-engine.ts";
+import { createMutationSession } from "../../capabilities/tools/mutation/session.js";
 import { hashlineHash } from "../../capabilities/tools/support/hashline.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
 
@@ -51,7 +52,7 @@ test("multiple operations keep their target and preserve CRLF, BOM, and literal 
 
 test("preview never writes and no-op is not reported as applied", async () => {
 	const f = fixture();
-	const preview = await executeHashlineEdit(f.input("PUT >1:middle"), createEditStore(), f.cwd);
+	const preview = await executeHashlineEdit(f.input("PUT >1:middle"), createEditStore(), createMutationSession(createEditStore(), f.cwd), f.cwd);
 	expect(preview.applied).toBe(false);
 	expect(preview.diff).toContain("middle");
 	expect(readFileSync(f.file, "utf8")).toBe("first\nlast\n");

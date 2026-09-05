@@ -6,15 +6,16 @@
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
 import type { Tool, ToolResult } from "@logician/log-core";
+import { createHash } from "node:crypto";
 import { executeHashlineEdit } from "./support/hashline-engine.js";
 import { createEditStore } from "./support/edit-store.js";
+import { createMutationSession } from "./mutation/session.js";
 import { withFileMutationQueue } from "./support/mutation-queue.js";
 import {
 	hasBeenRead,
 	isStaleSinceRead,
 	refreshAfterWrite,
 } from "./support/read-tracker.ts";
-import { atomicWriteFile } from "./support/utils/atomic-write.ts";
 import { generateEditDiffs } from "./support/utils/diff-utils.ts";
 import {
 	defaultEditOperations,
@@ -678,73 +679,66 @@ export const edit_file: Tool = {
 				"Read it with read_file before editing."
 			);
 		}
-		return withFileMutationQueue(resolved, async () => {
-			if (isStaleSinceRead(resolved)) {
-				return (
-					`${resolved} has been modified since it was last read. ` +
-					"Read it again before editing."
+		const store = createEditStore();
+			const mutation = createMutationSession(store, ctx.cwd || process.cwd(), { allowedPaths: ctx.allowedPaths, allowAllPaths: ctx.allowAllPaths });
+
+			return withFileMutationQueue(resolved, async () => {
+				if (isStaleSinceRead(resolved)) {
+					return (
+						`${resolved} has been modified since it was last read. ` +
+						"Read it again before editing."
+					);
+				}
+				if (input) {
+					const result = await executeHashlineEdit(input, store, mutation, ctx.cwd || process.cwd(), false, resolved);
+					if (result.error) return `Error: ${result.error}`;
+					if (!result.applied) return "No changes made: hashline edits matched the current content.";
+					refreshAfterWrite(resolved);
+					return {
+						content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
+							(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
+						details: {
+							diff: result.diff,
+							linesChanged: result.linesChanged,
+							filesAffected: result.filesAffected,
+						},
+					};
+				}
+				const buffer = await defaultEditOperations.readFile(resolved);
+				const rawContent = buffer.toString("utf-8");
+				const { bom, text: fileContent } = stripBom(rawContent);
+				const lineEnding = detectLineEnding(fileContent);
+				const normalizedContent = normalizeToLF(fileContent);
+
+				const { baseContent, newContent } = applyEditsToNormalizedContent(
+					normalizedContent,
+					edits,
+					path,
 				);
-			}
-			if (input) {
-				const store = createEditStore();
-				const result = await executeHashlineEdit(input, store, ctx.cwd || process.cwd(), false, resolved);
-				if (result.error) return `Error: ${result.error}`;
-				if (!result.applied) return "No changes made: hashline edits matched the current content.";
+
+				const proposal = {
+					path: resolved,
+					before: rawContent,
+					beforeHash: createHash("sha256").update(rawContent, "utf-8").digest("hex"),
+					after: bom + restoreLineEndings(newContent, lineEnding),
+				};
+				const result = await mutation.apply(proposal);
 				refreshAfterWrite(resolved);
+
+				if (result.error) return `Error: ${result.error}`;
+				if (!result.applied) return "No changes made: the edit produced identical content.";
+
+				const diffResult = generateEditDiffs(path, baseContent, newContent);
 				return {
-					content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
-						(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
+					content:
+						`Successfully replaced ${edits.length} block(s) in ${path}.\n` +
+						(diffResult.diff ? `\nDiff:\n${diffResult.diff}` : ""),
 					details: {
-						diff: result.diff,
-						linesChanged: result.linesChanged,
-						filesAffected: result.filesAffected,
+						diff: diffResult.diff,
+						patch: diffResult.patch,
+						firstChangedLine: diffResult.firstChangedLine,
 					},
 				};
-			}
-			const buffer = await defaultEditOperations.readFile(resolved);
-			const rawContent = buffer.toString("utf-8");
-			const { bom, text: content } = stripBom(rawContent);
-			const lineEnding = detectLineEnding(content);
-			const normalizedContent = normalizeToLF(content);
-
-			const { baseContent, newContent } = applyEditsToNormalizedContent(
-				normalizedContent,
-				edits,
-				path,
-			);
-
-			const finalContent = bom + restoreLineEndings(newContent, lineEnding);
-
-			await atomicWriteFile(resolved, finalContent, {
-				expectedContent: rawContent,
 			});
-			refreshAfterWrite(resolved);
-
-			// Generate diff only if content actually changed (already guaranteed by
-			// applyEditsToNormalizedContent throwing on no-change, but keep the
-			// early-exit for clarity and to avoid unnecessary work). The display
-			// diff and the unified patch are derived from one LCS pass instead of
-			// two, since both cover the same before/after pair.
-			let diff = "";
-			let firstChangedLine: number | undefined;
-			let patch = "";
-			if (baseContent !== newContent) {
-				const diffResult = generateEditDiffs(path, baseContent, newContent);
-				diff = diffResult.diff;
-				firstChangedLine = diffResult.firstChangedLine;
-				patch = diffResult.patch;
-			}
-
-			return {
-				content:
-					`Successfully replaced ${edits.length} block(s) in ${path}.\n` +
-					(diff ? `\nDiff:\n${diff}` : ""),
-				details: {
-					diff,
-					patch,
-					firstChangedLine,
-				},
-			};
-		});
 	},
 };

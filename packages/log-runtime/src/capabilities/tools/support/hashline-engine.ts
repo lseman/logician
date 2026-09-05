@@ -1,9 +1,11 @@
-// Hashline line edits are planned before writing. Preview remains the default;
-// callers must explicitly request application and may constrain the target path.
+// Hashline line edits are planned before writing. The mutation session owns the
+// full lifecycle: parsing, validation, atomic writes, and diagnostic events.
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import type { EditStore } from "./edit-store.js";
 import { createEditStore } from "./edit-store.js";
+import type { MutationSession } from "../mutation/session.js";
 import {
 	type HashlineEdit,
 	type HashlineEditResult,
@@ -12,7 +14,6 @@ import {
 	splitAddressableFileLines,
 } from "./hashline.js";
 import { generateEditDiffs } from "./utils/diff-utils.js";
-import { atomicWriteFile } from "./utils/atomic-write.js";
 import { detectLineEnding, normalizeToLF, restoreLineEndings, stripBom } from "./utils/helpers.ts";
 
 interface FileEdit {
@@ -57,7 +58,6 @@ function applyLineEdits(original: string, edits: HashlineEdit[]): { content: str
 	const normalized = normalizeToLF(text);
 	const lines = normalized === "" ? [] : splitAddressableFileLines(normalized);
 	let linesChanged = 0;
-	// Each operation addresses the result of the preceding operation.
 	for (const edit of edits) {
 		const range = edit.range ?? "";
 		const insertion = /^([<>])(\d+)$/.exec(range);
@@ -89,6 +89,7 @@ function applyLineEdits(original: string, edits: HashlineEdit[]): { content: str
 export async function executeHashlineEdit(
 	input: string,
 	store: EditStore,
+	mutation: MutationSession,
 	cwd: string,
 	dryRun = true,
 	targetPath?: string,
@@ -109,6 +110,7 @@ export async function executeHashlineEdit(
 			return { ...file, original, ...result };
 		}).filter(plan => plan.original !== plan.content);
 		if (!plans.length) return { applied: false, filesAffected: 0, linesChanged: 0, diff: "" };
+
 		if (dryRun) {
 			return {
 				applied: false,
@@ -117,15 +119,24 @@ export async function executeHashlineEdit(
 				diff: plans.map(plan => generateEditDiffs(plan.path, plan.original, plan.content).diff).join("\n"),
 			};
 		}
+
 		for (const plan of plans) {
 			if (fs.readFileSync(plan.path, "utf8") !== plan.original) {
 				throw new Error(`${plan.path} changed while preparing the edit. Read it again.`);
 			}
-			await atomicWriteFile(plan.path, plan.content, { expectedContent: plan.original });
-			store.clearSnapshot(plan.path);
+			const proposal = {
+				path: plan.path,
+				before: plan.original,
+				beforeHash: createHash("sha256").update(plan.original, "utf-8").digest("hex"),
+				after: plan.content,
+			};
+			const result = await mutation.apply(proposal);
+			if (!result.applied) {
+				throw new Error(result.error || `Mutation failed for ${plan.path}`);
+			}
 			filesAffected++;
 			linesChanged += plan.linesChanged;
-			diff += generateEditDiffs(plan.path, plan.original, plan.content).diff + "\n";
+			diff += result.diff + "\n";
 		}
 		return { applied: true, filesAffected, linesChanged, diff: diff.trimEnd() };
 	} catch (error) {
