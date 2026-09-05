@@ -36,6 +36,7 @@ import type { MemoriamWorker } from "../../capabilities/memoriam/worker.ts";
 import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
+import { createKernelManager } from "../../capabilities/eval/kernel-manager.ts";
 import { onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type { SandboxProfile } from "../../capabilities/tools/sandbox.ts";
 import { killAllTrackedChildren } from "../../capabilities/tools/support/utils/shell.ts";
@@ -102,6 +103,7 @@ export class AgentRuntime {
 
 	private cwd: string;
 	private readonly toolRouter: ToolRouter;
+	private readonly kernelManager = createKernelManager();
 	private baseSystemPrompt = "";
 	private get _defaultTools(): Tool[] {
 		return this.toolRouter.getDefaultTools();
@@ -240,6 +242,7 @@ export class AgentRuntime {
 			graphicianEnabled: opts.graphicianEnabled,
 			fffgrepEnabled: opts.fffgrepEnabled,
 			autoStartMcp: false,
+			kernelManager: this.kernelManager,
 			emit: event => this.emit(event),
 			onToolAdded: _tool => {
 				if (!this.config) return;
@@ -446,8 +449,9 @@ export class AgentRuntime {
 				this.lsp.close();
 				this.legroom.close();
 				this.memoriam.close();
-				await this.toolRouter.closeMcp();
 				killAllTrackedChildren();
+				await this.toolRouter.closeMcp();
+				this.kernelManager.stop();
 			},
 			resetActivity: () => this.activity.resetContext(),
 			publishUsage: () => this.publishContextUsage(),

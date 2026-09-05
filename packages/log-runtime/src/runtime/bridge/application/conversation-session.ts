@@ -16,6 +16,7 @@ import {
 } from "../../../adapters/claude-code/plugin-runtime.ts";
 import type { ExtensionRegistry } from "../../../capabilities/extensions/extensions.ts";
 import { getTasks } from "../../../capabilities/tasks/todo.ts";
+import { ContextLearningStore } from "../../context/context-learning-store.ts";
 import type { AgentBridgeOptions } from "../types.ts";
 import { ConversationQueues } from "./conversation-queues.ts";
 
@@ -58,11 +59,18 @@ export class ConversationSession {
 
 		const { backend, emit, extensions } = this.dependencies;
 		const config = this.dependencies.config();
+		const contextLearning = new ContextLearningStore(
+			config.cwd ?? process.cwd(),
+		);
 		const session = new AgentSession({
 			config: { ...config, taskLedger: { snapshot: getTasks } },
 			backend,
 			cwd: config.cwd,
 			maxIterations: config.maxIterations,
+			contextLearning: {
+				initialState: contextLearning.load(),
+				onStateChange: state => contextLearning.save(state),
+			},
 			onEvent: event => emit(event as RuntimeEvent),
 			extensionRunner: extensions().runner ?? undefined,
 			pluginHookFactory: context =>

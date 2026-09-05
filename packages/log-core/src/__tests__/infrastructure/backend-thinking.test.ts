@@ -112,11 +112,13 @@ void test("withModel and withEndpoint preserve thinkingFormat", async () => {
 		model: "qwen3",
 		thinkingFormat: "qwen",
 	});
-	for (const clone of [backend.withModel("other"), backend.withEndpoint("m2", "http://x")]) {
-		const body = await captureRequestBody(
-			clone as OpenAIBackend,
-			{ thinkingLevel: "off" },
-		);
+	for (const clone of [
+		backend.withModel("other"),
+		backend.withEndpoint("m2", "http://x"),
+	]) {
+		const body = await captureRequestBody(clone as OpenAIBackend, {
+			thinkingLevel: "off",
+		});
 		assert.equal(body.enable_thinking, false, "clone must keep qwen format");
 	}
 });

@@ -7,6 +7,22 @@ description: Lifecycle hooks — when they fire, what they receive, and how to u
 
 The hook system provides lifecycle callbacks at key points in the agent loop. Hooks are registered on the `HookBus` and can observe, modify, or short-circuit agent behavior.
 
+Related handlers can be registered as a named `PolicyModule`. A policy declares
+whether its decision is deterministic, prompt-backed, or agent-backed, plus an
+optional deadline. The bus applies cancellation and emits structured
+`policy_evaluation` lifecycle records with policy identity, duration, status,
+and decision. Ordinary hooks remain supported for lightweight extensions.
+
+```typescript
+bus.registerPolicy({
+  id: "verified-stop",
+  description: "Require verification before settling",
+  kind: "deterministic",
+  timeoutMs: 5_000,
+  hooks: { shouldStopAfterTurn }
+})
+```
+
 ## Hook lifecycle
 
 ```mermaid

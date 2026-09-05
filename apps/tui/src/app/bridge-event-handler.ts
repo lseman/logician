@@ -419,6 +419,14 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 			ctx.transcript.addSteeredMessage(String(event.message || ""));
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			break;
+		case "policy_evaluation":
+			if (event.status === "failed") {
+				ctx.transcript.addSystemMessage(
+					`Policy ${event.policyId} failed${event.error ? `: ${event.error}` : "."}`,
+				);
+				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			}
+			break;
 		default:
 			assertNever(event);
 	}

@@ -6,6 +6,21 @@ import {
 	TerminalInputBuffer,
 } from "../terminal/input-protocol.ts";
 
+test("extended arrow reports normalize presses and repeats with lock state", () => {
+	for (const direction of ["A", "B", "C", "D"]) {
+		for (const modifier of [1, 65, 129, 193]) {
+			for (const event of ["", ":1", ":2"]) {
+				expect(normalizeKeyboardInput(`\x1b[1;${modifier}${event}${direction}`)).toBe(`\x1b[${direction}`);
+			}
+			expect(normalizeKeyboardInput(`\x1b[1;${modifier}:3${direction}`)).toBe("");
+		}
+		for (const modifier of [2, 3, 5, 133]) {
+			const sequence = `\x1b[1;${modifier}${direction}`;
+			expect(normalizeKeyboardInput(sequence)).toBe(sequence);
+		}
+	}
+});
+
 test("Kitty control reports preserve ambiguous Ctrl+I and Ctrl+M", () => {
 	expect(normalizeKeyboardInput("\x1b[99;5u")).toBe("\x03");
 	expect(normalizeKeyboardInput("\x1b[99;133u")).toBe("\x03");

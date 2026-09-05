@@ -16,11 +16,23 @@ export {
 	parseProviderUsage,
 } from "./capabilities/provider/backend.ts";
 export {
+	OpenAIChatCompletionsAdapter,
+	type ProviderAdapter,
+	type ProviderRequestContext,
+} from "./capabilities/provider/provider-adapter.ts";
+export {
 	parseTextToolCalls,
 	stripTextToolCalls,
 } from "./capabilities/provider/text-tool-calls.ts";
 export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
 export { stripAcceptanceReport } from "./control/guards/acceptance-contract.ts";
+export type {
+	NamedAgentStopPolicy,
+	StopPolicy,
+	StopPolicyEvaluation,
+	StopPolicyKind,
+} from "./control/policy/execution-policy.ts";
+export { createVerifiedStopPolicy } from "./control/policy/verified-stop-policy.ts";
 export {
 	EventJournal,
 	type EventJournalEntry,
@@ -38,6 +50,7 @@ export {
 export {
 	AdaptiveContextController,
 	type AdaptiveContextControllerOptions,
+	type AdaptiveContextLearningState,
 	type AdaptiveContextPlan,
 	type AdaptiveContextRequest,
 	type ContextOutcome,

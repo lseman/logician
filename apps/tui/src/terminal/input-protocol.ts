@@ -6,6 +6,10 @@ const KITTY_KEY = new RegExp(
 	"g",
 );
 const MODIFY_OTHER_KEYS_CTRL = new RegExp(`${ESCAPE}\\[27;([56]);(\\d+)~`, "g");
+const CSI_ARROW_KEY = new RegExp(
+	`${ESCAPE}\\[1;(\\d+)(?::(\\d+))?([ABCD])`,
+	"g",
+);
 const CSI_NAVIGATION_KEY = new RegExp(
 	`${ESCAPE}\\[(?:5~|6~|1;5H|1;5F|H|F)`,
 	"g",
@@ -57,6 +61,12 @@ export interface ParsedMouseInput {
  */
 export function normalizeKeyboardInput(data: string): string {
 	return data
+		.replace(CSI_ARROW_KEY, (sequence, modifierText: string, eventText: string | undefined, direction: string) => {
+			if (eventText === "3") return "";
+			// Ignore Caps/Num Lock state, but preserve actual navigation modifiers.
+			const modifiers = Number(modifierText) - 1;
+			return (modifiers & ~192) === 0 ? `${ESCAPE}[${direction}` : sequence;
+		})
 		.replace(
 			KITTY_KEY,
 			(

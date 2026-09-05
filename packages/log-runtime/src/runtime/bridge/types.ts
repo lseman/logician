@@ -116,6 +116,7 @@ export interface AgentBridgeOptions {
 	duplicateToolThreshold?: number;
 	toolFailureLoopThreshold?: number;
 	progressStopEnabled?: boolean;
+	verifiedStopEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
 	compaction?: {
 		enabled?: boolean;

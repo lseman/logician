@@ -30,6 +30,7 @@ void test("settings exposes tri-state guards and every inference provider mode",
 				continuationEnabled: true,
 				autoRetryEnabled: true,
 				progressStopEnabled: false,
+				workflowMode: "act",
 			}),
 		},
 		settingsSelector: {

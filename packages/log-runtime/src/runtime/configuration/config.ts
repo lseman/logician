@@ -59,6 +59,7 @@ const KNOWN_KEYS = new Set([
 	"toolFailureLoopThreshold",
 	"progressStopEnabled",
 	"continuationEnabled",
+	"verifiedStopEnabled",
 	"postEditDiagnostics",
 	"lsp",
 	"compaction",
@@ -341,6 +342,7 @@ export function validateConfig(
 		failureGuardEnabled: undefined,
 		progressStopEnabled: undefined,
 		continuationEnabled: true,
+		verifiedStopEnabled: undefined,
 		postEditDiagnostics: true,
 		autoRetryEnabled: true,
 		rtkProxyEnabled: undefined,
@@ -890,6 +892,7 @@ export interface LogicianTuiConfig {
 	toolFailureLoopThreshold?: number; // repeated failures (same call/path/category) before the failure guard blocks (default 3)
 	progressStopEnabled?: boolean; // OFF by default — stops after repeated turns produce no new tool/task evidence
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
+	verifiedStopEnabled?: boolean; // Require successful post-edit verification before settling
 	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
 	autoRetryEnabled?: boolean;
 	// RTK CLI proxy — compresses bash/rg/grep output 60–90%.

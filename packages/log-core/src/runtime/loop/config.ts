@@ -40,6 +40,7 @@ export type AgentLoopOptions = Pick<
 	| "tools"
 	| "truncation"
 	| "turnTimeoutMs"
+	| "verifiedStopEnabled"
 >;
 
 export interface AgentLoopConfig extends AgentLoopOptions {

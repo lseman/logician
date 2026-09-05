@@ -196,6 +196,15 @@ export type AgentEventBody =
 	| { type: "agent_start" }
 	| ({ type: "harness_intervention" } & HarnessIntervention)
 	| {
+			type: "policy_evaluation";
+			policyId: string;
+			kind: "deterministic" | "prompt" | "agent";
+			status: "started" | "completed" | "failed";
+			durationMs?: number;
+			decision?: "continue" | "finish" | "abstain";
+			error?: string;
+	  }
+	| {
 			type: "agent_end";
 			messages?: Message[];
 			status?: RunOutcomeStatus;

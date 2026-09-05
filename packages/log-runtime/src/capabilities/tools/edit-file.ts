@@ -6,7 +6,9 @@
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
 import type { Tool, ToolResult } from "@logician/log-core";
-import { withFileMutationQueue } from "./support/mutation-queue.ts";
+import { executeHashlineEdit } from "./support/hashline-engine.js";
+import { createEditStore } from "./support/edit-store.js";
+import { withFileMutationQueue } from "./support/mutation-queue.js";
 import {
 	hasBeenRead,
 	isStaleSinceRead,
@@ -543,10 +545,16 @@ const editSchema = {
 				},
 			},
 		},
+		input: {
+			type: "string",
+			description:
+				"Hashline-format edit input (alternative to edits[]). " +
+				"Use [path#4hex] file headers with PUT/CUT/MV/REM operations. " +
+				"When provided alongside edits[], the input field takes precedence.",
+		},
 	},
 	required: ["path"],
 } as const;
-
 function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 	const args = raw as Record<string, unknown>;
@@ -604,7 +612,8 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 		}
 	}
 
-	return { path, edits };
+	const input = typeof args.input === "string" && args.input ? args.input : undefined;
+	return { path, edits, input };
 }
 
 // ============================================================================
@@ -636,14 +645,28 @@ export const edit_file: Tool = {
 	): Promise<string | ToolResult> => {
 		const path = String(args.path ?? "");
 		const edits = (args.edits as Edit[]) || [];
+		const input = String(args.input ?? "");
 
 		if (!path) {
 			return "Error: edit_file requires a path.";
 		}
+		if (input) {
+			const store = createEditStore();
+			const result = await executeHashlineEdit(input, store, ctx.cwd || process.cwd());
+			if (result.error) return result.error;
+			return {
+				content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
+					(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
+				details: {
+					diff: result.diff,
+					linesChanged: result.linesChanged,
+					filesAffected: result.filesAffected,
+				},
+			};
+		}
 		if (edits.length === 0) {
 			return "Error: Provide oldText/newText or edits[].";
 		}
-
 		const resolved = resolveReadPath(path, ctx.cwd || process.cwd());
 		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 

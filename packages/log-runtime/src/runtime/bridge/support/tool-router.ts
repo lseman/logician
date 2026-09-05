@@ -42,6 +42,7 @@ import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,
 } from "./resource-directories.ts";
+import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
 
 export interface ToolRouterDeps {
 	cwd: string;
@@ -67,6 +68,8 @@ export interface ToolRouterDeps {
 	 * the time the stub is installed.
 	 */
 	autoStartMcp?: boolean;
+	/** Pre-constructed kernel manager for eval/workpool tools. */
+	kernelManager?: KernelManager;
 }
 
 /** Snapshot of MCP/skill state as reported by getState()/init(). */
@@ -162,6 +165,7 @@ export class ToolRouter {
 			: createDefaultTools({
 					webSearch,
 					graphicianEnabled: deps.graphicianEnabled,
+					kernelManager: deps.kernelManager,
 				});
 		if (deps.extraTools?.length) {
 			this.defaultTools = [

@@ -7,6 +7,10 @@ import type {
 	ThinkingLevel,
 } from "../../system/types/types-config.ts";
 import type { ToolCall } from "../../system/types/types-messages.ts";
+import {
+	OpenAIChatCompletionsAdapter,
+	type ProviderAdapter,
+} from "./provider-adapter.ts";
 
 // ── Typed backend errors ───────────────────────────────────────────────────
 // The backend classifies provider/network failures at the boundary so the loop
@@ -310,6 +314,7 @@ export function createLLMBackend(options: {
 	stop?: string[];
 	thinkingLevel?: ThinkingLevel;
 	thinkingFormat?: ThinkingFormat;
+	providerAdapter?: ProviderAdapter;
 }): LLMBackend {
 	return new OpenAIBackend(options);
 }
@@ -321,6 +326,7 @@ export class OpenAIBackend implements LLMBackend {
 	private stop?: string[];
 	private defaultThinkingLevel: ThinkingLevel = "off";
 	private thinkingFormat?: ThinkingFormat;
+	private readonly providerAdapter: ProviderAdapter;
 
 	constructor(options: {
 		baseUrl: string;
@@ -329,6 +335,7 @@ export class OpenAIBackend implements LLMBackend {
 		stop?: string[];
 		thinkingLevel?: ThinkingLevel;
 		thinkingFormat?: ThinkingFormat;
+		providerAdapter?: ProviderAdapter;
 	}) {
 		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.model = options.model;
@@ -336,6 +343,8 @@ export class OpenAIBackend implements LLMBackend {
 		this.stop = options.stop;
 		this.defaultThinkingLevel = options.thinkingLevel ?? "off";
 		this.thinkingFormat = options.thinkingFormat;
+		this.providerAdapter =
+			options.providerAdapter ?? new OpenAIChatCompletionsAdapter();
 	}
 
 	/** Clone this backend bound to a different model (LLMBackend.withModel). */
@@ -347,6 +356,7 @@ export class OpenAIBackend implements LLMBackend {
 			stop: this.stop,
 			thinkingLevel: this.defaultThinkingLevel,
 			thinkingFormat: this.thinkingFormat,
+			providerAdapter: this.providerAdapter,
 		});
 	}
 
@@ -358,6 +368,7 @@ export class OpenAIBackend implements LLMBackend {
 			stop: this.stop,
 			thinkingLevel: this.defaultThinkingLevel,
 			thinkingFormat: this.thinkingFormat,
+			providerAdapter: this.providerAdapter,
 		});
 	}
 
@@ -399,54 +410,22 @@ export class OpenAIBackend implements LLMBackend {
 
 		const providerMessages = normalizeProviderMessages(messages);
 
-		const body: Record<string, unknown> = {
+		const effectiveLevel = thinkingLevel ?? this.defaultThinkingLevel;
+		const body = this.providerAdapter.buildPayload({
 			model: this.model,
 			messages: providerMessages,
+			tools,
 			temperature,
-			max_tokens: maxTokens,
-			stream: true,
-			// Ask OpenAI-compatible providers to emit a final usage chunk so the
-			// loop can report real token counts instead of a local estimate.
-			stream_options: { include_usage: true },
-			// llama.cpp: reuse KV cache across turns instead of recomputing the prefix.
-			cache_prompt: true,
-			...(this.stop && { stop: this.stop }),
-			// Additional sampling params (populated when an inference mode is active).
-			...(topP !== undefined && { top_p: topP }),
-			...(topK !== undefined && { top_k: topK }),
-			...(minP !== undefined && { min_p: minP }),
-			...(presencePenalty !== undefined && {
-				presence_penalty: presencePenalty,
-			}),
-			...(repetitionPenalty !== undefined && {
-				repetition_penalty: repetitionPenalty,
-			}),
-		};
-
-		// Pass thinking control to OpenAI-compatible chat-completions providers.
-		const effectiveLevel = thinkingLevel ?? this.defaultThinkingLevel;
-		if (this.thinkingFormat === "qwen") {
-			// Qwen3-family hybrid-thinking models (e.g. served by llama.cpp)
-			// default to thinking ON in their chat templates, so "off" must be
-			// an explicit disable — omission leaves the server default in place.
-			body.enable_thinking = effectiveLevel !== "off";
-			if (effectiveLevel !== "off") {
-				body.reasoning_effort = effectiveLevel;
-			}
-		} else if (this.thinkingFormat === "qwen-chat-template") {
-			// Older llama.cpp builds only expose the chat template kwargs.
-			body.chat_template_kwargs = {
-				enable_thinking: effectiveLevel !== "off",
-				preserve_thinking: true,
-			};
-		} else if (effectiveLevel !== "off") {
-			// Top-level field for /v1/chat/completions (GPT-5, vLLM, llama.cpp).
-			body.reasoning_effort = effectiveLevel;
-		}
-
-		if (tools && tools.length > 0) {
-			body.tools = tools;
-		}
+			maxTokens,
+			topP,
+			topK,
+			minP,
+			presencePenalty,
+			repetitionPenalty,
+			stop: this.stop,
+			thinkingLevel: effectiveLevel,
+			thinkingFormat: this.thinkingFormat,
+		});
 
 		// Let a provider-payload hook inspect/rewrite the final body.
 		const finalBody = transformPayload ? await transformPayload(body) : body;
@@ -461,7 +440,7 @@ export class OpenAIBackend implements LLMBackend {
 				: (signal ?? timeoutSignal);
 		let response: Response;
 		try {
-			response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+			response = await fetch(this.providerAdapter.endpoint(this.baseUrl), {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",

@@ -27,13 +27,17 @@ export async function openSettingsSelector(
 		const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
 		const settings: SettingDef[] = [
 			{
+				tab: "Model",
 				name: "Model",
+				section: "Model",
 				currentValue: data.model,
 				description: "LLM model to use",
 				options: [{ label: data.model, value: data.model, current: true }],
 			},
 			{
+				tab: "Model",
 				name: "Temperature",
+				section: "Sampling",
 				currentValue: String(data.temperature),
 				description: "Sampling temperature (0–2)",
 				options: [0.0, 0.3, 0.5, 0.7, 1.0].map(v => ({
@@ -43,7 +47,9 @@ export async function openSettingsSelector(
 				})),
 			},
 			{
+				tab: "Model",
 				name: "Max tokens",
+				section: "Response limits",
 				currentValue: String(data.maxTokens),
 				description: "Maximum response tokens",
 				options: [1024, 2048, 4096, 8192, 16384].map(v => ({
@@ -53,7 +59,9 @@ export async function openSettingsSelector(
 				})),
 			},
 			{
+				tab: "Model",
 				name: "Max iterations",
+				section: "Response limits",
 				currentValue: String(data.maxIterations),
 				description: "Maximum tool-use iterations per turn",
 				options: [10, 20, 30, 50, 100].map(v => ({
@@ -63,7 +71,9 @@ export async function openSettingsSelector(
 				})),
 			},
 			{
+				tab: "Model",
 				name: "Thinking level",
+				section: "Reasoning",
 				currentValue: data.thinkingLevel,
 				description: "Depth of reasoning before responding",
 				options: thinkingLevels.map(v => ({
@@ -73,7 +83,9 @@ export async function openSettingsSelector(
 				})),
 			},
 			{
+				tab: "Behavior",
 				name: "Workflow mode",
+				section: "Workflow",
 				currentValue: ctx.workflowMode,
 				description: "Act with tools or produce a read-only plan",
 				options: [
@@ -86,7 +98,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Behavior",
 				name: "Guards",
+				section: "Safety",
 				currentValue: data.guardMode,
 				description: "Loop guards: auto uses safe defaults; off disables all",
 				options: [
@@ -110,7 +124,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Behavior",
 				name: "Compaction",
+				section: "Context",
 				currentValue: data.proactiveCompactionEnabled ? "on" : "off",
 				description: "Auto-compact context to save tokens",
 				options: [
@@ -129,7 +145,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Model",
 				name: "Inference mode",
+				section: "Sampling",
 				currentValue: data.inferenceMode,
 				description: "Pre-defined sampling parameter set (Alt+M to cycle)",
 				options: [
@@ -186,7 +204,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Tools",
 				name: "Post-edit diagnostics",
+				section: "Editing",
 				currentValue: data.postEditDiagnostics ? "on" : "off",
 				description: "Check edited files against the project",
 				options: [
@@ -205,7 +225,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Tools",
 				name: "RTK CLI proxy",
+				section: "Command output",
 				currentValue: data.rtkProxyEnabled ? "on" : "off",
 				description:
 					"Prefix all bash commands with `rtk` for 60-90% output compression",
@@ -225,7 +247,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Tools",
 				name: "Legroom SDK",
+				section: "Integrations",
 				currentValue: data.legroomEnabled ? "on" : "off",
 				description:
 					"Compress outbound context through the local Legroom worker",
@@ -245,7 +269,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Tools",
 				name: "Memoriam SDK",
+				section: "Integrations",
 				currentValue: data.memoriamEnabled ? "on" : "off",
 				description:
 					"Retrieve memory context for every turn (SQLite-backed store)",
@@ -265,7 +291,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Tools",
 				name: "Graphician",
+				section: "Integrations",
 				currentValue: data.graphicianEnabled ? "on" : "off",
 				description:
 					"Expose the Graphician code-graph tool for semantic repository analysis",
@@ -285,7 +313,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Tools",
 				name: "fffgrep",
+				section: "Integrations",
 				currentValue: data.fffgrepEnabled ? "on" : "off",
 				description: "Prefer the fff indexed MCP grep tool over local grep",
 				options: [
@@ -304,7 +334,9 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				tab: "Behavior",
 				name: "Execution policy",
+				section: "Workflow",
 				currentValue: data.executionProfile,
 				description:
 					"Auto continues bounded work; minimal performs one direct pass",
@@ -349,6 +381,8 @@ export async function openSettingsSelector(
 				],
 			].map(([name, enabled, description]) => ({
 				name: String(name),
+				tab: "Guards",
+				section: "Loop protection",
 				currentValue: enabled ? "on" : "off",
 				description: String(description),
 				options: [
@@ -363,14 +397,14 @@ export async function openSettingsSelector(
 			})),
 		];
 		ctx.settingsSelector.setSettings(settings);
-		ctx.settingsSelector.setMessage(
-			"Enter selects a setting · Enter in detail applies",
-		);
 		ctx.settingsSelector.show();
+		ctx.settingsSelector.setMessage(
+			"Changes apply to your current configuration.",
+		);
 		const overlay = ctx.tui.showOverlay(ctx.settingsSelector, {
-			anchor: "aboveInput",
-			align: "left",
-			maxHeight: 18,
+			anchor: "center",
+			width: "100%",
+			maxHeight: "100%",
 		});
 		overlay.focus();
 	} catch (e: unknown) {

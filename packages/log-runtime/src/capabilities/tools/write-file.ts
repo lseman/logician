@@ -25,6 +25,10 @@ import {
 	formatSize,
 	truncateHead,
 } from "./support/utils/truncate.ts";
+import {
+	executeResolutionDevice,
+	isResolutionDeviceName,
+} from "./support/resolve-devices.ts";
 
 export const write_file: Tool = {
 	name: "write_file",
@@ -72,6 +76,24 @@ export const write_file: Tool = {
 		const append = Boolean(args.append);
 		const resolved = resolvePath(ctx.cwd, filePath);
 		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
+		// xdev dispatch: resolve/reject for staged edits
+		if (filePath.startsWith("xd://")) {
+			const deviceName = filePath.replace("xd://", "");
+			if (isResolutionDeviceName(deviceName)) {
+				const result = await executeResolutionDevice(
+					deviceName,
+					content,
+					ctx.cwd || process.cwd(),
+				);
+				return {
+					content: result.message,
+					details: {
+						filesAffected: result.filesAffected,
+						linesChanged: result.linesChanged,
+					},
+				};
+			}
+		}
 
 		return withFileMutationQueue(resolved, async () => {
 			const fileExists = fs.existsSync(resolved);

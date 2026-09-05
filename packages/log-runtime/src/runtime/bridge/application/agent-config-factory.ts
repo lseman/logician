@@ -61,6 +61,7 @@ export function createAgentConfig(
 		duplicateToolThreshold: bridge.duplicateToolThreshold,
 		toolFailureLoopThreshold: bridge.toolFailureLoopThreshold,
 		progressStopEnabled: bridge.progressStopEnabled,
+		verifiedStopEnabled: bridge.verifiedStopEnabled,
 		proactiveCompactionEnabled: bridge.proactiveCompactionEnabled,
 		continuationEnabled: bridge.continuationEnabled,
 		rtkProxyEnabled: bridge.rtkProxyEnabled,

@@ -27,6 +27,7 @@ overrides in `.logician.json`:
   },
   "inferenceMode": "none",
   "thinkingLevel": "off",
+  "verifiedStopEnabled": true,
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
@@ -48,6 +49,10 @@ including `permissions`, `compaction`, `lsp.serverOverrides`, MCP servers, and
 truncation limits. A project override therefore does not erase unrelated user
 settings in the same section. Project configuration is ignored until the
 workspace is trusted.
+
+`verifiedStopEnabled` activates the built-in deterministic stop policy. After
+a file mutation, the agent must produce successful evidence from a relevant
+test, typecheck, lint, check, or build command before the run can settle.
 
 Writes made by selectors and `/settings` update only the selected field in the
 user file via an atomic replacement. Starting Logician, switching sessions, or

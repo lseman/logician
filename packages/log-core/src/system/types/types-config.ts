@@ -2,8 +2,8 @@
 
 import type { PermissionPolicy } from "../../capabilities/tools/permissions.ts";
 import type {
-	AgentStopPolicy,
 	ExecutionProfile,
+	StopPolicy,
 } from "../../control/policy/execution-policy.ts";
 import type { AcceptanceConfig } from "./acceptance.ts";
 import type { RunBudgetLimits } from "./run-budget.ts";
@@ -311,7 +311,9 @@ export interface AgentConfig {
 	 */
 	executionProfile?: ExecutionProfile;
 	/** Policies evaluated externally when the agent loop naturally becomes idle. */
-	stopPolicies?: AgentStopPolicy[];
+	stopPolicies?: StopPolicy[];
+	/** Require post-edit verification evidence before an autonomous run settles. */
+	verifiedStopEnabled?: boolean;
 	/** Optional task capability observed by autonomous policy. */
 	taskLedger?: TaskLedger;
 	loopDetectionWindow?: number;

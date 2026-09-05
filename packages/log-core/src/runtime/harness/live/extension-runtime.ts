@@ -129,8 +129,26 @@ export function withExtensionRuntime(
 
 	// External interception and internal run control have different lifetimes
 	// and authority. Compose them independently through AgentHooks.
-	const extensionBus = new HookBus();
-	const controlBus = new HookBus();
+	const policyTelemetry = {
+		onPolicyEvaluation: (evaluation: {
+			policyId: string;
+			kind: "deterministic" | "prompt" | "agent";
+			status: "completed" | "failed" | "timed_out";
+			durationMs: number;
+		}) =>
+			deps.emit({
+				type: "policy_evaluation",
+				...evaluation,
+				status:
+					evaluation.status === "timed_out" ? "failed" : evaluation.status,
+				error:
+					evaluation.status === "timed_out"
+						? "Policy evaluation timed out"
+						: undefined,
+			}),
+	};
+	const extensionBus = new HookBus(policyTelemetry);
+	const controlBus = new HookBus(policyTelemetry);
 	const builtinHooks = buildBuiltinHooks({
 		config,
 		contextWindowTokens: () => config.contextWindowTokens,

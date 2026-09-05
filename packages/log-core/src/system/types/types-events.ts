@@ -219,6 +219,16 @@ export interface DiagnosticEvent {
 	recoverable: boolean;
 }
 
+export interface PolicyEvaluationEvent {
+	type: "policy_evaluation";
+	policyId: string;
+	kind: "deterministic" | "prompt" | "agent";
+	status: "started" | "completed" | "failed";
+	durationMs?: number;
+	decision?: "continue" | "finish" | "abstain";
+	error?: string;
+}
+
 export interface RuntimeStatusEvent {
 	type: "runtime_status";
 	runPhase: string;
@@ -356,7 +366,8 @@ export type RuntimeEvent =
 	| AgentRetryEndEvent
 	| RuntimeStatusEvent
 	| AgentErrorEvent
-	| DiagnosticEvent;
+	| DiagnosticEvent
+	| PolicyEvaluationEvent;
 
 /** Event names are derived from the canonical discriminated union so the two
  * cannot drift as new runtime events are added. */

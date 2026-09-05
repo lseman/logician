@@ -19,7 +19,8 @@
 		"./sessions": "./src/runtime/session/index.ts",
 		"./skills": "./src/capabilities/skills/loader.ts",
 		"./tools": "./src/tools.ts",
-		"./trust": "./src/runtime/trust/index.ts"
+		"./trust": "./src/runtime/trust/index.ts",
+		"./eval": "./src/capabilities/eval/index.ts"
 	},
 	"scripts": {
 		"test": "bun test $(find src -name '*.test.ts' -type f -print)",

@@ -92,4 +92,54 @@ describe("AdaptiveContextController", () => {
 			}),
 		).toBe(true);
 	});
+
+	test("persists learning and applies task-specific source utility", () => {
+		let persisted:
+			| ReturnType<AdaptiveContextController["exportState"]>
+			| undefined;
+		const controller = new AdaptiveContextController(estimate, {
+			learningRate: 1,
+			learningWeight: 10,
+			onStateChange: state => {
+				persisted = state;
+			},
+		});
+		const contributions = [
+			{
+				source: "memory",
+				messages: [{ role: "system" as const, content: "cached advice" }],
+			},
+			{
+				source: "repository-map",
+				messages: [{ role: "system" as const, content: "repository map" }],
+			},
+		];
+		const training = controller.buildContext({
+			history: [],
+			objective: "repair authentication middleware",
+			maxInjectedTokens: 20,
+			contributions,
+		});
+		expect(
+			controller.recordOutcome(training.id, {
+				success: true,
+				usefulSources: ["repository-map"],
+			}),
+		).toBe(true);
+		expect(
+			persisted?.sources["repository-map"]?.terms.authentication?.utility,
+		).toBe(1);
+
+		const restored = new AdaptiveContextController(estimate, {
+			learningWeight: 10,
+			initialState: persisted,
+		});
+		const plan = restored.buildContext({
+			history: [],
+			objective: "authentication failure",
+			maxInjectedTokens: 10,
+			contributions,
+		});
+		expect(plan.sources[0]?.source).toBe("repository-map");
+	});
 });

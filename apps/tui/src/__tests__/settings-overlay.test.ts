@@ -6,7 +6,9 @@ import {
 	type SettingDef,
 	SettingsSelectorOverlay,
 } from "../overlays/settings-overlay.ts";
+import { visibleWidth } from "../terminal/primitives.ts";
 import { initTheme } from "../terminal/theme.ts";
+import { normalizeKeyboardInput, TerminalInputBuffer } from "../terminal/input-protocol.ts";
 
 // Initialize theme before any overlay rendering.
 const setupTheme = (): void => {
@@ -50,6 +52,83 @@ const makeSettings = (): SettingDef[] => [
 ];
 
 describe("SettingsSelectorOverlay", () => {
+	it("routes extended arrows through terminal input to settings, options, and tabs", () => {
+		setupTheme();
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings([
+			...makeSettings(),
+			{ name: "Theme", currentValue: "dark", tab: "Appearance", options: [] },
+		]);
+		overlay.show();
+		const buffer = new TerminalInputBuffer(sequence => {
+			overlay.handleInput(normalizeKeyboardInput(sequence));
+		});
+		try {
+			buffer.process("\x1b[1;");
+			buffer.process("129B");
+			assert.strictEqual(overlay.selectedIndex, 1);
+			buffer.process("\r\x1b[1;129:2B\x1b[1;129:3B");
+			assert.strictEqual(overlay.selectedOptionIndex, 3);
+			buffer.process("\x1b[1;129A");
+			assert.strictEqual(overlay.selectedOptionIndex, 2);
+			buffer.process("\t\x1b[1;129C");
+			assert.strictEqual(overlay.currentTabId, 1);
+			buffer.process("\x1b[1;129D");
+			assert.strictEqual(overlay.currentTabId, 0);
+		} finally {
+			buffer.destroy();
+		}
+	});
+
+	it("jumps sections with Tab and keeps tabs on left/right", () => {
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings(makeSettings().map((setting, i) => ({ ...setting, section: i < 2 ? "Model" : "Safety" })));
+		overlay.show();
+		overlay.handleInput("\t");
+		assert.strictEqual(overlay.selectedIndex, 2);
+		assert.strictEqual(overlay.currentTabId, 0);
+		overlay.handleInput("\x1b[Z");
+		assert.strictEqual(overlay.selectedIndex, 0);
+	});
+
+	it("shows and clears search, including q and backspace", () => {
+		setupTheme();
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings(makeSettings());
+		overlay.show();
+		overlay.handleInput("q");
+		assert.ok(overlay.render(100).join("\n").includes("No matching settings"));
+		overlay.handleInput("\x7f");
+		assert.ok(overlay.render(100).join("\n").includes("claude-sonnet-4"));
+		overlay.handleInput("t");
+		assert.ok(overlay.render(100).join("\n").includes("Search"));
+		assert.strictEqual(overlay.handleInput("\x1b"), null);
+		assert.deepStrictEqual(overlay.handleInput("\x1b"), { type: "close" });
+	});
+
+	it("keeps selected rows and the footer visible across terminal sizes", () => {
+		setupTheme();
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings(Array.from({ length: 35 }, (_, i) => ({
+			name: `Setting ${i}`, section: `Section ${Math.floor(i / 5)}`,
+			currentValue: "enabled", description: `Description ${i}`,
+			options: [{ label: "enabled", value: "true" }],
+		})));
+		overlay.show();
+		for (let i = 0; i < 34; i++) overlay.handleInput("\x1b[B");
+		for (const width of [40, 80, 120]) {
+			for (const height of [12, 24, 48]) {
+				overlay.setMaxHeight(height);
+				const lines = overlay.render(width);
+				assert.strictEqual(lines.length, height);
+				assert.ok(lines.every(line => visibleWidth(line) <= width));
+				assert.ok(lines.join("\n").includes("Setting 34"));
+				assert.ok(lines.join("\n").includes("Description 34"));
+				assert.ok(lines.at(-1)?.endsWith("\x1b[0m") || lines.at(-1)?.includes("┘"));
+			}
+		}
+	});
+
 	it("shows empty when not visible", () => {
 		setupTheme();
 		const overlay = new SettingsSelectorOverlay();
@@ -172,8 +251,8 @@ describe("SettingsSelectorOverlay", () => {
 
 		const lines = overlay.render(80);
 		const rendered = lines.join("\n");
-		assert.ok(rendered.includes("(claude-sonnet-4)"));
-		assert.ok(rendered.includes("(medium)"));
+		assert.ok(rendered.includes("claude-sonnet-4"));
+		assert.ok(rendered.includes("medium"));
 	});
 
 	it("handles empty settings", () => {
@@ -201,9 +280,7 @@ describe("SettingsSelectorOverlay", () => {
 
 		// Page down
 		overlay.handleInput("\x1b[6~");
-		assert.ok(overlay.selectedIndex >= 8);
-
-		// Page up
+		assert.ok(overlay.selectedIndex >= 8, `expected >= 8, got ${overlay.selectedIndex}`);
 		overlay.handleInput("\x1b[5~");
 		assert.ok(overlay.selectedIndex < 8);
 	});

@@ -121,6 +121,8 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 		case "agent_start":
 		case "phase":
 			return null; // Handled separately
+		case "policy_evaluation":
+			return { ...event };
 		case "inference_mode_selected":
 			return {
 				type: "notice",

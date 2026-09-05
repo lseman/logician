@@ -188,3 +188,75 @@ void test("a parent abort signal propagates to the handler's signal", async () =
 	await run;
 	assert.equal(observedAbort, true);
 });
+
+void test("policy modules expose kind, timing, and lifecycle decisions", async () => {
+	const evaluations: Array<{ policyId: string; kind: string; status: string }> =
+		[];
+	const bus = new HookBus({
+		onPolicyEvaluation: evaluation => evaluations.push(evaluation),
+	});
+	const unregister = bus.registerPolicy({
+		id: "verified-stop",
+		description: "Require independent verification before stopping",
+		kind: "agent",
+		hooks: {
+			shouldStopAfterTurn: ({ hadToolCalls }) => hadToolCalls,
+		},
+	});
+	assert.equal(
+		await bus.toHooks().shouldStopAfterTurn?.({
+			messages: [],
+			iteration: 1,
+			hadToolCalls: true,
+		}),
+		true,
+	);
+	assert.equal(evaluations.length, 1);
+	assert.deepEqual(
+		{
+			policyId: evaluations[0]?.policyId,
+			kind: evaluations[0]?.kind,
+			status: evaluations[0]?.status,
+		},
+		{ policyId: "verified-stop", kind: "agent", status: "completed" },
+	);
+	unregister();
+	assert.equal(
+		await bus.toHooks().shouldStopAfterTurn?.({
+			messages: [],
+			iteration: 2,
+			hadToolCalls: true,
+		}),
+		undefined,
+	);
+});
+
+void test("policy module deadlines fail open and report a timeout", async () => {
+	const statuses: string[] = [];
+	const bus = new HookBus({
+		onPolicyEvaluation: evaluation => statuses.push(evaluation.status),
+	});
+	bus.registerPolicy({
+		id: "slow-judge",
+		description: "A bounded prompt policy",
+		kind: "prompt",
+		timeoutMs: 5,
+		hooks: {
+			shouldStopAfterTurn: async (_context, signal) =>
+				await new Promise<boolean>(resolve => {
+					signal?.addEventListener("abort", () => resolve(false), {
+						once: true,
+					});
+				}),
+		},
+	});
+	assert.equal(
+		await bus.toHooks().shouldStopAfterTurn?.({
+			messages: [],
+			iteration: 1,
+			hadToolCalls: false,
+		}),
+		undefined,
+	);
+	assert.deepEqual(statuses, ["timed_out"]);
+});

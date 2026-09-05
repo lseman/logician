@@ -30,9 +30,31 @@ export interface AdaptiveContextControllerOptions {
 	learningWeight?: number;
 	/** EWMA update rate. Higher values adapt faster to recent outcomes. */
 	learningRate?: number;
+	/** Previously persisted learning state. Invalid entries are ignored. */
+	initialState?: AdaptiveContextLearningState;
+	/** Called after a new outcome changes source utility. */
+	onStateChange?: (state: AdaptiveContextLearningState) => void;
+}
+
+export interface AdaptiveContextLearningState {
+	version: 1;
+	sources: Record<
+		string,
+		{
+			utility: number;
+			uses: number;
+			terms: Record<string, { utility: number; uses: number }>;
+		}
+	>;
 }
 
 interface SourceState {
+	utility: number;
+	uses: number;
+	terms: Map<string, SourceTermState>;
+}
+
+interface SourceTermState {
 	utility: number;
 	uses: number;
 }
@@ -45,6 +67,7 @@ interface RankedContribution {
 
 interface RecordedPlan {
 	sources: string[];
+	objectiveTerms: string[];
 	recorded: boolean;
 }
 
@@ -84,6 +107,7 @@ export class AdaptiveContextController {
 	private nextPlan = 1;
 	private readonly learningWeight: number;
 	private readonly learningRate: number;
+	private readonly onStateChange?: AdaptiveContextControllerOptions["onStateChange"];
 
 	constructor(
 		private readonly estimateTokens: (messages: readonly Message[]) => number,
@@ -91,6 +115,8 @@ export class AdaptiveContextController {
 	) {
 		this.learningWeight = options.learningWeight ?? 2;
 		this.learningRate = options.learningRate ?? 0.25;
+		this.onStateChange = options.onStateChange;
+		if (options.initialState) this.importState(options.initialState);
 	}
 
 	buildContext(request: AdaptiveContextRequest): AdaptiveContextPlan {
@@ -138,7 +164,11 @@ export class AdaptiveContextController {
 		}
 
 		const id = `context-${this.nextPlan++}`;
-		this.plans.set(id, { sources: includedSources, recorded: false });
+		this.plans.set(id, {
+			sources: includedSources,
+			objectiveTerms: [...objective].slice(0, 32),
+			recorded: false,
+		});
 		return {
 			id,
 			systemPrompt,
@@ -156,14 +186,62 @@ export class AdaptiveContextController {
 			? new Set(outcome.usefulSources)
 			: null;
 		for (const source of plan.sources) {
-			const state = this.sourceState.get(source) ?? { utility: 0.5, uses: 0 };
+			const state = this.sourceState.get(source) ?? {
+				utility: 0.5,
+				uses: 0,
+				terms: new Map(),
+			};
 			const reward = outcome.success && (!useful || useful.has(source)) ? 1 : 0;
 			state.utility += this.learningRate * (reward - state.utility);
 			state.uses++;
+			for (const term of plan.objectiveTerms) {
+				const termState = state.terms.get(term) ?? { utility: 0.5, uses: 0 };
+				termState.utility += this.learningRate * (reward - termState.utility);
+				termState.uses++;
+				state.terms.set(term, termState);
+			}
 			this.sourceState.set(source, state);
 		}
 		this.prunePlans();
+		try {
+			this.onStateChange?.(this.exportState());
+		} catch {
+			// Outcome recording must not turn a successful agent run into a failure.
+		}
 		return true;
+	}
+
+	exportState(): AdaptiveContextLearningState {
+		const sources: AdaptiveContextLearningState["sources"] = {};
+		for (const [source, state] of this.sourceState) {
+			const terms: Record<string, SourceTermState> = {};
+			for (const [term, value] of state.terms) terms[term] = { ...value };
+			sources[source] = {
+				utility: state.utility,
+				uses: state.uses,
+				terms,
+			};
+		}
+		return { version: 1, sources };
+	}
+
+	importState(snapshot: AdaptiveContextLearningState): void {
+		if (snapshot.version !== 1 || !snapshot.sources) return;
+		this.sourceState.clear();
+		for (const [source, raw] of Object.entries(snapshot.sources)) {
+			if (!Number.isFinite(raw.utility) || !Number.isInteger(raw.uses))
+				continue;
+			const terms = new Map<string, SourceTermState>();
+			for (const [term, value] of Object.entries(raw.terms ?? {})) {
+				if (Number.isFinite(value.utility) && Number.isInteger(value.uses))
+					terms.set(term, { ...value });
+			}
+			this.sourceState.set(source, {
+				utility: Math.max(0, Math.min(1, raw.utility)),
+				uses: Math.max(0, raw.uses),
+				terms,
+			});
+		}
 	}
 
 	private rank(
@@ -173,7 +251,15 @@ export class AdaptiveContextController {
 		return contributions
 			.map((contribution, index) => {
 				const state = this.sourceState.get(contribution.source);
-				const learned = state?.utility ?? 0.5;
+				const globalUtility = state?.utility ?? 0.5;
+				const matchingTerms = [...objective]
+					.map(term => state?.terms.get(term))
+					.filter((term): term is SourceTermState => term !== undefined);
+				const taskUtility = matchingTerms.length
+					? matchingTerms.reduce((sum, term) => sum + term.utility, 0) /
+						matchingTerms.length
+					: globalUtility;
+				const learned = globalUtility * 0.4 + taskUtility * 0.6;
 				const exploration = 1 / Math.sqrt(1 + (state?.uses ?? 0));
 				return {
 					contribution,

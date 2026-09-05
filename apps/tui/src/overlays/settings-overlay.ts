@@ -1,41 +1,32 @@
-// ── SettingsOverlay — beautiful settings browser ────────────────────────────
-// Rounded-corner overlay for browsing and modifying runtime settings.
-// Two views: main menu (list of settings with current values) and detail view
-// (show available options for a selected setting, with enter to apply).
-// Uses the shared popup-utils design system.
+// ── SettingsSelectorOverlay — full-screen tabbed settings browser ────────────
+// OMP-style fullscreen overlay with tab bar, search banner, split list,
+// dividers, and footer hint. Compatible with the existing SettingDef interface.
 
-import { type Component, RESET } from "../terminal/core.ts";
-import { theme } from "../terminal/theme.ts";
+import { clampLineToWidth } from "../terminal/core.ts";
 import {
-	clampPopupLines,
-	type ListItem,
-	renderListItem,
-	renderListPopupFrame,
-	renderSeparator,
-	renderStatusLine,
-} from "./popup-utils.ts";
+	BOLD,
+	type Component,
+	RESET,
+	visibleWidth,
+} from "../terminal/primitives.ts";
+import { theme } from "../terminal/theme.ts";
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
-interface SettingOption {
-	/** Label shown to the user. */
+export interface SettingOption {
 	label: string;
-	/** Value sent back on selection (the value to apply). */
 	value: string;
-	/** Whether this option is currently active. */
 	current?: boolean;
-	/** For boolean toggles: show [on]/[off] indicator. true=on. */
 	toggleOn?: boolean;
 }
 
 export interface SettingDef {
-	/** Display name shown in the menu. */
 	name: string;
-	/** Current value. */
 	currentValue: string;
-	/** Short description of what this setting controls. */
-	description: string;
-	/** Available options. */
+	description?: string;
+	warning?: string;
+	tab?: string;
+	section?: string;
 	options: SettingOption[];
 }
 
@@ -44,40 +35,181 @@ export type SettingsSelectorAction =
 	| { type: "open"; settingName: string }
 	| { type: "close" };
 
+// ── Theme helpers ────────────────────────────────────────────────────────────
+
+const getHeader = (): string => theme.fgRaw("header");
+const getMuted = (): string => theme.fgRaw("muted");
+const getSuccess = (): string => theme.fgRaw("success");
+const getWarning = (): string => theme.fgRaw("warning");
+
+// ── Layout helpers ───────────────────────────────────────────────────────────
+
+const BOX = {
+	topLeft: "┌",
+	topRight: "┐",
+	bottomLeft: "└",
+	bottomRight: "┘",
+	horizontal: "─",
+	teeRight: "├",
+	teeLeft: "┤",
+};
+
+// ── Tab management ───────────────────────────────────────────────────────────
+
+interface SettingTab {
+	name: string;
+}
+
+function deriveTabs(settings: SettingDef[]): SettingTab[] {
+	const tabs: SettingTab[] = [];
+	const tabNames: string[] = [];
+	for (const s of settings) {
+		const tabName = s.tab ?? "General";
+		if (!tabNames.includes(tabName)) {
+			tabNames.push(tabName);
+			tabs.push({ name: tabName });
+		}
+	}
+	return tabs;
+}
+
+function filterSettingsForTab(
+	settings: SettingDef[],
+	tabName: string,
+): SettingDef[] {
+	const items = settings.filter(s => (s.tab ?? "General") === tabName);
+	const sections = [...new Set(items.map(s => s.section ?? tabName))];
+	return sections.flatMap(section => items.filter(s => (s.section ?? tabName) === section));
+}
+
+// ── Fuzzy filter ─────────────────────────────────────────────────────────────
+
+function fuzzyMatch(query: string, text: string): boolean {
+	const q = query.toLowerCase();
+	const t = text.toLowerCase();
+	let qi = 0;
+	for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+		if (t[ti] === q[qi]) qi++;
+	}
+	return qi === q.length;
+}
+
+function filterSettings(settings: SettingDef[], query: string): SettingDef[] {
+	if (!query.trim()) return settings;
+	const q = query.toLowerCase();
+	return settings.filter((s: SettingDef) => {
+		if (fuzzyMatch(q, s.name)) return true;
+		if (fuzzyMatch(q, s.currentValue)) return true;
+		if (s.description && fuzzyMatch(q, s.description)) return true;
+		if (s.tab && fuzzyMatch(q, s.tab)) return true;
+		if (s.section && fuzzyMatch(q, s.section)) return true;
+		return false;
+	});
+}
+
+// ── Border helpers ───────────────────────────────────────────────────────────
+
+function topBorder(width: number, title: string): string {
+	const inner = Math.max(0, width - 2);
+	const label = clampLineToWidth(title, Math.max(0, inner - 1));
+	return `${getHeader()}${BOX.topLeft}${BOX.horizontal}${BOLD}${label}${RESET}${getHeader()}${BOX.horizontal.repeat(Math.max(0, inner - visibleWidth(label) - 1))}${BOX.topRight}${RESET}`;
+}
+
+function bottomBorder(width: number): string {
+	const inner = Math.max(0, width - 2);
+	const hc = getHeader();
+	return `${hc}${BOX.bottomLeft}${BOX.horizontal.repeat(inner)}${BOX.bottomRight}`;
+}
+
+function divider(width: number): string {
+	const inner = Math.max(0, width - 2);
+	const hc = getMuted();
+	return `${hc}${BOX.teeRight}${BOX.horizontal.repeat(inner)}${BOX.teeLeft}`;
+}
+
+function row(content: string, width: number): string {
+	const sep = getMuted();
+	const inset = Math.max(0, width - 4);
+	const clamped = clampLineToWidth(content, inset);
+	return `${sep}│${RESET} ${clamped}${" ".repeat(Math.max(0, inset - visibleWidth(clamped)))} ${sep}│${RESET}`;
+}
+
+// ── Section management ───────────────────────────────────────────────────────
+
+interface SettingSection {
+	name: string;
+	firstItemIndex: number;
+	lastItemIndex: number;
+}
+
+function deriveSections(settings: SettingDef[]): SettingSection[] {
+	const sections: SettingSection[] = [];
+	let current: SettingSection | null = null;
+	for (let i = 0; i < settings.length; i++) {
+		const s = settings[i];
+		const sectionName = s.section ?? s.tab ?? "General";
+		if (!current || current.name !== sectionName) {
+			if (current) sections.push(current);
+			current = { name: sectionName, firstItemIndex: i, lastItemIndex: i };
+		} else {
+			current.lastItemIndex = i;
+		}
+	}
+	if (current) sections.push(current);
+	return sections;
+}
+
+function findActiveSection(
+	sections: SettingSection[],
+	selectedIndex: number,
+): number {
+	for (let i = sections.length - 1; i >= 0; i--) {
+		if (sections[i].firstItemIndex <= selectedIndex) return i;
+	}
+	return 0;
+}
+
+// ── Main overlay class ───────────────────────────────────────────────────────
+
 export class SettingsSelectorOverlay implements Component {
 	public visible = false;
-	private settings: SettingDef[] = [];
-	/** Index into `settings` array (main menu view). */
+	private _message = "";
+	private _settings: SettingDef[] = [];
+	private _filtered: SettingDef[] = [];
+	private _tabs: SettingTab[] = [];
+	private _currentTabId = 0;
 	private _selectedIndex = 0;
-	/** When in detail view, the selected setting's option index. */
 	private _selectedOptionIndex = 0;
-	/** `true` when showing the detail/option-selection view. */
 	private _inDetailView = false;
-	private message = "";
-	private cachedLines: string[] | null = null;
-	private cachedWidth = -1;
+	private _searchQuery = "";
+	private _availableHeight: number | undefined;
 
-	/** @internal Exposed for tests. */
-	get selectedIndex(): number {
-		return this._selectedIndex;
+	setMaxHeight(height: number): void {
+		this._availableHeight = Math.max(1, Math.floor(height));
 	}
-	get selectedOptionIndex(): number {
-		return this._selectedOptionIndex;
-	}
-	get inDetailView(): boolean {
-		return this._inDetailView;
+
+	get selectedIndex(): number { return this._selectedIndex; }
+	get selectedOptionIndex(): number { return this._selectedOptionIndex; }
+	get inDetailView(): boolean { return this._inDetailView; }
+	get currentTabId(): number { return this._currentTabId; }
+
+	invalidate(): void {
+		// Rendering is inexpensive and reflects terminal resize and theme changes.
 	}
 
 	setSettings(settings: SettingDef[]): void {
-		this.settings = settings;
-		if (this._selectedIndex >= this.settings.length) {
-			this._selectedIndex = Math.max(0, this.settings.length - 1);
+		this._settings = settings;
+		this._tabs = deriveTabs(settings);
+		this._currentTabId = 0;
+		this._filtered = filterSettingsForTab(settings, this._tabs[0]?.name ?? "");
+		if (this._selectedIndex >= this._filtered.length) {
+			this._selectedIndex = Math.max(0, this._filtered.length - 1);
 		}
 		this.invalidate();
 	}
 
 	setMessage(message: string): void {
-		this.message = message;
+		this._message = message;
 		this.invalidate();
 	}
 
@@ -86,6 +218,9 @@ export class SettingsSelectorOverlay implements Component {
 		this._inDetailView = false;
 		this._selectedIndex = 0;
 		this._selectedOptionIndex = 0;
+		this._searchQuery = "";
+		this._currentTabId = 0;
+		this._filtered = filterSettingsForTab(this._settings, this._tabs[0]?.name ?? "");
 		this.invalidate();
 	}
 
@@ -99,67 +234,97 @@ export class SettingsSelectorOverlay implements Component {
 	}
 
 	handleInput(data: string): SettingsSelectorAction | null {
-		if (!this.visible) return null;
-
-		if (data === "\x1b" || data === "\x03" || data.toLowerCase() === "q") {
+		if (!this.visible || !data) return null;
+		if (data === "\x03") return { type: "close" };
+		if (data === "\x1b") {
+			if (this._inDetailView) {
+				this._inDetailView = false;
+				return null;
+			}
+			if (this._searchQuery) {
+				this._searchQuery = "";
+				this._filtered = filterSettingsForTab(this._settings, this._tabs[this._currentTabId]?.name ?? "");
+				this._selectedIndex = 0;
+				return null;
+			}
 			return { type: "close" };
 		}
-
-		if (this._inDetailView) {
-			return this.handleDetailInput(data);
+		if (this._inDetailView) return this.handleDetailInput(data);
+		if (data === "\x7f" || data === "\x08") {
+			this._searchQuery = this._searchQuery.slice(0, -1);
+		} else if ([...data].length === 1 && data >= " " && (data !== " " || this._searchQuery)) {
+			this._searchQuery += data;
+		} else {
+			return this.handleMenuInput(data);
 		}
-
-		return this.handleMenuInput(data);
+		this._filtered = this._searchQuery
+			? filterSettings(this._settings, this._searchQuery)
+			: filterSettingsForTab(this._settings, this._tabs[this._currentTabId]?.name ?? "");
+		this._selectedIndex = 0;
+		return null;
 	}
 
 	private handleMenuInput(data: string): SettingsSelectorAction | null {
-		if (data === "\r" || data === "\n") {
-			// Enter opens detail view for the selected setting
-			const s = this.settings[this._selectedIndex];
-			if (s?.name.toLowerCase() === "model") {
+		if (data === "\r" || data === "\n" || data === " ") {
+			const s = this._filtered[this._selectedIndex];
+			if (!s) return null;
+			if (s.name.toLowerCase() === "model") {
 				return { type: "open", settingName: s.name };
 			}
 			this._inDetailView = true;
-			this._selectedOptionIndex = s
-				? s.options.findIndex(o => o.current) >= 0
-					? s.options.findIndex(o => o.current)
-					: 0
-				: 0;
+			this._selectedOptionIndex = Math.max(0, s.options.findIndex(option => option.current));
 			this.invalidate();
 			return null;
 		}
-		if (data === "\x1b[A" || data === "\x1bOA" || data === "k") {
+
+		if (data === "\t" || data === "\x1b[Z") {
+			const sections = deriveSections(this._filtered);
+			if (sections.length) {
+				const delta = data === "\t" ? 1 : -1;
+				const next = (findActiveSection(sections, this._selectedIndex) + delta + sections.length) % sections.length;
+				this._selectedIndex = sections[next].firstItemIndex;
+			}
+			return null;
+		}
+
+		if (data === "\x1b[A" || data === "\x1bOA") {
 			this.moveSelection(-1);
 			return null;
 		}
-		if (data === "\x1b[B" || data === "\x1bOB" || data === "j") {
+		if (data === "\x1b[B" || data === "\x1bOB") {
 			this.moveSelection(1);
 			return null;
 		}
+		if (data === "\x1b[D" || data === "\x1bOD") {
+			this._switchTab(this._currentTabId - 1);
+			return null;
+		}
+		if (data === "\x1b[C" || data === "\x1bOC") {
+			this._switchTab(this._currentTabId + 1);
+			return null;
+		}
 		if (data === "\x1b[5~") {
-			this.moveSelection(-8);
+			this.jumpSection(-1);
 			return null;
 		}
 		if (data === "\x1b[6~") {
-			this.moveSelection(8);
+			this.jumpSection(1);
 			return null;
 		}
 		return null;
 	}
 
 	private handleDetailInput(data: string): SettingsSelectorAction | null {
-		const s = this.settings[this._selectedIndex];
+		const s = this._filtered[this._selectedIndex];
 		if (!s) return { type: "close" };
 
-		// Tab or backspace goes back to menu
 		if (data === "\t" || data === "\x08") {
 			this._inDetailView = false;
 			this.invalidate();
 			return null;
 		}
 
-		if (data === "\r" || data === "\n") {
-			// Apply the selected option
+		if (data === "\r" || data === "\n" || data === " ") {
 			const opt = s.options[this._selectedOptionIndex];
 			if (opt) {
 				return { type: "change", settingName: s.name, value: opt.value };
@@ -186,176 +351,146 @@ export class SettingsSelectorOverlay implements Component {
 		return null;
 	}
 
-	invalidate(): void {
-		this.cachedLines = null;
+	private _switchTab(nextId: number): void {
+		if (this._tabs.length <= 1) return;
+		if (nextId < 0) nextId = this._tabs.length - 1;
+		if (nextId >= this._tabs.length) nextId = 0;
+		this._currentTabId = nextId;
+		const tabName = this._tabs[nextId].name;
+		this._filtered = filterSettingsForTab(this._settings, tabName);
+		this._searchQuery = "";
+		this._selectedIndex = 0;
+		this.invalidate();
 	}
 
-	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedLines !== null) {
-			return this.cachedLines;
-		}
-		this.cachedWidth = width;
-
-		if (!this.visible) return [];
-
-		const popupWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, popupWidth - 4);
-		const bodyLines: string[] = [];
-
-		// ── Content ──
-		if (!this._inDetailView) {
-			this.renderMainMenu(bodyLines, innerWidth, popupWidth);
-		} else {
-			this.renderDetailView(bodyLines, innerWidth, popupWidth);
-		}
-
-		const setting = this.settings[this._selectedIndex];
-		const lines = renderListPopupFrame({
-			popupWidth,
-			innerWidth,
-			title: this._inDetailView
-				? (setting?.name ?? "Settings")
-				: "Runtime Settings",
-			subtitle: this._inDetailView
-				? ` (${setting?.options.length ?? 0} options)`
-				: ` (${this.settings.length})`,
-			hints: this._inDetailView
-				? "↑↓ navigate · enter apply · tab back · esc close"
-				: "↑↓ navigate · enter configure · esc close",
-			bodyLines,
-			bottomText:
-				this.message ||
-				(this._inDetailView
-					? "Select an option to apply."
-					: "Select a setting to configure."),
-		});
-
-		this.cachedLines = clampPopupLines(lines, width);
-		return this.cachedLines;
-	}
-
-	private renderMainMenu(
-		lines: string[],
-		innerWidth: number,
-		_popupWidth: number,
-	): void {
-		if (!this.settings.length) {
-			lines.push(renderStatusLine("No settings available.", innerWidth));
-			return;
-		}
-
-		const maxRows = 12;
-		const start = Math.max(
-			0,
-			Math.min(
-				this._selectedIndex - Math.floor(maxRows / 2),
-				Math.max(0, this.settings.length - maxRows),
-			),
-		);
-		const end = Math.min(this.settings.length, start + maxRows);
-		if (start > 0) {
-			lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
-		}
-		for (let i = start; i < end; i++) {
-			const s = this.settings[i];
-			const isSelected = i === this._selectedIndex;
-
-			// Build the item with a gear icon for settings
-			const item: ListItem = {
-				label: s.name,
-				metadata: `(${s.currentValue})`,
-				selected: isSelected,
-			};
-
-			lines.push(renderListItem(item, innerWidth));
-		}
-		if (end < this.settings.length) {
-			lines.push(
-				renderStatusLine(`↓ ${this.settings.length - end} more`, innerWidth),
-			);
-		}
-	}
-
-	private renderDetailView(
-		lines: string[],
-		innerWidth: number,
-		popupWidth: number,
-	): void {
-		const s = this.settings[this._selectedIndex];
-		if (!s) {
-			lines.push(renderStatusLine("No setting selected.", innerWidth));
-			return;
-		}
-
-		// ── Current value indicator ──
-		const currentMark = s.options.find(o => o.current);
-		if (currentMark) {
-			const currentColor =
-				typeof currentMark.toggleOn === "boolean"
-					? currentMark.toggleOn
-						? theme.fg("success", "")
-						: theme.fg("error", "")
-					: theme.fg("active", "");
-			const indicator = `${currentColor}Current: ${currentMark.label} ✓${RESET}`;
-			lines.push(renderStatusLine(indicator, innerWidth, ""));
-		}
-
-		// ── Separator before options ──
-		lines.push(renderSeparator(popupWidth));
-
-		const maxRows = 10;
-		const start = Math.max(
-			0,
-			Math.min(
-				this._selectedOptionIndex - Math.floor(maxRows / 2),
-				Math.max(0, s.options.length - maxRows),
-			),
-		);
-		const end = Math.min(s.options.length, start + maxRows);
-		if (start > 0) {
-			lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
-		}
-		for (let i = start; i < end; i++) {
-			const opt = s.options[i];
-			const isSelected = i === this._selectedOptionIndex;
-
-			// Build the item
-			const item: ListItem = {
-				label: opt.label,
-				selected: isSelected,
-				current: opt.current,
-			};
-
-			// Toggle mark
-			if (typeof opt.toggleOn === "boolean") {
-				const mark = opt.toggleOn
-					? `${theme.fg("success", "")}[on]${RESET}`
-					: `${theme.fg("error", "")}[off]${RESET}`;
-				item.metadata = mark;
-			}
-
-			lines.push(renderListItem(item, innerWidth));
-		}
-		if (end < s.options.length) {
-			lines.push(
-				renderStatusLine(`↓ ${s.options.length - end} more`, innerWidth),
-			);
-		}
+	private jumpSection(delta: -1 | 1): void {
+		const len = this._filtered.length;
+		if (!len) return;
+		const jump = 8;
+		this._selectedIndex = Math.max(0, Math.min(this._selectedIndex + delta * jump, len - 1));
+		this.invalidate();
 	}
 
 	private moveSelection(delta: number): void {
-		const n = this.settings.length;
+		const n = this._filtered.length;
 		if (!n) return;
 		this._selectedIndex = (this._selectedIndex + delta + n) % n;
 		this.invalidate();
 	}
 
 	private moveOptionSelection(delta: number): void {
-		const s = this.settings[this._selectedIndex];
+		const s = this._filtered[this._selectedIndex];
 		if (!s) return;
 		const n = s.options.length;
 		if (!n) return;
-		this._selectedOptionIndex = (this._selectedOptionIndex + delta + n) % n;
+		this._selectedOptionIndex = ((this._selectedOptionIndex + delta) % n + n) % n;
 		this.invalidate();
+	}
+
+	public render(width: number): string[] {
+		if (!this.visible || width < 1) return [];
+		const height = this._availableHeight ?? (process.stdout.rows || 40);
+		const inner = Math.max(0, width - 4);
+		const selected = this._filtered[this._selectedIndex];
+		const lines = [topBorder(width, " Settings "), row(this.renderTabs(inner), width), divider(width)];
+		if (this._searchQuery) {
+			lines.push(row(`${getHeader()}Search${RESET}  ${this._searchQuery}  ${getMuted()}${this._filtered.length} matches${RESET}`, width));
+		}
+		const contentRows = Math.max(1, height - lines.length - 6);
+		const content = this._inDetailView
+			? this.renderOptions(inner, contentRows)
+			: this.renderSettings(inner, contentRows);
+		for (const line of content) lines.push(row(line, width));
+		lines.push(row("", width));
+		lines.push(row(`${getMuted()}${selected?.description ?? "Choose a setting to configure Logician."}${RESET}`, width));
+		lines.push(row(selected?.warning
+			? `${getWarning()}⚠ ${selected.warning}${RESET}`
+			: `${getMuted()}${this._message}${RESET}`, width));
+		lines.push(divider(width));
+		const hint = this._inDetailView
+			? "↑↓ select · Enter/Space apply · Tab/Esc back"
+			: inner < 75
+				? "↑↓ select · ←→ tabs · Tab section · Enter edit · Esc back"
+				: "↑↓ select · Enter/Space change · Tab section · ←→ tabs · Type to search · Esc close";
+		lines.push(row(`${getMuted()}${hint}${RESET}`, width), bottomBorder(width));
+		return lines.slice(0, height).map(line => clampLineToWidth(line, width));
+	}
+
+	private renderTabs(width: number): string {
+		const symbols: Record<string, string> = { Model: "◇", Behavior: "≡", Tools: "⚒", Guards: "◆", Appearance: "◐" };
+		const labels = this._tabs.map(tab => ` ${symbols[tab.name] ?? "·"} ${tab.name} `);
+		let start = this._currentTabId;
+		let end = start + 1;
+		let used = visibleWidth(labels[start] ?? "") + 4;
+		while (start > 0 && used + visibleWidth(labels[start - 1]) + 1 <= width) {
+			used += visibleWidth(labels[--start]) + 1;
+		}
+		while (end < labels.length && used + visibleWidth(labels[end]) + 1 <= width) {
+			used += visibleWidth(labels[end++]) + 1;
+		}
+		return `${start > 0 ? "‹ " : ""}${labels.slice(start, end).map((label, offset) =>
+			start + offset === this._currentTabId
+				? `${getHeader()}${BOLD}\x1b[7m${label}${RESET}`
+				: `${getMuted()}${label}${RESET}`,
+		).join(" ")}${end < labels.length ? " ›" : ""}`;
+	}
+
+	private renderSettings(width: number, height: number): string[] {
+		if (!this._filtered.length) {
+			return Array.from({ length: height }, (_, i) => i === 0
+				? `${getMuted()}${this._settings.length ? "No matching settings · Backspace to edit · Esc clear" : "No settings available"}${RESET}` : "");
+		}
+		const sections = deriveSections(this._filtered);
+		const active = findActiveSection(sections, this._selectedIndex);
+		const sidebar = width >= 70 && !this._searchQuery
+			? Math.min(22, Math.max(14, ...sections.map(section => visibleWidth(section.name) + 3))) : 0;
+		const paneWidth = Math.max(0, width - (sidebar ? sidebar + 3 : 0));
+		const labelWidth = Math.min(32, Math.floor(paneWidth * 0.55), Math.max(...this._filtered.map(s => visibleWidth(s.name))));
+		const rows: string[] = [];
+		let selectedRow = 0;
+		for (let i = 0; i < this._filtered.length; i++) {
+			const setting = this._filtered[i];
+			const section = sections.find(section => section.firstItemIndex === i);
+			if (section) {
+				if (i > 0) rows.push("");
+				rows.push(`${getMuted()}  \x1b[4m${section.name}${RESET}`);
+			}
+			const isSelected = i === this._selectedIndex;
+			if (isSelected) selectedRow = rows.length;
+			const label = clampLineToWidth(setting.name, labelWidth);
+			const pad = " ".repeat(Math.max(0, labelWidth - visibleWidth(label)));
+			const cursor = isSelected ? `${getHeader()}❯${RESET}` : " ";
+			const color = isSelected ? getWarning() + BOLD : theme.fgRaw("text");
+			const valueColor = isSelected ? getWarning() + BOLD : getMuted();
+			rows.push(`${cursor} ${color}${label}${pad}${RESET}  ${valueColor}${setting.currentValue}${RESET}${setting.warning ? ` ${getWarning()}⚠${RESET}` : ""}`);
+		}
+		const start = Math.max(0, Math.min(selectedRow - Math.floor(height / 2), rows.length - height));
+		const sidebarStart = Math.max(0, active - height + 1);
+		return Array.from({ length: height }, (_, index) => {
+			const content = clampLineToWidth(rows[start + index] ?? "", paneWidth);
+			if (!sidebar) return content;
+			const section = sections[sidebarStart + index];
+			const name = clampLineToWidth(section?.name ?? "", sidebar);
+			const color = sidebarStart + index === active ? getHeader() + BOLD : getMuted();
+			return `${color}${name}${RESET}${" ".repeat(Math.max(0, sidebar - visibleWidth(name)))} ${getMuted()}│${RESET} ${content}`;
+		});
+	}
+
+	private renderOptions(width: number, height: number): string[] {
+		const setting = this._filtered[this._selectedIndex];
+		if (!setting) return Array.from({ length: height }, () => "");
+		const lines = [`${getHeader()}${BOLD}${setting.section ?? setting.tab ?? "General"}${RESET} ${getMuted()}/ ${setting.name}${RESET}`, ""];
+		const count = Math.max(1, height - lines.length);
+		const start = Math.max(0, Math.min(this._selectedOptionIndex - Math.floor(count / 2), setting.options.length - count));
+		for (let i = start; i < Math.min(setting.options.length, start + count); i++) {
+			const option = setting.options[i];
+			const selected = i === this._selectedOptionIndex;
+			const color = selected ? getWarning() + BOLD : theme.fgRaw("text");
+			const mark = typeof option.toggleOn === "boolean"
+				? option.toggleOn ? `${getSuccess()} [on]` : `${getMuted()} [off]` : "";
+			lines.push(clampLineToWidth(`${selected ? getHeader() + "❯" : " "}${RESET} ${color}${option.label}${RESET}${mark}${option.current ? `${getSuccess()} ✓` : ""}${RESET}`, width));
+		}
+		while (lines.length < height) lines.push("");
+		return lines.slice(0, height);
 	}
 }

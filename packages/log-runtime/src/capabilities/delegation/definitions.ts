@@ -28,6 +28,8 @@ import {
 	runDelegatedAgent,
 	type SpawnAgentsTask,
 } from "./runtime.ts";
+import { createHubMessageBus, type HubMessageBus } from "./hub.ts";
+import { hubSendTool, hubWaitTool, hubJobsTool, hubInboxTool } from "./hub-tools.ts";
 
 // ── Agent definitions ────────────────────────────────────────────────────────
 
@@ -178,6 +180,8 @@ export interface SpawnAgentDeps {
 	defaultMaxIterations?: number;
 	/** Session-local concurrency limiter shared by both subagent tools. */
 	concurrencyLimiter?: SubagentConcurrencyLimiter;
+	/** Shared message bus for peer-to-peer subagent coordination. */
+	hub?: HubMessageBus;
 }
 
 // ── Session-local concurrency limiter ───────────────────────────────────────
@@ -302,6 +306,27 @@ async function _runSpawn(
 		taskIndex: ctx.taskIndex,
 	});
 
+	// Register with the hub so parent and sibling agents can coordinate.
+	if (deps.hub) {
+		deps.hub.register(agentId, {
+			id: agentId,
+			agent: def.name,
+			task,
+			status: "running",
+			taskIndex: ctx.taskIndex,
+		});
+	}
+
+	// Child tools: resolve allowlist, then add hub coordination tools.
+	const childTools = deps.hub
+		? resolveChildTools(def, parent.tools ?? []).concat([
+			hubSendTool({ hub: deps.hub, agentId }),
+			hubWaitTool({ hub: deps.hub, agentId }),
+			hubJobsTool({ hub: deps.hub, agentId }),
+			hubInboxTool({ hub: deps.hub, agentId }),
+		])
+		: resolveChildTools(def, parent.tools ?? []);
+
 	// Accumulates text_delta chunks below into the full output so far — every
 	// onUpdate producer sends a cumulative snapshot, not a delta, so this
 	// keeps the contract consistent for transcript.ts's consumer.
@@ -317,7 +342,7 @@ async function _runSpawn(
 		maxTokens: parent.maxTokens,
 		contextWindowTokens: parent.contextWindowTokens,
 		systemPrompt: def.prompt,
-		tools: resolveChildTools(def, parent.tools ?? []),
+		tools: childTools,
 		toolExecution: parent.toolExecution,
 		permissions: parent.permissions,
 		onPermissionRequest: parent.onPermissionRequest,
@@ -386,6 +411,14 @@ async function _runSpawn(
 			isError: run.status !== "completed",
 			taskIndex: ctx.taskIndex,
 		});
+
+		if (deps.hub) {
+			deps.hub.complete(
+				agentId,
+				run.status === "completed" ? "completed" : "failed",
+				result,
+			);
+		}
 		return {
 			content: result,
 			isError: run.status !== "completed",
@@ -413,6 +446,10 @@ async function _runSpawn(
 			isError: true,
 			taskIndex: ctx.taskIndex,
 		});
+
+		if (deps.hub) {
+			deps.hub.complete(agentId, "failed", message);
+		}
 		return { content: message, isError: true };
 	}
 }
@@ -617,6 +654,12 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 				task,
 			}));
 
+			// Create a session-local hub for inter-subagent coordination.
+			// Use an existing hub from deps if provided (for testability),
+			// otherwise create a new one.
+			const hub = deps.hub ?? createHubMessageBus();
+			const childDeps: SpawnAgentDeps = { ...deps, hub };
+
 			// Execute through the limiter owned by this runtime/session.
 			const results: Array<{
 				index: number;
@@ -626,7 +669,7 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 
 			const runOne = async (item: (typeof taskArgs)[number]) => {
 				try {
-					const result = await limiterFor(deps).run(
+					const result = await limiterFor(childDeps).run(
 						() =>
 							_runSpawn(
 								item.spawnArgs,
@@ -634,7 +677,7 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 									signal: ctx.signal,
 									taskIndex: item.taskIndex,
 								},
-								deps,
+								childDeps,
 							),
 						ctx.signal,
 					);

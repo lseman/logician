@@ -1,19 +1,26 @@
 // ── read_file tool ────────────────────────────────────────────────────────────────
-// Read file contents with line-based pagination and two-axis truncation.
+// Read file contents with line-based pagination, two-axis truncation, and
+// hashline anchors for edit targeting. Output includes a [path#4hex] header
+// followed by numbered lines (1:content).
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import type { Tool } from "@logician/log-core";
-import { recordRead } from "./support/read-tracker.ts";
+import { recordRead } from "./support/read-tracker.js";
+import {
+	formatHashlineHeader,
+	splitAddressableFileLines,
+} from "./support/hashline.js";
 import {
 	ensureInsideCwd,
 	resolveReadPath,
-} from "./support/utils/path-utils.ts";
+} from "./support/utils/path-utils.js";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
 	truncateHead,
-} from "./support/utils/truncate.ts";
+} from "./support/utils/truncate.js";
 
 export const read_file: Tool = {
 	readOnly: true,
@@ -23,12 +30,15 @@ export const read_file: Tool = {
 	hookAliases: ["Read"],
 	executionMode: "parallel",
 	description:
-		`Read file contents. Output is truncated to ${DEFAULT_MAX_LINES} lines or ` +
-		`${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files; ` +
-		"continue with offset until complete.",
-	promptSnippet: "Read file contents with line numbers and truncation support",
+		`Read file contents. Output includes hashline anchors ` +
+		`(format: [path#4hex] with numbered lines). ` +
+		`Truncated to ${DEFAULT_MAX_LINES} lines or ` +
+		`${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first). ` +
+		"Use offset/limit for large files; continue with offset until complete.",
+	promptSnippet:
+		"Read files; output includes [path#4hex] hashline header + numbered lines for edit targeting",
 	promptGuidelines: [
-		"Use read_file to read files; use bash cat for quick checks",
+		"Use read_file to read files; the output includes hashline anchors for edit_file targeting",
 	],
 	parameters: {
 		type: "object",
@@ -77,9 +87,15 @@ export const read_file: Tool = {
 				`(${formatSize(stat.size)}). Use bash tools (file, xxd, strings) to inspect it.`
 			);
 		}
-		const text = buffer.toString("utf-8");
+		const fullContent = buffer.toString("utf-8");
 		recordRead(resolved);
-		const allLines = text.split("\n");
+
+		// Compute hashline tag from full file content
+		const fileHash = createHash("sha256").update(buffer).digest("hex").slice(0, 4);
+		const header = formatHashlineHeader(filePath, fileHash);
+
+		// Split into addressable lines (no trailing empty line)
+		const allLines = splitAddressableFileLines(fullContent);
 		const totalLines = allLines.length;
 
 		// 1-based offset -> 0-based start.
@@ -89,17 +105,17 @@ export const read_file: Tool = {
 		}
 		const startDisplay = startLine + 1;
 
-		let selected: string;
+		let selectedLines: string[];
 		let userLimited = 0;
 		if (limit > 0) {
 			const end = Math.min(startLine + limit, allLines.length);
-			selected = allLines.slice(startLine, end).join("\n");
+			selectedLines = allLines.slice(startLine, end);
 			userLimited = end - startLine;
 		} else {
-			selected = allLines.slice(startLine).join("\n");
+			selectedLines = allLines.slice(startLine);
 		}
 
-		const t = truncateHead(selected);
+		const t = truncateHead(selectedLines.join("\n"));
 
 		if (t.firstLineExceedsLimit) {
 			const lineSize = formatSize(
@@ -110,6 +126,7 @@ export const read_file: Tool = {
 				`Use bash: sed -n '${startDisplay}p' ${filePath} | head -c ${DEFAULT_MAX_BYTES}]`
 			);
 		}
+
 		if (t.truncated) {
 			const endDisplay = startDisplay + t.outputLines - 1;
 			const nextOffset = endDisplay + 1;
@@ -117,13 +134,15 @@ export const read_file: Tool = {
 				t.truncatedBy === "lines"
 					? `Showing lines ${startDisplay}-${endDisplay} of ${totalLines}.`
 					: `Showing lines ${startDisplay}-${endDisplay} of ${totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit).`;
-			return `${t.content}\n\n[${limitNote} Use offset=${nextOffset} to continue.]`;
+			return `${header}\n${t.content}\n\n[${limitNote} Use offset=${nextOffset} to continue.]`;
 		}
+
 		if (userLimited > 0 && startLine + userLimited < allLines.length) {
 			const remaining = allLines.length - (startLine + userLimited);
 			const nextOffset = startLine + userLimited + 1;
-			return `${t.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+			return `${header}\n${t.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
 		}
-		return t.content;
+
+		return `${header}\n${t.content}`;
 	},
 };

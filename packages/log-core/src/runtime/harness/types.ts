@@ -1,4 +1,5 @@
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
+import type { AdaptiveContextLearningState } from "../../system/context/adaptive-context-controller.ts";
 import type { ContextContribution } from "../../system/context/context-engine.ts";
 import type { ExtensionRunner } from "../../system/extension/runner.ts";
 import type {
@@ -67,6 +68,10 @@ export interface AgentSessionOptions {
 	modules?: HarnessModule[];
 	pluginHookFactory?: HarnessPluginHookFactory;
 	pluginLifecycle?: HarnessPluginLifecycle;
+	contextLearning?: {
+		initialState?: AdaptiveContextLearningState;
+		onStateChange?: (state: AdaptiveContextLearningState) => void;
+	};
 }
 
 /** Request-scoped context supplied by the host for one user-initiated turn. */

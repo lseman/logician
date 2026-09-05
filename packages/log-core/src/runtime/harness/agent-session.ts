@@ -149,9 +149,7 @@ export class AgentSession {
 	private loopConfig: AgentConfig | null = null;
 	private readonly session: SessionState;
 	private readonly compactor: SessionCompactor;
-	private readonly contextController = new AdaptiveContextController(messages =>
-		estimateChatPayloadTokens([...messages]),
-	);
+	private readonly contextController: AdaptiveContextController;
 	private activeContextPlanId?: string;
 	private loopDetector: LoopDetector;
 	// Durable intervention history spans turns; run policy is reset per prompt.
@@ -188,6 +186,10 @@ export class AgentSession {
 		},
 	) {
 		this.onEvent = options.onEvent;
+		this.contextController = new AdaptiveContextController(
+			messages => estimateChatPayloadTokens([...messages]),
+			options.contextLearning,
+		);
 		this.session = new SessionState({
 			steeringMode: options.config.steeringQueueMode ?? "one-at-a-time",
 			followUpMode: options.config.followUpQueueMode ?? "one-at-a-time",

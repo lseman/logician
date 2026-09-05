@@ -30,6 +30,7 @@ import {
 } from "../../control/policy/intervention-controller.ts";
 import { RunBudgetController } from "../../control/policy/run-budget.ts";
 import { AgentRunController } from "../../control/policy/run-controller.ts";
+import { createVerifiedStopPolicy } from "../../control/policy/verified-stop-policy.ts";
 import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import type { RunBudgetDecision } from "../../system/types/run-budget.ts";
 import type {
@@ -618,12 +619,22 @@ async function runAgentLoopInternal(
 			: await drainFollowUps();
 		if (pendingMessages.length > 0) continue;
 
-		const stopPolicyDecision = await evaluateStopPolicies(config.stopPolicies, {
-			messages,
-			newMessages,
-			iteration,
-			signal: config.signal,
-		});
+		const stopPolicies = [
+			...(config.verifiedStopEnabled === true
+				? [createVerifiedStopPolicy()]
+				: []),
+			...(config.stopPolicies ?? []),
+		];
+		const stopPolicyDecision = await evaluateStopPolicies(
+			stopPolicies,
+			{
+				messages,
+				newMessages,
+				iteration,
+				signal: config.signal,
+			},
+			evaluation => emit({ type: "policy_evaluation", ...evaluation }),
+		);
 		if (stopPolicyDecision?.action === "finish") {
 			return finish({
 				status: stopPolicyDecision.status,

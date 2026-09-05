@@ -16,7 +16,10 @@
 // a failing extension is identifiable; a thrown handler is skipped and
 // reported via `onError` rather than aborting the chain.
 
-import { CancellationScope } from "../../system/lifecycle/cancellation-scope.ts";
+import {
+	CancellationError,
+	CancellationScope,
+} from "../../system/lifecycle/cancellation-scope.ts";
 import type {
 	AfterProviderResponseContext,
 	AfterToolCallContext,
@@ -48,16 +51,45 @@ export interface HookRegistration {
 	/** Stable identity used for diagnostics and duplicate detection. */
 	id?: string;
 	source?: string;
+	/** Optional deadline for this handler. Timed-out handlers are skipped. */
+	timeoutMs?: number;
+}
+
+export type PolicyModuleKind = "deterministic" | "prompt" | "agent";
+
+/**
+ * A named bundle of lifecycle policy. The kind describes how the host-backed
+ * handlers reach their decisions; the hook bus only owns ordering, deadlines,
+ * cancellation, and diagnostics.
+ */
+export interface PolicyModule {
+	id: string;
+	description: string;
+	kind: PolicyModuleKind;
+	hooks: AgentHooks;
+	timeoutMs?: number;
+	enabled?: boolean;
+}
+
+export interface PolicyEvaluation {
+	policyId: string;
+	kind: PolicyModuleKind;
+	event: HookEventName;
+	durationMs: number;
+	status: "completed" | "failed" | "timed_out";
 }
 
 export interface HookBusOptions {
 	onError?: (error: Error, event: HookEventName, source?: string) => void;
+	onPolicyEvaluation?: (evaluation: PolicyEvaluation) => void;
 }
 
 interface Entry<H> {
 	handler: H;
 	id: string;
 	source?: string;
+	timeoutMs?: number;
+	policy?: Pick<PolicyModule, "id" | "kind">;
 }
 
 type BeforeHandler = NonNullable<AgentHooks["beforeToolCall"]>;
@@ -89,9 +121,11 @@ export class HookBus {
 	private nextAnonymousId = 0;
 
 	private onError?: HookBusOptions["onError"];
+	private onPolicyEvaluation?: HookBusOptions["onPolicyEvaluation"];
 
 	constructor(options: HookBusOptions = {}) {
 		this.onError = options.onError;
+		this.onPolicyEvaluation = options.onPolicyEvaluation;
 	}
 
 	// Register one handler for an event, run in registration order. Returns an unsubscribe function.
@@ -104,12 +138,41 @@ export class HookBus {
 		const id = reg.id ?? `${String(event)}#${++this.nextAnonymousId}`;
 		if (this.hasHandlerId(id))
 			throw new Error(`Duplicate hook handler id: ${id}`);
-		const entry = { handler, id, source: reg.source };
+		const entry = { handler, id, source: reg.source, timeoutMs: reg.timeoutMs };
 		list.push(entry);
 		return () => {
 			const i = list.indexOf(entry);
 			if (i >= 0) list.splice(i, 1);
 		};
+	}
+
+	registerPolicy(policy: PolicyModule): () => void {
+		if (policy.enabled === false) return () => {};
+		const offs: Array<() => void> = [];
+		for (const event of Object.keys(policy.hooks) as HookEventName[]) {
+			const handler = policy.hooks[event];
+			if (!handler) continue;
+			const list = this.listFor(event) as Entry<typeof handler>[];
+			const id = `${policy.id}:${event}`;
+			if (this.hasHandlerId(id))
+				throw new Error(`Duplicate hook handler id: ${id}`);
+			const entry: Entry<typeof handler> = {
+				handler,
+				id,
+				source: policy.id,
+				timeoutMs: policy.timeoutMs,
+				policy: { id: policy.id, kind: policy.kind },
+			};
+			list.push(entry);
+			offs.push(() => {
+				const index = list.indexOf(entry);
+				if (index >= 0) list.splice(index, 1);
+			});
+		}
+		return () =>
+			offs.forEach(off => {
+				off();
+			});
 	}
 
 	// Register a whole AgentHooks object at once (each present handler).
@@ -507,37 +570,79 @@ export class HookBus {
 		_id: string,
 		parentSignal?: AbortSignal,
 	): Promise<T | undefined> {
+		const entry = this.allEntries().find(candidate => candidate.id === _id);
+		const started = performance.now();
 		const scope = new CancellationScope({
 			operation: `hook ${event}${source ? ` (${source})` : ""}`,
 			parent: parentSignal,
+			timeoutMs: entry?.timeoutMs,
 		});
 		try {
-			return await scope.run(signal => Promise.resolve(fn(signal)), {
-				rejectOnAbort: false,
-			});
+			const result = await scope.run(
+				signal => {
+					const work = Promise.resolve(fn(signal));
+					let onAbort: (() => void) | undefined;
+					const cancelled = new Promise<never>((_resolve, reject) => {
+						if (signal.aborted) reject(signal.reason);
+						else {
+							onAbort = () => reject(signal.reason);
+							signal.addEventListener("abort", onAbort, {
+								once: true,
+							});
+						}
+					});
+					return Promise.race([work, cancelled]).finally(() => {
+						if (onAbort) signal.removeEventListener("abort", onAbort);
+					});
+				},
+				{ rejectOnAbort: false },
+			);
+			if (entry?.policy)
+				this.onPolicyEvaluation?.({
+					policyId: entry.policy.id,
+					kind: entry.policy.kind,
+					event,
+					durationMs: performance.now() - started,
+					status: "completed",
+				});
+			return result;
 		} catch (e) {
 			const error = e as Error;
+			if (entry?.policy)
+				this.onPolicyEvaluation?.({
+					policyId: entry.policy.id,
+					kind: entry.policy.kind,
+					event,
+					durationMs: performance.now() - started,
+					status:
+						scope.signal.reason instanceof CancellationError &&
+						scope.signal.reason.kind === "timeout"
+							? "timed_out"
+							: "failed",
+				});
 			this.onError?.(error, event, source);
 			return undefined;
 		}
 	}
 
+	private allEntries(): Array<Entry<unknown>> {
+		return [
+			...this.agentStart,
+			...this.before,
+			...this.after,
+			...this.prepare,
+			...this.transform,
+			...this.providerRequest,
+			...this.providerPayload,
+			...this.afterProvider,
+			...this.stop,
+			...this.steering,
+			...this.followUp,
+			...this.compact,
+		] as Array<Entry<unknown>>;
+	}
+
 	private hasHandlerId(id: string): boolean {
-		return (
-			[
-				...this.agentStart,
-				...this.before,
-				...this.after,
-				...this.prepare,
-				...this.transform,
-				...this.providerRequest,
-				...this.providerPayload,
-				...this.afterProvider,
-				...this.stop,
-				...this.steering,
-				...this.followUp,
-				...this.compact,
-			] as Array<Entry<unknown>>
-		).some(entry => entry.id === id);
+		return this.allEntries().some(entry => entry.id === id);
 	}
 }
