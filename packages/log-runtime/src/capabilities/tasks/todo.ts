@@ -1,65 +1,35 @@
-// ── todo tool — full task tracking ────────────────────────────────────────────
-// Actions: create, update, list, get, delete, clear
-// State machine: pending → in_progress → completed, plus deleted tombstone
-// Dependencies: blockedBy with cycle detection and auto-resolve
+// ── todo tool — phased task tracking ──────────────────────────────────────────
+// Operations: init, start, done, rm, drop, block, unblock, append, view
+// Phases group tasks; completion transitions track what changed per update.
 
 import type { Tool } from "@logician/log-core";
-import {
-	getTasks,
-	mutateTasks,
-	type Task,
-	type TaskMutationResult,
-	type TaskStatus,
-} from "./state.ts";
-import { hasDependencyCycle, resolvedDependents } from "./task-graph.ts";
+/** Read-only task state supplied by an optional capability package. */
+interface TaskLedger {
+	snapshot(): readonly { id: number; subject: string; status: string }[];
+}
 
-export type { Task, TaskStatus } from "./state.ts";
-export { getTasks, onTodosChanged } from "./state.ts";
+import { getTasks, mutateTasks } from "./state.ts";
+import type { Task, TaskPhase } from "./state.ts";
 
-export type TaskAction =
-	| "create"
-	| "update"
-	| "list"
-	| "get"
-	| "delete"
-	| "clear";
+export { getTasks } from "./state.ts";
+export type { Task, TaskPhase, TaskStatus } from "./state.ts";
+export { onTodosChanged } from "./state.ts";
 
-// ── Validation ───────────────────────────────────────────────────────────────
+export type TodoOp =
+	| "init"
+	| "start"
+	| "done"
+	| "rm"
+	| "drop"
+	| "block"
+	| "unblock"
+	| "append"
+	| "view";
 
-const VALID_STATUSES: ReadonlySet<TaskStatus> = new Set([
-	"pending",
-	"in_progress",
-	"completed",
-	"deleted",
-]);
 const ANSI_CSI_SEQUENCE = new RegExp(
 	`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
 	"g",
 );
-
-function validTransition(from: TaskStatus, to: TaskStatus): boolean {
-	// pending → in_progress, pending → completed (finish without starting)
-	// in_progress → completed, in_progress → pending (pause)
-	// completed → pending (restart)
-	// deleted can come from any status
-	if (to === "deleted") return true;
-	if (from === "pending" && to === "in_progress") return true;
-	if (from === "pending" && to === "completed") return true;
-	if (from === "in_progress" && to === "completed") return true;
-	if (from === "in_progress" && to === "pending") return true;
-	if (from === "completed" && to === "pending") return true;
-	return false;
-}
-
-function unchanged(value: string): TaskMutationResult<string> {
-	return { value, changed: false };
-}
-
-function changed(value: string): TaskMutationResult<string> {
-	return { value, changed: true };
-}
-
-// ── Actions ──────────────────────────────────────────────────────────────────
 
 function stripNewlines(s: string): string {
 	return s
@@ -69,305 +39,264 @@ function stripNewlines(s: string): string {
 		.trim();
 }
 
-function actionCreate(params: Record<string, unknown>): string {
-	const subject = stripNewlines(String(params.subject ?? ""));
-	if (!subject) return "Error: subject is required for create.";
-	if (
-		params.metadata !== undefined &&
-		(!params.metadata ||
-			typeof params.metadata !== "object" ||
-			Array.isArray(params.metadata))
-	) {
-		return "Error: metadata must be an object.";
+function findPhase(phases: TaskPhase[], name: string): TaskPhase | undefined {
+	return phases.find(p => p.name === name);
+}
+
+function findTaskByContent(
+	phases: TaskPhase[],
+	content: string,
+): { phase: TaskPhase; task: Task } | undefined {
+	for (const phase of phases) {
+		const task = phase.tasks.find(t => t.content === content);
+		if (task) return { phase, task };
+	}
+	return undefined;
+}
+
+function opInit(entry: Record<string, unknown>): string {
+	const items = entry.items as
+		| Array<string | { phase: string; items: string[] }>
+		| undefined;
+	if (!items || !Array.isArray(items))
+		return "Error: init requires 'items' array.";
+
+	const errors: string[] = [];
+	const newPhases: TaskPhase[] = [];
+	const phaseNames = new Set<string>();
+	const allTasks: Array<{ phaseName: string; content: string }> = [];
+
+	for (const item of items) {
+		if (typeof item === "string") {
+			const name = stripNewlines(item);
+			if (!name) continue;
+			if (phaseNames.has(name)) {
+				errors.push(`Duplicate phase '${name}'.`);
+				continue;
+			}
+			phaseNames.add(name);
+			newPhases.push({ name, tasks: [] });
+		} else if (typeof item === "object" && item && "phase" in item) {
+			const name = stripNewlines(String(item.phase));
+			if (!name) continue;
+			if (phaseNames.has(name)) {
+				errors.push(`Duplicate phase '${name}'.`);
+				continue;
+			}
+			phaseNames.add(name);
+			const taskNames = Array.isArray(item.items) ? item.items : [];
+			const tasks: Task[] = [];
+			for (const t of taskNames) {
+				const content = stripNewlines(String(t));
+				if (!content) continue;
+				tasks.push({ content, status: "pending" });
+				allTasks.push({ phaseName: name, content });
+			}
+			newPhases.push({ name, tasks });
+		}
 	}
 
-	return mutateTasks(({ tasks, allocateId }) => {
-		const existing = tasks.find(
-			task =>
-				task.status !== "deleted" &&
-				task.subject.toLowerCase() === subject.toLowerCase(),
-		);
-		if (existing) {
-			return unchanged(
-				`Task already on the list: #${existing.id} - ${existing.subject} (${existing.status})`,
-			);
-		}
+	if (errors.length > 0) return errors.join("\n");
 
-		const task: Task = {
-			id: allocateId(),
-			subject,
-			status: "pending",
+	return mutateTasks(() => ({
+		value: `Created ${newPhases.length} phase(s): ${newPhases
+			.map(p => p.name)
+			.join(", ")} (${allTasks.length} tasks)`,
+		changed: true,
+	}));
+}
+
+function opStart(entry: Record<string, unknown>): string {
+	const phase = stripNewlines(String(entry.phase || ""));
+	const task = stripNewlines(String(entry.task || ""));
+	if (!phase || !task)
+		return "Error: both 'phase' and 'task' are required for start.";
+
+	return mutateTasks(() => {
+		const result = findTaskByContent(getTasks(), task);
+		if (!result)
+			return {
+				value: `Error: task '${task}' not found.`,
+				changed: false,
+			};
+		const { task: targetTask } = result;
+		if (targetTask.status === "in_progress")
+			return { value: "Task already in progress.", changed: false };
+		if (targetTask.status === "completed")
+			return { value: "Task already completed.", changed: false };
+		targetTask.status = "in_progress";
+		return {
+			value: `Started '${targetTask.content}' in ${result.phase.name}.`,
+			changed: true,
 		};
-		if (params.description) task.description = String(params.description);
-		if (params.activeForm)
-			task.activeForm = stripNewlines(String(params.activeForm));
-		if (params.owner) task.owner = stripNewlines(String(params.owner));
-		if (params.metadata)
-			task.metadata = { ...(params.metadata as Record<string, unknown>) };
-
-		if (Array.isArray(params.blockedBy)) {
-			const blockedBy: number[] = [];
-			for (const dependencyId of params.blockedBy) {
-				if (typeof dependencyId !== "number") continue;
-				const dependency = tasks.find(item => item.id === dependencyId);
-				if (!dependency)
-					return unchanged(`Error: blockedBy #${dependencyId} not found.`);
-				if (dependency.status === "deleted")
-					return unchanged(`Error: blockedBy #${dependencyId} is deleted.`);
-				if (!blockedBy.includes(dependencyId)) blockedBy.push(dependencyId);
-			}
-			if (blockedBy.length) task.blockedBy = blockedBy;
-			if (hasDependencyCycle([...tasks, task], task.id)) {
-				return unchanged("Error: blockedBy would create a dependency cycle.");
-			}
-		}
-
-		tasks.push(task);
-		return changed(`Created task #${task.id}: ${subject}`);
 	});
 }
 
-function actionUpdate(params: Record<string, unknown>): string {
-	const id = params.id as number | undefined;
-	if (id === undefined) return "Error: id is required for update.";
-	const hasMutation =
-		params.subject !== undefined ||
-		params.description !== undefined ||
-		params.activeForm !== undefined ||
-		params.status !== undefined ||
-		params.owner !== undefined ||
-		params.metadata !== undefined ||
-		params.addBlockedBy ||
-		params.removeBlockedBy;
-	if (!hasMutation) return "Error: update requires at least one mutable field.";
-	if (
-		params.metadata !== undefined &&
-		(!params.metadata ||
-			typeof params.metadata !== "object" ||
-			Array.isArray(params.metadata))
-	) {
-		return "Error: metadata must be an object.";
-	}
+function opDone(entry: Record<string, unknown>): string {
+	const task = stripNewlines(String(entry.task || ""));
+	if (!task) return "Error: 'task' is required for done.";
 
-	return mutateTasks(({ tasks }) => {
-		const index = tasks.findIndex(task => task.id === id);
-		if (index === -1) return unchanged(`Error: task #${id} not found.`);
-		const task = tasks[index];
-		let newStatus = task.status;
-
-		if (params.status !== undefined) {
-			const targetStatus = params.status as TaskStatus;
-			if (!VALID_STATUSES.has(targetStatus)) {
-				return unchanged(
-					`Error: invalid status '${targetStatus}'. Use: pending, in_progress, completed, deleted.`,
-				);
-			}
-			if (!validTransition(task.status, targetStatus)) {
-				return unchanged(
-					`Error: illegal status transition ${task.status} → ${targetStatus}.`,
-				);
-			}
-			newStatus = targetStatus;
-		}
-
-		let newBlockedBy = task.blockedBy ? [...task.blockedBy] : [];
-		if (Array.isArray(params.removeBlockedBy)) {
-			const remove = new Set(params.removeBlockedBy);
-			newBlockedBy = newBlockedBy.filter(
-				dependencyId => !remove.has(dependencyId),
-			);
-		}
-		if (Array.isArray(params.addBlockedBy)) {
-			for (const dependencyId of params.addBlockedBy) {
-				if (typeof dependencyId !== "number") continue;
-				if (dependencyId === id)
-					return unchanged(`Error: cannot block #${id} on itself.`);
-				const dependency = tasks.find(item => item.id === dependencyId);
-				if (!dependency)
-					return unchanged(`Error: addBlockedBy #${dependencyId} not found.`);
-				if (dependency.status === "deleted")
-					return unchanged(`Error: addBlockedBy #${dependencyId} is deleted.`);
-				if (!newBlockedBy.includes(dependencyId))
-					newBlockedBy.push(dependencyId);
-			}
-			const candidate = { ...task, blockedBy: newBlockedBy };
-			const candidateTasks = [...tasks];
-			candidateTasks[index] = candidate;
-			if (hasDependencyCycle(candidateTasks, id)) {
-				return unchanged(
-					"Error: addBlockedBy would create a dependency cycle.",
-				);
-			}
-		}
-
-		if (params.subject !== undefined) {
-			const newSubject = stripNewlines(String(params.subject));
-			if (!newSubject) return unchanged("Error: subject cannot be empty.");
-			task.subject = newSubject;
-		}
-		if (params.description !== undefined)
-			task.description = String(params.description);
-		if (params.activeForm !== undefined)
-			task.activeForm = stripNewlines(String(params.activeForm));
-		if (params.owner !== undefined)
-			task.owner = stripNewlines(String(params.owner));
-
-		if (params.metadata !== undefined) {
-			const merged = { ...(task.metadata ?? {}) };
-			for (const [key, value] of Object.entries(
-				params.metadata as Record<string, unknown>,
-			)) {
-				if (value === null) delete merged[key];
-				else merged[key] = value;
-			}
-			task.metadata = Object.keys(merged).length ? merged : undefined;
-		}
-
-		const statusWas = task.status;
-		task.status = newStatus;
-		task.blockedBy = newBlockedBy.length ? newBlockedBy : undefined;
-		const dependents =
-			statusWas !== "completed" && newStatus === "completed"
-				? resolvedDependents(tasks, id)
-				: [];
-
-		const lines = [`Updated task #${id}: ${task.subject}`];
-		if (statusWas !== newStatus)
-			lines.push(`  Status: ${statusWas} → ${newStatus}`);
-		for (const dependent of dependents) {
-			lines.push(`  → Unblocked #${dependent.id}: ${dependent.subject}`);
-			dependent.status = "pending";
-		}
-
-		return changed(lines.join("\n"));
+	return mutateTasks(() => {
+		const result = findTaskByContent(getTasks(), task);
+		if (!result)
+			return { value: `Error: task '${task}' not found.`, changed: false };
+		const { task: targetTask, phase } = result;
+		targetTask.status = "completed";
+		return {
+			value: `Completed '${targetTask.content}' in ${phase.name}.`,
+			changed: true,
+		};
 	});
 }
 
-function actionList(params: Record<string, unknown>): string {
-	const tasks = getTasks();
-	let filtered = [...tasks];
-	const status = params.status as TaskStatus | undefined;
-	const includeDeleted = params.includeDeleted === true;
+function opRm(entry: Record<string, unknown>): string {
+	const phase = stripNewlines(String(entry.phase || ""));
+	const task = stripNewlines(String(entry.task || ""));
+	if (!phase || !task)
+		return "Error: both 'phase' and 'task' are required for rm.";
 
-	if (status) {
-		filtered = filtered.filter(t => t.status === status);
-	}
-	if (!includeDeleted) {
-		filtered = filtered.filter(t => t.status !== "deleted");
-	}
+	return mutateTasks(() => {
+		const target = findPhase(getTasks(), phase);
+		if (!target)
+			return {
+				value: `Error: phase '${phase}' not found.`,
+				changed: false,
+			};
+		const idx = target.tasks.findIndex(t => t.content === task);
+		if (idx === -1)
+			return {
+				value: `Error: task '${task}' not in phase '${phase}'.`,
+				changed: false,
+			};
+		target.tasks.splice(idx, 1);
+		return { value: `Removed '${task}' from ${phase}.`, changed: true };
+	});
+}
 
-	if (filtered.length === 0) return "No tasks.";
+function opDrop(entry: Record<string, unknown>): string {
+	const phase = stripNewlines(String(entry.phase || ""));
+	if (!phase) return "Error: 'phase' is required for drop.";
 
-	const groups: Record<TaskStatus, Task[]> = {
-		pending: [],
-		in_progress: [],
-		completed: [],
-		deleted: [],
-	};
-	for (const t of filtered) {
-		if (!t.subject?.trim()) continue;
-		groups[t.status].push(t);
+	return mutateTasks(() => {
+		const idx = getTasks().findIndex(p => p.name === phase);
+		if (idx === -1)
+			return {
+				value: `Error: phase '${phase}' not found.`,
+				changed: false,
+			};
+		const count = getTasks()[idx].tasks.length;
+		getTasks().splice(idx, 1);
+		return {
+			value: `Dropped phase '${phase}' (${count} task(s)).`,
+			changed: true,
+		};
+	});
+}
+
+function opBlock(entry: Record<string, unknown>): string {
+	const phase = stripNewlines(String(entry.phase || ""));
+	const task = stripNewlines(String(entry.task || ""));
+	const blocker = stripNewlines(String(entry.blocker || ""));
+	if (!phase || !task || !blocker)
+		return "Error: 'phase', 'task', and 'blocker' are required for block.";
+
+	return mutateTasks(() => {
+		const result = findTaskByContent(getTasks(), task);
+		if (!result)
+			return { value: `Error: task '${task}' not found.`, changed: false };
+		const { task: targetTask } = result;
+		targetTask.blocker = blocker;
+		targetTask.status = "pending";
+		return {
+			value: `Blocked '${task}' by '${blocker}'.`,
+			changed: true,
+		};
+	});
+}
+
+function opUnblock(entry: Record<string, unknown>): string {
+	const task = stripNewlines(String(entry.task || ""));
+	if (!task) return "Error: 'task' is required for unblock.";
+
+	return mutateTasks(() => {
+		const result = findTaskByContent(getTasks(), task);
+		if (!result)
+			return { value: `Error: task '${task}' not found.`, changed: false };
+		const { task: targetTask } = result;
+		targetTask.blocker = undefined;
+		return { value: `Unblocked '${task}'.`, changed: true };
+	});
+}
+
+function opAppend(entry: Record<string, unknown>): string {
+	const phase = stripNewlines(String(entry.phase || ""));
+	const taskList = entry.tasks as string[] | undefined;
+	if (!phase || !taskList || !Array.isArray(taskList))
+		return "Error: 'phase' and 'tasks' (array) are required for append.";
+
+	const newTasks: Task[] = [];
+	for (const content of taskList) {
+		const cleaned = stripNewlines(String(content));
+		if (!cleaned) continue;
+		newTasks.push({ content: cleaned, status: "pending" });
 	}
+	if (newTasks.length === 0) return "No valid tasks to append.";
+
+	return mutateTasks(() => {
+		const existingPhases = getTasks();
+		const target = findPhase(existingPhases, phase);
+		if (!target) {
+			existingPhases.push({ name: phase, tasks: newTasks });
+			return {
+				value: `Created phase '${phase}' and added ${newTasks.length} task(s).`,
+				changed: true,
+			};
+		}
+		for (const t of newTasks) {
+			if (!target.tasks.find(ex => ex.content === t.content)) {
+				target.tasks.push(t);
+			}
+		}
+		return {
+			value: `Added ${newTasks.length} task(s) to ${phase}.`,
+			changed: true,
+		};
+	});
+}
+
+function opView(): string {
+	const phases = getTasks();
+	if (phases.length === 0) return "No tasks.";
 
 	const lines: string[] = [];
-	const fmt = (task: Task) => {
-		const mark = {
-			pending: "○",
-			in_progress: "◐",
-			completed: "✓",
-			deleted: "✗",
-		}[task.status];
-		const dep = task.blockedBy ? ` [blocks: #${task.blockedBy.join(",")}]` : "";
-		const active = task.activeForm ? ` (${task.activeForm})` : "";
-		return `  #${task.id} ${mark} ${task.subject}${active}${dep}`;
-	};
-
-	if (groups.in_progress.length > 0) {
-		lines.push("── In Progress ──");
-		for (const task of groups.in_progress) lines.push(fmt(task));
-	}
-	if (groups.pending.length > 0) {
-		lines.push("── Pending ──");
-		for (const task of groups.pending) lines.push(fmt(task));
-	}
-	if (groups.completed.length > 0 && includeDeleted) {
-		lines.push("── Completed ──");
-		for (const task of groups.completed) lines.push(fmt(task));
-	}
-	if (groups.deleted.length > 0) {
-		lines.push("── Deleted ──");
-		for (const task of groups.deleted) lines.push(fmt(task));
-	}
-
-	return lines.join("\n");
-}
-
-function actionGet(params: Record<string, unknown>): string {
-	const tasks = getTasks();
-	const id = params.id as number | undefined;
-	if (id === undefined) return "Error: id is required for get.";
-	const task = tasks.find(t => t.id === id);
-	if (!task) return `Error: task #${id} not found.`;
-
-	const lines: string[] = [];
-	lines.push(`# ${task.subject}`);
-	if (task.description) lines.push(`  desc: ${task.description}`);
-	lines.push(`  status: ${task.status}`);
-	if (task.activeForm) lines.push(`  active: ${task.activeForm}`);
-	if (task.owner) lines.push(`  owner: ${task.owner}`);
-	if (task.blockedBy?.length)
-		lines.push(`  blockedBy: #${task.blockedBy.join(", ")}`);
-	if (task.metadata) lines.push(`  metadata: ${JSON.stringify(task.metadata)}`);
-
-	return lines.join("\n");
-}
-
-function actionDelete(params: Record<string, unknown>): string {
-	const id = params.id as number | undefined;
-	if (id === undefined) return "Error: id is required for delete.";
-	return mutateTasks(({ tasks }) => {
-		const task = tasks.find(item => item.id === id);
-		if (!task) return unchanged(`Error: task #${id} not found.`);
-		if (task.status === "deleted")
-			return unchanged(`Error: task #${id} is already deleted.`);
-
-		task.status = "deleted";
-		for (const dependent of tasks) {
-			if (dependent.blockedBy?.includes(id)) {
-				dependent.blockedBy = dependent.blockedBy.filter(
-					dependencyId => dependencyId !== id,
-				);
-				if (dependent.blockedBy.length === 0) dependent.blockedBy = undefined;
-			}
+	for (const phase of phases) {
+		const done = phase.tasks.filter(
+			t => t.status === "completed",
+		).length;
+		const active = phase.tasks.filter(
+			t => t.status === "in_progress",
+		).length;
+		lines.push(
+			`Phase: ${phase.name} (${done} done, ${active} active, ${phase.tasks.length} total)`,
+		);
+		for (const t of phase.tasks) {
+			const mark: Record<string, string> = {
+				pending: "○",
+				in_progress: "→",
+				completed: "✓",
+				abandoned: "✕",
+			};
+			const dep = t.blocker
+				? ` [blocked by: ${t.blocker}]`
+				: "";
+			lines.push(`  ${mark[t.status]} ${t.content}${dep}`);
 		}
-		return changed(`Deleted task #${id}: ${task.subject}`);
-	});
-}
-
-function actionClear(): string {
-	return mutateTasks(({ tasks, resetIds }) => {
-		const count = tasks.length;
-		tasks.length = 0;
-		resetIds();
-		return { value: `Cleared ${count} task(s).`, changed: count > 0 };
-	});
+		lines.push("");
+	}
+	return lines.join("\n");
 }
 
 // ── Tool definition ──────────────────────────────────────────────────────────
-
-const normalizeInput = (
-	raw: unknown,
-): { action?: TaskAction; params?: Record<string, unknown> } => {
-	if (typeof raw === "string") {
-		try {
-			return JSON.parse(raw);
-		} catch (_e: unknown) {
-			return {};
-		}
-	}
-	if (!raw || typeof raw !== "object") return {};
-	return raw as Record<string, unknown>;
-};
 
 export const todo_tool: Tool = {
 	readOnly: false,
@@ -376,117 +305,134 @@ export const todo_tool: Tool = {
 	label: "Todo",
 	hookAliases: ["Todo"],
 	description:
-		"Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). " +
-		"Status: pending → in_progress → completed, plus deleted tombstone. " +
-		"Use this to plan and track multi-step work like research, design, and implementation. " +
-		"Use blockedBy to express dependencies (A is blocked by B). On create, pass blockedBy as the initial set. On update, use addBlockedBy / removeBlockedBy (additive merge — do not resend the full array). Cycles are rejected. " +
-		"list hides tombstoned (deleted) tasks by default; pass includeDeleted:true to see them. Pass status to filter by a single status. " +
-		"Subject must be short and imperative (e.g. 'Research existing tool'); description is for long-form detail. " +
-		"activeForm is a present-continuous label shown while in_progress (e.g. 'writing tests').",
-	promptSnippet: "Manage task list with status tracking and dependencies",
+		"Manage a phased task list for tracking multi-step progress. " +
+		"Operations: init (create phases with tasks), start (mark in_progress), done (mark completed), " +
+		"rm (remove task), drop (remove phase), block/unblock (set/clear blocker), append (add tasks to phase), view (list all). " +
+		"Init takes { phase: string, items: string[] } entries or just phase name strings. " +
+		"Use phases to organize work (e.g., 'Foundation', 'Implementation', 'Verification').",
+	promptSnippet: "Manage phased task list with status tracking",
 	promptGuidelines: [
 		"Use todo to track multi-step progress; mark in_progress before work, completed immediately when done",
 	],
 	parameters: {
 		type: "object",
 		properties: {
-			action: {
+			op: {
 				type: "string",
-				enum: ["create", "update", "list", "get", "delete", "clear"],
-				description: "Action to perform",
+				enum: [
+					"init",
+					"start",
+					"done",
+					"rm",
+					"drop",
+					"block",
+					"unblock",
+					"append",
+					"view",
+				],
+				description: "Operation to apply",
 			},
-			subject: {
-				type: "string",
-				description: "Task subject line (required for create)",
-			},
-			description: {
-				type: "string",
-				description: "Long-form task description",
-			},
-			activeForm: {
+			phase: {
 				type: "string",
 				description:
-					"Present-continuous spinner label shown while status is in_progress",
+					"Phase name (required for most operations)",
 			},
-			status: {
+			task: {
 				type: "string",
-				enum: ["pending", "in_progress", "completed", "deleted"],
-				description: "Target status (update) or list filter (list)",
+				description:
+					"Task content (required for start/done/rm/block/unblock)",
 			},
-			blockedBy: {
+			blocker: {
+				type: "string",
+				description: "Blocker description (required for block)",
+			},
+			tasks: {
 				type: "array",
-				items: { type: "number" },
-				description: "Initial blockedBy ids (create only)",
+				items: { type: "string" },
+				description:
+					"Task content strings (for append or init items)",
 			},
-			addBlockedBy: {
+			items: {
 				type: "array",
-				items: { type: "number" },
 				description:
-					"Task ids to add to blockedBy (update only, additive merge)",
-			},
-			removeBlockedBy: {
-				type: "array",
-				items: { type: "number" },
-				description:
-					"Task ids to remove from blockedBy (update only, additive merge)",
-			},
-			owner: {
-				type: "string",
-				description: "Agent/owner assigned to this task",
-			},
-			metadata: {
-				type: "object",
-				description:
-					"Arbitrary metadata; pass null value for a key to delete that key on update",
-			},
-			id: {
-				type: "number",
-				description: "Task id (required for update, get, delete)",
-			},
-			includeDeleted: {
-				type: "boolean",
-				description:
-					"If true, list action returns deleted (tombstoned) tasks as well. Default: false.",
+					"Init items: phase names or { phase, items } objects",
 			},
 		},
-		required: ["action"],
+		required: ["op"],
 	},
 	prepareArguments: (raw): Record<string, unknown> => {
-		const parsed = normalizeInput(raw);
-		return parsed;
+		if (typeof raw === "string") {
+			try {
+				return JSON.parse(raw);
+			} catch {
+				return {};
+			}
+		}
+		if (!raw || typeof raw !== "object") return {};
+		return raw as Record<string, unknown>;
 	},
 	execute: async (args): Promise<string> => {
-		const { action, ...params } = normalizeInput(args) as {
-			action?: TaskAction;
-		} & Record<string, unknown>;
+		const entry = (raw => {
+			if (typeof raw === "string") {
+				try { return JSON.parse(raw); } catch { return {}; }
+			}
+			if (!raw || typeof raw !== "object") return {};
+			return raw as Record<string, unknown>;
+		})(args) as Record<string, unknown>;
+		const op = (entry.op as TodoOp) || (entry.action as TodoOp);
 
-		if (!action)
-			return "Error: action is required. Use: create, update, list, get, delete, clear.";
+		if (!op)
+			return "Error: 'op' is required. Use: init, start, done, rm, drop, block, unblock, append, view.";
 
-		let result: string;
-		switch (action) {
-			case "create":
-				result = actionCreate(params);
-				break;
-			case "update":
-				result = actionUpdate(params);
-				break;
-			case "list":
-				result = actionList(params);
-				break;
-			case "get":
-				result = actionGet(params);
-				break;
-			case "delete":
-				result = actionDelete(params);
-				break;
-			case "clear":
-				result = actionClear();
-				break;
+		switch (op) {
+			case "init":
+				return opInit(entry);
+			case "start":
+				return opStart(entry);
+			case "done":
+				return opDone(entry);
+			case "rm":
+				return opRm(entry);
+			case "drop":
+				return opDrop(entry);
+			case "block":
+				return opBlock(entry);
+			case "unblock":
+				return opUnblock(entry);
+			case "append":
+				return opAppend(entry);
+			case "view":
+				return opView();
 			default:
-				return `Error: unknown action '${action}'. Use: create, update, list, get, delete, clear.`;
+				return `Error: unknown op '${op}'. Use: init, start, done, rm, drop, block, unblock, append, view.`;
 		}
-
-		return result;
 	},
 };
+
+// ── TaskLedger adapter ────────────────────────────────────────────────────────
+// Converts phased tasks to the flat TaskLedgerEntry format expected by the
+// autonomous policy and continuation logic.
+
+const PHASED_TASK_LEDGER: TaskLedger = {
+	snapshot: () => {
+		const phases = getTasks();
+		const entries: Array<{
+			id: number;
+			subject: string;
+			status: string;
+		}> = [];
+		let idx = 0;
+		for (const phase of phases) {
+			for (const task of phase.tasks) {
+				entries.push({
+					id: idx++,
+					subject: `${phase.name}: ${task.content}`,
+					status: task.status,
+				});
+			}
+		}
+		return entries;
+	},
+};
+
+export { PHASED_TASK_LEDGER as taskLedger };

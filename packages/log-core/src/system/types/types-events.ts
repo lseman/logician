@@ -152,20 +152,28 @@ export interface RepairEvent {
 	errorType?: string;
 	message?: string;
 }
+// ── Phased todo types ─────────────────────────────────────────────────────────
 
+/** Tracks which task in which phase transitioned to completed in the last update. */
+export interface TodoCompletionTransition {
+	phase: string;
+	content: string;
+}
+
+/** Phased todo list event — replaces flat task list with phase-grouped structure. */
 export interface TodosEvent {
 	type: "todos";
-	todos: Array<{
-		id: number;
-		subject: string;
-		description?: string;
-		activeForm?: string;
-		status: "pending" | "in_progress" | "completed" | "deleted";
-		blockedBy?: number[];
-		owner?: string;
-		metadata?: Record<string, unknown>;
+	phases: Array<{
+		name: string;
+		tasks: Array<{
+			content: string;
+			status: "pending" | "in_progress" | "completed" | "abandoned";
+			blocker?: string;
+		}>;
 	}>;
+	completedTasks?: TodoCompletionTransition[];
 }
+
 
 export interface SteeredEvent {
 	type: "steered";
@@ -333,6 +341,18 @@ export interface QuestionRequestEvent {
 		choices: Array<{ value: string; label: string; description?: string }>;
 	}>;
 }
+/** A TTSR rule matched and was injected (aborted current turn). */
+export interface TtsrInjectedEvent {
+	type: "ttsr_injected";
+	ruleName: string;
+	ruleContent: string;
+}
+
+/** A TTSR rule matched but was queued (will apply after current turn). */
+export interface TtsrQueuedEvent {
+	type: "ttsr_queued";
+	ruleName: string;
+}
 
 export type RuntimeEvent =
 	| TokenEvent
@@ -367,7 +387,9 @@ export type RuntimeEvent =
 	| RuntimeStatusEvent
 	| AgentErrorEvent
 	| DiagnosticEvent
-	| PolicyEvaluationEvent;
+	| PolicyEvaluationEvent
+	| TtsrInjectedEvent
+	| TtsrQueuedEvent;
 
 /** Event names are derived from the canonical discriminated union so the two
  * cannot drift as new runtime events are added. */

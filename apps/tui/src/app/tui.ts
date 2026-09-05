@@ -587,8 +587,7 @@ export class LogicianTUI {
 		const pinnedContainer = new Container();
 		this.notifications.setOnInvalidate(() => this.tui.requestRender());
 		pinnedContainer.addChild(this.notifications);
-		pinnedContainer.addChild(this.todoBar);
-		pinnedContainer.addChild(this.workSurface);
+
 		pinnedContainer.addChild(this.researchWidget);
 		pinnedContainer.addChild(this.steerQueue);
 		this.steerQueue.setCallbacks({
@@ -633,13 +632,14 @@ export class LogicianTUI {
 		// the TranscriptDisplay to its viewport; the dock renders at a
 		// separate y position below the clip region.
 		const dock = new Container();
+		dock.addChild(this.workSurface);
 		dock.addChild(new Separator());
+		dock.addChild(this.todoBar);
 		dock.addChild(pinnedContainer);
 		dock.addChild(this.tui.getAboveInputOverlaysComponent());
 		dock.addChild(this.inputBar);
 		dock.addChild(new Separator());
 		dock.addChild(this.statusPanel);
-
 		// Transcript scrolls and follows newly streamed output; scrolling away
 		// disables follow until the user returns to the bottom (Home/End/PageDown
 		// or the new-output indicator's click-to-catch-up).

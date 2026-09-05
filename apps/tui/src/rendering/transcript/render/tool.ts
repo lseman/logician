@@ -58,6 +58,7 @@ import {
 import {
 	renderBashDetails,
 	renderEditDetails,
+	renderEvalDetails,
 	renderFileDiffDetails,
 	renderMcpDetails,
 	renderWriteDetails,
@@ -185,7 +186,7 @@ export function renderTool(
 		row = gap >= 2 ? `${row}${" ".repeat(gap)}${right}` : `${row} ${right}`;
 	}
 	lines.push(blockLine(borderColor, clampLineToWidth(row, contentWidth), width));
-	lines.push(blockDivider(borderColor, width));
+	lines.push(blockDivider(borderColor, width, "Output"));
 
 	// Edits keep their compact diff preview. File writes and appends report
 	// their live line count in the header and reveal content on expand.
@@ -497,6 +498,8 @@ function toolDetailLines(
 		lines.push(...renderFileDiffDetails(ctx, tool, width, toolDetailHelpers));
 	} else if (tool.tool_name === "bash") {
 		lines.push(...renderBashDetails(ctx, tool, width, toolDetailHelpers));
+	} else if (tool.tool_name === "eval") {
+		lines.push(...renderEvalDetails(ctx, tool, width, toolDetailHelpers));
 	} else if (tool.tool_name.startsWith("mcp__")) {
 		lines.push(...renderMcpDetails(ctx, tool, width, toolDetailHelpers));
 	} else {
@@ -805,9 +808,16 @@ function blockBottom(color: ThemeColor, width: number): string {
 	return paintBlockBg(theme.fg(color, `${BOX.bl}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.br}`));
 }
 
-/** Divider separating the tool call's header row from the rest of the box. */
-function blockDivider(color: ThemeColor, width: number): string {
-	return paintBlockBg(theme.fg(color, `${BOX.teeLeft}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.teeRight}`));
+/**
+ * Divider separating the tool call's header row from the rest of the box,
+ * e.g. `├----Output──────────────────────┤`.
+ */
+function blockDivider(color: ThemeColor, width: number, label: string): string {
+	const innerWidth = Math.max(1, width - 2);
+	const leftFill = Math.min(4, Math.max(0, innerWidth - label.length));
+	const rightFill = Math.max(0, innerWidth - label.length - leftFill);
+	const rule = `${BOX.horiz.repeat(leftFill)}${label}${BOX.horiz.repeat(rightFill)}`;
+	return paintBlockBg(theme.fg(color, `${BOX.teeLeft}${rule}${BOX.teeRight}`));
 }
 
 /** One content row inside a tool box, padded and clamped so both borders align. */

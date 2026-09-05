@@ -1,124 +1,179 @@
-// ── Todo bar component ─────────────────────────────────────────────────────────
-// Pinned task list shown directly above the input bar. Renders nothing when the
-// list is empty, so it only takes vertical space while there are active tasks.
+// ── Todo bar component ────────────────────────────────────────────────────────
+// Phased task list rendered above the input bar. Shows phase headers with Roman
+// numerals, progress counts, and task status marks.
 //
-// Displays: compact task list with status marks, grouped by status.
-//           in_progress first, then pending, then completed.
+// Rendering strategy:
+//   - Phases touched in the latest update are rendered fully.
+//   - Phases not touched show a collapsed summary line: "I. Foundation · 2/5"
+//   - The phase with the in_progress task is always touched (active attention).
+//
+// Status marks:
+//   → in_progress (accent), ✓ completed (success + strikethrough),
+//   ○ pending (dim), ✕ abandoned (error + strikethrough)
 
 import { type Component, visibleWidth } from "../terminal/core.ts";
 import { type ThemeColor, theme } from "../terminal/theme.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
+const STRIKE = "\x1b[9m";
 
-export interface TaskItem {
-	id: number;
-	subject: string;
-	description?: string;
-	activeForm?: string;
-	status: "pending" | "in_progress" | "completed" | "deleted";
-	blockedBy?: number[];
-	owner?: string;
-	metadata?: Record<string, unknown>;
+// ── Phased data types ─────────────────────────────────────────────────────────
+
+export interface TodoPhase {
+	name: string;
+	tasks: TodoTask[];
+}
+
+export interface TodoTask {
+	content: string;
+	status: "pending" | "in_progress" | "completed" | "abandoned";
+	blocker?: string;
+}
+
+/** Tracks which task completed in the last update (for strikethrough animation). */
+export interface CompletionTransition {
+	phase: string;
+	content: string;
 }
 
 // ── Status marks ──────────────────────────────────────────────────────────────
 
-const STATUS: Record<TaskItem["status"], { sym: string; color: ThemeColor }> = {
+const STATUS: Record<TodoTask["status"], { sym: string; color: ThemeColor }> = {
 	completed: { sym: "✓", color: "success" },
-	in_progress: { sym: "▸", color: "warning" },
+	in_progress: { sym: "→", color: "accent" },
 	pending: { sym: "○", color: "dim" },
-	deleted: { sym: "✗", color: "dim" },
+	abandoned: { sym: "✕", color: "error" },
 };
 
-// Fill-in frames shown briefly when a task's status just changed, e.g.
-// pending → in_progress plays ○ ◔ ◑ ◕ ▸, in_progress → completed plays ▸ ◕ ● ✓.
-const TRANSITION_FRAMES: Record<TaskItem["status"], string[]> = {
-	pending: ["○"],
-	in_progress: ["◔", "◑", "◕", "▸"],
-	completed: ["◕", "●", "✓"],
-	deleted: ["✗"],
-};
-const TRANSITION_TICKS = 4;
-const TRANSITION_INTERVAL_MS = 90;
-const ANSI_CSI_SEQUENCE = new RegExp(
-	`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
-	"g",
-);
+// ── Roman numeral display ─────────────────────────────────────────────────────
 
-function statusMark(status: TaskItem["status"], frame?: number): string {
-	const s = STATUS[status];
-	if (frame !== undefined) {
-		const frames = TRANSITION_FRAMES[status];
-		const sym = frames[Math.min(frame, frames.length - 1)];
-		return ` ${theme.fg(s.color, sym)}${RESET}`;
+const ROMAN_PAIRS: ReadonlyArray<readonly [number, string]> = [
+	[1000, "M"],
+	[900, "CM"],
+	[500, "D"],
+	[400, "CD"],
+	[100, "C"],
+	[90, "XC"],
+	[50, "L"],
+	[40, "XL"],
+	[10, "X"],
+	[9, "IX"],
+	[5, "V"],
+	[4, "IV"],
+	[1, "I"],
+];
+
+function roman(n: number): string {
+	let remaining = n;
+	let result = "";
+	for (const [value, numeral] of ROMAN_PAIRS) {
+		while (remaining >= value) {
+			result += numeral;
+			remaining -= value;
+		}
 	}
-	return ` ${theme.fg(s.color, s.sym)}${RESET}`;
+	return result;
 }
 
-// ── Task list ─────────────────────────────────────────────────────────────────
+function formatPhaseDisplayName(name: string, oneBasedIndex: number): string {
+	return `${roman(oneBasedIndex)}. ${name}`;
+}
 
-const MAX_ROWS = 5;
+// ── Strikethrough animation ───────────────────────────────────────────────────
+
+const STRIKE_HOLD_FRAMES = 2;
+const STRIKE_REVEAL_FRAMES = 12;
+const STRIKE_TOTAL_FRAMES = STRIKE_HOLD_FRAMES + STRIKE_REVEAL_FRAMES;
+const STRIKE_START = "\x1b[9m";
+const STRIKE_END = "\x1b[29m";
+
+function partialStrikethrough(text: string, visibleChars: number): string {
+	if (visibleChars <= 0) return text;
+	const fullStrike = STRIKE + text + STRIKE_END;
+	if (visibleChars >= text.length) return fullStrike;
+	return STRIKE + text.slice(0, visibleChars) + STRIKE_END + text.slice(visibleChars);
+}
+
+function strikeRevealCount(totalChars: number, frame: number): number {
+	if (frame < STRIKE_HOLD_FRAMES) return totalChars;
+	return Math.round(
+		((frame - STRIKE_HOLD_FRAMES) / STRIKE_REVEAL_FRAMES) * totalChars,
+	);
+}
+
+// ── Phase-aware rendering ─────────────────────────────────────────────────────
+
+const MAX_ROWS = 6;
+
+function computeTouchedPhases(
+	completedTasks: CompletionTransition[] | undefined,
+): Set<string> | null {
+	if (!completedTasks || completedTasks.length === 0) return null;
+	const touched = new Set<string>();
+	for (const ct of completedTasks) touched.add(ct.phase);
+	return touched.size > 0 ? touched : null;
+}
+
+function formatPhaseProgress(phase: TodoPhase): string {
+	const done = phase.tasks.filter(t => t.status === "completed" || t.status === "abandoned").length;
+	return theme.fg("dim", `  ${done}/${phase.tasks.length}`);
+}
+
+function formatPhaseSummary(
+	phase: TodoPhase,
+	oneBasedIndex: number,
+): string {
+	const header = theme.fg("muted", formatPhaseDisplayName(phase.name, oneBasedIndex));
+	return header + formatPhaseProgress(phase);
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export class TodoBar implements Component {
-	private tasks: TaskItem[] = [];
+	private phases: TodoPhase[] = [];
+	private completedTasks: CompletionTransition[] | undefined;
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
-	private cachedCount = -1;
 	private onInvalidate: (() => void) | null = null;
 
-	// Transition animation state: last-seen status per task id, and remaining
-	// frame count for tasks currently mid-transition.
-	private prevStatus = new Map<number, TaskItem["status"]>();
-	private transitionFrame = new Map<number, number>();
+	// Completion animation state: track which tasks just completed.
+	private completionFrames = new Map<string, number>(); // "phase\x00content" -> frame
 	private timer: ReturnType<typeof setInterval> | null = null;
+	private readonly COMPLETION_FRAME_TICKS = STRIKE_TOTAL_FRAMES;
+	private readonly COMPLETION_INTERVAL_MS = 40;
 
 	setOnInvalidate(cb: () => void): void {
 		this.onInvalidate = cb;
 	}
 
-	setTodos(tasks: TaskItem[]): void {
-		this.tasks = tasks.flatMap(task => {
-			const subject = normalizeLabel(task?.subject);
-			if (!subject) return [];
-			return [
-				{
-					...task,
-					subject,
-					activeForm: normalizeLabel(task.activeForm) || undefined,
-					blockedBy: Array.isArray(task.blockedBy)
-						? task.blockedBy.filter(Number.isFinite)
-						: undefined,
-				},
-			];
-		});
+	setPhases(phases: TodoPhase[], completedTasks?: CompletionTransition[]): void {
+		this.phases = phases;
+		this.completedTasks = completedTasks;
 
-		let anyTransition = false;
-		const liveIds = new Set(this.tasks.map(t => t.id));
-		for (const t of this.tasks) {
-			const prev = this.prevStatus.get(t.id);
-			if (prev !== undefined && prev !== t.status) {
-				this.transitionFrame.set(t.id, 0);
-				anyTransition = true;
-			}
-			this.prevStatus.set(t.id, t.status);
-		}
-		for (const id of this.prevStatus.keys()) {
-			if (!liveIds.has(id)) {
-				this.prevStatus.delete(id);
-				this.transitionFrame.delete(id);
+		// Mark newly completed tasks with animation frames.
+		const prevKeys = new Set<string>(this.completionFrames.keys());
+		const currentKeys = new Set<string>();
+		for (const ct of completedTasks ?? []) {
+			const key = `${ct.phase}\x00${ct.content}`;
+			currentKeys.add(key);
+			if (!prevKeys.has(key)) {
+				this.completionFrames.set(key, 0);
 			}
 		}
-		if (anyTransition) this.startAnimation();
+		for (const key of prevKeys) {
+			if (!currentKeys.has(key)) {
+				this.completionFrames.delete(key);
+			}
+		}
 
+		this.startAnimation();
 		this.cachedLines = null;
-		this.cachedCount = -1;
 		this.onInvalidate?.();
 	}
 
 	invalidate(): void {
 		this.cachedLines = null;
-		this.cachedCount = -1;
 		this.onInvalidate?.();
 	}
 
@@ -126,19 +181,19 @@ export class TodoBar implements Component {
 		if (this.timer) return;
 		this.timer = setInterval(() => {
 			let stillRunning = false;
-			for (const [id, frame] of this.transitionFrame) {
+			for (const [key, frame] of this.completionFrames) {
 				const next = frame + 1;
-				if (next >= TRANSITION_TICKS) {
-					this.transitionFrame.delete(id);
+				if (next >= this.COMPLETION_FRAME_TICKS) {
+					this.completionFrames.delete(key);
 				} else {
-					this.transitionFrame.set(id, next);
+					this.completionFrames.set(key, next);
 					stillRunning = true;
 				}
 			}
 			this.cachedLines = null;
 			this.onInvalidate?.();
 			if (!stillRunning) this.stopAnimation();
-		}, TRANSITION_INTERVAL_MS);
+		}, this.COMPLETION_INTERVAL_MS);
 	}
 
 	private stopAnimation(): void {
@@ -154,92 +209,134 @@ export class TodoBar implements Component {
 	}
 
 	render(width: number): string[] {
-		const countKey = this.tasks.filter(t => t.status !== "deleted").length;
-
-		if (
-			width === this.cachedWidth &&
-			countKey === this.cachedCount &&
-			this.cachedLines !== null &&
-			this.transitionFrame.size === 0
-		) {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
 			return this.cachedLines;
 		}
-
-		const lines = renderRaw(width, this.tasks, this.transitionFrame);
+		const lines = renderRaw(width, this.phases, this.completedTasks, this.completionFrames);
 		this.cachedWidth = width;
-		this.cachedCount = countKey;
 		this.cachedLines = lines;
 		return lines;
 	}
 }
 
-// ── Render (pure function, no closure over `this`) ────────────────────────────
+// ── Render ────────────────────────────────────────────────────────────────────
 
 function renderRaw(
 	width: number,
-	tasks: TaskItem[],
-	transitionFrame: Map<number, number>,
+	phases: TodoPhase[],
+	completedTasks: CompletionTransition[] | undefined,
+	completionFrames: Map<string, number>,
 ): string[] {
-	const visible = tasks.filter(t => t.status !== "deleted");
-	if (visible.length === 0) return [];
+	const visibleTasks = phases.flatMap(p =>
+		p.tasks.filter(t => t.status !== "abandoned"),
+	);
+	if (visibleTasks.length === 0) return [];
 
-	const done = visible.filter(t => t.status === "completed").length;
-	const total = visible.length;
+	const done = phases.reduce(
+		(sum, p) => sum + p.tasks.filter(t => t.status === "completed").length,
+		0,
+	);
+	const total = phases.reduce((sum, p) => sum + p.tasks.filter(t => t.status !== "abandoned").length, 0);
+	const active = total - done;
+
 	const lines: string[] = [];
 
 	// Header
-	const header = `${theme.fg("muted", "")}Tasks ${done}/${total}${RESET}`;
-	lines.push(pad(clampLine(header, width), width));
-
-	// Group by status: in_progress → pending → completed
-	const groups = new Map<string, TaskItem[]>();
-	for (const t of visible) {
-		if (!groups.has(t.status)) groups.set(t.status, []);
-		groups.get(t.status)?.push(t);
+	if (active > 0) {
+		const header = `${theme.fg("muted", "Tasks ")}${done}/${total}${RESET}${theme.fg("accent", ` · ${active} active`)}`;
+		lines.push(pad(clampLine(header, width), width));
+	} else {
+		const header = `${theme.fg("muted", "Tasks ")}${done}/${total}${RESET}`;
+		lines.push(pad(clampLine(header, width), width));
 	}
 
-	const order: TaskItem["status"][] = ["in_progress", "pending", "completed"];
-	let shown = 0;
+	// Determine touched phases (from completion transitions).
+	const touched = computeTouchedPhases(completedTasks);
 
-	for (const status of order) {
-		const group = groups.get(status);
-		if (!group || shown >= MAX_ROWS) continue;
-
-		for (const t of group) {
-			if (shown >= MAX_ROWS) break;
-
-			const mark = statusMark(t.status, transitionFrame.get(t.id));
-			const line = buildTaskLine(t, mark);
-			lines.push(pad(clampLine(line, width), width));
-			shown++;
+	// Find the phase with in_progress tasks — always render fully.
+	const activePhaseNames = new Set<string>();
+	for (const phase of phases) {
+		if (phase.tasks.some(t => t.status === "in_progress")) {
+			activePhaseNames.add(phase.name);
 		}
 	}
 
-	// Hidden count
-	const hidden = total - shown;
-	if (hidden > 0) {
-		const hint = `${DIM}… ${hidden} more${RESET}`;
-		lines.push(pad(clampLine(`   ${hint}`, width), width));
+	let shownRows = 0;
+	const isTouched = (phaseName: string): boolean =>
+		touched !== null
+			? touched.has(phaseName) || activePhaseNames.has(phaseName)
+			: true; // null means render everything fully
+
+	for (let idx = 0; idx < phases.length && shownRows < MAX_ROWS; idx++) {
+		const phase = phases[idx];
+		const oneBasedIndex = idx + 1;
+
+		if (isTouched(phase.name)) {
+			// Full phase rendering
+			lines.push(pad(clampLine(formatPhaseDisplayName(phase.name, oneBasedIndex), width), width));
+			for (const t of phase.tasks) {
+				if (shownRows >= MAX_ROWS) break;
+				const line = buildTaskLine(t, completionFrames);
+				lines.push(pad(clampLine(line, width), width));
+				shownRows++;
+			}
+			lines.push(pad(clampLine(formatPhaseProgress(phase), width), width));
+			shownRows++;
+		} else {
+			// Collapsed summary
+			if (shownRows >= MAX_ROWS) break;
+			lines.push(pad(clampLine(formatPhaseSummary(phase, oneBasedIndex), width), width));
+			shownRows++;
+		}
+	}
+
+	const hiddenCount =
+		total -
+		phases.reduce(
+			(sum, p) =>
+				sum +
+				(isTouched(p.name) ? p.tasks.filter(t => t.status !== "abandoned").length : 0),
+			0,
+		);
+
+	if (hiddenCount > 0) {
+		lines.push(pad(clampLine(`   ${DIM}… ${hiddenCount} more${RESET}`, width), width));
 	}
 
 	return lines;
 }
 
-function buildTaskLine(t: TaskItem, mark: string): string {
-	let text = `${mark} ${t.subject}`;
+function buildTaskLine(
+	t: TodoTask,
+	completionFrames: Map<string, number>,
+): string {
+	const mark = STATUS[t.status].sym;
+	const markColored = theme.fg(STATUS[t.status].color, mark);
 
-	if (t.activeForm) {
-		text += ` ${DIM}— ${t.activeForm}${RESET}`;
+	let text = markColored + " ";
+
+	// Apply strikethrough animation for just-completed tasks.
+	if (t.status === "completed") {
+		const key = `completed\x00${t.content}`;
+		const frame = completionFrames.get(key);
+		if (frame !== undefined) {
+			const revealCount = strikeRevealCount(t.content.length, frame);
+			text += partialStrikethrough(t.content, revealCount);
+		} else {
+			text += STRIKE + t.content + STRIKE_END;
+		}
+	} else if (t.status === "abandoned") {
+		text += STRIKE + t.content + STRIKE_END;
+	} else {
+		text += t.content;
 	}
 
-	if (t.blockedBy?.length) {
-		const deps = t.blockedBy
-			.map(id => ` ${theme.fg("muted", `[→ #${id}]`)}${RESET}`)
-			.join("");
-		text += deps;
+	// Show blocker inline.
+	if (t.blocker) {
+		text += ` ${DIM}[blocked: ${t.blocker}]${RESET}`;
 	}
 
-	return text;
+	return theme.fg(STATUS[t.status].color, text);
 }
 
 function clampLine(text: string, maxW: number): string {
@@ -258,12 +355,4 @@ function clampLine(text: string, maxW: number): string {
 function pad(line: string, width: number): string {
 	const w = visibleWidth(line);
 	return w < width ? line + " ".repeat(width - w) : line;
-}
-
-function normalizeLabel(value: unknown): string {
-	return String(value ?? "")
-		.replace(ANSI_CSI_SEQUENCE, "")
-		.replace(/[\p{Cc}\p{Cf}]/gu, " ")
-		.replace(/\s+/g, " ")
-		.trim();
 }

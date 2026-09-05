@@ -249,3 +249,32 @@ export function renderMcpDetails(
 	}
 	return lines;
 }
+
+export function renderEvalDetails(
+	ctx: RenderCtx,
+	tool: ToolExecution,
+	width: number,
+	helpers: ToolDetailHelpers,
+): string[] {
+	const lines: string[] = [];
+	const args = tool.args || {};
+	const code = stringArg(args, "code") || "";
+	const language = stringArg(args, "language") || "";
+
+	if (code) {
+		const lineCount = code.split("\n").length;
+		const meta = `${DIM}${code.length} bytes · ${lineCount} lines${RESET}`;
+		lines.push(helpers.detailSection("code", meta));
+		lines.push(
+			...renderFileContent(code, width, lineCount, language || undefined, true),
+		);
+	}
+
+	const result = tool.result ?? tool.partialResult;
+	if (result) {
+		lines.push(helpers.detailSection(tool.isError ? "error" : "output"));
+		lines.push(...helpers.previewBlock(ctx, result, width));
+	}
+
+	return lines;
+}

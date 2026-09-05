@@ -100,3 +100,15 @@ export type {
 	ToolContext,
 	ToolResult,
 } from "./system/types/types-messages.ts";
+// TTSR (Time-Traveling Stream Rules) types
+export type {
+	TtsrRule,
+	TtsrScope,
+	TtsrSettings,
+	TtsrMatchContext,
+	TtsrMatchSource,
+	TtsrInjectionEntry,
+	TtsrBridgeSettings,
+} from "./system/types/ttsr-types.ts";
+export { TtsrManager } from "./system/ttsr/ttsr-manager.ts";
+

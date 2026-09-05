@@ -232,7 +232,7 @@ ${mcpWorkflow.join("\n")}
 Workflow:
 - Inspect before editing; prefer the most specific tool for the source of truth (MCP over local when both cover it).
 - Read a file before editing or overwriting it. Use replaceAll for renames across a file.
-- Track multi-step work with the todo tool: one task in_progress at a time, completed immediately when done.
+- Organize work into phased todo lists (init → start → done): use phases to group related tasks, mark in_progress before work, completed immediately when done.
 - After a change, verify it — read the diff, run the narrowest relevant test/typecheck/lint.
 - Keep changes scoped to the request. Never use destructive git operations (reset --hard, checkout --, deletions) unless explicitly asked.${webSection}`;
 

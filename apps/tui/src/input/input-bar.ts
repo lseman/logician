@@ -689,10 +689,7 @@ export class InputBar implements Component, Focusable {
 		const lineWidth = visibleWidth(cleanLine);
 		const finalLine = rawLine + " ".repeat(Math.max(0, width - lineWidth));
 
-		// Give the composer a quiet visual boundary on normal-width terminals.
-		// Narrow terminals keep the compact one-line editor.
-		const header = width >= 36 ? this._renderComposerHeader(width) : null;
-		this.cachedLines = header ? [header, finalLine] : [finalLine];
+		this.cachedLines = [finalLine];
 		return this.cachedLines;
 	}
 
@@ -702,7 +699,6 @@ export class InputBar implements Component, Focusable {
 	 * terminal; each logical line still gets the familiar horizontal viewport.
 	 */
 	private _renderMultiline(width: number, logicalLines: string[]): string[] {
-		const header = width >= 36 ? [this._renderComposerHeader(width)] : [];
 		const maxVisibleLines = width >= 52 ? 5 : 3;
 		const beforeCursor = this._graphemeSlice(this.value, 0, this.cursor);
 		const cursorLine = Math.min(
@@ -769,31 +765,7 @@ export class InputBar implements Component, Focusable {
 			rows.push(raw + " ".repeat(Math.max(0, width - visibleWidth(clean))));
 		}
 
-		return [...header, ...rows];
-	}
-
-	private _renderComposerHeader(width: number): string {
-		const hasValue = this.value.length > 0;
-		const lineCount = hasValue ? this.value.split("\n").length : 0;
-		const graphemeCount = hasValue ? this._graphemeCount(this.value) : 0;
-		const labelText = width >= 52 ? " COMPOSER " : " MESSAGE ";
-		const label = `${theme.fg("accent", "")}${BOLD}${labelText}${RESET}`;
-		const hintText =
-			width >= 72
-				? hasValue
-					? `${lineCount}L · ${graphemeCount} chars  ·  Enter send  ·  Ctrl+Enter steer`
-					: "/ Enter commands  ·  @ files  ·  Enter send  ·  Ctrl+Enter steer"
-				: width >= 52
-					? hasValue
-						? `${graphemeCount} chars  ·  Enter send`
-						: "/ Enter commands  ·  Enter send"
-					: "Enter send";
-		const hint = ` ${theme.fg("muted", hintText)} `;
-		const ruleWidth = Math.max(
-			1,
-			width - visibleWidth(label) - visibleWidth(hint),
-		);
-		return label + theme.fg("borderMuted", "─".repeat(ruleWidth)) + hint;
+		return rows;
 	}
 
 	private _inputViewport(

@@ -141,7 +141,7 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 
 	switch (event.type) {
 		case "todos":
-			ctx.todoBar.setTodos(event.todos);
+			ctx.todoBar.setPhases(event.phases, event.completedTasks);
 			break;
 		case "queue_update":
 			ctx.steerQueue.setItems(
@@ -211,6 +211,26 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 			break;
 		case "agent_retry_end":
 			ctx.statusPanel.update({ phase: event.success ? "thinking" : "error" });
+			break;
+		case "ttsr_injected":
+			ctx.transcript.handleEvent({
+				type: "notice",
+				level: "info",
+				label: `TTSR Rule "${event.ruleName}"`,
+				text: `Interrupted stream: ${event.ruleContent}`,
+			});
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			ctx.tui.requestRender();
+			break;
+		case "ttsr_queued":
+			ctx.transcript.handleEvent({
+				type: "notice",
+				level: "info",
+				label: `TTSR Rule "${event.ruleName}"`,
+				text: "Rule queued for next turn.",
+			});
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			ctx.tui.requestRender();
 			break;
 		case "runtime_status":
 			ctx.statusPanel.update({

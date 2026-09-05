@@ -1,43 +1,44 @@
 // Shared todo state. The todo tool owns mutations; core observes the list to
 // decide whether an optional continuation nudge is useful.
 
-export type TaskStatus = "pending" | "in_progress" | "completed" | "deleted";
-export type TaskState = TaskStatus;
+/** Status values for phased todo tasks. */
+export type TaskStatus = "pending" | "in_progress" | "completed" | "abandoned";
 
+/** A single task in the phased todo list. */
 export interface Task {
-	id: number;
-	subject: string;
-	description?: string;
-	activeForm?: string;
+	content: string;
 	status: TaskStatus;
-	blockedBy?: number[];
-	owner?: string;
-	metadata?: Record<string, unknown>;
+	blocker?: string;
 }
 
-let tasks: Task[] = [];
-let nextTaskId = 1;
-const listeners = new Set<(tasks: Task[]) => void>();
+/** A named phase grouping tasks together. */
+export interface TaskPhase {
+	name: string;
+	tasks: Task[];
+}
 
-function cloneTasks(source: readonly Task[] = tasks): Task[] {
-	return source.map(task => ({
-		...task,
-		blockedBy: task.blockedBy ? [...task.blockedBy] : undefined,
-		metadata: task.metadata ? { ...task.metadata } : undefined,
+let phases: TaskPhase[] = [];
+let nextTaskId = 1;
+const listeners = new Set<(phases: TaskPhase[]) => void>();
+
+function clonePhases(source: readonly TaskPhase[] = phases): TaskPhase[] {
+	return source.map(phase => ({
+		name: phase.name,
+		tasks: phase.tasks.map(task => ({ ...task })),
 	}));
 }
 
-export function getTasks(): Task[] {
-	return cloneTasks();
+export function getTasks(): TaskPhase[] {
+	return clonePhases();
 }
 
-export function onTodosChanged(cb: (tasks: Task[]) => void): () => void {
+export function onTodosChanged(cb: (phases: TaskPhase[]) => void): () => void {
 	listeners.add(cb);
 	return () => listeners.delete(cb);
 }
 
 export interface TaskMutationContext {
-	tasks: Task[];
+	phases: TaskPhase[];
 	allocateId: () => number;
 	resetIds: () => void;
 }
@@ -54,10 +55,10 @@ export interface TaskMutationResult<T> {
 export function mutateTasks<T>(
 	mutation: (context: TaskMutationContext) => TaskMutationResult<T>,
 ): T {
-	const draft = cloneTasks();
+	const draft = clonePhases();
 	let draftNextTaskId = nextTaskId;
 	const result = mutation({
-		tasks: draft,
+		phases: draft,
 		allocateId: () => draftNextTaskId++,
 		resetIds: () => {
 			draftNextTaskId = 1;
@@ -65,12 +66,12 @@ export function mutateTasks<T>(
 	});
 	if (!result.changed) return result.value;
 
-	tasks = draft;
+	phases = draft;
 	nextTaskId = draftNextTaskId;
-	const snapshot = cloneTasks();
+	const snapshot = clonePhases();
 	for (const listener of listeners) {
 		try {
-			listener(cloneTasks(snapshot));
+			listener(clonePhases(snapshot));
 		} catch (error) {
 			console.error("[todo] change listener failed:", error);
 		}

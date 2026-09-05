@@ -27,6 +27,7 @@ export type { AbortResult } from "./runtime/harness/types.ts";
 export type { HarnessPhase } from "./runtime/state/runtime-state.ts";
 export { loadExtensions } from "./system/extension/loader.ts";
 export { ExtensionRunner } from "./system/extension/runner.ts";
+export { TtsrManager } from "./system/ttsr/ttsr-manager.ts";
 export {
 	type CancellationCleanup,
 	CancellationError,

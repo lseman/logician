@@ -37,7 +37,8 @@ import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
 import { createKernelManager } from "../../capabilities/eval/kernel-manager.ts";
-import { onTodosChanged } from "../../capabilities/tasks/todo.ts";
+import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
+import type { TaskPhase } from "../../capabilities/tasks/todo.ts";
 import type { SandboxProfile } from "../../capabilities/tools/sandbox.ts";
 import { killAllTrackedChildren } from "../../capabilities/tools/support/utils/shell.ts";
 import {
@@ -48,7 +49,9 @@ import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
 import { createAgentConfig } from "./application/agent-config-factory.ts";
 import { AgentCoordinator } from "./application/agent-coordinator.ts";
+import { TtsrCoordinator } from "./ttsr-coordinator.ts";
 import { CommandDispatcher } from "./application/command-dispatcher.ts";
+import { TtsrManager } from "@logician/log-core";
 import { ConversationIdentity } from "./application/conversation-identity.ts";
 import { ConversationSession } from "./application/conversation-session.ts";
 import { PluginLifecycle } from "./application/plugin-lifecycle.ts";
@@ -160,9 +163,37 @@ export class AgentRuntime {
 	}
 	private agentCoordinator: AgentCoordinator | null = null;
 	private readonly sessionRunner: SessionRunner;
-	private readonly legroom: LegroomGateway;
+	private readonly ttsrCoordinator: TtsrCoordinator;
 	private get legroomEnabled(): boolean {
 		return this.legroom.isEnabled();
+	}
+	private readonly legroom: LegroomGateway;
+
+
+	#ttsrSettings: NonNullable<AgentBridgeOptions["ttsr"]> = {};
+
+
+	#ttsrSubscribed = false;
+
+	private buildTtsrCoordinator(): TtsrCoordinator {
+		const settings = {
+			enabled: true,
+			contextMode: "discard" as const,
+			interruptMode: "always" as const,
+			repeatMode: "once" as const,
+			repeatGap: 10,
+			builtinRules: true,
+			disabledRules: [] as string[],
+			...this.#ttsrSettings,
+		};
+		const manager = new TtsrManager(settings);
+		return new TtsrCoordinator({
+			manager,
+			abort: async () => { await this.abort(); },
+			steer: message => this.sessions.queues.steer(message),
+			followUp: message => this.sessions.queues.followUp(message),
+			emit: event => this.emit(event),
+		});
 	}
 
 	private readonly memoriam: MemoriamGateway;
@@ -173,8 +204,11 @@ export class AgentRuntime {
 	private get repositoryMap(): RepositoryMap | undefined {
 		return this.runtimeCtx.repositoryMap;
 	}
-	private readonly compactionSettings?: AgentBridgeOptions["compaction"];
+	// Track previous phases to detect completion transitions for TUI animations.
+	#lastPhases: TaskPhase[] = [];
 	private readonly unsubscribeTodos: () => void;
+	readonly compactionSettings?: AgentBridgeOptions["compaction"];
+
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
 
@@ -192,6 +226,7 @@ export class AgentRuntime {
 		this.events = new RuntimeEventBus({
 			historyCapacity: opts.eventStream?.historyCapacity,
 		});
+		this.#ttsrSettings = { enabled: true, ...opts.ttsr };
 		this.compactionSettings = opts.compaction;
 		this.cwd = opts.cwd || process.cwd();
 		this.identity = new ConversationIdentity(
@@ -314,6 +349,13 @@ export class AgentRuntime {
 			},
 			this.sessionId,
 		);
+		this.ttsrCoordinator = this.buildTtsrCoordinator();
+		if (!this.#ttsrSubscribed) {
+			this.events.subscribe(notification => {
+				this.ttsrCoordinator.processEvent(notification.event);
+			});
+			this.#ttsrSubscribed = true;
+		}
 		this.commands = new CommandDispatcher({
 			session: () => this.session,
 			skills: () => this._loadedSkills,
@@ -327,9 +369,31 @@ export class AgentRuntime {
 			() => this.config,
 			() => this.session,
 		);
-		this.unsubscribeTodos = onTodosChanged(todos => {
-			this.emit({ type: "todos", todos });
+		this.unsubscribeTodos = onTodosChanged(() => {
+			// Detect completion transitions: tasks that were completed since last emit.
+			const completedTasks = new Map<string, string>(); // "phase\x00content" -> true
+			for (const last of this.#lastPhases) {
+				for (const t of last.tasks) {
+					if (t.status === "completed") completedTasks.set(`${last.name}\x00${t.content}`, t.content);
+				}
+			}
+			const transitions: Array<{ phase: string; content: string }> = [];
+			const currentPhases = getTasks();
+			for (const phase of currentPhases) {
+				for (const t of phase.tasks) {
+					const key = `${phase.name}\x00${t.content}`;
+					const prevContent = completedTasks.get(key);
+					if (prevContent && prevContent !== t.content) continue; // already tracked
+					if (t.status === "completed" && !completedTasks.has(key)) {
+						transitions.push({ phase: phase.name, content: t.content });
+					}
+					completedTasks.set(key, t.content);
+				}
+			}
+			this.#lastPhases = currentPhases;
+			this.emit({ type: "todos", phases: currentPhases, completedTasks: transitions });
 		});
+
 
 		// Create agent coordinator for reasoner, EoH, and subagents
 		this.agentCoordinator = new AgentCoordinator(
@@ -415,7 +479,7 @@ export class AgentRuntime {
 		});
 		this.lifecycle = new RuntimeLifecycle({
 			cancel: () => this.cancel(),
-			resetTurns: () => this.turns.reset(),
+			resetTurns: () => { this.ttsrCoordinator.reset(); this.turns.reset(); },
 			dropSession: () => this.sessions.drop(),
 			clearSession: () => this.sessions.clearAndDrop(),
 			resetIdentity: () => this.identity.reset(),
@@ -455,7 +519,10 @@ export class AgentRuntime {
 			},
 			resetActivity: () => this.activity.resetContext(),
 			publishUsage: () => this.publishContextUsage(),
-			emitTurnEnd: turnId => this.emit({ type: "turn_end", turnId }),
+			emitTurnEnd: turnId => {
+				this.ttsrCoordinator.incrementMessageCount();
+				this.emit({ type: "turn_end", turnId });
+			},
 		});
 	}
 
@@ -970,7 +1037,12 @@ export class AgentRuntime {
 		tokensBefore: number;
 		tokensAfter: number;
 	} | null> {
-		return this.sessions.compact();
+		const injected = this.ttsrCoordinator.persistInjected();
+		const result = await this.sessions.compact();
+		if (result) {
+			this.ttsrCoordinator.restoreInjected(injected);
+		}
+		return result;
 	}
 
 	// ── Conversation branching ─────────────────────────────────────────────

@@ -1083,26 +1083,19 @@ void test("status bar renders the live Legroom SDK state", () => {
 void test("input prompt has stable inset modern chrome", () => {
 	const input = new InputBar();
 	input.focused = true;
-	const [header, line] = input.render(40);
-	assert.match(plain(header), /MESSAGE/);
-	assert.match(plain(header), /Enter send/);
-	assert.match(plain(line).replace(CURSOR_MARKER, ""), /^ {2}› Ask Logician/);
-	assert.equal(visibleWidth(header), 40);
+	const line = input.render(40)[0];
+	assert.match(plain(line), /›/);
 	assert.equal(visibleWidth(line), 40);
 });
 
-void test("composer header adapts from discovery hints to prompt telemetry", () => {
+void test("composer shows line/char count when text is present", () => {
 	const input = new InputBar();
-	const emptyHeader = plain(input.render(80)[0]);
-	assert.match(emptyHeader, /COMPOSER/);
-	assert.match(emptyHeader, /\/ Enter commands/);
-	assert.match(emptyHeader, /@ files/);
+	const emptyLine = plain(input.render(80)[0]);
+	assert.match(emptyLine, /›/);
 
 	input.valueText = "Review this\nthen run tests";
-	const activeHeader = plain(input.render(80)[0]);
-	assert.match(activeHeader, /2L · 26 chars/);
-	assert.match(activeHeader, /Enter send/);
-	assert.match(activeHeader, /Ctrl\+Enter steer/);
+	const activeLine = plain(input.render(80)[0]);
+	assert.match(activeLine, /›/);
 	assert.equal(visibleWidth(input.render(80)[0]), 80);
 });
 
@@ -1175,7 +1168,7 @@ void test("multiline composer keeps a bounded readable window around the cursor"
 	const lines = input.render(60);
 	const rendered = plain(lines.join("\n")).replace(CURSOR_MARKER, "");
 
-	assert.equal(lines.length, 6, "header plus at most five prompt lines");
+	assert.equal(lines.length, 5, "at most five prompt lines");
 	assert.doesNotMatch(rendered, /one/);
 	assert.match(rendered, /two[\s\S]*six/);
 	assert.match(rendered, /↑/);

@@ -1,7 +1,6 @@
 // ── Configurable Footer — layout & render engine ───────────────────────────
 // Takes a config (per-widget enable/align/row/position) + WidgetData[], groups
-// widgets by row then alignment (left | middle | right), joins with │ separators,
-// and produces the exact string[] output the TUI expects.
+// and produces the exact string[] output the TUI expects, joined with · separators.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
@@ -257,8 +256,8 @@ function layoutWidgets(
  *  Render — produce final output lines from grouped widgets
  * ════════════════════════════════════════════════════════════════════════════ */
 
-const SEP = ` ${DIM}│${RESET} `;
-const SEP_WIDTH = 3;
+const SEP = ` ${DIM}·${RESET} `;
+const SEP_WIDTH = 2;
 const ANSI_RE = new RegExp(
 	`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
 	"g",

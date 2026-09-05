@@ -150,4 +150,13 @@ export interface AgentBridgeOptions {
 	permissions?: PermissionsCapabilityConfig;
 	extensions?: ExtensionsCapabilityConfig;
 	eventStream?: EventStreamConfig;
+	ttsr?: {
+		enabled?: boolean;
+		repeatMode?: "once" | "gap";
+		contextMode?: "discard" | "keep";
+
+		interruptMode?: "always" | "prose-only" | "tool-only" | "never";
+		builtinRules?: boolean;
+		disabledRules?: string[];
+	};
 }
