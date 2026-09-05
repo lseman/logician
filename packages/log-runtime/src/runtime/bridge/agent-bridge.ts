@@ -2,7 +2,6 @@
 
 import type { AgentConfig, Message, QueueMode, Tool } from "@logician/log-core";
 import { OpenAIBackend } from "@logician/log-core";
-import type { RuntimeEvent } from "@logician/log-core/events";
 import type { PermissionMode } from "@logician/log-core/permissions";
 import type { AbortResult, SessionStore } from "@logician/log-core/runtime";
 import {
@@ -53,7 +52,7 @@ import { TtsrCoordinator } from "./ttsr-coordinator.ts";
 import { CommandDispatcher } from "./application/command-dispatcher.ts";
 import { TtsrManager } from "@logician/log-core";
 import { ConversationIdentity } from "./application/conversation-identity.ts";
-import { ConversationSession } from "./application/conversation-session.ts";
+import { TodoTracker } from "./todo-tracker.ts";
 import { PluginLifecycle } from "./application/plugin-lifecycle.ts";
 import { executeProcessCommand } from "./application/process-command.ts";
 import { RuntimeActivity } from "./application/runtime-activity.ts";
@@ -168,6 +167,8 @@ export class AgentRuntime {
 		return this.legroom.isEnabled();
 	}
 	private readonly legroom: LegroomGateway;
+
+	private readonly todoTracker: TodoTracker;
 
 
 	#ttsrSettings: NonNullable<AgentBridgeOptions["ttsr"]> = {};
@@ -312,19 +313,18 @@ export class AgentRuntime {
 			tools: this._defaultTools,
 			webSearch,
 			permissions: this.interactions.permissions,
-			onPermissionRequest: context =>
-				this.interactions.requestPermission(context),
-			onQuestionRequest: context => this.interactions.requestQuestion(context),
-			hooks: this.buildMemoriamHooks(
-				this.buildLegroomHooks(
-					createPostEditDiagnosticHooks(
-						this.cwd,
-						() => this.runtimeConfiguration.postEditDiagnostics,
-						opts.lsp?.enabled === false ? undefined : this.lsp,
-						{
-							allowedPaths: opts.allowedPaths,
-							allowAllPaths: opts.allowAllPaths,
-						},
+			hooks: this.buildTodoHooks(
+				this.buildMemoriamHooks(
+					this.buildLegroomHooks(
+						createPostEditDiagnosticHooks(
+							this.cwd,
+							() => this.runtimeConfiguration.postEditDiagnostics,
+							opts.lsp?.enabled === false ? undefined : this.lsp,
+							{
+								allowedPaths: opts.allowedPaths,
+								allowAllPaths: opts.allowAllPaths,
+							},
+						),
 					),
 				),
 			),
@@ -356,6 +356,40 @@ export class AgentRuntime {
 			});
 			this.#ttsrSubscribed = true;
 		}
+		// ── TodoTracker (phased todo enforcement) ──────────────────────────
+		this.todoTracker = new TodoTracker({
+			getActiveToolNames: () =>
+				this.config?.tools?.map(t => t.name) ?? [],
+			getMutatingToolNames: () =>
+				this.config?.tools
+					?.filter(t =>
+						[
+							"bash",
+							"edit",
+							"write",
+							"ast_edit",
+						].includes(t.name ?? ""),
+					)
+					.map(t => t.name ?? "") ?? [],
+			getCurrentPromptText: () => {
+				const msgs = this.session?.messages ?? [];
+				const userMsg = [...msgs].reverse().find(
+					m => m.role === "user",
+				);
+				return typeof userMsg?.content === "string"
+					? userMsg.content
+					: undefined;
+			},
+			isFirstTurn: () => {
+				const msgs = this.session?.messages ?? [];
+				return msgs.filter(
+					m => m.role === "user" || m.role === "assistant",
+				).length <= 1;
+			},
+			isPlanMode: () => false,
+			modelSupportsToolChoice: () => true,
+			steer: (text) => this.sessions.queues.steer(text),
+		});
 		this.commands = new CommandDispatcher({
 			session: () => this.session,
 			skills: () => this._loadedSkills,
@@ -537,6 +571,101 @@ export class AgentRuntime {
 		existingHooks: AgentConfig["hooks"],
 	): AgentConfig["hooks"] {
 		return this.memoriam.createHooks(existingHooks);
+	}
+
+	/** Build TodoTracker hooks for phased todo enforcement. */
+	private buildTodoHooks(
+		existingHooks: AgentConfig["hooks"],
+	): AgentConfig["hooks"] {
+		const tracker = this.todoTracker;
+
+		return {
+			...existingHooks,
+			beforeAgentStart: (_ctx, _signal) => {
+				const prelude = tracker.createEagerTodoPrelude();
+				const messages: Message[] = [];
+				if (prelude) {
+					messages.push(prelude);
+				}
+				const nudge = tracker.createMidRunNudge();
+				if (nudge) {
+					messages.push(nudge);
+				}
+				if (messages.length === 0) return undefined;
+				return { messages };
+			},
+			afterToolCall: ({ toolCall, result, isError }) => {
+				const name = toolCall.name ?? "";
+				if (name === "todo") {
+					tracker.onTodoToolResult();
+					try {
+						const parsed = JSON.parse(result);
+						if (parsed.value && typeof parsed.value === "object") {
+							const obj = parsed.value as Record<string, unknown>;
+							if (Array.isArray(obj.phases)) {
+								const phases = obj.phases as Array<{
+									name: string;
+									tasks: Array<{
+										content: string;
+										status: string;
+										blocker?: string;
+									}>;
+								}>;
+								// Cast status to the expected union.
+								const typedPhases: Array<{
+									name: string;
+									tasks: Array<{
+										content: string;
+										status:
+											| "pending"
+											| "in_progress"
+											| "completed"
+											| "abandoned";
+										blocker?: string;
+									}>;
+								}> = phases.map(p => ({
+									...p,
+									tasks: p.tasks.map(t => ({
+										...t,
+										status: t.status as
+											| "pending"
+											| "in_progress"
+											| "completed"
+											| "abandoned",
+									})),
+								}));
+								const completedTasks = obj.completedTasks as Array<{
+									phase: string;
+									content: string;
+								}> | undefined;
+								const completed = tracker.setPhases(
+									typedPhases,
+									completedTasks,
+								);
+								if (completed && completed.length > 0) {
+									this.emit({
+										type: "todos",
+										phases: typedPhases,
+										completedTasks: completed,
+									});
+								}
+							}
+						}
+					} catch {
+						// Non-JSON result; ignore.
+					}
+				} else if (!isError) {
+					tracker.onMutatingToolResult();
+				}
+				return undefined;
+			},
+			getToolChoice: () => tracker.createEagerTodoRequirement(),
+			shouldStopAfterTurn: (_ctx, _signal) => {
+				const completed = tracker.checkCompletion();
+				if (!completed) return undefined;
+				return true;
+			},
+		};
 	}
 
 	/** Add a tool to the default set and propagate it into live config/harness/system prompt. */
