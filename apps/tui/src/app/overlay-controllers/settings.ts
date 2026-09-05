@@ -591,6 +591,7 @@ export function handleSettingsSelectorAction(
 		case "failure-loop guard":
 		case "continuation":
 		case "auto-compact on full context":
+		case "budget early-stop":
 		case "progress early-stop": {
 			const on = value === "true";
 			const runtimeKeys = {
@@ -599,6 +600,7 @@ export function handleSettingsSelectorAction(
 				continuation: "continuationEnabled",
 				"auto-compact on full context": "autoRetryEnabled",
 				"progress early-stop": "progressStopEnabled",
+				"budget early-stop": "progressStopEnabled",
 			} as const;
 			const configKey =
 				runtimeKeys[settingName.toLowerCase() as keyof typeof runtimeKeys];

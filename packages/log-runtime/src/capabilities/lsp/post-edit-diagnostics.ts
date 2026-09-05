@@ -17,7 +17,7 @@ export interface PostEditDiagnostic {
 
 function successfulMutation(toolName: string, result: string): boolean {
 	if (toolName === "edit_file")
-		return result.startsWith("Successfully replaced ");
+	return result.startsWith("Successfully replaced ") || /^Applied [1-9]\d* line change\(s\) across [1-9]\d* file\(s\)\./.test(result);
 	if (toolName === "write_file") {
 		return result.startsWith("Created ") || result.startsWith("Wrote ");
 	}

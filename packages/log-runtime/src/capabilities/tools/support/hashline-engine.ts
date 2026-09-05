@@ -1,253 +1,141 @@
-// ── Hashline edit engine ──────────────────────────────────────────────────────
-// Applies hashline-format edits (PUT/CUT/MV/REM) with staging, preview, and
-// stale-anchor recovery. Integrates with the EditStore for snapshots and
-// clipboard registers.
-
+// Hashline line edits are planned before writing. Preview remains the default;
+// callers must explicitly request application and may constrain the target path.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { EditStore } from "./edit-store.js";
 import { createEditStore } from "./edit-store.js";
 import {
-	HashlineEditResult,
-	isHashlineFileHeader,
+	type HashlineEdit,
+	type HashlineEditResult,
+	hashlineHash,
 	parseHashlineEdit,
-	HL_REM_KEYWORD,
+	splitAddressableFileLines,
 } from "./hashline.js";
 import { generateEditDiffs } from "./utils/diff-utils.js";
 import { atomicWriteFile } from "./utils/atomic-write.js";
+import { detectLineEnding, normalizeToLF, restoreLineEndings, stripBom } from "./utils/helpers.ts";
 
-// ── Staged hashline result ────────────────────────────────────────────────────
-
-/** A single file in a staged (previewed) hashline edit. */
-interface StagedFileEdit {
+interface FileEdit {
 	path: string;
-	original: string;
-	proposed: string;
-	diff: string;
-	linesChanged: number;
-	deleted: boolean;
+	tag: string;
+	edits: HashlineEdit[];
 }
 
-// ── Hashline edit application ─────────────────────────────────────────────────
-
-/**
- * Apply hashline PUT/CUT operations to file content.
- */
-function applyEditsToLines(
-	lines: string[],
-	edits: Array<{ range: string | undefined; body: string[] | undefined }>,
-): { newLines: string[]; linesChanged: number } {
-	let newLines = [...lines];
-	let linesChanged = 0;
-
-	for (const edit of edits) {
-		const range = edit.range;
-		if (!range) continue;
-
-		if (range.startsWith("<")) {
-			const targetLine = Number(range.slice(1));
-			if (!Number.isNaN(targetLine)) {
-				const insertAt = Math.max(0, targetLine - 1);
-				newLines.splice(insertAt, 0, ...(edit.body ?? []));
-				linesChanged += (edit.body?.length ?? 0);
+function parseDocument(input: string, cwd: string, targetPath?: string): FileEdit[] {
+	const files: FileEdit[] = [];
+	for (const line of input.split(/\r?\n/)) {
+		if (!line.trim()) continue;
+		const header = /^\[(.+)#([a-fA-F0-9]{4})\]$/.exec(line.trim());
+		if (header) {
+			const resolved = path.resolve(cwd, header[1]);
+			if (targetPath && resolved !== targetPath) {
+				throw new Error("Hashline header must target the edit_file path.");
 			}
-		} else if (range.startsWith(">")) {
-			const targetLine = Number(range.slice(1));
-			if (!Number.isNaN(targetLine)) {
-				const insertAt = Math.min(lines.length, targetLine);
-				newLines.splice(insertAt, 0, ...(edit.body ?? []));
-				linesChanged += (edit.body?.length ?? 0);
+			if (files.some(file => file.path === resolved)) {
+				throw new Error("Use one header per file, followed by its operations.");
 			}
-		} else if (range.includes("-")) {
-			const match = range.match(/^(\d+)-(\d+)$/);
-			if (match) {
-				const start = Math.max(0, Number(match[1]) - 1);
-				const end = Math.min(lines.length, Number(match[2]));
-				const removed = end - start;
-				newLines.splice(start, removed, ...(edit.body ?? []));
-				linesChanged += Math.abs((edit.body?.length ?? 0) - removed);
-			}
-		} else {
-			const num = Number(range);
-			if (!Number.isNaN(num)) {
-				const idx = Math.max(0, num - 1);
-				if (idx < newLines.length) {
-					newLines[idx] = edit.body?.[0] ?? newLines[idx];
-					linesChanged += 1;
-				}
-			}
-		}
-	}
-
-	return { newLines, linesChanged };
-}
-
-// ── Hashline edit execution ───────────────────────────────────────────────────
-
-/**
- * Execute a hashline edit — dry-run (preview) mode by default.
- * Returns a result with the staged diff but does not write to disk.
- */
-export async function executeHashlineEdit(
-	editsInput: string,
-	store: EditStore,
-	cwd: string,
-	dryRun: boolean = true,
-): Promise<HashlineEditResult> {
-	const lines = editsInput.split("\n");
-	const fileEntries: StagedFileEdit[] = [];
-	const REM = HL_REM_KEYWORD;
-	let totalLinesChanged = 0;
-	let filesAffected = 0;
-	let error: string | undefined;
-	let staleAnchors: Array<{ path: string; expectedTag: string; computedTag: string }> | undefined;
-
-	let currentPath = "";
-	let currentEdits: Array<{ range: string | undefined; body: string[] | undefined }> = [];
-
-	function flushCurrentPath(): void {
-		if (currentPath.length === 0 || currentEdits.length === 0) {
-			currentPath = "";
-			currentEdits = [];
-			return;
-		}
-
-		// Check for REM
-		if (currentEdits.some((e) => e.range === REM)) {
-			const fullPath = path.resolve(cwd, currentPath);
-			try {
-				if (!dryRun) fs.unlinkSync(fullPath);
-			} catch {
-				// File might not exist
-			}
-			fileEntries.push({
-				path: currentPath,
-				original: "",
-				proposed: "",
-				diff: "",
-				linesChanged: 0,
-				deleted: true,
-			});
-			filesAffected++;
-			store.clearSnapshot(fullPath);
-			currentPath = "";
-			currentEdits = [];
-			return;
-		}
-
-		const fullPath = path.resolve(cwd, currentPath);
-
-		// Read original content
-		let originalContent: string;
-		try {
-			originalContent = fs.readFileSync(fullPath, "utf-8");
-		} catch {
-			originalContent = "";
-		}
-
-		// Apply edits
-		const origLines = originalContent.split("\n");
-		const { newLines, linesChanged } = applyEditsToLines(origLines, currentEdits);
-		const newContent = newLines.join("\n") + (originalContent.endsWith("\n") ? "\n" : "");
-
-		const diff = originalContent !== newContent
-			? generateEditDiffs(currentPath, originalContent, newContent).diff
-			: "";
-
-		fileEntries.push({
-			path: currentPath,
-			original: originalContent,
-			proposed: newContent,
-			diff,
-			linesChanged,
-			deleted: false,
-		});
-
-		totalLinesChanged += linesChanged;
-		filesAffected++;
-		currentPath = "";
-		currentEdits = [];
-	}
-
-	for (const line of lines) {
-		const trimmed = line.trim();
-
-		// File header: [path#4hex]
-		if (isHashlineFileHeader(trimmed)) {
-			flushCurrentPath();
-			const hashIdx = trimmed.indexOf("#");
-			const closeIdx = trimmed.indexOf("]");
-			if (hashIdx >= 0 && closeIdx > hashIdx) {
-				currentPath = trimmed.slice(1, hashIdx);
-			} else if (closeIdx > 1) {
-				currentPath = trimmed.slice(1, closeIdx);
-			}
-			// Record snapshot for stale detection
-			try {
-				const fullPath = path.resolve(cwd, currentPath);
-				const raw = fs.readFileSync(fullPath, "utf-8");
-				store.recordSnapshot(fullPath, raw);
-			} catch {
-				// New file — no snapshot needed
-			}
+			files.push({ path: resolved, tag: header[2].toLowerCase(), edits: [] });
 			continue;
 		}
-
-		// Operation line
-		const op = parseHashlineEdit(trimmed);
-		if (op) {
-			flushCurrentPath();
-
-			if (op.operation === "REM") {
-				currentPath = "";
-				currentEdits = [{ range: REM, body: [] }];
-			} else if (op.operation === "MV") {
-				// MV handled separately
-				currentPath = "";
-			} else if (op.operation === "PUT" || op.operation === "CUT") {
-				currentEdits = [{ range: op.range, body: op.body }];
-			}
+		const file = files.at(-1);
+		const edit = parseHashlineEdit(line);
+		if (!file || !edit) throw new Error(`Invalid hashline input: ${line}`);
+		if ((edit.operation !== "PUT" && edit.operation !== "CUT") || edit.register || edit.block || !edit.range || edit.range.includes("*")) {
+			throw new Error("Unsupported hashline operation. Use PUT/CUT line edits; use another tool for moves, removal, or registers.");
 		}
+		file.edits.push(edit);
 	}
-
-	flushCurrentPath();
-
-	// If dry-run, return staged preview
-	if (dryRun && fileEntries.length > 0) {
-		return {
-			applied: false,
-			linesChanged: totalLinesChanged,
-			filesAffected,
-			diff: fileEntries.map((e) => e.diff).join("\n"),
-			staleAnchors,
-		};
+	if (!files.length || files.some(file => !file.edits.length)) {
+		throw new Error("Provide a [path#hash] header followed by at least one line edit.");
 	}
-
-	// Actually apply edits to disk
-	for (const entry of fileEntries) {
-		if (entry.deleted) continue;
-		const fullPath = path.resolve(cwd, entry.path);
-		try {
-			await atomicWriteFile(fullPath, entry.proposed);
-			store.clearSnapshot(fullPath);
-		} catch (e) {
-			error = `Failed to write ${entry.path}: ${e instanceof Error ? e.message : String(e)}`;
-		}
-	}
-
-	return {
-		applied: true,
-		linesChanged: totalLinesChanged,
-		filesAffected,
-		diff: fileEntries.map((e) => e.diff).join("\n"),
-		staleAnchors,
-		error,
-	};
+	return files;
 }
 
-/**
- * Create a default edit store for simple usage.
- */
+function applyLineEdits(original: string, edits: HashlineEdit[]): { content: string; linesChanged: number } {
+	const { bom, text } = stripBom(original);
+	const ending = detectLineEnding(text);
+	const normalized = normalizeToLF(text);
+	const lines = normalized === "" ? [] : splitAddressableFileLines(normalized);
+	let linesChanged = 0;
+	// Each operation addresses the result of the preceding operation.
+	for (const edit of edits) {
+		const range = edit.range ?? "";
+		const insertion = /^([<>])(\d+)$/.exec(range);
+		const replacement = /^(\d+)(?:-(\d+))?$/.exec(range);
+		let start: number;
+		let count: number;
+		if (insertion && edit.operation === "PUT") {
+			start = Number(insertion[2]) - (insertion[1] === "<" ? 1 : 0);
+			count = 0;
+		} else if (replacement) {
+			start = Number(replacement[1]) - 1;
+			count = Number(replacement[2] ?? replacement[1]) - start;
+		} else {
+			throw new Error(`Unsupported line range: ${range}`);
+		}
+		if (!Number.isSafeInteger(start) || !Number.isSafeInteger(count) || start < 0 || count < 0 || (replacement && count === 0) || start + count > lines.length) {
+			throw new Error(`Line range out of bounds: ${range}`);
+		}
+		const body = edit.operation === "CUT" ? [] : edit.body ?? [];
+		const before = lines.slice(start, start + count);
+		if (before.length === body.length && before.every((line, i) => line === body[i])) continue;
+		lines.splice(start, count, ...body);
+		linesChanged += Math.max(count, body.length);
+	}
+	const content = bom + restoreLineEndings(lines.join("\n") + (lines.length > 0 && normalized.endsWith("\n") ? "\n" : ""), ending);
+	return { content, linesChanged };
+}
+
+export async function executeHashlineEdit(
+	input: string,
+	store: EditStore,
+	cwd: string,
+	dryRun = true,
+	targetPath?: string,
+): Promise<HashlineEditResult> {
+	let filesAffected = 0;
+	let linesChanged = 0;
+	let diff = "";
+	try {
+		const files = parseDocument(input, cwd, targetPath);
+		const plans = files.map(file => {
+			const original = fs.readFileSync(file.path, "utf8");
+			const stale = store.checkStale(file.path);
+			if (stale) throw new Error(stale);
+			if (hashlineHash(original) !== file.tag) {
+				throw new Error(`Stale hashline anchor for ${file.path}. Read it again before editing.`);
+			}
+			const result = applyLineEdits(original, file.edits);
+			return { ...file, original, ...result };
+		}).filter(plan => plan.original !== plan.content);
+		if (!plans.length) return { applied: false, filesAffected: 0, linesChanged: 0, diff: "" };
+		if (dryRun) {
+			return {
+				applied: false,
+				filesAffected: plans.length,
+				linesChanged: plans.reduce((sum, plan) => sum + plan.linesChanged, 0),
+				diff: plans.map(plan => generateEditDiffs(plan.path, plan.original, plan.content).diff).join("\n"),
+			};
+		}
+		for (const plan of plans) {
+			if (fs.readFileSync(plan.path, "utf8") !== plan.original) {
+				throw new Error(`${plan.path} changed while preparing the edit. Read it again.`);
+			}
+			await atomicWriteFile(plan.path, plan.content, { expectedContent: plan.original });
+			store.clearSnapshot(plan.path);
+			filesAffected++;
+			linesChanged += plan.linesChanged;
+			diff += generateEditDiffs(plan.path, plan.original, plan.content).diff + "\n";
+		}
+		return { applied: true, filesAffected, linesChanged, diff: diff.trimEnd() };
+	} catch (error) {
+		return {
+			applied: false, filesAffected, linesChanged, diff,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
 export function createDefaultEditStore(): EditStore {
 	return createEditStore();
 }

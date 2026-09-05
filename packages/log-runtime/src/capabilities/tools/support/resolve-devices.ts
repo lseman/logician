@@ -80,6 +80,13 @@ export async function handleResolve(
 			if (!fs.existsSync(dir)) {
 				fs.mkdirSync(dir, { recursive: true });
 			}
+			// Skip writing if the file is already identical.
+			if (fs.existsSync(fullPath)) {
+				const current = fs.readFileSync(fullPath, "utf8");
+				if (current === file.content) {
+					continue;
+				}
+			}
 			await atomicWriteFile(fullPath, file.content);
 			filesAffected++;
 			linesChanged += file.content.split("\n").length;

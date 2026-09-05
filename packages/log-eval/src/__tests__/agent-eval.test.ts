@@ -1,15 +1,34 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { grade } from "../graders.ts";
 import { runProcess } from "../process.ts";
 import { buildReport } from "../report.ts";
-import { replayTrial, runTrial } from "../runner.ts";
+import { fixtureDigest, prepareTrialWorkspace, replayTrial, runTrial } from "../runner.ts";
 import { validateCorpus } from "../schema.ts";
 
 describe("agent eval", () => {
+	test("bundled baseline fixtures provision at their pinned revisions and contain failing task tests", async () => {
+		const root = path.resolve(import.meta.dirname, "../../../..");
+		const corpus = validateCorpus(JSON.parse(readFileSync(path.join(root, "packages/log-eval/corpus/baseline.json"), "utf8")));
+		const workRoot = mkdtempSync(path.join(tmpdir(), "logician-baseline-fixtures-"));
+		try {
+			for (const task of corpus.tasks) {
+				const workspace = prepareTrialWorkspace({ ...task, fixture: { ...task.fixture, repository: path.resolve(root, task.fixture.repository) } }, workRoot, "probe");
+				expect(`sha256:${fixtureDigest(workspace)}`).toBe(task.fixture.revision);
+				const tests = task.graders.find(grader => grader.id === "tests");
+				if (!tests) throw new Error(`Missing tests grader for ${task.id}`);
+				const result = await grade(tests, workspace);
+				expect(result.passed).toBe(false);
+				expect(result.evidence).toContain("(fail)");
+			}
+		} finally {
+			rmSync(workRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("validates versioned corpora and rejects duplicate ids", () => {
 		const task = {
 			schemaVersion: 1,

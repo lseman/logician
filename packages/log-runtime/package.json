@@ -27,12 +27,13 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@logician/log-core": "0.2.0",
 		"@logician/log-autoresearch": "0.2.0",
+		"@logician/log-core": "0.2.0",
 		"@logician/log-eoh": "0.1.0",
 		"@logician/log-rag": "0.2.0",
 		"emphasize": "^7.0.0",
-		"ignore": "^7.0.5"
+		"ignore": "^7.0.5",
+		"puppeteer": "^25.10.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

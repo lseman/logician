@@ -19,6 +19,7 @@ Guides cover each subsystem in depth. Pick a topic below.
 - [Plugins & Hooks](/guides/plugins) — lifecycle hooks, plugin architecture, and extensibility
 - [Reasoning & Inference](/guides/reasoning) — provider defaults, thinking effort, and optional structured reasoners
 - [Subagents](/guides/subagents) — delegating bounded tasks to child agents
+- [Browser Automation](/guides/browser) — Puppeteer-based browser control for testing and scraping
 
 ## Infrastructure
 

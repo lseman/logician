@@ -19,6 +19,8 @@ import { web_fetch } from "./web-fetch.ts";
 import { createWebSearchTool } from "./web-search.ts";
 import { write_file } from "./write-file.ts";
 import { ast_edit } from "./ast-edit.ts";
+import type { BrowserManager } from "../browser/browser-manager.ts";
+import { createBrowserTool } from "../browser/browser-tool.ts";
 
 // Default SearXNG instance assumed for local development.
 export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
@@ -29,6 +31,8 @@ export interface DefaultToolsOptions {
 	graphicianEnabled?: boolean;
 	// Pre-constructed kernel manager for eval/workpool tools.
 	kernelManager?: KernelManager;
+	// Pre-constructed browser manager for browser automation.
+	browserManager?: BrowserManager;
 }
 
 export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
@@ -55,6 +59,9 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		...getBuiltInTools(),
 		web_fetch,
 		createWebSearchTool(webSearch),
+		...(opts.browserManager
+			? [createBrowserTool({ manager: opts.browserManager })]
+			: []),
 		...(opts.kernelManager
 			? [
 					createEvalTool({ kernel: opts.kernelManager }),

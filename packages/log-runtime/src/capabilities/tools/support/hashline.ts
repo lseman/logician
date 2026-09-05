@@ -191,7 +191,7 @@ export interface HashlineEdit {
  * Returns null if the line is not a hashline operation.
  */
 export function parseHashlineEdit(line: string): HashlineEdit | null {
-	const trimmed = line.trim();
+	const trimmed = line.trimStart();
 
 	// REM — delete file
 	if (trimmed === HL_REM_KEYWORD) {
@@ -218,119 +218,25 @@ export function parseHashlineEdit(line: string): HashlineEdit | null {
 }
 
 function parsePutOperation(line: string): HashlineEdit | null {
-	const rest = line.slice(4).trim();
-
-	// PUT <N: — insert before line N
-	if (rest.startsWith("<")) {
-		const parts = rest.slice(1).trim().split(HL_LINE_BODY_SEP);
-		if (parts.length < 2) return null;
-		const lineNum = parseInt(parts[0], 10);
-		if (isNaN(lineNum)) return null;
-		const body = parts.slice(1).join(HL_LINE_BODY_SEP);
-		return { operation: "PUT", path: "", range: `<${lineNum}`, body: body ? [body] : [] };
+	const insert = /^PUT ([<>])(\d+):(.*)$/.exec(line);
+	if (insert) {
+		return { operation: "PUT", path: "", range: insert[1] + insert[2], body: [insert[3]] };
 	}
-
-	// PUT >N: — insert after line N
-	if (rest.startsWith(">")) {
-		const parts = rest.slice(1).trim().split(HL_LINE_BODY_SEP);
-		if (parts.length < 2) return null;
-		const lineNum = parseInt(parts[0], 10);
-		if (isNaN(lineNum)) return null;
-		const body = parts.slice(1).join(HL_LINE_BODY_SEP);
-		return { operation: "PUT", path: "", range: `>${lineNum}`, body: body ? [body] : [] };
+	const replace = /^PUT (\d+)\.=(\d+):(.*)$/.exec(line);
+	if (replace) {
+		return { operation: "PUT", path: "", range: `${replace[1]}-${replace[2]}`, body: [replace[3]] };
 	}
-
-	// PUT N.=M: — replace lines N through M
-	const eqIdx = rest.indexOf(".=");
-	if (eqIdx >= 0) {
-		const rangePart = rest.slice(0, eqIdx);
-		const afterEq = rest.slice(eqIdx + 2);
-		const rangeMatch = rangePart.match(/^(\d+)-(\d+)$/);
-		if (!rangeMatch) {
-			// PUT N.=N: (single line)
-			const num = parseInt(rangePart, 10);
-			if (isNaN(num)) return null;
-			const body = afterEq.trim();
-			return { operation: "PUT", path: "", range: `${num}.=${num}`, body: body ? [body] : [] };
-		}
-		const body = afterEq.trim();
-		return {
-			operation: "PUT",
-			path: "",
-			range: rangePart,
-			body: body ? [body] : [],
-		};
+	// Accept the earlier range spelling as well.
+	const legacy = /^PUT (\d+)(?:-(\d+))?\.=(.*)$/.exec(line);
+	if (legacy) {
+		return { operation: "PUT", path: "", range: `${legacy[1]}-${legacy[2] ?? legacy[1]}`, body: [legacy[3]] };
 	}
-
-	// PUT N*: — replace block starting at N
-	if (rest.endsWith("*:")) {
-		const lineNum = parseInt(rest.slice(0, -2), 10);
-		if (isNaN(lineNum)) return null;
-		// Block body follows after this header line
-		return { operation: "PUT", path: "", range: `${lineNum}*` };
-	}
-
-	// PUT with register: PUT >N @reg
-	const atIdx = rest.indexOf(" @");
-	if (atIdx >= 0) {
-		const beforeAt = rest.slice(0, atIdx).trim();
-		const regName = rest.slice(atIdx + 2).trim();
-		const parts = beforeAt.split(HL_LINE_BODY_SEP);
-		if (parts.length < 2) return null;
-		const lineNum = parseInt(parts[0], 10);
-		if (isNaN(lineNum)) return null;
-		const afterColon = parts.slice(1).join(HL_LINE_BODY_SEP);
-		const range = afterColon.startsWith(">") || afterColon.startsWith("<")
-			? afterColon
-			: `>${lineNum}`;
-		return {
-			operation: "PUT",
-			path: "",
-			range,
-			body: afterColon ? [afterColon] : [],
-			register: regName,
-		};
-	}
-
 	return null;
 }
 
 function parseCutOperation(line: string): HashlineEdit | null {
-	const rest = line.slice(4).trim();
-
-	// CUT N.=M — capture lines N through M
-	const eqIdx = rest.indexOf(".=");
-	if (eqIdx >= 0) {
-		const rangePart = rest.slice(0, eqIdx);
-		const afterEq = rest.slice(eqIdx + 2).trim();
-		if (afterEq && afterEq.startsWith("@")) {
-			return {
-				operation: "CUT",
-				path: "",
-				range: rangePart,
-				register: afterEq.slice(1),
-			};
-		}
-		return { operation: "CUT", path: "", range: rangePart };
-	}
-
-	// CUT N* — capture block starting at N
-	if (rest.endsWith("*")) {
-		const lineNum = parseInt(rest.slice(0, -1), 10);
-		if (isNaN(lineNum)) return null;
-		const afterStar = rest.slice(1).trim();
-		if (afterStar && afterStar.startsWith("@")) {
-			return {
-				operation: "CUT",
-				path: "",
-				range: `${lineNum}*`,
-				register: afterStar.slice(1),
-			};
-		}
-		return { operation: "CUT", path: "", range: `${lineNum}*` };
-	}
-
-	return null;
+	const match = /^CUT (\d+)(?:\.=(\d+))?$/.exec(line);
+	return match ? { operation: "CUT", path: "", range: `${match[1]}-${match[2] ?? match[1]}` } : null;
 }
 
 // ── Edit result ────────────────────────────────────────────────────────────────

@@ -1,12 +1,16 @@
-import { test } from "bun:test";
+import { spyOn, test } from "bun:test";
 import assert from "node:assert/strict";
-import { openSettingsSelector } from "../app/overlay-controllers/settings.ts";
+import * as configuration from "@logician/log-runtime/configuration";
+import { handleSettingsSelectorAction, openSettingsSelector } from "../app/overlay-controllers/settings.ts";
 import type { SettingDef } from "../overlays/settings-overlay.ts";
 
 void test("settings exposes tri-state guards and every inference provider mode", async () => {
 	let settings: SettingDef[] = [];
+	const updates: Record<string, unknown>[] = [];
+	const notifications: string[] = [];
 	const ctx = {
 		bridge: {
+			updateSettings: (update: Record<string, unknown>) => updates.push(update),
 			getSettingsData: () => ({
 				model: "test",
 				temperature: 0.5,
@@ -42,7 +46,13 @@ void test("settings exposes tri-state guards and every inference provider mode",
 		},
 		tui: {
 			showOverlay: () => ({ focus: () => {} }),
+			requestRender: () => {},
+			removeOverlay: () => {},
 		},
+		statusPanel: { update: () => {} },
+		transcript: { getTurns: () => [] },
+		transcriptDisplay: { setTurns: () => {} },
+		notify: (message: string) => notifications.push(message),
 	} as unknown as Parameters<typeof openSettingsSelector>[0];
 
 	await openSettingsSelector(ctx);
@@ -60,4 +70,18 @@ void test("settings exposes tri-state guards and every inference provider mode",
 		settings.find(setting => setting.name === "Legroom SDK")?.currentValue,
 		"on",
 	);
+	const budgetStop = settings.find(setting => setting.name === "Budget early-stop");
+	assert.ok(budgetStop);
+	const save = spyOn(configuration, "saveConfigField").mockReturnValue(true);
+	try {
+		for (const option of budgetStop.options) {
+			handleSettingsSelectorAction(ctx, { type: "change", settingName: budgetStop.name, value: option.value });
+			assert.deepEqual(updates.at(-1), { progressStopEnabled: option.value === "true" });
+			assert.deepEqual(save.mock.calls.at(-1), ["progressStopEnabled", option.value === "true"]);
+		}
+		assert.equal(notifications.some(message => message.includes("Unknown setting")), false);
+	} finally {
+		save.mockRestore();
+	}
+
 });

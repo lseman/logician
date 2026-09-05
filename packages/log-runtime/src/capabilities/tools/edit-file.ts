@@ -518,6 +518,10 @@ export function applyEditsToNormalizedContent(
 const editSchema = {
 	type: "object",
 	properties: {
+		input: {
+			type: "string",
+			description: "Hashline edits for path: [path#hash] followed by PUT >N:text, PUT <N:text, PUT N.=M:text, or CUT N.=M. Use the hash from read_file. Operations apply sequentially; content after the colon is literal. Cannot be combined with edits/oldText.",
+		},
 		path: {
 			type: "string",
 			description: "File path to edit (relative or absolute)",
@@ -650,21 +654,9 @@ export const edit_file: Tool = {
 		if (!path) {
 			return "Error: edit_file requires a path.";
 		}
-		if (input) {
-			const store = createEditStore();
-			const result = await executeHashlineEdit(input, store, ctx.cwd || process.cwd());
-			if (result.error) return result.error;
-			return {
-				content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
-					(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
-				details: {
-					diff: result.diff,
-					linesChanged: result.linesChanged,
-					filesAffected: result.filesAffected,
-				},
-			};
-		}
-		if (edits.length === 0) {
+
+		if (input && edits.length > 0) return "Error: Use either input or text edits, not both.";
+		if (!input && edits.length === 0) {
 			return "Error: Provide oldText/newText or edits[].";
 		}
 		const resolved = resolveReadPath(path, ctx.cwd || process.cwd());
@@ -692,6 +684,22 @@ export const edit_file: Tool = {
 					`${resolved} has been modified since it was last read. ` +
 					"Read it again before editing."
 				);
+			}
+			if (input) {
+				const store = createEditStore();
+				const result = await executeHashlineEdit(input, store, ctx.cwd || process.cwd(), false, resolved);
+				if (result.error) return `Error: ${result.error}`;
+				if (!result.applied) return "No changes made: hashline edits matched the current content.";
+				refreshAfterWrite(resolved);
+				return {
+					content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
+						(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
+					details: {
+						diff: result.diff,
+						linesChanged: result.linesChanged,
+						filesAffected: result.filesAffected,
+					},
+				};
 			}
 			const buffer = await defaultEditOperations.readFile(resolved);
 			const rawContent = buffer.toString("utf-8");
