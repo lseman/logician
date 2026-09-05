@@ -149,9 +149,9 @@ void test("TUI starts in a real terminal and Ctrl+M opens mode selection", async
 		rows: 32,
 	});
 	const screen = screenFromPtyResult(result, 120, 32).text();
-	assert.match(screen, /Enter commands/);
+	assert.match(screen, /› Ask Logician/);
 	assert.match(screen, /Inference Mode \(10\)/);
-	assert.match(screen, /Provider ✓/);
+	assert.match(screen, /● READY/);
 	assert.doesNotMatch(result.output, /TypeError|TUI render error/);
 });
 
@@ -447,6 +447,6 @@ void test("TUI handles a Kitty Ctrl+O sequence without corrupting the render", a
 		rows: 32,
 	});
 	const screen = screenFromPtyResult(result, 120, 32).text();
-	assert.match(screen, /Enter commands/);
+	assert.match(screen, /› Ask Logician/);
 	assert.doesNotMatch(result.output, /TUI render error/);
 });

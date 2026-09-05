@@ -13,6 +13,7 @@ import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import { convertToChatFormat } from "../../capabilities/provider/messages.ts";
 import type { AgentSettings } from "../../control/configuration/agent-settings.ts";
 import type { OutputGuard } from "../../control/guards/output-guard.ts";
+import { filterProviderReplayMessages } from "../../control/guards/refusal-detection.ts";
 import type { InterventionInput } from "../../control/policy/intervention-controller.ts";
 import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import { getInferenceMode } from "../../system/types/types-config.ts";
@@ -119,7 +120,10 @@ export async function requestAssistantTurn(
 		const llmMessages = input.convertToLlm(
 			(presentationMessages ?? messages) as AgentMessage[],
 		);
-		const chatMessages = convertToChatFormat(llmMessages);
+		// Strip provider refusal messages from replay context — they carry no
+		// useful dialogue and pollute future turns with safety metadata.
+		const filteredLlmMessages = filterProviderReplayMessages(llmMessages);
+		const chatMessages = convertToChatFormat(filteredLlmMessages);
 
 		let requestHeaders = config.streamOptions?.headers;
 		let requestTimeoutMs =

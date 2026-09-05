@@ -54,26 +54,6 @@ export function formatHashlineHeader(path: string, tag: string): string {
 	return `${HL_FILE_PREFIX}${path}${HL_FILE_HASH_SEP}${tag}${HL_FILE_SUFFIX}`;
 }
 
-/**
- * Format numbered lines for hashline display.
- * Each line gets a sequential number: `1:content`, `2:content`, ...
- */
-export function formatNumberedLines(text: string, startLine?: number): string {
-	const lines = text.split("\n");
-	const end = lines.length > 0 && lines.at(-1) === "" ? lines.length - 1 : lines.length;
-	const lineNum = startLine ?? 1;
-	const parts: string[] = [];
-	for (let i = 0; i < end; i++) {
-		parts.push(`${lineNum + i}:${lines[i]}`);
-	}
-	return parts.join("\n");
-}
-
-/** Format a single numbered line: `N:content` */
-export function formatNumberedLine(lineNumber: number, line: string): string {
-	return `${lineNumber}:${line}`;
-}
-
 // ── Hashline parsing ───────────────────────────────────────────────────────────
 
 /**
@@ -83,63 +63,6 @@ export function splitAddressableFileLines(text: string): string[] {
 	const lines = text.split("\n");
 	if (lines.length > 0 && lines.at(-1) === "") lines.pop();
 	return lines;
-}
-
-/**
- * Strip hashline prefixes (numbered lines: `1:content` → `content`).
- * Used when the model writes back hashline-format content.
- */
-export function stripHashlinePrefixes(lines: string[]): string[] {
-	return lines.map((line) => {
-		const idx = line.indexOf(HL_LINE_BODY_SEP);
-		if (idx > 0) {
-			return line.slice(idx + 1);
-		}
-		return line;
-	});
-}
-
-// ── Hashline anchor parsing ────────────────────────────────────────────────────
-
-/**
- * Extract the hashline tag from a file header: [path#4hex]
- */
-export function extractHashlineTag(fileHeader: string): string | null {
-	if (!fileHeader.startsWith(HL_FILE_PREFIX)) return null;
-	const closeIdx = fileHeader.indexOf(HL_FILE_SUFFIX);
-	if (closeIdx < 0) return null;
-	const inner = fileHeader.slice(1, closeIdx);
-	const hashIdx = inner.indexOf(HL_FILE_HASH_SEP);
-	if (hashIdx < 0) return null;
-	const tag = inner.slice(hashIdx + 1);
-	if (tag.length !== HASHLINE_TAG_LENGTH) return null;
-	return tag;
-}
-
-/**
- * Check if a line is a hashline file header.
- */
-export function isHashlineFileHeader(line: string): boolean {
-	return line.startsWith(HL_FILE_PREFIX) && line.endsWith(HL_FILE_SUFFIX);
-}
-
-// ── Hashline anchor validation ─────────────────────────────────────────────────
-
-/**
- * Validate a hashline anchor against expected content.
- * Returns the expected tag if the anchor is valid, null otherwise.
- */
-export function validateHashlineAnchor(
-	tag: string,
-	content: string,
-	expectedTag: string,
-): boolean {
-	if (tag !== expectedTag) return false;
-	// Additional check: recompute hash of content to verify it matches
-	const computed = hashlineHash(content);
-	// For 4-char tags, we allow the stored tag to match the computed tag
-	// of the file content at read time.
-	return computed.startsWith(tag) || tag === expectedTag;
 }
 
 // ── Stale anchor detection ─────────────────────────────────────────────────────

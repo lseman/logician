@@ -60,6 +60,20 @@ function formatSkillsForPrompt(skills: PromptSkill[]): string {
 	return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Ensures blank lines before and after fenced code blocks.
+ * Without this, a code block directly following text (or another code block)
+ * may not render as fenced — Markdown requires a blank line boundary.
+ */
+function normalizeCodeBlockSpacing(text: string): string {
+	// Blank line before ``` (when not at start of text)
+	text = text.replace(/([^\n])\n```/g, "$1\n\n```");
+	// Blank line after ``` (when followed by newline + content, or at end of text)
+	text = text.replace(/```\n([^\n])/g, "```\n\n$1");
+	text = text.replace(/```\n$/g, "```\n\n");
+	return text;
+}
+
 // ============================================================================
 // Project context file loading
 // ============================================================================
@@ -234,7 +248,12 @@ Workflow:
 - Read a file before editing or overwriting it. Use replaceAll for renames across a file.
 - Organize work into phased todo lists (init → start → done): use phases to group related tasks, mark in_progress before work, completed immediately when done.
 - After a change, verify it — read the diff, run the narrowest relevant test/typecheck/lint.
-- Keep changes scoped to the request. Never use destructive git operations (reset --hard, checkout --, deletions) unless explicitly asked.${webSection}`;
+- Keep changes scoped to the request. Never use destructive git operations (reset --hard, checkout --, deletions) unless explicitly asked.
+Rules:
+- Before writing a helper, check whether one already exists — search first. Two implementations of the same thing is a bug even when both work.
+- Before yielding: all affected callsites/tests/docs updated or intentionally unchanged. Never yield unfinished work: stubs, placeholders, no-ops, fake fallbacks, 'TODO: implement' are not acceptable.
+- Fix the source; never suppress symptoms or special-case inputs unless asked. Migrate every caller with a clean cutover.
+- Code that may run while the TUI is active must not use 'console.log'/'error'/'warn'; use the centralized logger.${webSection}`;
 
 	// Custom prompt overrides everything
 	const resolvedCustomPrompt =
@@ -255,7 +274,6 @@ Workflow:
 		}
 		prompt += "</project_context>\n";
 	}
-
 	// Append skills section (only if read tool is available)
 	if (
 		tools.some(t => t.name === "read_file") &&
@@ -267,8 +285,8 @@ Workflow:
 		);
 		prompt += formatSkillsForPrompt(sortedSkills);
 	}
+	return normalizeCodeBlockSpacing(prompt);
 
-	return prompt;
 }
 
 /**

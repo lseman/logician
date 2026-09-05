@@ -29,14 +29,21 @@ It works equally well at a local workstation, inside `tmux`, or over SSH—and i
 | | Capability | What it gives you |
 |---|---|---|
 | ⚡ | **Streaming-first TUI** | Live responses, thinking modes, tool cards, overlays, and steering without leaving the terminal |
-| 🛠️ | **Code-aware execution** | Precise edits, fast search, shell execution, Git workflows, syntax diagnostics, and verification |
-| 🧠 | **Persistent memory** | Workspace-scoped observations and durable lessons with lexical + semantic retrieval |
+| 🛠️ | **Code-aware execution** | Hashline edits, AST-aware structural rewrites, LSP diagnostics, fuzzy matching, and post-edit verification |
+| 🌐 | **Browser automation** | Full Puppeteer-driven browser with tab lifecycle, navigation, interaction, screenshots, and accessibility snapshots |
+| 🧠 | **Persistent memory** | Workspace-scoped observations and durable lessons with lexical + semantic retrieval via Memoriam |
 | 📚 | **Hybrid RAG** | Dense and BM25 retrieval, structural chunking, reranking, source attribution, and context budgeting |
 | 🔌 | **Extensibility** | `SKILL.md` capabilities, plugins, lifecycle hooks, custom events, and MCP tools |
-| 🌿 | **Parallel agents** | Delegate bounded work to child agents with isolated context and worktree support |
+| 🌿 | **Parallel agents** | `spawn_agent` and `spawn_agents` with scoped tool sets, concurrency limits, budget enforcement, and peer coordination |
 | 🛡️ | **Controlled autonomy** | Permission modes, sandbox profiles, workspace trust, loop guards, and cancellation |
 | 💾 | **Durable sessions** | Append-only JSONL journals, bookmarks, branching, rewind, recovery, and compaction |
 | 🧪 | **Autoresearch** | Run measured experiment loops and keep improvements that beat the baseline |
+| 🧮 | **Reasoning strategies** | ToT, Reflexion, SSR, Auto-CoT, Best-of-N, Self-Consistency, GoT, Cover — selectable per session |
+| 📈 | **Context compression** | Legroom SDK integration for pre-provider payload compression, reducing context window usage |
+| 🗺️ | **Repository map** | Query-ranked file/symbol/import index with hard token budget, scoped to source files |
+| 🎯 | **Goal tracking** | Set completion conditions; the agent loops until the goal is met or budget is exhausted |
+| 🧬 | **EOH** | Evolution of Heuristics — evolve self-evaluating Python heuristics with generations, status, and best selection |
+| 📋 | **~30 slash commands** | Categorized, fuzzy-searchable commands for sessions, agent control, context, skills, reasoning, display, permissions, and more |
 | 🤖 | **Headless operation** | Versioned JSONL events for scripts, CI, editors, and other agent systems |
 
 ## Install

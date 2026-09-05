@@ -21,6 +21,8 @@ import { write_file } from "./write-file.ts";
 import { ast_edit } from "./ast-edit.ts";
 import type { BrowserManager } from "../browser/browser-manager.ts";
 import { createBrowserTool } from "../browser/browser-tool.ts";
+import { createHubTool } from "../hub/hub-tool.ts";
+import { defaultHub } from "../hub/process-manager.ts";
 
 // Default SearXNG instance assumed for local development.
 export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
@@ -70,6 +72,8 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 					createWaitTool({ kernel: opts.kernelManager }),
 				]
 			: []),
+		// ── Hub (named process lifecycle) ──────────────────────────────────
+		createHubTool({ manager: defaultHub }),
 	];
 	return tools;
 }

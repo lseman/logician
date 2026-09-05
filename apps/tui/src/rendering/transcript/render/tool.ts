@@ -50,6 +50,78 @@ const BOX = {
 	teeRight: "┤",
 } as const;
 
+// ── Simple vs block tool classification ──────────────────────────────────────
+// Simple tools render as a compact one-liner; block tools use the card-style
+// box.  The classification is intentional: read/grep/glob/ask/web_search etc.
+// carry low visual density and benefit from a dense list view, whereas bash,
+// write, edit, eval, subagents, and MCP calls carry structured data that
+// benefits from the card layout.
+const SIMPLE_TOOL_NAMES = new Set([
+	// File / directory introspection
+	"read_file",
+	"ls",
+	"tree",
+	"file",
+	"which",
+	// Search
+	"rg_search",
+	"glob",
+	"grep",
+	// Q&A
+	"ask",
+	"web_search",
+	// Process / shell utilities
+	"ps",
+	"wc",
+	"sort",
+	"uniq",
+	"sed",
+	"awk",
+	"base64",
+	"jq",
+	"diff",
+	"kill_child_process",
+	// File ops (pure metadata, no content preview needed)
+	"touch",
+	"mkdir",
+	"rm",
+	"mv",
+	"cp",
+	"chmod",
+	// Other simple read-only / query tools
+	"cat",
+	"head",
+	"tail",
+	"read",
+	"md5sum",
+	"sha1sum",
+	"sha224sum",
+	"sha256sum",
+	"sha384sum",
+	"sha512sum",
+	"b2sum",
+	// Internal harness tools
+	"env",
+]);
+
+function isSimpleTool(toolName: string, simpleTools?: string[]): boolean {
+	const merged = new Set<string>(SIMPLE_TOOL_NAMES);
+	// Merge user-config tools into the default set.
+	if (simpleTools) {
+		for (const t of simpleTools) {
+			merged.add(t);
+		}
+	}
+	if (merged.has(toolName)) return true;
+	// MCP tools always get the card layout — their structured results need
+	// the block rendering to be readable.
+	if (toolName.startsWith("mcp__")) return false;
+	// spawn_agent(s) already have their own subagent rendering.
+	if (toolName === "spawn_agent" || toolName === "spawn_agents") return false;
+	// Everything else is a block tool.
+	return false;
+}
+
 import {
 	renderSubagentBatchActivityTail,
 	renderSubagentBatchCollapsed,
@@ -80,6 +152,10 @@ export function renderTool(
 		ctx.detailSection = detailSection;
 		ctx.previewBlock = previewBlock;
 		ctx.computeBatchTally = computeBatchTally;
+	}
+	// Simple tools use the compact one-liner renderer instead of the card box.
+	if (isSimpleTool(tool.tool_name, ctx.simpleTools)) {
+		return renderSimpleTool(ctx, tool, width, expanded);
 	}
 	// Tool results, streamed output, arguments, and nested subagent details
 	// are untrusted terminal input. Clone and remove every terminal control
@@ -296,6 +372,83 @@ export function renderTool(
 		lines.push(blockLine(borderColor, "", width));
 	}
 	return finish();
+}
+
+// ── Simple-tool rendering ────────────────────────────────────────────────────
+// Simple tools render as a single compact line.  When expanded the result
+// flows underneath as plain lines (no box) so the transcript stays dense.
+function renderSimpleTool(
+	ctx: RenderCtx,
+	tool: ToolExecution,
+	width: number,
+	expanded = ctx.toolsExpanded,
+): string[] {
+	tool = sanitizeToolForDisplay(ctx, tool);
+	const postEdit = extractPostEditDiagnostics(tool.result);
+	const resultText = stripInternalHookGuidance(postEdit.text);
+	const displayTool = {
+		...tool,
+		result: stripInternalHookGuidance(tool.result),
+		partialResult: stripInternalHookGuidance(tool.partialResult),
+	};
+
+	const lines: string[] = [];
+
+	const glyph = tool.isError
+		? theme.fg("toolError", "×")
+		: tool.isComplete
+			? theme.fg("toolSuccess", "✓")
+			: theme.fg("toolRunning", ctx.spinnerFrame());
+	const status = tool.isError
+		? theme.fg("toolError", "error")
+		: tool.isComplete
+			? theme.fg("toolSuccess", "done")
+			: tool.partialResult || tool.streamOutput
+				? theme.fg("toolStreaming", "streaming")
+				: theme.fg("toolRunning", "running");
+
+	const summary = toolSummary(displayTool);
+	const elapsed =
+		tool.durationMs !== undefined ? formatDurationMs(tool.durationMs) : "";
+
+	// Build the one-liner:  › read_file  /path/to/file  done
+	const base = `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${
+		summary
+			? hyperlinkedFilePath(summary, `${DIM}${summary}${RESET}`)
+			: DIM + summary + RESET
+	} ${status}`;
+	const right = elapsed ? `${DIM}${elapsed}${RESET}` : "";
+	let row = base;
+	if (right) {
+		const gap = Math.max(1, width - 4) - visibleWidth(row) - visibleWidth(right);
+		row = gap >= 2 ? `${row}${" ".repeat(gap)}${right}` : `${row} ${right}`;
+	}
+	lines.push(padToLine(row, width));
+
+	// Expanded: show the result content as plain lines (no box).
+	if (expanded) {
+		const raw = displayTool.streamOutput || displayTool.result || "";
+		if (raw.trim()) {
+			const resultLines = wrapText(raw, Math.max(16, width - 4));
+			for (const line of resultLines) {
+				lines.push(padToLine(line, width));
+			}
+		}
+		for (const block of postEdit.blocks) {
+			for (const dl of renderPostEditDiagnostics(block, width - 4)) {
+				lines.push(padToLine(dl, width));
+			}
+		}
+	}
+
+	return lines;
+}
+
+/** Compose a line of exactly `width` visible columns, left-padded with
+ * two spaces for the focus-cursor prefix slot. */
+function padToLine(content: string, width: number): string {
+	const padded = content.padEnd(width - 2, " ");
+	return `  ${padded}`;
 }
 
 function sanitizeToolForDisplay(

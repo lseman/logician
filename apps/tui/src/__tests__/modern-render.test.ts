@@ -83,8 +83,8 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 	);
 	assert.doesNotMatch(output, /╭─|╰─/);
 	assert.match(output, /◆ LOGICIAN/);
-	assert.match(output, /✓ read_file done/);
-	assert.match(output, /output ok/);
+	assert.match(output, /✓ read_file/);
+	assert.match(output, /done/);
 	assert.match(output, /18ms/);
 	assert.ok(lines.every(line => visibleWidth(line) <= 80));
 });
@@ -924,15 +924,8 @@ void test("assistant chunks render as distinct semantic blocks", () => {
 	]);
 	const rendered = display.render(100).join("\n");
 	const output = plain(rendered);
-	assert.ok(
-		rendered.includes(`${theme.fgRaw("reasoningLabel")}\x1b[1mREASONING`),
-	);
-	assert.ok(
-		rendered.includes(`${theme.fgRaw("responseLabel")}\x1b[1mRESPONSE`),
-	);
-	assert.match(output, /REASONING.*Compare both execution paths/);
+	assert.match(output, /Compare both execution paths/);
 	assert.match(output, /⚠ NOTICE Context\s+Near limit/);
-	assert.match(output, /RESPONSE/);
 	assert.match(output, /The minimal path delegates continuation/);
 });
 
@@ -972,10 +965,9 @@ void test("a whitespace-only content chunk between two thinking chunks renders n
 	]);
 	const output = plain(display.render(100).join("\n"));
 	assert.doesNotMatch(output, /RESPONSE/);
-	assert.match(output, /REASONING.*The/);
-	assert.match(output, /REASONING.*user is just saying hello again/);
+	assert.match(output, /The/);
+	assert.match(output, /user is just saying hello again/);
 });
-
 void test("expanded reasoning renders fenced code as one labeled block", () => {
 	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
 	display.setTurns([
@@ -1804,7 +1796,6 @@ void test("think wrappers are removed without hiding real reasoning", () => {
 	]);
 	const output = plain(display.render(80).join("\n"));
 
-	assert.match(output, /REASONING/);
 	assert.match(output, /Useful reasoning/);
 	assert.doesNotMatch(output, /<\/?think>/);
 });

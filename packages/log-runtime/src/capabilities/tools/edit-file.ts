@@ -7,6 +7,7 @@
 
 import type { MutationReceipt, Tool, ToolResult } from "@logician/log-core";
 import { createHash } from "node:crypto";
+import { checkFileParse } from "./support/auto-repair.js";
 import { executeHashlineEdit } from "./support/hashline-engine.js";
 import { createEditStore } from "./support/edit-store.js";
 import { createMutationSession } from "./mutation/session.js";
@@ -708,17 +709,35 @@ export const edit_file: Tool = {
 						return { content: "No changes made: hashline edits matched the current content.", details: { mutation: receipt } };
 					}
 					store.recordSuccess(resolved);
-					refreshAfterWrite(resolved);
+				refreshAfterWrite(resolved);
+				// Auto-recovery: check parse after edit
+				const hashlineParseError = await checkFileParse(resolved);
+				if (hashlineParseError) {
 					return {
-						content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
+						content:
+							`Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).\n` +
+							`\n⚠ Parse error detected after edit: ${hashlineParseError}` +
 							(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
+						isError: true,
 						details: {
 							mutation: receipt,
 							diff: result.diff,
 							linesChanged: result.linesChanged,
 							filesAffected: result.filesAffected,
+							parseError: true,
 						},
 					};
+				}
+				return {
+					content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
+						(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
+					details: {
+						mutation: receipt,
+						diff: result.diff,
+						linesChanged: result.linesChanged,
+						filesAffected: result.filesAffected,
+					},
+				};
 				}
 				const buffer = await defaultEditOperations.readFile(resolved);
 				const rawContent = buffer.toString("utf-8");
@@ -748,20 +767,41 @@ export const edit_file: Tool = {
 					if (noopWarning) return { content: noopWarning, details: { mutation: receipt } };
 					return { content: "No changes made: the edit produced identical content.", details: { mutation: receipt } };
 				}
-				store.recordSuccess(resolved);
+			store.recordSuccess(resolved);
 
-				const diffResult = generateEditDiffs(path, baseContent, newContent);
+			// Generate diff first (needed for parse error message)
+			const diffResult = generateEditDiffs(path, baseContent, newContent);
+
+			// Auto-recovery: check parse after edit
+			const parseError = await checkFileParse(resolved);
+			if (parseError) {
 				return {
 					content:
-						`Successfully replaced ${edits.length} block(s) in ${path}.\n` +
-						(diffResult.diff ? `\nDiff:\n${diffResult.diff}` : ""),
+						`Successfully replaced ${edits.length} block(s) in ${path}.` +
+						`\n\n⚠ Parse error detected after edit: ${parseError}` +
+						(diffResult.diff ? `\n\nDiff:\n${diffResult.diff}` : ""),
+					isError: true,
 					details: {
-									mutation: receipt,
+						mutation: receipt,
 						diff: diffResult.diff,
 						patch: diffResult.patch,
 						firstChangedLine: diffResult.firstChangedLine,
+						parseError: true,
 					},
 				};
+			}
+
+			return {
+				content:
+					`Successfully replaced ${edits.length} block(s) in ${path}.\n` +
+					(diffResult.diff ? `\n\nDiff:\n${diffResult.diff}` : ""),
+				details: {
+							mutation: receipt,
+				diff: diffResult.diff,
+				patch: diffResult.patch,
+				firstChangedLine: diffResult.firstChangedLine,
+			},
+		};
 			});
 	},
 };

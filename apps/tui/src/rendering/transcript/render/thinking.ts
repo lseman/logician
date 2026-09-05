@@ -7,7 +7,7 @@ import type {
 	AssistantChunk,
 	ThinkingDisplayStyle,
 } from "@logician/log-runtime/sessions";
-import { BOLD, DIM, RESET } from "../../../terminal/core.ts";
+import { DIM, RESET } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
 import { wrapText } from "../layout.ts";
 import {
@@ -33,19 +33,14 @@ export function renderThinkingChunk(
 	switch (thinkingMode) {
 		case "collapsed": {
 			const preview = text.trim().slice(0, 100);
-			lines.push(
-				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} ${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`,
-			);
+			lines.push(`${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`);
 			break;
 		}
 		case "summary": {
-			lines.push(
-				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} \x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
-			);
+			lines.push(`${DIM}\x1b[2m${text.trim().slice(0, 150)}\x1b[0m${RESET}`);
 			break;
 		}
 		case "expanded": {
-			lines.push(`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET}`);
 			renderThinkingExpanded(text, lines, currentWidth);
 			break;
 		}

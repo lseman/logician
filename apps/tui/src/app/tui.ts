@@ -353,6 +353,7 @@ export class LogicianTUI {
 			// mode, for anyone who wants one.
 			maxTurns: runtimeConfig.source.transcriptMaxTurns,
 			maxRenderedLines: runtimeConfig.source.transcriptMaxRenderedLines,
+			simpleTools: runtimeConfig.source.simpleTools,
 		});
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.

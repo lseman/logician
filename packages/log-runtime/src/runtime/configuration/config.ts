@@ -79,6 +79,7 @@ const KNOWN_KEYS = new Set([
 	"reasonerConfig",
 	"legroom",
 	"memoriam",
+	"simpleTools",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
@@ -829,6 +830,20 @@ export function validateConfig(
 		}
 	}
 
+	// simpleTools: explicit list of tool names that render as simple one-liners.
+	if (obj.simpleTools !== undefined) {
+		if (Array.isArray(obj.simpleTools)) {
+			const tools: string[] = [];
+			for (const t of obj.simpleTools) {
+				if (typeof t === "string" && t.trim()) {
+					tools.push(t.trim());
+				}
+			}
+			if (tools.length > 0) cfg.simpleTools = tools;
+		} else {
+			warn(warnings, '"simpleTools" must be an array of strings.');
+		}
+	}
 	// Strip undefined values so the returned config only contains set fields.
 	return Object.fromEntries(
 		Object.entries(cfg).filter(([, v]) => v !== undefined),
@@ -953,8 +968,10 @@ export interface LogicianTuiConfig {
 	transcriptMaxRenderedLines?: number;
 	/** Structured pre-reasoning mode. Default: "none" (disabled). */
 	reasoner?: string;
-	/** Overrides for the selected reasoner's registry defaults. */
 	reasonerConfig?: Record<string, unknown>;
+	/** Explicit list of tool names that should render as simple one-liners.
+	 * Merged with the built-in defaults; only adds tools the user wants as simple. */
+	simpleTools?: string[];
 }
 
 export function configString(

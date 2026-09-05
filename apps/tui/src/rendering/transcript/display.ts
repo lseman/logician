@@ -47,6 +47,8 @@ interface TranscriptDisplayOptions {
 	maxRenderedLines?: number;
 	/** Workspace details shown before the first turn. */
 	emptyState?: { workspace: string; branch?: string };
+	/** Explicit simple-tool names from user config, merged with built-in defaults. */
+	simpleTools?: string[];
 }
 
 interface TurnRenderCache {
@@ -112,6 +114,8 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	private focusedToolKey: string | null = null;
 	/** Populated by renderTool for spawn_agent(s) per-task/per-child-tool hit regions. */
 	_taskHitRegions?: Array<{ start: number; end: number; key: string }>;
+	/** Explicit simple-tool names from user config, merged with built-in defaults. */
+	simpleTools: string[] = [];
 	maxMessageLength: number;
 	private maxTurns: number;
 	private maxRenderedLines: number;
@@ -139,6 +143,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		this.maxTurns = options.maxTurns ?? Number.POSITIVE_INFINITY;
 		this.maxRenderedLines =
 			options.maxRenderedLines ?? Number.POSITIVE_INFINITY;
+		this.simpleTools = options.simpleTools ?? [];
 	}
 
 	setEmptyStateContext(context: { workspace: string; branch?: string }): void {
@@ -900,7 +905,6 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			const msg = turn.assistantMessage;
 			const chunks = msg.chunks;
 			const streaming = !msg.isComplete || hasStreamingChunk(chunks);
-			let lastThinkingSection = false;
 			lines.push(
 				padToWidth(`${theme.fgRaw("assistantText")}◆ ${BOLD}LOGICIAN${RESET}`),
 			);
@@ -915,20 +919,10 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				}
 				const answer = stripThinkTags(contentBuffer).trim();
 				contentBuffer = "";
-				if (lastThinkingSection) {
-					lines.push(
-						padToWidth(
-							`${theme.fgRaw("separator")}${DIM}  ─────────────────${RESET}`,
-						),
-					);
-					lastThinkingSection = false;
+				if (lines.length === 0 || lines[lines.length - 1].trim() !== "") {
+					lines.push(padToWidth(""));
 				}
 				if (answer) {
-					lines.push(
-						padToWidth(
-							`  ${theme.fgRaw("responseLabel")}${BOLD}RESPONSE${RESET}`,
-						),
-					);
 					const contentLines = renderMarkdownLines(
 						answer,
 						contentWidth - 2,
@@ -945,7 +939,6 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				}
 				flushContent();
 				if (chunk.type === "user") {
-					lastThinkingSection = false;
 					renderUserOrNoticeContent(chunk.contentText || "");
 				} else if (chunk.type === "thinking") {
 					// Render thinking block
@@ -956,9 +949,11 @@ export class TranscriptDisplay implements Component, RenderCtx {
 						this.currentWidth,
 					);
 					for (const line of thinkLines) lines.push(padToWidth(`  ${line}`));
-					lastThinkingSection = true;
 				} else if (chunk.type === "tool" && chunk.tool) {
-					lastThinkingSection = false;
+				// Blank line before tool boxes to separate from preceding text.
+				if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
+					lines.push(padToWidth(""));
+				}
 					const toolKey = chunk.tool.tool_call_id ?? `${turn.id}:${chunk.seq}`;
 					const regionStart = lines.length;
 					// Clear per-task hit regions before rendering so this tool's
@@ -1002,6 +997,10 @@ export class TranscriptDisplay implements Component, RenderCtx {
 							key: toolKey,
 						});
 					}
+				// Blank line after tool boxes to separate from following text.
+				if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
+					lines.push(padToWidth(""));
+				}
 				} else if (chunk.type === "notice" && chunk.notice) {
 					const n = chunk.notice;
 					if (n.label === "Skills" && n.level === "info") {

@@ -165,8 +165,10 @@ export interface LLMResponse {
 	toolCalls: ToolCall[];
 	stopReason: "stop" | "length" | "error";
 	errorMessage?: string;
-	// Provider-reported token usage from the final stream chunk, when available.
-	// Lets the loop report real context size instead of a local char/4 estimate.
+	/** Non-null when the model refused to answer (safety/content-policy refusal). */
+	refusal?: string;
+	/** Provider-reported token usage from the final stream chunk, when available.
+	 * Lets the loop report real context size instead of a local char/4 estimate. */
 	usage?: {
 		promptTokens?: number;
 		completionTokens?: number;
@@ -479,6 +481,7 @@ export class OpenAIBackend implements LLMBackend {
 		let fullReasoning = "";
 		let toolCalls: ToolCall[] = [];
 		let stopReason: LLMResponse["stopReason"] = "stop";
+		let refusal: string | undefined;
 		let finishReason: string | undefined;
 		let usage: LLMResponse["usage"];
 		let hasText = false;
@@ -516,6 +519,10 @@ export class OpenAIBackend implements LLMBackend {
 						};
 					}
 					const delta = chunk.choices?.[0]?.delta;
+					// Detect provider safety/content-policy refusals (OpenAI returns delta.refusal).
+					if (delta.refusal) {
+						refusal = (refusal || "") + delta.refusal;
+					}
 					if (!delta) continue;
 
 					// Emit text_start on first text content
@@ -635,6 +642,7 @@ export class OpenAIBackend implements LLMBackend {
 			content: fullContent || null,
 			toolCalls,
 			stopReason,
+			refusal,
 			usage,
 		};
 	}

@@ -1,6 +1,9 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
+import { readdirSync, readFileSync, type Dirent } from "node:fs";
+import path from "node:path";
 import type { AgentConfig, Message, QueueMode, Tool } from "@logician/log-core";
+import type { RuntimeEvent } from "@logician/log-core/events";
 import { OpenAIBackend } from "@logician/log-core";
 import type { PermissionMode } from "@logician/log-core/permissions";
 import type { AbortResult, SessionStore } from "@logician/log-core/runtime";
@@ -35,6 +38,7 @@ import type { MemoriamWorker } from "../../capabilities/memoriam/worker.ts";
 import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
+import { parseFrontmatter, frontmatterToRule } from "../../capabilities/rules/loader.ts";
 import { createKernelManager } from "../../capabilities/eval/kernel-manager.ts";
 import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type { TaskPhase } from "../../capabilities/tasks/todo.ts";
@@ -47,6 +51,7 @@ import {
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
 import { createAgentConfig } from "./application/agent-config-factory.ts";
+import { ConversationSession } from "./application/conversation-session.ts";
 import { AgentCoordinator } from "./application/agent-coordinator.ts";
 import { TtsrCoordinator } from "./ttsr-coordinator.ts";
 import { CommandDispatcher } from "./application/command-dispatcher.ts";
@@ -188,6 +193,7 @@ export class AgentRuntime {
 			...this.#ttsrSettings,
 		};
 		const manager = new TtsrManager(settings);
+		this.loadTtsrRules(manager);
 		return new TtsrCoordinator({
 			manager,
 			abort: async () => { await this.abort(); },
@@ -195,6 +201,27 @@ export class AgentRuntime {
 			followUp: message => this.sessions.queues.followUp(message),
 			emit: event => this.emit(event),
 		});
+	}
+
+	private loadTtsrRules(manager: TtsrManager): void {
+		const rulesDir = path.join(this.cwd, ".logician", "rules");
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(rulesDir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name.startsWith(".")) continue;
+			const filePath = path.join(rulesDir, entry.name);
+			let content: string;
+			try { content = readFileSync(filePath, "utf-8"); } catch { continue; }
+			const parsed = parseFrontmatter(content);
+			if (!parsed) continue;
+			const rule = frontmatterToRule(parsed.frontmatter, filePath);
+			if (!rule || !rule.name || rule.conditions.length === 0) continue;
+			manager.addRule(rule);
+		}
 	}
 
 	private readonly memoriam: MemoriamGateway;
@@ -1348,3 +1375,4 @@ export class AgentRuntime {
 }
 
 export { getSkillsDirs } from "./support/resource-directories.ts";
+export { getProjectRulesDirs } from "./support/resource-directories.ts";

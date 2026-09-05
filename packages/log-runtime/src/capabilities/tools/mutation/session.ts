@@ -226,20 +226,24 @@ export class MutationSession {
 				};
 			}
 		} else {
-			const current = fs.readFileSync(resolved, "utf8");
-			const currentHash = this.#hash(current);
-			if (currentHash !== beforeHash) {
-				return {
-					applied: false,
-					changed: true,
-					path: resolved,
-					beforeHash,
-					afterHash,
-					linesChanged,
-					filesAffected: 0,
-					diff: generateEditDiffs(resolved, proposal.before, proposal.after).diff,
-					error: `${resolved} has been modified since it was last read. Read it again before editing.`,
-				};
+			// Stale detection: only applies when the file already exists.
+			// For new files, the file must not exist (checked above), so skip re-read.
+			if (fs.existsSync(resolved)) {
+				const current = fs.readFileSync(resolved, "utf8");
+				const currentHash = this.#hash(current);
+				if (currentHash !== beforeHash) {
+					return {
+						applied: false,
+						changed: true,
+						path: resolved,
+						beforeHash,
+						afterHash,
+						linesChanged,
+						filesAffected: 0,
+						diff: generateEditDiffs(resolved, proposal.before, proposal.after).diff,
+						error: `${resolved} has been modified since it was last read. Read it again before editing.`,
+					};
+				}
 			}
 		}
 

@@ -52,4 +52,6 @@ export interface RenderCtx {
 		liveStatus: Map<number, "running" | "completed" | "failed">;
 		taskElapsedMs: Map<number, number>;
 	};
+	/** Explicit simple-tool names from user config, merged with built-in defaults. */
+	simpleTools?: string[];
 }

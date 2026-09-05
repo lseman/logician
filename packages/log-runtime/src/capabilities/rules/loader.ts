@@ -53,7 +53,7 @@ function isValidScope(value: string): value is TtsrScope {
 }
 
 /** Convert frontmatter to a TtsrRule. */
-function frontmatterToRule(fm: Record<string, string | string[]>, filePath: string): TtsrRule | null {
+export function frontmatterToRule(fm: Record<string, string | string[]>, filePath: string): TtsrRule | null {
 	const name = typeof fm.name === "string" ? fm.name : null;
 	if (!name) return null;
 

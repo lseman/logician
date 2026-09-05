@@ -26,7 +26,7 @@ export {
 } from "./capabilities/provider/text-tool-calls.ts";
 export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
 export { MAX_ESCALATIONS, SoftToolRequirementExceededError, SoftToolRequirementManager } from "./control/guards/soft-tool-requirement.ts";
-export { StablePrefix } from "./control/guards/stable-prefix.ts";
+export { StablePrefix, AppendOnlyLog, AppendOnlyContextManager } from "./control/guards/stable-prefix.ts";
 export { TextLoopDetector, type TextLoopDetectorOptions } from "./control/guards/text-loop-detector.ts";
 export type {
 	NamedAgentStopPolicy,

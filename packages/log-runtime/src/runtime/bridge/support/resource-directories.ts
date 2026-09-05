@@ -46,3 +46,7 @@ function projectResourceDirs(cwd: string, resource: string): string[] {
 	}
 	return dirs;
 }
+export function getProjectRulesDirs(cwd: string): string[] {
+	return Array.from(new Set(projectResourceDirs(cwd, "rules")));
+}
+

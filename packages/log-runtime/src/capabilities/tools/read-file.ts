@@ -21,6 +21,9 @@ import {
 	formatSize,
 	truncateHead,
 } from "./support/utils/truncate.js";
+import {
+	parseConflictBlocks,
+} from "./support/conflict-resolution.js";
 
 export const read_file: Tool = {
 	readOnly: true,
@@ -97,6 +100,9 @@ export const read_file: Tool = {
 		// Split into addressable lines (no trailing empty line)
 		const allLines = splitAddressableFileLines(fullContent);
 		const totalLines = allLines.length;
+		// Detect merge conflicts
+		const conflictBlocks = parseConflictBlocks(fullContent, resolved);
+
 
 		// 1-based offset -> 0-based start.
 		const startLine = offset > 0 ? offset - 1 : 0;
@@ -134,15 +140,38 @@ export const read_file: Tool = {
 				t.truncatedBy === "lines"
 					? `Showing lines ${startDisplay}-${endDisplay} of ${totalLines}.`
 					: `Showing lines ${startDisplay}-${endDisplay} of ${totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit).`;
-			return `${header}\n${t.content}\n\n[${limitNote} Use offset=${nextOffset} to continue.]`;
+			const conflictNotice = formatConflictNotice(fullContent, conflictBlocks);
+			return `${header}\n${t.content}\n\n[${limitNote} Use offset=${nextOffset} to continue.]${conflictNotice}`;
 		}
 
 		if (userLimited > 0 && startLine + userLimited < allLines.length) {
 			const remaining = allLines.length - (startLine + userLimited);
 			const nextOffset = startLine + userLimited + 1;
-			return `${header}\n${t.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+			const conflictNotice = formatConflictNotice(fullContent, conflictBlocks);
+			return `${header}\n${t.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]${conflictNotice}`;
 		}
 
-		return `${header}\n${t.content}`;
+		const conflictNotice = formatConflictNotice(fullContent, conflictBlocks);
+		return `${header}\n${t.content}${conflictNotice}`;
 	},
 };
+
+/** Build a conflict notice to append to read_file output. */
+function formatConflictNotice(fullContent: string, blocks: { index: number; oursLabel: string; theirsLabel: string; offset: number; file: string }[]): string {
+	if (blocks.length === 0) return "";
+	const lines = [
+		"",
+		`# ⚠ Merge Conflicts: ${blocks.length} block${blocks.length > 1 ? "s" : ""} in ${blocks[0].file}`,
+		"",
+	];
+	for (const block of blocks) {
+		const blockLine = fullContent.slice(0, block.offset).split("\n").length;
+		lines.push(
+			`${block.index}: <<<<<<< ${block.oursLabel} ... ======= ... >>>>>>> ${block.theirsLabel} (around line ${blockLine})`,
+		);
+	}
+	lines.push("");
+	lines.push("[Use conflict://N?q=ours|theirs|ours+theirs|base to resolve]");
+	lines.push("[Use :conflicts selector to view full conflict blocks]");
+	return "\n" + lines.join("\n");
+}

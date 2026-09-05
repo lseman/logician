@@ -1,0 +1,5 @@
+# write_file test (via bash workaround)
+
+This file was created because write_file tool is returning ENOENT.
+
+Sat Sep  5 08:50:37 PM -03 2026

@@ -122,7 +122,7 @@ function renderSubagentFlow(
 	const flushContent = () => {
 		if (!contentBuffer) return;
 		showAgentBoundary(contentAgent);
-		if (lastWasThinking) {
+		if (lastWasThinking && (lines.length === 0 || lines[lines.length - 1].trim() !== "")) {
 			lines.push(`${theme.fgRaw("separator")}${DIM}─── response ───${RESET}`);
 		}
 		const visible = stripThinkTags(contentBuffer);
@@ -168,6 +168,10 @@ function renderSubagentFlow(
 			continue;
 		}
 		if (chunk.type === "tool" && chunk.tool) {
+			// Blank line before child tool boxes to separate from preceding text.
+			if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
+				lines.push("");
+			}
 			const childToolCallId = chunk.tool.toolCallId;
 			const childExpanded =
 				parentKey && childToolCallId
@@ -190,6 +194,10 @@ function renderSubagentFlow(
 				});
 			}
 			lastWasThinking = false;
+			// Blank line after child tool boxes to separate from following text.
+			if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
+				lines.push("");
+			}
 		}
 	}
 	flushContent();

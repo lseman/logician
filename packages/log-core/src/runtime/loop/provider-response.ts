@@ -23,6 +23,7 @@ import {
 	stripTextToolCalls,
 } from "../../capabilities/provider/text-tool-calls.ts";
 import type { ToolRegistry } from "../../capabilities/tools/registry.ts";
+import { isProviderRefusal } from "../../control/guards/refusal-detection.ts";
 import type { OutputGuard } from "../../control/guards/output-guard.ts";
 import type {
 	AgentEventSink,
@@ -89,6 +90,32 @@ export function processProviderResponse(
 			toolCalls = textCalls;
 			assistantContent = stripTextToolCalls(response.content);
 		}
+	}
+	// Detect provider safety/content-policy refusals. Refusal messages
+	// carry no useful dialogue — they are terminal rejections. Mark them
+	// so the history layer can strip them from replay context.
+	const refusal = response?.refusal;
+	if (isProviderRefusal(assistantContent, refusal)) {
+		const refusalAssistant = createAssistantMessage(
+			assistantContent,
+			[],
+		);
+		(refusalAssistant as unknown as Record<string, unknown>).details = { refusal: true };
+		messages.push(refusalAssistant);
+		newMessages.push(refusalAssistant);
+
+		emit({ type: "message_start", turnId, role: "assistant" });
+		emit({ type: "message_update", turnId, message: refusalAssistant });
+		emit({ type: "message_end", turnId, message: refusalAssistant });
+
+		return {
+			success: false,
+			toolCalls: [],
+			stopReason: "error",
+			assistant: refusalAssistant,
+			performedToolWork: false,
+			errorMessage: refusal || "Model refused to answer",
+		};
 	}
 
 	const performedToolWork = toolCalls.length > 0;
