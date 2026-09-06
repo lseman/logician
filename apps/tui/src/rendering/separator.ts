@@ -7,7 +7,7 @@ export class Separator implements Component {
 	private cachedWidth = -1;
 	private cachedLines: string[] | null = null;
 
-	constructor(private color: "separator" | "borderMuted" = "separator") {}
+	constructor(private color: "separator" | "inputBarBorder" = "separator") {}
 
 	render(width: number): string[] {
 		if (this.cachedLines !== null && this.cachedWidth === width) {

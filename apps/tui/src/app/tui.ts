@@ -656,9 +656,9 @@ export class LogicianTUI {
 		});
 		dock.addChild(pinnedContainer);
 		dock.addChild(this.tui.getAboveInputOverlaysComponent());
-		dock.addChild(new Separator("borderMuted"));
+		dock.addChild(new Separator("inputBarBorder"));
 		dock.addChild(this.inputBar);
-		dock.addChild(new Separator("borderMuted"));
+		dock.addChild(new Separator("inputBarBorder"));
 		dock.addChild(this.statusPanel);
 		// Transcript scrolls and follows newly streamed output; scrolling away
 		// disables follow until the user returns to the bottom (Home/End/PageDown

@@ -78,6 +78,7 @@ export type ThemeColor =
 	| "prompt"
 	| "inputText"
 	| "inputPlaceholder"
+	| "inputBarBorder"
 	| "selected"
 	| "header"
 	| "active"
@@ -444,6 +445,7 @@ function buildThemeFromJson(
 		"prompt",
 		"inputText",
 		"inputPlaceholder",
+		"inputBarBorder",
 		"selected",
 		"header",
 		"active",
