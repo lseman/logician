@@ -355,7 +355,9 @@ export class AgentRuntime {
 					),
 				),
 			),
+			onPermissionRequest: ctx => this.interactions.requestPermission(ctx),
 			onTurnEnd: turnId => this.emit({ type: "turn_end", turnId }),
+			onQuestionRequest: ctx => this.interactions.requestQuestion(ctx),
 			onEvent: event => this.activity.handle(event),
 		});
 		this.activity = new RuntimeActivity({

@@ -1,5 +1,0 @@
-Hello from write_file tool!
-This is a test file to verify the tool works correctly.
-Line 3: testing basic content writing.
-Line 5: testing append mode.
-Line 6: this should be appended, not overwrite.
