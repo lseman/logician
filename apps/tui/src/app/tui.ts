@@ -648,12 +648,12 @@ export class LogicianTUI {
 		// the TranscriptDisplay to its viewport; the dock renders at a
 		// separate y position below the clip region.
 		const dock = new Container();
+		dock.addChild(this.todoBar);
 		dock.addChild(this.workSurface);
 		dock.addChild(this.steerQueue);
 		this.steerQueue.setCallbacks({
 			onAction: action => this.handleSteerQueueAction(action),
 		});
-		dock.addChild(this.todoBar);
 		dock.addChild(pinnedContainer);
 		dock.addChild(this.tui.getAboveInputOverlaysComponent());
 		dock.addChild(new Separator());

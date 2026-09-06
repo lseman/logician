@@ -7,7 +7,7 @@ async function mutateTodo(args: Record<string, unknown>): Promise<void> {
 }
 
 test("stopping a runtime detaches it from global task updates", async () => {
-	await mutateTodo({ action: "clear" });
+	await mutateTodo({ op: "init", items: [] });
 	const stopped = new AgentRuntime({
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
@@ -22,7 +22,7 @@ test("stopping a runtime detaches it from global task updates", async () => {
 	await stopped.stop();
 	const stoppedSequence = stopped.events.snapshot().at(-1)?.sequence ?? 0;
 	const activeSequence = active.events.snapshot().at(-1)?.sequence ?? 0;
-	await mutateTodo({ action: "create", subject: "Verify detachment" });
+	await mutateTodo({ op: "append", phase: "Verification", tasks: ["Verify detachment"] });
 
 	expect(stopped.events.snapshot().at(-1)?.sequence ?? 0).toBe(stoppedSequence);
 	expect(active.events.snapshot().at(-1)?.sequence ?? 0).toBeGreaterThan(
@@ -30,5 +30,5 @@ test("stopping a runtime detaches it from global task updates", async () => {
 	);
 	expect(active.events.snapshot().at(-1)?.event.type).toBe("todos");
 	await active.stop();
-	await mutateTodo({ action: "clear" });
+	await mutateTodo({ op: "init", items: [] });
 });

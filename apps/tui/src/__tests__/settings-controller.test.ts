@@ -37,6 +37,7 @@ void test("settings exposes tri-state guards and every inference provider mode",
 				workflowMode: "act",
 			}),
 		},
+		workflowMode: "act",
 		settingsSelector: {
 			setSettings: (value: SettingDef[]) => {
 				settings = value;
@@ -45,12 +46,16 @@ void test("settings exposes tri-state guards and every inference provider mode",
 			show: () => {},
 		},
 		tui: {
+			setShowHardwareCursor: () => {},
 			showOverlay: () => ({ focus: () => {} }),
 			requestRender: () => {},
 			removeOverlay: () => {},
 		},
 		statusPanel: { update: () => {} },
-		transcript: { getTurns: () => [] },
+		transcript: {
+			getTurns: () => [],
+			addSystemMessage: () => {},
+		},
 		transcriptDisplay: { setTurns: () => {} },
 		notify: (message: string) => notifications.push(message),
 	} as unknown as Parameters<typeof openSettingsSelector>[0];
