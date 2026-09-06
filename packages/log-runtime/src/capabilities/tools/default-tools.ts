@@ -23,6 +23,8 @@ import type { BrowserManager } from "../browser/browser-manager.ts";
 import { createBrowserTool } from "../browser/browser-tool.ts";
 import { createHubTool } from "../hub/hub-tool.ts";
 import { defaultHub } from "../hub/process-manager.ts";
+import type { LspClientPool } from "../lsp/lsp-client-pool.ts";
+import { createLspTool } from "../lsp/lsp-tool.ts";
 
 // Default SearXNG instance assumed for local development.
 export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
@@ -35,6 +37,8 @@ export interface DefaultToolsOptions {
 	kernelManager?: KernelManager;
 	// Pre-constructed browser manager for browser automation.
 	browserManager?: BrowserManager;
+	// Pre-constructed LSP client pool for language server queries.
+	lspPool?: LspClientPool;
 }
 
 export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
@@ -60,10 +64,6 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		git,
 		...getBuiltInTools(),
 		web_fetch,
-		createWebSearchTool(webSearch),
-		...(opts.browserManager
-			? [createBrowserTool({ manager: opts.browserManager })]
-			: []),
 		...(opts.kernelManager
 			? [
 					createEvalTool({ kernel: opts.kernelManager }),
@@ -74,6 +74,14 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 			: []),
 		// ── Hub (named process lifecycle) ──────────────────────────────────
 		createHubTool({ manager: defaultHub }),
+		// ── Web search ──────────────────────────────────────────────────
+		createWebSearchTool(webSearch),
+		// ── Browser ─────────────────────────────────────────────────────
+		...(opts.browserManager
+			? [createBrowserTool({ manager: opts.browserManager })]
+			: []),
+		// ── LSP (language server protocol) ────────────────────────────────
+		...(opts.lspPool ? [createLspTool(opts.lspPool)] : []),
 	];
 	return tools;
 }

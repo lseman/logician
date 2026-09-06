@@ -70,6 +70,8 @@ export interface ToolRouterDeps {
 	autoStartMcp?: boolean;
 	/** Pre-constructed kernel manager for eval/workpool tools. */
 	kernelManager?: KernelManager;
+	/** Pre-constructed LSP client pool for language server queries. */
+	lspPool?: LspClientPool;
 }
 
 /** Snapshot of MCP/skill state as reported by getState()/init(). */

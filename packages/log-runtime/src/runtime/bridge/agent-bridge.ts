@@ -306,6 +306,7 @@ export class AgentRuntime {
 			fffgrepEnabled: opts.fffgrepEnabled,
 			autoStartMcp: false,
 			kernelManager: this.kernelManager,
+			lspPool: this.lsp,
 			emit: event => this.emit(event),
 			onToolAdded: _tool => {
 				if (!this.config) return;
