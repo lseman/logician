@@ -7,6 +7,7 @@ import {
 import { beginPendingTurn } from "../state/turn-state.ts";
 import { logInputTrace } from "../terminal/input-protocol.ts";
 import type { LogicianTUI } from "./tui.ts";
+import { theme } from "../terminal/theme.ts";
 
 /** Ctrl+Enter encodings emitted by terminals with CSI-u or modifyOtherKeys. */
 export function isCtrlEnter(data: string): boolean {
@@ -513,6 +514,21 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			ctx.fileMentionPopup.hide();
 		}
 
+		// Update input bar mode color for bash (!) and python ($) prefixes.
+		const trimmed = text.trimStart();
+		if (trimmed.startsWith("!")) {
+			ctx.inputBar.modeColor = theme.fgRaw("bashMode");
+		} else if (trimmed.startsWith("$")) {
+			const prefixLen = pythonCommandPrefixLength(trimmed);
+			if (prefixLen > 0 && !looksLikePastedShellPrompt(trimmed.slice(prefixLen).trim())) {
+				ctx.inputBar.modeColor = theme.fgRaw("pythonMode");
+			} else {
+				ctx.inputBar.modeColor = null;
+			}
+		} else {
+			ctx.inputBar.modeColor = null;
+		}
+
 		ctx.tui.requestRender();
 	};
 
@@ -573,6 +589,42 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 				return;
 			}
 		}
+
+		// User python: `$code` or `$$code`.
+		// `$` = execute Python code (single `$` with space: `$ print("hello")`)
+		// `$$` = execute and exclude from context (double `$` with space: `$$ import os`)
+		// Shell-style variables like `$HOME` are not triggered (requires space after `$`).
+		// Pasted shell prompts like `$cd foo` are not triggered (command+no-space check).
+		if (text.startsWith("$")) {
+			const trimmed = text.trimStart();
+			const prefixLength = pythonCommandPrefixLength(trimmed);
+			if (prefixLength > 0 && !looksLikePastedShellPrompt(trimmed.slice(prefixLength).trim())) {
+				const excludeFromContext = prefixLength === 2;
+				const code = trimmed.slice(prefixLength).trim();
+				if (code) {
+					ctx.statusPanel.update({ phase: "python" });
+					ctx.statusPanel.startAnimation();
+					ctx.tui.renderNow();
+					setImmediate(async () => {
+						try {
+							const result = await ctx.bridge.executePythonCommand(code);
+							ctx.transcript.addSystemMessage(
+								`$$${excludeFromContext ? "" : "$"}${code}: ${result.error ? `Error: ${result.error}` : `Output:\n${result.output}`}`,
+							);
+						} catch (err) {
+							ctx.transcript.addSystemMessage(
+								`$$${excludeFromContext ? "" : "$"}${code}: Error: ${err instanceof Error ? err.message : String(err)}`,
+							);
+						} finally {
+							ctx.statusPanel.update({ phase: "ready" });
+							ctx.tui.requestRender();
+						}
+					});
+					return;
+				}
+			}
+		}
+
 
 		// Check for slash commands
 		if (text.startsWith("/")) {
@@ -682,4 +734,30 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 function oneLineSteerPreview(text: string, maxLength = 60): string {
 	const flat = text.replace(/\s+/g, " ").trim();
 	return flat.length > maxLength ? `${flat.slice(0, maxLength)}…` : flat;
+}
+// ── Python command prefix detection ──────────────────────────────────────────
+
+// OMP-style `$code` / `$$code` prefix detection.
+// Returns 0 (not a python command), 1 (single `$`), or 2 (double `$$`).
+function pythonCommandPrefixLength(trimmedText: string): 0 | 1 | 2 {
+	if (trimmedText.charCodeAt(0) !== 36 /* $ */) return 0;
+	if (trimmedText.charCodeAt(1) === 123 /* { */) return 0;
+
+	const prefixLength = trimmedText.charCodeAt(1) === 36 /* $ */ ? 2 : 1;
+	const next = trimmedText.charCodeAt(prefixLength);
+	if (Number.isNaN(next)) return prefixLength;
+	return next === 32 || next === 9 || next === 10 || next === 13 ? prefixLength : 0;
+}
+
+// Regex patterns to detect pasted shell prompts that should NOT trigger Python mode.
+const SHELL_PROMPT_COMMAND_RE =
+	/^(?:\.{0,2}\/|~\/|cd(?:\s|$)|sudo(?:\s|$)|git(?:\s|$)|bun(?:\s|$)|npm(?:\s|$)|pnpm(?:\s|$)|yarn(?:\s|$)|node(?:\s|$)|python\d*(?:\s|$)|cargo(?:\s|$)|go(?:\s|$)|make(?:\s|$)|docker(?:\s|$)|kubectl(?:\s|$))/;
+const SHELL_PROMPT_OPERATOR_RE = /(?:^|\s)(?:&&|\|\||\||2>&1|[<>]{1,2})(?:\s|$)/;
+
+function looksLikePastedShellPrompt(code: string): boolean {
+	const firstLine = code.split("\n", 1)[0]?.trimStart() ?? "";
+	return (
+		SHELL_PROMPT_COMMAND_RE.test(firstLine) ||
+		SHELL_PROMPT_OPERATOR_RE.test(firstLine)
+	);
 }

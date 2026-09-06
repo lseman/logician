@@ -76,6 +76,8 @@ const DARK_THEME_JSON = JSON.stringify({
 		memoryContent: "text",
 		memoryCount: "#81a2be",
 		pluginStartup: "green",
+		bashMode: "blue",
+		pythonMode: "yellow",
 		header: "accent",
 		active: "accent",
 		selected: "#3a3a4a",

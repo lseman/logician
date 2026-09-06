@@ -90,7 +90,10 @@ export type ThemeColor =
 	| "memoryTag"
 	| "memoryId"
 	| "memoryContent"
-	| "memoryCount";
+	| "memoryCount"
+	// Execution modes
+	| "bashMode"
+	| "pythonMode";
 export type ThemeBg = "mdCodeBlockBg" | "toolBlockBg";
 
 // ── Schema types ──────────────────────────────────────────────────────────────

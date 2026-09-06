@@ -396,6 +396,7 @@ export async function openSettingsSelector(
 				],
 			})),
 		];
+		ctx.tui.setShowHardwareCursor(false);
 		ctx.settingsSelector.setSettings(settings);
 		ctx.settingsSelector.show();
 		ctx.settingsSelector.setMessage(
@@ -419,6 +420,7 @@ export function handleSettingsSelectorAction(
 	action: SettingsSelectorAction,
 ): void {
 	if (action.type === "close") {
+		ctx.tui.setShowHardwareCursor(true);
 		ctx.tui.removeOverlay(ctx.settingsSelector);
 		ctx.statusPanel.update({ phase: "ready" });
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
@@ -426,6 +428,7 @@ export function handleSettingsSelectorAction(
 		return;
 	}
 	if (action.type === "open" && action.settingName.toLowerCase() === "model") {
+		ctx.tui.setShowHardwareCursor(true);
 		ctx.tui.removeOverlay(ctx.settingsSelector);
 		openModelSelector(ctx);
 		return;

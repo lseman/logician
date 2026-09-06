@@ -98,6 +98,14 @@ export class InputBar implements Component, Focusable {
 	onSubmit?: (text: string, intent: InputSubmitIntent) => void;
 	onCancel?: () => void;
 	onChange?: (text: string) => void;
+	// Bash/Python mode indicator — changes input text color when ! or $ is typed.
+	private _modeColor: string | null = null;
+	public get modeColor(): string | null { return this._modeColor; }
+	public set modeColor(value: string | null) {
+		if (this._modeColor === value) return;
+		this._modeColor = value;
+		this.invalidate();
+	}
 
 	// ── Injected dependencies ────────────────────────────────────────────────
 
@@ -669,7 +677,7 @@ export class InputBar implements Component, Focusable {
 		// Build the line
 		const color = isPlaceholder
 			? theme.fg("inputPlaceholder", "")
-			: theme.fg("inputText", "");
+			: (this._modeColor ?? theme.fg("inputText", ""));
 		const rawLine =
 			prompt +
 			(viewport.leftClipped

@@ -94,6 +94,8 @@
 		"memoryTag": "blue",
 		"memoryId": "fgMuted",
 		"memoryContent": "fgMuted",
-		"memoryCount": "fgMuted"
+		"memoryCount": "fgMuted",
+		"bashMode": "blue",
+		"pythonMode": "yellow"
 	}
 }

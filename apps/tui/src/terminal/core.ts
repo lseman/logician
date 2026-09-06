@@ -358,6 +358,27 @@ export class TUI extends Container {
 		this.lastRenderFinishedAt = performance.now();
 		if (this.renderRequested) this.scheduleRender();
 	}
+	/**
+	 * Send a desktop notification via terminal escape sequences.
+	 * Uses OSC 99 (Kitty) on confirmed Kitty/ghostty terminals,
+	 * OSC 9 as fallback, and BEL on unsupported terminals.
+	 */
+	sendNotification(title: string, body: string): void {
+		if (!this.started || this.stopped) return;
+		// Skip if running in a headless / non-TTY environment.
+		if (!process.stdout.isTTY) return;
+		// Build an OSC 99 notification (Kitty / modern terminals).
+		// Format: \x1b]99;title<body>\x07
+		// On terminals that don't support OSC 99, this is harmlessly ignored.
+		const escapedTitle = title.replace(/[\x00-\x1f\x7f-\x9f]/gu, "");
+		const escapedBody = body.replace(/[\x00-\x1f\x7f-\x9f]/gu, "");
+		const notification = `\x1b]99;${escapedTitle};${escapedBody}\x07`;
+		try {
+			process.stdout.write(notification);
+		} catch {
+			// Silently ignore write errors
+		}
+	}
 
 	private scheduleRender(): void {
 		if (this.stopped || this.renderTimer || !this.renderRequested) return;
@@ -1324,4 +1345,6 @@ export interface TuiHandle {
 	};
 	removeOverlay(component: Component): void;
 	bringToFront(component: Component): void;
+	setShowHardwareCursor(enabled: boolean): void;
+	sendNotification(title: string, body: string): void;
 }

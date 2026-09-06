@@ -1374,6 +1374,21 @@ export class AgentRuntime {
 	}> {
 		return executeProcessCommand(this.cwd, command);
 	}
+
+	/**
+	 * Execute Python code directly (for $code in the input bar).
+	 * Returns the execution output.
+	 */
+	async executePythonCommand(code: string): Promise<{
+		output: string;
+		error?: string;
+	}> {
+		const result = await this.kernelManager.eval({ language: "python", code });
+		return {
+			output: result.output,
+			error: result.error,
+		};
+	}
 }
 
 export { getSkillsDirs } from "./support/resource-directories.ts";

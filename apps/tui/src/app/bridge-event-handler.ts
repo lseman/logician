@@ -278,6 +278,12 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 				turnCount: ctx.transcript.getTurns().length,
 				messageCount: ctx.transcript.getMessageCount(),
 			});
+			// Send desktop notification on turn completion.
+			const turnNumber = ctx.transcript.getTurns().length;
+			ctx.tui.sendNotification(
+				"Logician",
+				`Turn ${turnNumber} complete`,
+			);
 			// Goal evaluation: if a goal is active, evaluate after each turn
 			if (ctx.goalActive && ctx.goalManager.isSet()) {
 				const goalState = ctx.goalManager.getState();
