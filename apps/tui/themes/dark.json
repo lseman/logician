@@ -75,7 +75,7 @@
 		"prompt": "blue",
 		"inputText": "text",
 		"inputPlaceholder": "muted",
-		"inputBarBorder": "borderMuted",
+		"inputBarBorder": "#30363d",
 		"selected": "blue",
 		"header": "text",
 		"active": "green",

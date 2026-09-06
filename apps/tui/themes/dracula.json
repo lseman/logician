@@ -81,7 +81,7 @@
     "prompt": "purple",
     "inputText": "fg",
     "inputPlaceholder": "mutedGray",
-		"inputBarBorder": "borderMuted",
+		"inputBarBorder": "#30363d",
     "selected": "purple",
     "header": "fg",
     "active": "green",
