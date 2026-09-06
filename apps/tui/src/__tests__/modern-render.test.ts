@@ -10,7 +10,7 @@ import { NewOutputIndicator } from "../rendering/transcript/new-output-indicator
 import { NotificationCenter } from "../status/notification-center.ts";
 import { StatusBar } from "../status/status-bar.ts";
 import { SteerQueue } from "../status/steer-queue.ts";
-import { CURSOR_MARKER, visibleWidth } from "../terminal/core.ts";
+import { CURSOR_MARKER, TUI, visibleWidth } from "../terminal/core.ts";
 import { initTheme, theme } from "../terminal/theme.ts";
 
 /** Drive a TranscriptDisplay through a real ScrollView + layout pass, the
@@ -472,6 +472,93 @@ void test("clicking a tool card in a non-first turn expands the right card", () 
 		plain(display.render(80).join("\n")),
 		/echo first[\s\S]*first output/,
 	);
+});
+
+void test("tool-card clicks still land after scrolling up (scroll ahead of render)", () => {
+	// Repro for "after scrolling up I can't click to expand a tool card". The
+	// screen shows the last COMPLETED frame; TUI.routeClick maps a click to a
+	// content row using only that frame's box origin (row - box.rect.y).
+	// Scrolling changes ScrollView.scrollTop immediately, but the repaint is
+	// throttled (~16ms), so a quick click lands while the frame — and the
+	// pixels — still reflect the pre-scroll offset. Any hit-test term that reads
+	// the live scrollTop instead of the frame's baked offset shifts the click
+	// off the card the user actually pointed at.
+	const display = new TranscriptDisplay();
+	const turns: Turn[] = [];
+	for (let t = 0; t < 8; t++) {
+		turns.push({
+			id: `turn-${t}`,
+			userMessage: { type: "user", content: `question ${t}` },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: true,
+				chunks: [
+					// Prose padding so tool cards sit apart, separated by plain rows.
+					{ seq: 0, type: "content", content: `prose line ${t}\n`.repeat(12) },
+					{
+						seq: 1,
+						type: "tool" as const,
+						tool: {
+							tool_name: "bash",
+							tool_call_id: `tool-${t}`,
+							args: { command: `echo ${t}` },
+							result: `out ${t}`,
+							isComplete: true,
+							isError: false,
+						},
+						isComplete: true,
+					},
+				],
+			},
+			isComplete: true,
+		} as unknown as Turn);
+	}
+	display.setTurns(turns);
+
+	const W = 90;
+	const H = 16;
+	const scrollView = new ScrollView(display, {
+		follow: "end",
+		primary: true,
+		scrollbar: "auto",
+	});
+	display.setScrollView(scrollView);
+
+	// One completed render — this frame is both the paint and currentLayoutFrame.
+	const frame = renderLayoutFrame(scrollView, W, H, () => {});
+	const scrollTopAtRender = scrollView.scrollTop;
+	assert.ok(
+		scrollTopAtRender > 20,
+		"content must overflow so we can scroll up",
+	);
+
+	// Drive the real TUI.routeClick against that frame.
+	const tui = new TUI(process.stdout as unknown as NodeJS.WriteStream);
+	// biome-ignore lint/suspicious/noExplicitAny: test injects the committed frame.
+	(tui as any).currentLayoutFrame = frame;
+	const routeClick = (row: number): boolean =>
+		// biome-ignore lint/suspicious/noExplicitAny: routeClick is private.
+		(tui as any).routeClick(4, row, false);
+
+	// Header row of a tool card, as painted in the viewport.
+	const screenRow = frame.lines.findIndex(line =>
+		/bash done · echo \d/.test(plain(line)),
+	);
+	assert.notEqual(screenRow, -1);
+
+	const base = plain(display.render(W).join("\n"));
+	assert.equal(routeClick(screenRow), true);
+	assert.notEqual(plain(display.render(W).join("\n")), base); // that card toggled
+
+	// User scrolls up. scrollTop moves now; the throttled repaint has not run,
+	// so routeClick still sees `frame` and the screen still shows `frame`.
+	scrollView.scrollBy(-3);
+	assert.notEqual(scrollView.scrollTop, scrollTopAtRender);
+
+	// Clicking the same painted row must toggle the same card back to `base`.
+	// With the pre-fix scroll compensation the click misses entirely.
+	assert.equal(routeClick(screenRow), true);
+	assert.equal(plain(display.render(W).join("\n")), base);
 });
 
 void test("streaming a new turn does not disturb a completed turn's cached lines", () => {

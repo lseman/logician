@@ -676,6 +676,7 @@ export class LogicianTUI {
 		this.tui.showOverlay(new NewOutputIndicator(this.transcriptDisplay), {
 			anchor: "bottom",
 			align: "left",
+			nonCapturing: true,
 			onClick: () => {
 				transcriptScroll.scrollToEnd();
 				this.transcriptDisplay.clearNewOutputIndicator();

@@ -334,6 +334,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		if (this.scrollView) {
 			const viewportHeight = Math.max(1, this.scrollView.viewportHeight);
 			const scrollTop = this.scrollView.scrollTop;
+			// Hit regions are in full-content space, same as scrollTop.
 			if (region.start < scrollTop) {
 				this.scrollView.scrollTo(region.start);
 			} else if (region.end > scrollTop + viewportHeight) {
@@ -571,13 +572,11 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			turnStartLines,
 			padToWidth,
 		);
-		this.toolHitRegions = pendingToolRegions
-			.map(region => ({
-				...region,
-				start: region.start - visibleStart,
-				end: region.end - visibleStart,
-			}))
-			.filter(region => region.end > 0);
+		this.toolHitRegions = pendingToolRegions.map(region => ({
+			start: region.start,
+			end: region.end,
+			key: region.key,
+		}));
 
 		this.cachedLines = visibleBuffer;
 		return visibleBuffer;
