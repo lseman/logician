@@ -38,6 +38,19 @@ import {
 import { truncateText, withTruncationMarker } from "./content.ts";
 import type { RenderCtx, SanitizedStringCache } from "./tool-context.ts";
 export type { RenderCtx, SanitizedToolCache } from "./tool-context.ts";
+// ── Helper registry for tool detail renderers ────────────────────────────────
+// Must be declared before collapsedToolPreview / toolDetailLines so the
+// runtime can reference it without a circular init-order dependency.
+const toolDetailHelpers: ToolDetailHelpers = {
+	detailSection,
+	detailSectionFile,
+	previewBlock,
+	renderDiffBlock,
+	renderMcpResultBlocks,
+	renderTerminalBlock,
+	writeFileContent,
+};
+
 // ── Box-drawing characters for card-style tool blocks ───────────────────────
 const BOX = {
 	tl: "┌",
@@ -288,23 +301,33 @@ export function renderTool(
 			}
 		}
 	}
-	const compactPreview =
+	const collapsedLines =
 		!showDiffResult && !expanded && !subagent && !subagentBatch
-			? collapsedToolPreview(tool)
-			: "";
-	if (compactPreview) {
+			? collapsedToolPreview(ctx, tool, contentWidth)
+			: [];
+	if (collapsedLines.length > 0) {
 		const label = tool.isError
 			? theme.fg("toolError", "error")
 			: !tool.isComplete
 				? theme.fg("toolRunning", "live")
 				: theme.fg("muted", "output");
+		const prefix = `${theme.fg("dim", "└─")} ${label} `;
 		lines.push(
 			blockLine(
 				borderColor,
-				clampLineToWidth(`${theme.fg("dim", "└─")} ${label} ${compactPreview}${RESET}`, contentWidth),
+				clampLineToWidth(`${prefix}${collapsedLines[0]}${RESET}`, contentWidth),
 				width,
 			),
 		);
+		for (let i = 1; i < collapsedLines.length; i++) {
+			lines.push(
+				blockLine(
+					borderColor,
+					clampLineToWidth(collapsedLines[i], contentWidth),
+					width,
+				),
+			);
+		}
 	}
 	for (const block of postEdit.blocks) {
 		for (const dl of renderPostEditDiagnostics(block, contentWidth)) {
@@ -514,21 +537,28 @@ export function getSanitizationMetrics(ctx: RenderCtx): {
 	return { ...ctx.sanitizationMetrics };
 }
 
-function collapsedToolPreview(tool: ToolExecution): string {
-	if (tool.tool_name === "write_file") {
-		return "";
+// ── Collapsed tool preview ────────────────────────────────────────────────────
+const ansiRegex = /\u001b\[[0-9;]*m/gu;
+
+function stripAnsi(text: string): string {
+	return text.replace(ansiRegex, "");
+}
+
+/** Return the last N lines of a tool's detail content for collapsed rendering. */
+const COLLAPSED_PREVIEW_LINES = 10;
+
+function collapsedToolPreview(
+	ctx: RenderCtx,
+	tool: ToolExecution,
+	contentWidth: number,
+): string[] {
+	const detailLines = toolDetailLines(ctx, tool, contentWidth, false);
+	const stripped = detailLines.map(line => stripAnsi(line));
+	// Trim trailing empty lines for a cleaner tail display
+	while (stripped.length > 0 && stripped[stripped.length - 1] === "") {
+		stripped.pop();
 	}
-	const raw = tool.streamOutput || tool.result || "";
-	if (!raw.trim()) return "";
-	const firstLine = raw
-		.split("\n")
-		.map(line => line.trim())
-		.find(Boolean);
-	if (!firstLine) return "";
-	const preview = compactText(firstLine);
-	const summary = toolSummary(tool);
-	if (!tool.isError && preview === summary) return "";
-	return clampLineToWidth(preview, 120);
+	return stripped.slice(-COLLAPSED_PREVIEW_LINES);
 }
 
 function renderPostEditDiagnostics(
@@ -925,16 +955,6 @@ function previewBlock(
 	}
 	return lines;
 }
-
-const toolDetailHelpers: ToolDetailHelpers = {
-	detailSection,
-	detailSectionFile,
-	previewBlock,
-	renderDiffBlock,
-	renderMcpResultBlocks,
-	renderTerminalBlock,
-	writeFileContent,
-};
 
 // ── Tool block styling ──────────────────────────────────────────────────────
 // Every rendered line inside a tool box must have the exact same visible

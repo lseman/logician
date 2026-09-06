@@ -212,6 +212,11 @@ export function renderBashDetails(
 			: "streaming output";
 		lines.push(helpers.detailSection(label));
 		lines.push(...helpers.renderTerminalBlock(ctx, result, width));
+	} else if (tool.streamOutput) {
+		// For live streaming before the tool completes, show the current
+		// stream content so the collapsed preview isn't just "waiting…".
+		lines.push(helpers.detailSection("streaming"));
+		lines.push(...helpers.renderTerminalBlock(ctx, tool.streamOutput, width));
 	} else {
 		lines.push(`${DIM}waiting for command output...${RESET}`);
 	}

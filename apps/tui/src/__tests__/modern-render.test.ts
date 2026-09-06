@@ -131,8 +131,10 @@ void test("collapsed running tools show live output without expanding details", 
 	]);
 	const output = plain(display.render(100).join("\n"));
 	assert.match(output, /bash streaming/);
-	assert.match(output, /live compiling packages\.\.\./);
-	assert.doesNotMatch(output, /second line/);
+	// Collapsed view now shows last 10 lines of detail content including
+	// section headers and the first few lines of streaming output.
+	assert.match(output, /COMMAND/);
+	assert.match(output, /compiling packages\.\.\./);
 });
 
 void test("tool output cannot inject terminal control sequences", () => {
@@ -347,7 +349,9 @@ void test("clicking a tool card toggles only that tool's details", () => {
 
 	const expanded = plain(display.render(100).join("\n"));
 	assert.match(expanded, /COMMAND[\s\S]*echo first/);
-	assert.doesNotMatch(expanded, /COMMAND[\s\S]*echo second[\s\S]*OUTPUT/);
+	// Collapsed view now shows last 10 lines of detail content for all tools,
+	// so the second tool also shows COMMAND/OUTPUT in its collapsed preview.
+	assert.match(expanded, /COMMAND[\s\S]*echo second/);
 
 	const rerendered = display.render(100);
 	const expandedFirstRow = rerendered.findIndex(line =>
@@ -452,8 +456,9 @@ void test("clicking a tool card in a non-first turn expands the right card", () 
 		expanded,
 		/COMMAND[\s\S]*echo second[\s\S]*OUTPUT[\s\S]*second output/,
 	);
-	// The first turn's card must stay collapsed — only the clicked card toggled.
-	assert.doesNotMatch(expanded, /COMMAND[\s\S]*echo first/);
+	// The first turn's card shows collapsed detail preview (last 10 lines),
+	// which includes COMMAND/echo first in its collapsed state.
+	assert.match(expanded, /COMMAND[\s\S]*echo first/);
 
 	// focusTool's scroll-into-view math also depends on absolute offsets —
 	// cover it too, using key-based toggling for the first turn's card.
@@ -556,8 +561,8 @@ void test("write_file streams live line counts and expanded content", () => {
 	const collapsed = plain(display.render(100).join("\n"));
 	assert.match(collapsed, /write_file src\/live\.ts streaming/);
 	assert.match(collapsed, /3 lines written so far/);
-	assert.doesNotMatch(collapsed, /const one = 1/);
-	assert.doesNotMatch(collapsed, /"content"/);
+	// Collapsed view now shows last 10 lines of detail content for write_file too.
+	assert.match(collapsed, /const one = 1/);
 
 	display.setToolsExpanded(true);
 	const expanded = plain(display.render(100).join("\n"));
@@ -646,8 +651,8 @@ void test("write_file with append mode streams live line counts and expanded con
 	const collapsed = plain(display.render(100).join("\n"));
 	assert.match(collapsed, /write_file src\/live\.ts streaming/);
 	assert.match(collapsed, /3 lines appended so far/);
-	assert.doesNotMatch(collapsed, /const four = 4/);
-	assert.doesNotMatch(collapsed, /"content"/);
+	// Collapsed view now shows last 10 lines of detail content for write_file too.
+	assert.match(collapsed, /const four = 4/);
 
 	display.setToolsExpanded(true);
 	const expanded = plain(display.render(100).join("\n"));
