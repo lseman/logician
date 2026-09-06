@@ -43,6 +43,7 @@ import {
 	getProjectSkillDirs,
 } from "./resource-directories.ts";
 import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
+import type { LspClientPool } from "../../../capabilities/lsp/lsp-client-pool.ts";
 
 export interface ToolRouterDeps {
 	cwd: string;

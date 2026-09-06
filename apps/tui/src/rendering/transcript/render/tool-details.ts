@@ -283,3 +283,85 @@ export function renderEvalDetails(
 
 	return lines;
 }
+// ── LSP tool detail renderer ─────────────────────────────────────────────────
+
+export function renderLspDetails(
+	ctx: RenderCtx,
+	tool: ToolExecution,
+	width: number,
+	helpers: ToolDetailHelpers,
+): string[] {
+	const lines: string[] = [];
+	const args = tool.args || {};
+	const action = String(args.action || "").toLowerCase();
+	const file = String(args.file || args.filePath || "");
+
+	// Show the action header
+	if (file) {
+		lines.push(helpers.detailSection("lsp", action));
+	} else {
+		lines.push(helpers.detailSection("lsp", action));
+	}
+
+	if (file && action !== "status" && action !== "capabilities") {
+		lines.push(helpers.detailSectionFile(file));
+	}
+
+	if (args.line) {
+		lines.push(`${DIM}line ${args.line}${args.column ? `:${args.column}` : ""}${RESET}`);
+	}
+
+	// Parse result text and format based on action type
+	const result = tool.result ?? tool.partialResult;
+	if (result) {
+		const resultText = String(result);
+
+		// Check for error prefix
+		if (resultText.startsWith("LSP Error:")) {
+			lines.push(helpers.detailSection(tool.isError ? "lsp error" : "lsp result"));
+			lines.push(...helpers.previewBlock(ctx, resultText, width));
+			return lines;
+		}
+
+		if (action === "diagnostics") {
+			if (resultText === "No diagnostics.") {
+				lines.push(`${theme.fg("success", "✓ No diagnostics")}${RESET}`);
+			} else {
+				lines.push(helpers.detailSection("diagnostics"));
+				lines.push(...helpers.previewBlock(ctx, resultText, width));
+			}
+		} else if (action === "hover") {
+			if (resultText === "No hover information.") {
+				lines.push(`${DIM}No hover information${RESET}`);
+			} else {
+				lines.push(helpers.detailSection("hover"));
+				lines.push(...helpers.previewBlock(ctx, resultText, width));
+			}
+		} else if (action === "status") {
+			lines.push(...resultText.split("\n").map(line => `${DIM}${line}${RESET}`));
+		} else if (action === "capabilities") {
+			lines.push(helpers.detailSection("capabilities"));
+			lines.push(...helpers.previewBlock(ctx, resultText, width));
+		} else if (action === "code-actions") {
+			lines.push(helpers.detailSection("available actions"));
+			lines.push(...helpers.previewBlock(ctx, resultText, width));
+		} else if (action === "symbols" || action === "workspace-symbols") {
+			lines.push(helpers.detailSection("results"));
+			lines.push(...helpers.previewBlock(ctx, resultText, width));
+		} else {
+			// Generic: go-to-definition, references, rename, type-definition, implementation
+			const hasLocations = resultText.includes(":") && resultText.split("\n").some(l => /^\s+\S+:\d+:\d+/.test(l));
+			if (hasLocations) {
+				lines.push(helpers.detailSection("locations"));
+				lines.push(...helpers.previewBlock(ctx, resultText, width));
+			} else {
+				lines.push(helpers.detailSection(tool.isError ? "error" : "result"));
+				lines.push(...helpers.previewBlock(ctx, resultText, width));
+			}
+		}
+	} else if (!tool.isComplete) {
+		lines.push(`${DIM}waiting for result...${RESET}`);
+	}
+
+	return lines;
+}

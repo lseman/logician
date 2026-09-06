@@ -145,6 +145,7 @@ import {
 	renderEditDetails,
 	renderEvalDetails,
 	renderFileDiffDetails,
+	renderLspDetails,
 	renderMcpDetails,
 	renderWriteDetails,
 	type ToolDetailHelpers,
@@ -677,8 +678,9 @@ function toolDetailLines(
 		lines.push(...renderBashDetails(ctx, tool, width, toolDetailHelpers));
 	} else if (tool.tool_name === "eval") {
 		lines.push(...renderEvalDetails(ctx, tool, width, toolDetailHelpers));
+	} else if (tool.tool_name === "lsp") {
+		lines.push(...renderLspDetails(ctx, tool, width, toolDetailHelpers));
 	} else if (tool.tool_name.startsWith("mcp__")) {
-		lines.push(...renderMcpDetails(ctx, tool, width, toolDetailHelpers));
 	} else {
 		const argText = JSON.stringify(args, null, 2);
 		if (argText && argText !== "{}") {
