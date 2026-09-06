@@ -102,7 +102,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): () => void {
 					themeName: theme.name,
 				});
 				if (message) {
-					ctx.transcript.addSystemMessage(message);
+					ctx.transcript.addBannerMessage(message);
 					ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 					ctx.tui.requestRender();
 				}
@@ -270,7 +270,7 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 				updateGitFooter(ctx);
 			}
 			break;
-		case "turn_end":
+		case "turn_end": {
 			// Auto-save the completed turn
 			ctx._autoSaveTurn();
 			updateGitFooter(ctx);
@@ -280,10 +280,7 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 			});
 			// Send desktop notification on turn completion.
 			const turnNumber = ctx.transcript.getTurns().length;
-			ctx.tui.sendNotification(
-				"Logician",
-				`Turn ${turnNumber} complete`,
-			);
+			ctx.tui.sendNotification("Logician", `Turn ${turnNumber} complete`);
 			// Goal evaluation: if a goal is active, evaluate after each turn
 			if (ctx.goalActive && ctx.goalManager.isSet()) {
 				const goalState = ctx.goalManager.getState();
@@ -324,6 +321,7 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 				ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
 			}
 			break;
+		}
 		case "turn_start":
 			ctx.workSurface.startRun();
 			ctx.researchManager.onAgentStart();

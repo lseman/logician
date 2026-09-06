@@ -23,7 +23,7 @@
 		"bench:keystroke": "tsx apps/tui/src/__tests__/benchmark-keystroke.ts",
 		"bench:latency": "tsx apps/tui/src/__tests__/benchmark-latency.ts",
 		"eval:smoke": "bun run --filter @logician/log-eval eval:smoke",
-		"test": "bun test --parallel --path-ignore-patterns=\"repos/**/*\" --path-ignore-patterns=\"**/node_modules/**/*\" --path-ignore-patterns=\"**/fixtures/**/*\" --path-ignore-patterns=\"**/*.mjs\"",
+		"test": "bun test apps/*/src packages/*/src packages/blocks/*/src",
 		"typecheck": "bun run --workspaces --if-present typecheck",
 		"ci": "bun run typecheck && bun run lint && bun run lint:ratchet && bun run format:check && bun run deadcode:check && bun run test"
 	},

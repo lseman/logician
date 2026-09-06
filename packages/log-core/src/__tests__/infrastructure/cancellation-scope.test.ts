@@ -5,6 +5,39 @@ import {
 } from "../../system/lifecycle/cancellation-scope.ts";
 
 describe("CancellationScope", () => {
+	test("does not start queued work after synchronous cancellation", async () => {
+		const scope = new CancellationScope({ operation: "queued tool" });
+		let started = false;
+		const pending = scope.run(async () => {
+			started = true;
+		});
+		scope.abort(new Error("cancel before dispatch"));
+		await expect(pending).rejects.toThrow("cancel before dispatch");
+		expect(started).toBe(false);
+	});
+
+	test("concurrent close calls wait for the same cleanup", async () => {
+		const scope = new CancellationScope({ operation: "cleanup" });
+		let release!: () => void;
+		const gate = new Promise<void>(resolve => {
+			release = resolve;
+		});
+		let cleaned = false;
+		scope.addCleanup(async () => {
+			await gate;
+			cleaned = true;
+		});
+		const first = scope.close();
+		let secondFinished = false;
+		const second = scope.close().then(() => {
+			secondFinished = true;
+		});
+		await Promise.resolve();
+		expect(secondFinished).toBe(false);
+		release();
+		await Promise.all([first, second]);
+		expect(cleaned).toBe(true);
+	});
 	test("propagates a parent reason and detaches through close", async () => {
 		const parent = new AbortController();
 		const scope = new CancellationScope({

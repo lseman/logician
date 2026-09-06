@@ -122,7 +122,10 @@ function renderSubagentFlow(
 	const flushContent = () => {
 		if (!contentBuffer) return;
 		showAgentBoundary(contentAgent);
-		if (lastWasThinking && (lines.length === 0 || lines[lines.length - 1].trim() !== "")) {
+		if (
+			lastWasThinking &&
+			(lines.length === 0 || lines[lines.length - 1].trim() !== "")
+		) {
 			lines.push(`${theme.fgRaw("separator")}${DIM}─── response ───${RESET}`);
 		}
 		const visible = stripThinkTags(contentBuffer);
@@ -393,7 +396,7 @@ function renderSubagentActivity(
 					`  ${theme.fg("dim", `⋯ ${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`,
 				]
 			: [];
-	const bg = theme.bg("mdCodeBlockBg", "");
+
 	for (const call of visible) {
 		const status = call.status ?? (call.isError ? "failed" : "completed");
 		const icon =
@@ -410,11 +413,19 @@ function renderSubagentActivity(
 		]
 			.filter(Boolean)
 			.join(` ${DIM}·${RESET} `);
-		lines.push(`${bg}${clampLineToWidth(row, Math.max(20, width))}${RESET}`);
+		lines.push(
+			theme.bg("mdCodeBlockBg", clampLineToWidth(row, Math.max(20, width))),
+		);
 		if (expanded && call.resultPreview) {
 			const result = compactText(call.resultPreview);
 			lines.push(
-				`${bg}${DIM}  └ ${clampLineToWidth(result, Math.max(16, width - 4))}${RESET}`,
+				theme.bg(
+					"mdCodeBlockBg",
+					theme.fg(
+						"toolOutput",
+						`  └ ${clampLineToWidth(result, Math.max(16, width - 4))}`,
+					),
+				),
 			);
 		}
 	}

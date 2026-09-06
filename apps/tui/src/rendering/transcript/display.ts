@@ -811,6 +811,13 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		// hook or a user steering message) since both carry the same content
 		// shapes and must render identically regardless of which path produced them.
 		const renderUserOrNoticeContent = (content: string): void => {
+			if (content.startsWith("[Banner]\n")) {
+				// Pre-rendered startup splash — emit each line verbatim (it carries
+				// its own border and ANSI styling); just clamp/pad to the frame.
+				for (const bannerLine of content.slice("[Banner]\n".length).split("\n"))
+					lines.push(padToWidth(bannerLine));
+				return;
+			}
 			if (content.startsWith("[System] ")) {
 				lines.push(padToWidth(`${theme.fgRaw("systemText")}◇ SYSTEM${RESET}`));
 				const sysLines = renderMarkdownLines(

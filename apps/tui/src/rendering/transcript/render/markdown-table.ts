@@ -2,9 +2,11 @@
 // Block-level markdown line rendering (code fences, tables, JSON) and the
 // table layout helpers it depends on. No instance state.
 
-import { highlight, highlightAuto } from "@logician/log-runtime/formatting";
-import { BOLD, DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
+import { BOLD, RESET, visibleWidth } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
+import { ImageComponent } from "../../image.ts";
+import { parseInlineImageFromLine } from "../../image-parser.ts";
+import { highlight, highlightAuto } from "../highlight.ts";
 import { wrapText } from "../layout.ts";
 import {
 	escapeMarkdownTableCell,
@@ -13,63 +15,15 @@ import {
 	renderInline,
 	renderMarkdownLine,
 } from "../text-utils.ts";
-import { parseInlineImageFromLine } from "../../image-parser.ts";
-import { ImageComponent } from "../../image.ts";
 
-/**
- * Cache for syntax-highlighted code blocks.
- *
- * Keyed by `${lang}|${hash(content)}` — during streaming the same code
- * blocks are re-highlighted every frame even though their content hasn't
- * changed. This avoids the expensive highlighter calls (which may fork a
- * tree-sitter binary) on unchanged blocks.
- *
- * Bounded at 512 entries (FIFO). Typical transcripts have <20 code blocks
- * so overflow is rare.
- */
-const highlightCache = new Map<string, string>();
-const highlightCacheOrder: string[] = [];
-const HIGHLIGHT_CACHE_MAX = 512;
-
-/** Simple djb2 hash for cache keys (fast, no crypto deps). */
-function hashString(s: string): number {
-	let hash = 5381;
-	for (let i = 0; i < s.length; i++) {
-		hash = ((hash << 5) + hash + s.charCodeAt(i)) | 0;
-	}
-	return hash;
-}
-
+// The runtime caches parsing; apply the current palette on every render so
+// switching themes never reuses stale syntax colors.
 function cachedHighlight(content: string, lang: string | null): string {
-	const key = lang
-		? `${lang}|${hashString(content)}`
-		: `auto|${hashString(content)}`;
-	const hit = highlightCache.get(key);
-	if (hit !== undefined) return hit;
-
-	let result = content;
 	try {
-		result = lang
-			? highlight(content, lang).value
-			: highlightAuto(content).value;
+		return lang ? highlight(content, lang).value : highlightAuto(content).value;
 	} catch {
-		/* keep raw content on failure */
+		return theme.fg("mdCodeBlock", content);
 	}
-
-	/* Insert / update cache */
-	if (highlightCache.has(key)) {
-		/* key already exists — just in case the first attempt failed and now
-		   succeeded, update the cached value. */
-		highlightCache.set(key, result);
-	} else {
-		if (highlightCacheOrder.length >= HIGHLIGHT_CACHE_MAX) {
-			const evicted = highlightCacheOrder.shift();
-			if (evicted !== undefined) highlightCache.delete(evicted);
-		}
-		highlightCache.set(key, result);
-		highlightCacheOrder.push(key);
-	}
-	return result;
 }
 
 export function renderMarkdownLines(
@@ -86,8 +40,7 @@ export function renderMarkdownLines(
 	let codeContent = "";
 	let codeBlockLang: string | null = null;
 	let prevEmptyLine = false;
-	const bg = theme.bg("mdCodeBlockBg", "");
-	const bgReset = RESET;
+
 	for (let li = 0; li < rawLines.length; li++) {
 		const rawLine = rawLines[li];
 
@@ -97,7 +50,7 @@ export function renderMarkdownLines(
 				const lang = codeBlockLang || null;
 				const renderedCode = cachedHighlight(codeContent, lang);
 				for (const cl of renderedCode.split("\n")) {
-					lines.push(`${bg}  ${cl}${bgReset}`);
+					lines.push(theme.bg("mdCodeBlockBg", `  ${cl}`));
 				}
 
 				codeContent = "";
@@ -106,7 +59,12 @@ export function renderMarkdownLines(
 			} else {
 				inCodeBlock = true;
 				codeBlockLang = extractLangFromFence(rawLine);
-				lines.push(`${bg}${DIM}  ┌─ ${codeBlockLang || "code"}${bgReset}`);
+				lines.push(
+					theme.bg(
+						"mdCodeBlockBg",
+						theme.fg("mdCodeBlockBorder", `  ┌─ ${codeBlockLang || "code"}`),
+					),
+				);
 			}
 			continue;
 		}
@@ -209,9 +167,8 @@ export function renderMarkdownLines(
 		// same partial content skip re-highlighting.
 		const renderedCode = cachedHighlight(codeContent, codeBlockLang);
 		for (const cl of renderedCode.split("\n")) {
-			lines.push(`${bg}  ${cl}${bgReset}`);
+			lines.push(theme.bg("mdCodeBlockBg", `  ${cl}`));
 		}
-
 	}
 
 	return lines;

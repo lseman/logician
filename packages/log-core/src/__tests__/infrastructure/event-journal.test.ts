@@ -7,6 +7,46 @@ type TestEvent =
 	| { type: "end"; ok: boolean };
 
 describe("EventJournal", () => {
+	test("reentrant appends stay ordered for every subscriber", () => {
+		const journal = new EventJournal<TestEvent>();
+		const received: number[] = [];
+		journal.subscribe(entry => {
+			if (entry.id === 1) journal.append({ type: "progress", value: 2 });
+		});
+		journal.subscribe(entry => received.push(entry.id));
+		journal.append({ type: "start", run: "a" });
+		expect(received).toEqual([1, 2]);
+	});
+
+	test("events appended during replay are delivered after retained history", () => {
+		const journal = new EventJournal<TestEvent>();
+		journal.append({ type: "start", run: "a" });
+		journal.append({ type: "progress", value: 1 });
+		const received: number[] = [];
+		journal.subscribe(
+			entry => {
+				received.push(entry.id);
+				if (entry.id === 1) journal.append({ type: "end", ok: true });
+			},
+			{ replay: true },
+		);
+		expect(received).toEqual([1, 2, 3]);
+	});
+
+	test("a failing error observer cannot interrupt other subscribers", () => {
+		const journal = new EventJournal<TestEvent>({
+			onSubscriberError: () => {
+				throw new Error("reporter failed");
+			},
+		});
+		const received: number[] = [];
+		journal.subscribe(() => {
+			throw new Error("observer failed");
+		});
+		journal.subscribe(entry => received.push(entry.id));
+		journal.append({ type: "start", run: "a" });
+		expect(received).toEqual([1]);
+	});
 	test("retains a bounded ordered window with monotonic cursors", () => {
 		let now = 100;
 		const journal = new EventJournal<TestEvent>({

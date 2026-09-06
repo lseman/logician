@@ -1,10 +1,11 @@
-import { expect, test, beforeEach } from "bun:test";
-import { todo_tool, getTasks } from "../../capabilities/tasks/todo.ts";
+import { beforeEach, expect, test } from "bun:test";
+import { getTasks, todo_tool } from "../../capabilities/tasks/todo.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function execute(args: Record<string, unknown>): Promise<string> {
-	return todo_tool.execute(args, {});
+async function execute(args: Record<string, unknown>): Promise<string> {
+	const result = await todo_tool.execute(args, {});
+	return typeof result === "string" ? result : result.content;
 }
 
 // Each test gets a clean slate.
@@ -91,9 +92,7 @@ test("view lists phases and tasks with status markers", async () => {
 test("view shows correct counts for mixed statuses", async () => {
 	await execute({
 		action: "init",
-		items: [
-			{ phase: "Work", items: ["A", "B", "C", "D"] },
-		],
+		items: [{ phase: "Work", items: ["A", "B", "C", "D"] }],
 	});
 	await execute({ action: "done", task: "A" });
 	await execute({ action: "start", phase: "Work", task: "B" });
@@ -111,7 +110,11 @@ test("start marks task in_progress", async () => {
 		action: "init",
 		items: [{ phase: "Work", items: ["Task A"] }],
 	});
-	const result = await execute({ action: "start", phase: "Work", task: "Task A" });
+	const result = await execute({
+		action: "start",
+		phase: "Work",
+		task: "Task A",
+	});
 	expect(result).toContain("Started 'Task A' in Work");
 
 	const tasks = getTasks();
@@ -119,7 +122,11 @@ test("start marks task in_progress", async () => {
 });
 
 test("start rejects non-existent task", async () => {
-	const result = await execute({ action: "start", phase: "Work", task: "Ghost" });
+	const result = await execute({
+		action: "start",
+		phase: "Work",
+		task: "Ghost",
+	});
 	expect(result).toContain("not found");
 });
 
@@ -129,7 +136,11 @@ test("start rejects already in_progress task", async () => {
 		items: [{ phase: "Work", items: ["Task A"] }],
 	});
 	await execute({ action: "start", phase: "Work", task: "Task A" });
-	const result = await execute({ action: "start", phase: "Work", task: "Task A" });
+	const result = await execute({
+		action: "start",
+		phase: "Work",
+		task: "Task A",
+	});
 	expect(result).toBe("Task already in progress.");
 });
 
@@ -139,7 +150,11 @@ test("start rejects completed task", async () => {
 		items: [{ phase: "Work", items: ["Task A"] }],
 	});
 	await execute({ action: "done", task: "Task A" });
-	const result = await execute({ action: "start", phase: "Work", task: "Task A" });
+	const result = await execute({
+		action: "start",
+		phase: "Work",
+		task: "Task A",
+	});
 	expect(result).toBe("Task already completed.");
 });
 

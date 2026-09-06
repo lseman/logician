@@ -5,6 +5,31 @@ import {
 } from "../../runtime/events/runtime-event-bus.ts";
 
 describe("RuntimeEventBus replay", () => {
+	test("nested emissions preserve sequence order for all clients", () => {
+		const bus = new RuntimeEventBus();
+		const received: number[] = [];
+		bus.subscribe(event => {
+			if (event.sequence === 1) bus.emit({ type: "phase", state: "thinking" });
+		});
+		bus.subscribe(event => received.push(event.sequence));
+		bus.emit({ type: "phase", state: "ready" });
+		expect(received).toEqual([1, 2]);
+	});
+
+	test("replay callbacks can emit without losing notifications", () => {
+		const bus = new RuntimeEventBus();
+		bus.emit({ type: "phase", state: "ready" });
+		bus.emit({ type: "phase", state: "thinking" });
+		const received: number[] = [];
+		bus.subscribe(
+			event => {
+				received.push(event.sequence);
+				if (event.sequence === 1) bus.emit({ type: "phase", state: "ready" });
+			},
+			{ replay: true },
+		);
+		expect(received).toEqual([1, 2, 3]);
+	});
 	test("keeps live delivery and monotonic protocol metadata", () => {
 		let now = 1_000;
 		const bus = new RuntimeEventBus({ now: () => now++ });

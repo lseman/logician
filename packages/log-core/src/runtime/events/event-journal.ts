@@ -49,6 +49,11 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 	private count = 0;
 	private nextId = 1;
 	private subscribers = new Set<Subscriber<E>>();
+	private publishing = false;
+	private pending: Array<{
+		entry: EventJournalEntry<E>;
+		subscribers: Subscriber<E>[];
+	}> = [];
 
 	constructor(options: EventJournalOptions<E> = {}) {
 		const capacity = options.capacity ?? DEFAULT_CAPACITY;
@@ -119,12 +124,23 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 		handler: Subscriber<E>,
 		options: EventJournalSubscriptionOptions<E> = {},
 	): () => void {
-		if (options.replay) {
-			const query = options.replay === true ? {} : options.replay;
-			for (const entry of this.snapshot(query)) this.invoke(handler, entry);
+		const history = options.replay
+			? this.snapshot(options.replay === true ? {} : options.replay)
+			: [];
+		let replaying = true;
+		const buffered: EventJournalEntry<E>[] = [];
+		const subscriber: Subscriber<E> = entry => {
+			if (replaying) buffered.push(entry);
+			else this.invoke(handler, entry);
+		};
+		this.subscribers.add(subscriber);
+		for (const entry of history) this.invoke(handler, entry);
+		for (let index = 0; index < buffered.length; index++) {
+			this.invoke(handler, buffered[index]);
 		}
-		this.subscribers.add(handler);
-		return () => this.subscribers.delete(handler);
+		buffered.length = 0;
+		replaying = false;
+		return () => this.subscribers.delete(subscriber);
 	}
 
 	clear(): void {
@@ -134,8 +150,20 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 	}
 
 	private publish(entry: EventJournalEntry<E>): void {
-		for (const subscriber of [...this.subscribers]) {
-			this.invoke(subscriber, entry);
+		this.pending.push({ entry, subscribers: [...this.subscribers] });
+		if (this.publishing) return;
+		this.publishing = true;
+		try {
+			for (let index = 0; index < this.pending.length; index++) {
+				const delivery = this.pending[index];
+				for (const subscriber of delivery.subscribers) {
+					if (this.subscribers.has(subscriber))
+						this.invoke(subscriber, delivery.entry);
+				}
+			}
+		} finally {
+			this.pending.length = 0;
+			this.publishing = false;
 		}
 	}
 
@@ -143,10 +171,14 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 		try {
 			subscriber(entry);
 		} catch (error) {
-			this.onSubscriberError?.(
-				error instanceof Error ? error : new Error(String(error)),
-				entry,
-			);
+			try {
+				this.onSubscriberError?.(
+					error instanceof Error ? error : new Error(String(error)),
+					entry,
+				);
+			} catch {
+				// Diagnostic observers must not interrupt delivery either.
+			}
 		}
 	}
 }

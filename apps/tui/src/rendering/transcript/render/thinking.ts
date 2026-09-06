@@ -2,13 +2,13 @@
 // Renders assistant reasoning chunks (collapsed/summary/expanded modes) with
 // code-block syntax highlighting in expanded mode.
 
-import { highlight, highlightAuto } from "@logician/log-runtime/formatting";
 import type {
 	AssistantChunk,
 	ThinkingDisplayStyle,
 } from "@logician/log-runtime/sessions";
-import { DIM, RESET } from "../../../terminal/core.ts";
+import { RESET } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
+import { highlight, highlightAuto } from "../highlight.ts";
 import { wrapText } from "../layout.ts";
 import {
 	extractLangFromFence,
@@ -16,6 +16,8 @@ import {
 	stripThinkingToolMarkup,
 	unwrapThinkingChannel,
 } from "../text-utils.ts";
+
+
 
 export function renderThinkingChunk(
 	chunk: AssistantChunk,
@@ -33,11 +35,16 @@ export function renderThinkingChunk(
 	switch (thinkingMode) {
 		case "collapsed": {
 			const preview = text.trim().slice(0, 100);
-			lines.push(`${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`);
+
+			lines.push(
+				`${theme.fgRaw("thinkingText")}${preview ? `${preview}...` : "thinking"}${RESET}`,
+			);
 			break;
 		}
 		case "summary": {
-			lines.push(`${DIM}\x1b[2m${text.trim().slice(0, 150)}\x1b[0m${RESET}`);
+			lines.push(
+				`${theme.fgRaw("thinkingText")}${text.trim().slice(0, 150)}${RESET}`,
+			);
 			break;
 		}
 		case "expanded": {
@@ -62,7 +69,7 @@ function renderThinkingExpanded(
 	let inCodeBlock = false;
 	let codeContent = "";
 	let codeBlockLang: string | null = null;
-	const fg = theme.fgRaw("thinkingText") + DIM;
+	const fg = theme.fgRaw("thinkingText");
 
 	for (const rawLine of rawLines) {
 		if (rawLine.startsWith("```")) {

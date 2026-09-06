@@ -1103,6 +1103,28 @@ export class Transcript {
 		this.notify();
 	}
 
+	/**
+	 * Add a pre-rendered banner (the startup splash). Unlike addSystemMessage
+	 * the content is shown verbatim — no "◇ SYSTEM" gutter, no markdown pass —
+	 * so it must already carry its own framing and ANSI styling. The renderer
+	 * keys off the leading "[Banner]\n" marker.
+	 */
+	addBannerMessage(content: string): void {
+		this.state.turns.push({
+			id: `banner_${Date.now()}`,
+			userMessage: {
+				type: "user" as const,
+				content: content.startsWith("[Banner]\n")
+					? content
+					: `[Banner]\n${content}`,
+			},
+			assistantMessage: null,
+			isComplete: true,
+			contentRevision: this._contentRevision,
+		});
+		this.notify();
+	}
+
 	// ── Thinking display ─────────────────────────────────────────────────
 
 	getThinkingDisplayMode(): ThinkingDisplayStyle {

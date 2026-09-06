@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+const OUTPUT_LIMIT = 100_000;
+
 export interface ProcessResult {
 	exitCode: number | null;
 	stdout: string;
@@ -43,16 +45,26 @@ export async function runProcess(
 					forceTimer = setTimeout(() => terminate("SIGKILL"), 2000);
 				}, options.timeoutMs)
 			: undefined;
-		child.stdout.on("data", chunk => (stdout += String(chunk)));
-		child.stderr.on("data", chunk => (stderr += String(chunk)));
-		child.on("error", error => (stderr += `${error.message}\n`));
+		// Decode across chunk boundaries and cap retention during execution,
+		// not only after a potentially long-running agent has exited.
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk: string) => {
+			stdout = (stdout + chunk).slice(-OUTPUT_LIMIT);
+		});
+		child.stderr.on("data", (chunk: string) => {
+			stderr = (stderr + chunk).slice(-OUTPUT_LIMIT);
+		});
+		child.on("error", error => {
+			stderr = `${stderr}${error.message}\n`.slice(-OUTPUT_LIMIT);
+		});
 		child.on("close", exitCode => {
 			if (timer) clearTimeout(timer);
 			if (forceTimer) clearTimeout(forceTimer);
 			resolve({
 				exitCode,
-				stdout: stdout.slice(-100_000),
-				stderr: stderr.slice(-100_000),
+				stdout,
+				stderr,
 				durationMs: Math.round(performance.now() - started),
 				timedOut,
 			});

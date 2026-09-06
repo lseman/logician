@@ -68,6 +68,11 @@ export interface RuntimeEventReplayGap {
 /** Ordered runtime notifications and asynchronous error delivery. */
 export class RuntimeEventBus {
 	private subscribers = new Set<ProtocolCallback>();
+	private publishing = false;
+	private pending: Array<{
+		notification: AgentProtocolNotification;
+		subscribers: ProtocolCallback[];
+	}> = [];
 	private errorCallback: ErrorCallback | null = null;
 	private readonly journal: EventJournal<RuntimeEvent>;
 	private readonly historyCapacity: number;
@@ -114,6 +119,7 @@ export class RuntimeEventBus {
 		callback: ProtocolCallback,
 		options: RuntimeEventSubscriptionOptions = {},
 	): () => void {
+		let history: readonly AgentProtocolNotification[] = [];
 		if (options.replay) {
 			const query = options.replay === true ? {} : options.replay;
 			const gap = this.replayGap(query);
@@ -124,18 +130,28 @@ export class RuntimeEventBus {
 			// gap and is expected to request a full refresh itself, so skip the
 			// (necessarily incomplete) partial snapshot replay.
 			const skipReplay = gap !== undefined && options.preReplayGapCheck;
-			if (!skipReplay) {
-				for (const notification of this.snapshot(query)) {
-					try {
-						callback(notification);
-					} catch {
-						// Replay has the same client-fault isolation as live delivery.
-					}
-				}
-			}
+			if (!skipReplay) history = this.snapshot(query);
 		}
-		this.subscribers.add(callback);
-		return () => this.subscribers.delete(callback);
+		let replaying = true;
+		const buffered: AgentProtocolNotification[] = [];
+		const deliver = (notification: AgentProtocolNotification) => {
+			try {
+				callback(notification);
+			} catch {
+				/* Client failures cannot interrupt the runtime. */
+			}
+		};
+		const subscriber: ProtocolCallback = notification => {
+			if (replaying) buffered.push(notification);
+			else deliver(notification);
+		};
+		this.subscribers.add(subscriber);
+		for (const notification of history) deliver(notification);
+		for (let index = 0; index < buffered.length; index++)
+			deliver(buffered[index]);
+		buffered.length = 0;
+		replaying = false;
+		return () => this.subscribers.delete(subscriber);
 	}
 
 	/** Retained protocol notifications ordered oldest to newest. */
@@ -293,12 +309,24 @@ export class RuntimeEventBus {
 			entry.recordedAt,
 			eventCorrelation,
 		);
-		for (const callback of this.subscribers) {
-			try {
-				callback(notification);
-			} catch {
-				// A client subscriber cannot interrupt the runtime.
+		this.pending.push({ notification, subscribers: [...this.subscribers] });
+		if (this.publishing) return;
+		this.publishing = true;
+		try {
+			for (let index = 0; index < this.pending.length; index++) {
+				const delivery = this.pending[index];
+				for (const callback of delivery.subscribers) {
+					if (!this.subscribers.has(callback)) continue;
+					try {
+						callback(delivery.notification);
+					} catch {
+						/* Client fault isolation. */
+					}
+				}
 			}
+		} finally {
+			this.pending.length = 0;
+			this.publishing = false;
 		}
 	}
 

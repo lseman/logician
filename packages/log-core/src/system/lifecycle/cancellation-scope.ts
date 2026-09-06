@@ -36,6 +36,7 @@ export class CancellationScope {
 	private readonly detachParent?: () => void;
 	private readonly deadlineTimer?: ReturnType<typeof setTimeout>;
 	private closed = false;
+	private closePromise?: Promise<void>;
 
 	constructor(readonly options: CancellationScopeOptions) {
 		const { parent, timeoutMs } = options;
@@ -100,41 +101,50 @@ export class CancellationScope {
 		work: (signal: AbortSignal) => Promise<T>,
 		options: { rejectOnAbort?: boolean } = {},
 	): Promise<T> {
+		if (this.closed) throw new Error("Cannot run work in a closed scope");
+		let detachAbort: (() => void) | undefined;
 		try {
 			this.signal.throwIfAborted();
 			if (options.rejectOnAbort === false) return await work(this.signal);
 			return await new Promise<T>((resolve, reject) => {
 				const onAbort = () => reject(this.signal.reason);
 				this.signal.addEventListener("abort", onAbort, { once: true });
+				detachAbort = () => this.signal.removeEventListener("abort", onAbort);
 				Promise.resolve()
-					.then(() => work(this.signal))
-					.then(resolve, reject)
-					.finally(() => this.signal.removeEventListener("abort", onAbort));
+					.then(() => {
+						this.signal.throwIfAborted();
+						return work(this.signal);
+					})
+					.then(resolve, reject);
 			});
 		} finally {
+			detachAbort?.();
 			await this.close();
 		}
 	}
 
-	async close(): Promise<void> {
-		if (this.closed) return;
+	close(): Promise<void> {
+		if (this.closePromise) return this.closePromise;
 		this.closed = true;
 		if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
 		this.detachParent?.();
-		const failures: unknown[] = [];
-		for (const cleanup of this.cleanups.reverse()) {
-			try {
-				await cleanup();
-			} catch (error) {
-				failures.push(error);
+		const cleanups = this.cleanups.splice(0).reverse();
+		this.closePromise = Promise.resolve().then(async () => {
+			const failures: unknown[] = [];
+			for (const cleanup of cleanups) {
+				try {
+					await cleanup();
+				} catch (error) {
+					failures.push(error);
+				}
 			}
-		}
-		this.cleanups.length = 0;
-		if (failures.length) {
-			throw new AggregateError(
-				failures,
-				`Cleanup failed for ${this.options.operation}`,
-			);
-		}
+			if (failures.length) {
+				throw new AggregateError(
+					failures,
+					`Cleanup failed for ${this.options.operation}`,
+				);
+			}
+		});
+		return this.closePromise;
 	}
 }

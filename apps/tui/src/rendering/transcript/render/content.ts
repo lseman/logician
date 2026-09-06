@@ -2,9 +2,9 @@
 // Pi-style line-numbered content rendering, syntax-highlighted file content,
 // and the shared truncation helpers used throughout the transcript renderers.
 
-import { highlight, highlightAuto } from "@logician/log-runtime/formatting";
 import { DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
+import { highlight, highlightAuto } from "../highlight.ts";
 import { wrapText } from "../layout.ts";
 
 // ── Pi-style line-numbered content rendering ────────────────────────────
@@ -17,8 +17,7 @@ function renderPiContent(
 	totalLines: number,
 ): string[] {
 	const lines: string[] = [];
-	const bg = theme.bg("mdCodeBlockBg", "");
-	const bgReset = RESET;
+
 	const gutterColor = theme.fgRaw("dim");
 	const contentColor = theme.fgRaw("assistantText");
 
@@ -53,7 +52,10 @@ function renderPiContent(
 				" ",
 			);
 			lines.push(
-				`${bg}${gutterColor}${numStr}│${RESET}${bg}${contentColor}${content}${bgReset}`,
+				theme.bg(
+					"mdCodeBlockBg",
+					`${gutterColor}${numStr}│${RESET}${contentColor}${content}`,
+				),
 			);
 		}
 	}
@@ -70,8 +72,7 @@ export function renderFileContent(
 	expanded: boolean,
 ): string[] {
 	const lines: string[] = [];
-	const bg = theme.bg("mdCodeBlockBg", "");
-	const bgReset = RESET;
+
 	const gutterColor = theme.fgRaw("dim");
 	const plainColor = theme.fgRaw("assistantText");
 
@@ -113,11 +114,13 @@ export function renderFileContent(
 				let hlContent = extractHlSpan(hlLine, displayLine);
 				if (!hlContent) hlContent = plainColor + displayLine + plainColor;
 				lines.push(
-					`${bg}${gutterColor}${numStr}│${RESET}${bg}${hlContent}${bgReset}`,
+					theme.bg(
+						"mdCodeBlockBg",
+						`${gutterColor}${numStr}│${RESET}${hlContent}`,
+					),
 				);
 			}
 		}
-
 	} else {
 		// No language detection — plain text with line numbers
 		for (let i = 0; i < displayLines.length; i++) {
@@ -134,7 +137,10 @@ export function renderFileContent(
 				const content = displayContent[wi];
 				const numStr = String(lineNum).padStart(gutterWidth - 1, " ");
 				lines.push(
-					`${bg}${gutterColor}${numStr}│${RESET}${bg}${plainColor}${content}${bgReset}`,
+					theme.bg(
+						"mdCodeBlockBg",
+						`${gutterColor}${numStr}│${RESET}${plainColor}${content}`,
+					),
 				);
 			}
 		}

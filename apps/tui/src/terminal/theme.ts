@@ -3,8 +3,7 @@
 // Supports hex (#rrggbb), 256-color (0-255), variable references, and default ("").
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 // ── Color token names ─────────────────────────────────────────────────────────
 
@@ -151,8 +150,9 @@ function rgbTo256(r: number, g: number, b: number): number {
 		(g - GRAY_VALUES[gI2]) ** 2 * 0.587 +
 		(b - GRAY_VALUES[gI2]) ** 2 * 0.114;
 
-	const spread = Math.max(r, g, b) - Math.min(r, g, b);
-	if (spread < 10 && grayDist < cubeDist) return grayIdx;
+	// Tinted charcoal surfaces are often closer to the gray ramp than to the
+	// coarse color cube. Avoid turning a subtle tint into saturated navy.
+	if (grayDist < cubeDist) return grayIdx;
 	return cubeIdx;
 }
 
@@ -241,7 +241,9 @@ export class Theme {
 	bg(color: ThemeBg, text: string): string {
 		const ansi = this.bgCache.get(color);
 		if (!ansi) throw new Error(`Unknown theme bg: ${color}`);
-		return `${ansi}${text}${RESET}`;
+		// Nested foreground styles reset their background too. Restore the surface
+		// after those resets so highlighted spans cannot punch holes in a block.
+		return `${ansi}${text.replace(/\x1b\[(?:0|49)m/g, `$&${ansi}`)}${RESET}`;
 	}
 
 	/** Get raw ANSI color code without trailing reset. Use for composing custom styles. */
@@ -249,6 +251,16 @@ export class Theme {
 		const ansi = this.fgCache.get(color);
 		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
 		return ansi;
+	}
+
+	/**
+	 * Raw foreground ANSI code for an arbitrary RGB triple, honoring the theme's
+	 * color depth (truecolor when available, nearest 256-cube index otherwise).
+	 * Use for gradients and other one-off styling that isn't a named token.
+	 */
+	rgbRaw(r: number, g: number, b: number): string {
+		if (this.mode === "truecolor") return `\x1b[38;2;${r};${g};${b}m`;
+		return `\x1b[38;5;${rgbTo256(r, g, b)}m`;
 	}
 
 	bgRaw(color: ThemeBg): string {
@@ -279,7 +291,7 @@ export class Theme {
 	// ── Convenience helpers ───────────────────────────────────────────────────
 
 	codeBlockBg(text: string): string {
-		return `${this.bgCache.get("mdCodeBlockBg") ?? ""}${DIM}${text}${RESET}`;
+		return this.bg("mdCodeBlockBg", this.fg("mdCodeBlock", text));
 	}
 
 	thinkingBorderColor(
@@ -349,12 +361,7 @@ function getThemesDir(): string {
 // Themes bundled with the package, used when a theme isn't found under the
 // user's ~/.logician/themes (fresh installs, CI, sandboxed HOME dirs).
 // Use process.cwd() for reliable resolution in compiled/sandboxed environments.
-const BUNDLED_THEMES_DIR = join(
-	process.cwd(),
-	"apps",
-	"tui",
-	"themes",
-);
+const BUNDLED_THEMES_DIR = join(process.cwd(), "apps", "tui", "themes");
 
 function loadThemeJson(_name: string, path: string): ThemeJson {
 	const content = readFileSync(path, "utf-8");
@@ -410,6 +417,7 @@ function buildThemeFromJson(
 		"mdHeading",
 		"mdCode",
 		"mdCodeBlock",
+		"mdCodeBlockBorder",
 		"mdLink",
 		"mdQuote",
 		"mdListBullet",
@@ -459,6 +467,8 @@ function buildThemeFromJson(
 		"memoryId",
 		"memoryContent",
 		"memoryCount",
+		"bashMode",
+		"pythonMode",
 	];
 
 	const bgKeys: ThemeBg[] = ["mdCodeBlockBg", "toolBlockBg"];
@@ -466,6 +476,10 @@ function buildThemeFromJson(
 		userLabel: "accent",
 		responseLabel: "assistantText",
 		reasoningLabel: "thinkingText",
+		mdCodeBlockBorder: "separator",
+		inputBarBorder: "border",
+		bashMode: "warning",
+		pythonMode: "accent",
 	};
 
 	for (const key of fgKeys) {

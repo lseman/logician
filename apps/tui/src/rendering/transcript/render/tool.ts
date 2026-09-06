@@ -4,7 +4,6 @@
 // helpers (diff/terminal/preview/mcp/permission blocks) used by both the
 // per-tool-type detail renderers and the subagent renderers.
 
-import { highlight, highlightAuto } from "@logician/log-runtime/formatting";
 import type { ToolExecution } from "@logician/log-runtime/sessions";
 import {
 	BOLD,
@@ -13,13 +12,14 @@ import {
 	RESET,
 	visibleWidth,
 } from "../../../terminal/core.ts";
-import { theme } from "../../../terminal/theme.ts";
 import type { ThemeColor } from "../../../terminal/theme.ts";
+import { theme } from "../../../terminal/theme.ts";
 import {
 	sanitizeTerminalText,
 	sanitizeTerminalValue,
 } from "../../terminal-sanitize.ts";
 import { detectLanguage } from "../file-language.ts";
+import { highlight, highlightAuto } from "../highlight.ts";
 import { wrapText } from "../layout.ts";
 import {
 	compactText,
@@ -37,7 +37,9 @@ import {
 } from "../text-utils.ts";
 import { truncateText, withTruncationMarker } from "./content.ts";
 import type { RenderCtx, SanitizedStringCache } from "./tool-context.ts";
+
 export type { RenderCtx, SanitizedToolCache } from "./tool-context.ts";
+
 // ── Helper registry for tool detail renderers ────────────────────────────────
 // Must be declared before collapsedToolPreview / toolDetailLines so the
 // runtime can reference it without a circular init-order dependency.
@@ -146,7 +148,6 @@ import {
 	renderEvalDetails,
 	renderFileDiffDetails,
 	renderLspDetails,
-	renderMcpDetails,
 	renderWriteDetails,
 	type ToolDetailHelpers,
 } from "./tool-details.ts";
@@ -275,7 +276,9 @@ export function renderTool(
 		const gap = available - visibleWidth(row) - visibleWidth(right);
 		row = gap >= 2 ? `${row}${" ".repeat(gap)}${right}` : `${row} ${right}`;
 	}
-	lines.push(blockLine(borderColor, clampLineToWidth(row, contentWidth), width));
+	lines.push(
+		blockLine(borderColor, clampLineToWidth(row, contentWidth), width),
+	);
 	lines.push(blockDivider(borderColor, width, "Output"));
 
 	// Edits keep their compact diff preview. File writes and appends report
@@ -288,14 +291,23 @@ export function renderTool(
 		if (tool.isError) {
 			const resultLines = resultText.split("\n");
 			lines.push(
-				blockLine(borderColor, `${BOLD}${theme.fg("toolError", label)}${RESET} ${resultLines[0]}`, width),
+				blockLine(
+					borderColor,
+					`${BOLD}${theme.fg("toolError", label)}${RESET} ${resultLines[0]}`,
+					width,
+				),
 			);
 			for (let ri = 1; ri < resultLines.length; ri++) {
 				lines.push(blockLine(borderColor, resultLines[ri], width));
 			}
 		} else {
 			// Syntax-highlight the diff in collapsed view.
-			const diffLines = renderDiffBlock(ctx, resultText, contentWidth, detectLanguage(filePath));
+			const diffLines = renderDiffBlock(
+				ctx,
+				resultText,
+				contentWidth,
+				detectLanguage(filePath),
+			);
 			lines.push(blockLine(borderColor, `${BOLD}${label}${RESET}`, width));
 			for (const dl of diffLines) {
 				lines.push(blockLine(borderColor, dl, width));
@@ -438,7 +450,8 @@ function renderSimpleTool(
 	const right = elapsed ? `${DIM}${elapsed}${RESET}` : "";
 	let row = base;
 	if (right) {
-		const gap = Math.max(1, width - 4) - visibleWidth(row) - visibleWidth(right);
+		const gap =
+			Math.max(1, width - 4) - visibleWidth(row) - visibleWidth(right);
 		row = gap >= 2 ? `${row}${" ".repeat(gap)}${right}` : `${row} ${right}`;
 	}
 	lines.push(padToLine(row, width));
@@ -890,10 +903,7 @@ function stripInternalMarkers(text: string): string {
 		"",
 	);
 	// Remove tip element and its content
-	cleaned = cleaned.replace(
-		/<\/?tip(\s[^>]*)?>([\s\S]*?)<\/tip>/gi,
-		"",
-	);
+	cleaned = cleaned.replace(/<\/?tip(\s[^>]*)?>([\s\S]*?)<\/tip>/gi, "");
 	return cleaned;
 }
 
@@ -903,7 +913,10 @@ function renderTerminalBlock(
 	width: number,
 ): string[] {
 	if (!text) return [`${DIM}(no output)${RESET}`];
-	const rawLines = truncateText(stripInternalMarkers(text), ctx.maxMessageLength).split("\n");
+	const rawLines = truncateText(
+		stripInternalMarkers(text),
+		ctx.maxMessageLength,
+	).split("\n");
 	const lines: string[] = [];
 	for (const raw of rawLines) {
 		const content = raw.length ? raw.replace(/\t/g, "    ") : " ";
@@ -970,11 +983,21 @@ function paintBlockBg(row: string): string {
 }
 
 function blockTop(color: ThemeColor, width: number): string {
-	return paintBlockBg(theme.fg(color, `${BOX.tl}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.tr}`));
+	return paintBlockBg(
+		theme.fg(
+			color,
+			`${BOX.tl}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.tr}`,
+		),
+	);
 }
 
 function blockBottom(color: ThemeColor, width: number): string {
-	return paintBlockBg(theme.fg(color, `${BOX.bl}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.br}`));
+	return paintBlockBg(
+		theme.fg(
+			color,
+			`${BOX.bl}${BOX.horiz.repeat(Math.max(1, width - 2))}${BOX.br}`,
+		),
+	);
 }
 
 /**
