@@ -2,6 +2,7 @@ import type {
 	ThinkingDisplayStyle,
 	ToolExecution,
 } from "@logician/log-runtime/sessions";
+import type { ImageBudget } from "../../../terminal/image-budget.ts";
 
 export interface SanitizedStringCache {
 	raw?: string;
@@ -54,4 +55,6 @@ export interface RenderCtx {
 	};
 	/** Explicit simple-tool names from user config, merged with built-in defaults. */
 	simpleTools?: string[];
+	/** Shared image budget for inline image rendering. */
+	imageBudget?: ImageBudget;
 }

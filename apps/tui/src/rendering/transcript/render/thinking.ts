@@ -122,5 +122,4 @@ function renderThinkingCodeBlock(
 	for (const line of codeLines) {
 		lines.push(`${border}  │${RESET} ${line}${RESET}`);
 	}
-	lines.push(`${border}  └─${RESET}`);
 }

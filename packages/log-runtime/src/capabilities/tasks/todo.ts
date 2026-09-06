@@ -98,12 +98,15 @@ function opInit(entry: Record<string, unknown>): string {
 
 	if (errors.length > 0) return errors.join("\n");
 
-	return mutateTasks(() => ({
-		value: `Created ${newPhases.length} phase(s): ${newPhases
-			.map(p => p.name)
-			.join(", ")} (${allTasks.length} tasks)`,
-		changed: true,
-	}));
+	return mutateTasks(ctx => {
+		ctx.phases = newPhases;
+		return {
+			value: `Created ${newPhases.length} phase(s): ${newPhases
+				.map(p => p.name)
+				.join(", ")} (${allTasks.length} tasks)`,
+			changed: true,
+		};
+	});
 }
 
 function opStart(entry: Record<string, unknown>): string {
@@ -112,8 +115,8 @@ function opStart(entry: Record<string, unknown>): string {
 	if (!phase || !task)
 		return "Error: both 'phase' and 'task' are required for start.";
 
-	return mutateTasks(() => {
-		const result = findTaskByContent(getTasks(), task);
+	return mutateTasks(ctx => {
+		const result = findTaskByContent(ctx.phases, task);
 		if (!result)
 			return {
 				value: `Error: task '${task}' not found.`,
@@ -136,8 +139,8 @@ function opDone(entry: Record<string, unknown>): string {
 	const task = stripNewlines(String(entry.task || ""));
 	if (!task) return "Error: 'task' is required for done.";
 
-	return mutateTasks(() => {
-		const result = findTaskByContent(getTasks(), task);
+	return mutateTasks(ctx => {
+		const result = findTaskByContent(ctx.phases, task);
 		if (!result)
 			return { value: `Error: task '${task}' not found.`, changed: false };
 		const { task: targetTask, phase } = result;
@@ -155,8 +158,8 @@ function opRm(entry: Record<string, unknown>): string {
 	if (!phase || !task)
 		return "Error: both 'phase' and 'task' are required for rm.";
 
-	return mutateTasks(() => {
-		const target = findPhase(getTasks(), phase);
+	return mutateTasks(ctx => {
+		const target = findPhase(ctx.phases, phase);
 		if (!target)
 			return {
 				value: `Error: phase '${phase}' not found.`,
@@ -177,15 +180,15 @@ function opDrop(entry: Record<string, unknown>): string {
 	const phase = stripNewlines(String(entry.phase || ""));
 	if (!phase) return "Error: 'phase' is required for drop.";
 
-	return mutateTasks(() => {
-		const idx = getTasks().findIndex(p => p.name === phase);
+	return mutateTasks(ctx => {
+		const idx = ctx.phases.findIndex(p => p.name === phase);
 		if (idx === -1)
 			return {
 				value: `Error: phase '${phase}' not found.`,
 				changed: false,
 			};
-		const count = getTasks()[idx].tasks.length;
-		getTasks().splice(idx, 1);
+		const count = ctx.phases[idx].tasks.length;
+		ctx.phases.splice(idx, 1);
 		return {
 			value: `Dropped phase '${phase}' (${count} task(s)).`,
 			changed: true,
@@ -200,8 +203,8 @@ function opBlock(entry: Record<string, unknown>): string {
 	if (!phase || !task || !blocker)
 		return "Error: 'phase', 'task', and 'blocker' are required for block.";
 
-	return mutateTasks(() => {
-		const result = findTaskByContent(getTasks(), task);
+	return mutateTasks(ctx => {
+		const result = findTaskByContent(ctx.phases, task);
 		if (!result)
 			return { value: `Error: task '${task}' not found.`, changed: false };
 		const { task: targetTask } = result;
@@ -218,8 +221,8 @@ function opUnblock(entry: Record<string, unknown>): string {
 	const task = stripNewlines(String(entry.task || ""));
 	if (!task) return "Error: 'task' is required for unblock.";
 
-	return mutateTasks(() => {
-		const result = findTaskByContent(getTasks(), task);
+	return mutateTasks(ctx => {
+		const result = findTaskByContent(ctx.phases, task);
 		if (!result)
 			return { value: `Error: task '${task}' not found.`, changed: false };
 		const { task: targetTask } = result;
@@ -242,8 +245,8 @@ function opAppend(entry: Record<string, unknown>): string {
 	}
 	if (newTasks.length === 0) return "No valid tasks to append.";
 
-	return mutateTasks(() => {
-		const existingPhases = getTasks();
+	return mutateTasks(ctx => {
+		const existingPhases = ctx.phases;
 		const target = findPhase(existingPhases, phase);
 		if (!target) {
 			existingPhases.push({ name: phase, tasks: newTasks });
@@ -252,14 +255,16 @@ function opAppend(entry: Record<string, unknown>): string {
 				changed: true,
 			};
 		}
+		let added = 0;
 		for (const t of newTasks) {
 			if (!target.tasks.find(ex => ex.content === t.content)) {
 				target.tasks.push(t);
+				added++;
 			}
 		}
 		return {
-			value: `Added ${newTasks.length} task(s) to ${phase}.`,
-			changed: true,
+			value: `Added ${added} task(s) to ${phase}.`,
+			changed: added > 0,
 		};
 	});
 }

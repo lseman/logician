@@ -56,6 +56,7 @@ import {
 	TrustPromptOverlay,
 } from "./overlays/trust-prompt-overlay.ts";
 import { visibleWidth } from "./terminal/core.ts";
+import { detectImageProtocol, setTERMINAL } from "./terminal/image-protocol.ts";
 import { getAvailableThemes, initTheme, theme } from "./terminal/theme.ts";
 
 /** Show the trust prompt as an interactive terminal card before the main TUI. */
@@ -210,6 +211,9 @@ async function main(): Promise<void> {
 
 	// Initialize theme before any component rendering
 	initTheme(runtimeConfig.source.theme);
+	// Initialize terminal image protocol detection for inline image support.
+	const terminalInfo = detectImageProtocol();
+	setTERMINAL(terminalInfo);
 
 	// Display theme info at startup
 	const themes = getAvailableThemes();

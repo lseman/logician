@@ -20,6 +20,7 @@ import { theme } from "../../terminal/theme.ts";
 import type { ScrollView } from "../scroll-view.ts";
 import { wrapText } from "./layout.ts";
 import { truncateText } from "./render/content.ts";
+import type { ImageBudget } from "../../terminal/image-budget.ts";
 import { renderMarkdownLines } from "./render/markdown-table.ts";
 import { renderThinkingChunk } from "./render/thinking.ts";
 import {
@@ -49,6 +50,8 @@ interface TranscriptDisplayOptions {
 	emptyState?: { workspace: string; branch?: string };
 	/** Explicit simple-tool names from user config, merged with built-in defaults. */
 	simpleTools?: string[];
+	/** Shared image budget for inline image rendering. */
+	imageBudget?: ImageBudget;
 }
 
 interface TurnRenderCache {
@@ -123,6 +126,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	private spinnerTick = 0;
 	private spinnerTimer: ReturnType<typeof setInterval> | null = null;
 	private onAnimationTick: (() => void) | null = null;
+	public imageBudget: ImageBudget | undefined;
 	private emptyState: { workspace: string; branch?: string } | undefined;
 	sanitizedToolCache = new WeakMap<ToolExecution, SanitizedToolCache>();
 	sanitizationMetrics = { cacheHits: 0, scannedCharacters: 0 };
@@ -144,6 +148,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		this.maxRenderedLines =
 			options.maxRenderedLines ?? Number.POSITIVE_INFINITY;
 		this.simpleTools = options.simpleTools ?? [];
+		this.imageBudget = options.imageBudget;
 	}
 
 	setEmptyStateContext(context: { workspace: string; branch?: string }): void {

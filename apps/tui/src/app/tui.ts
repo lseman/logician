@@ -22,6 +22,7 @@ import {
 import { StatusBar } from "../footer/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";
+import { ImageBudget } from "../terminal/image-budget.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import {
 	type AutoresearchDashboardAction,
@@ -185,6 +186,7 @@ export class LogicianTUI {
 	sessionTree: SessionTreeOverlay;
 	sessionService: TuiSessionService;
 	private killRing: KillRing;
+	private imageBudget: ImageBudget;
 	private undoStack: UndoStack<{ value: string; cursor: number }>;
 	loopManager: LoopRunner;
 	goalManager: GoalTracker;
@@ -336,6 +338,7 @@ export class LogicianTUI {
 		this.themeSelector = new ThemeSelectorOverlay();
 		this.settingsSelector = new SettingsSelectorOverlay();
 		this.thinkingLevelSelector = new ThinkingLevelSelectorOverlay();
+		this.imageBudget = new ImageBudget(8, () => this.tui.requestRender());
 		this.transcriptDisplay = new TranscriptDisplay({
 			thinkingMode: this.thinkingDisplayMode,
 			maxMessageLength:
@@ -354,6 +357,7 @@ export class LogicianTUI {
 			maxTurns: runtimeConfig.source.transcriptMaxTurns,
 			maxRenderedLines: runtimeConfig.source.transcriptMaxRenderedLines,
 			simpleTools: runtimeConfig.source.simpleTools,
+			imageBudget: this.imageBudget,
 		});
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.
@@ -414,6 +418,21 @@ export class LogicianTUI {
 		// Create the TUI with hardware cursor support
 		this.tui = new TUI(process.stdout, true);
 		this.statusPanel.setOnInvalidate(() => this.tui.requestRender());
+		// Wire image budget lifecycle into render loop
+		this.tui.setOnRenderBegin(() => this.imageBudget.beginPass());
+		this.tui.setOnRenderEnd(() => {
+			const retry = this.imageBudget.endPass();
+			if (retry) this.tui.requestRender();
+			// Emit pending image transmits
+			for (const transmit of this.imageBudget.takeTransmits()) {
+				process.stdout.write(transmit);
+			}
+			// Emit purge commands for demoted images
+			for (const id of this.imageBudget.takePurgeIds()) {
+				const purge = `\x1b_Ga=d,d=I,i=${id},q=2\x1b\\`;
+				process.stdout.write(purge);
+			}
+		});
 		this.todoBar.setOnInvalidate(() => this.tui.requestRender());
 		this.workSurface.setOnInvalidate(() => this.tui.requestRender());
 
@@ -582,7 +601,7 @@ export class LogicianTUI {
 	// ── Layout ─────────────────────────────────────────────────────────────
 
 	private buildLayout(): void {
-		// Stack todo bar + steer queue + question handler above the input bar
+		// Stack todo bar + question handler above the input bar
 		// (both render empty when there's nothing to show, so they only take
 		// space when active).
 		const pinnedContainer = new Container();
@@ -590,10 +609,6 @@ export class LogicianTUI {
 		pinnedContainer.addChild(this.notifications);
 
 		pinnedContainer.addChild(this.researchWidget);
-		pinnedContainer.addChild(this.steerQueue);
-		this.steerQueue.setCallbacks({
-			onAction: action => this.handleSteerQueueAction(action),
-		});
 
 		// Interactive pickers join the fixed composer stack. They consume layout
 		// space above the input like the TODO/queue region instead of floating
@@ -634,10 +649,14 @@ export class LogicianTUI {
 		// separate y position below the clip region.
 		const dock = new Container();
 		dock.addChild(this.workSurface);
-		dock.addChild(new Separator());
+		dock.addChild(this.steerQueue);
+		this.steerQueue.setCallbacks({
+			onAction: action => this.handleSteerQueueAction(action),
+		});
 		dock.addChild(this.todoBar);
 		dock.addChild(pinnedContainer);
 		dock.addChild(this.tui.getAboveInputOverlaysComponent());
+		dock.addChild(new Separator());
 		dock.addChild(this.inputBar);
 		dock.addChild(new Separator());
 		dock.addChild(this.statusPanel);

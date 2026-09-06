@@ -306,16 +306,10 @@ export function renderTool(
 			? collapsedToolPreview(ctx, tool, contentWidth)
 			: [];
 	if (collapsedLines.length > 0) {
-		const label = tool.isError
-			? theme.fg("toolError", "error")
-			: !tool.isComplete
-				? theme.fg("toolRunning", "live")
-				: theme.fg("muted", "output");
-		const prefix = `${theme.fg("dim", "└─")} ${label} `;
 		lines.push(
 			blockLine(
 				borderColor,
-				clampLineToWidth(`${prefix}${collapsedLines[0]}${RESET}`, contentWidth),
+				clampLineToWidth(collapsedLines[0], contentWidth),
 				width,
 			),
 		);

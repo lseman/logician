@@ -155,9 +155,22 @@ export class TUI extends Container {
 
 	private _showHardwareCursor = true;
 
+	/** Optional callback invoked before each render pass. */
+	private _onRenderBegin?: () => void;
+	/** Optional callback invoked after each render pass completes. */
+	private _onRenderEnd?: () => void;
+
 	constructor(_outStream: NodeJS.WriteStream, showCursor = true) {
 		super();
 		this._showHardwareCursor = showCursor;
+	}
+
+	setOnRenderBegin(cb: () => void): void {
+		this._onRenderBegin = cb;
+	}
+
+	setOnRenderEnd(cb: () => void): void {
+		this._onRenderEnd = cb;
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {
@@ -532,6 +545,7 @@ export class TUI extends Container {
 				}
 			}
 		}
+		this._onRenderBegin?.();
 		if (this.focusedComponent && "handleInput" in this.focusedComponent) {
 			(
 				this.focusedComponent as { handleInput: (data: string) => void }
@@ -540,6 +554,7 @@ export class TUI extends Container {
 	}
 
 	private doRender(): void {
+		this._onRenderBegin?.();
 		if (this.stopped) return;
 		try {
 			this._doRenderInner();
@@ -561,6 +576,8 @@ export class TUI extends Container {
 			);
 			// eslint-disable-next-line no-console
 			console.error("TUI render crash:", err);
+		} finally {
+			this._onRenderEnd?.();
 		}
 	}
 

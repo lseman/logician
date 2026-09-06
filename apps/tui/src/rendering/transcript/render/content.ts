@@ -58,14 +58,6 @@ function renderPiContent(
 		}
 	}
 
-	// Add truncation hint if collapsed
-	if (!showAll) {
-		const remaining = totalLines - collapsedPreviewLines;
-		lines.push(
-			`${bg}${DIM}  └─ ${remaining} more lines · ctrl+o to expand${RESET}`,
-		);
-	}
-
 	return lines;
 }
 
@@ -126,13 +118,6 @@ export function renderFileContent(
 			}
 		}
 
-		// Add language label in the gutter area if collapsed
-		if (!showAll) {
-			const remaining = totalLines - collapsedPreviewLines;
-			lines.push(
-				`${bg}${DIM}  └─ ${remaining} more lines · ctrl+o to expand${RESET}`,
-			);
-		}
 	} else {
 		// No language detection — plain text with line numbers
 		for (let i = 0; i < displayLines.length; i++) {
@@ -152,12 +137,6 @@ export function renderFileContent(
 					`${bg}${gutterColor}${numStr}│${RESET}${bg}${plainColor}${content}${bgReset}`,
 				);
 			}
-		}
-		if (!showAll) {
-			const remaining = totalLines - collapsedPreviewLines;
-			lines.push(
-				`${bg}${DIM}  └─ ${remaining} more lines · ctrl+o to expand${RESET}`,
-			);
 		}
 	}
 

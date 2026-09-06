@@ -13,6 +13,8 @@ import {
 	renderInline,
 	renderMarkdownLine,
 } from "../text-utils.ts";
+import { parseInlineImageFromLine } from "../../image-parser.ts";
+import { ImageComponent } from "../../image.ts";
 
 /**
  * Cache for syntax-highlighted code blocks.
@@ -76,6 +78,7 @@ export function renderMarkdownLines(
 	_streaming: boolean,
 	baseColor = theme.fg("assistantText", ""),
 	firstLinePrefix = "",
+	_imageBudget?: unknown,
 ): string[] {
 	const lines: string[] = [];
 	const rawLines = text.split("\n");
@@ -96,10 +99,7 @@ export function renderMarkdownLines(
 				for (const cl of renderedCode.split("\n")) {
 					lines.push(`${bg}  ${cl}${bgReset}`);
 				}
-				const count = codeContent.split("\n").length;
-				lines.push(
-					`${bg}${DIM}  └─ ${count} line${count === 1 ? "" : "s"}${bgReset}`,
-				);
+
 				codeContent = "";
 				codeBlockLang = null;
 				inCodeBlock = false;
@@ -113,6 +113,19 @@ export function renderMarkdownLines(
 
 		if (inCodeBlock) {
 			codeContent += (codeContent ? "\n" : "") + rawLine;
+			continue;
+		}
+
+		// Handle standalone inline images: ![alt](data:image/...)
+		const { image } = parseInlineImageFromLine(rawLine);
+		if (image) {
+			const img = new ImageComponent(image.data, image.mimeType, {
+				maxWidthCells: Math.max(10, Math.min(maxLen - 2, 40)),
+			});
+			const imgLines = img.render(maxLen);
+			for (const imgLine of imgLines) {
+				lines.push(imgLine);
+			}
 			continue;
 		}
 
@@ -198,7 +211,7 @@ export function renderMarkdownLines(
 		for (const cl of renderedCode.split("\n")) {
 			lines.push(`${bg}  ${cl}${bgReset}`);
 		}
-		lines.push(`${bg}${DIM}  └─ streaming${bgReset}`);
+
 	}
 
 	return lines;

@@ -57,16 +57,15 @@ export function mutateTasks<T>(
 ): T {
 	const draft = clonePhases();
 	let draftNextTaskId = nextTaskId;
-	const result = mutation({
+	const ctx = {
 		phases: draft,
 		allocateId: () => draftNextTaskId++,
-		resetIds: () => {
-			draftNextTaskId = 1;
-		},
-	});
+		resetIds: () => { draftNextTaskId = 1; },
+	};
+	const result = mutation(ctx);
 	if (!result.changed) return result.value;
 
-	phases = draft;
+	phases = ctx.phases;
 	nextTaskId = draftNextTaskId;
 	const snapshot = clonePhases();
 	for (const listener of listeners) {

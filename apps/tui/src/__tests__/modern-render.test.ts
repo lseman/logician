@@ -1000,7 +1000,6 @@ void test("expanded reasoning renders fenced code as one labeled block", () => {
 	assert.match(output, /┌─ typescript · 2 lines/);
 	assert.match(output, /│ const value = 1;/);
 	assert.match(output, /│ return value;/);
-	assert.match(output, /└─/);
 	assert.equal(output.match(/typescript/g)?.length, 1);
 	assert.doesNotMatch(output, /```/);
 });
