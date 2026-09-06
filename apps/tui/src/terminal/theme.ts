@@ -348,10 +348,11 @@ function getThemesDir(): string {
 
 // Themes bundled with the package, used when a theme isn't found under the
 // user's ~/.logician/themes (fresh installs, CI, sandboxed HOME dirs).
+// Use process.cwd() for reliable resolution in compiled/sandboxed environments.
 const BUNDLED_THEMES_DIR = join(
-	dirname(fileURLToPath(import.meta.url)),
-	"..",
-	"..",
+	process.cwd(),
+	"apps",
+	"tui",
 	"themes",
 );
 
