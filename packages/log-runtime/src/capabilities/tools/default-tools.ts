@@ -41,6 +41,62 @@ export interface DefaultToolsOptions {
 	lspPool?: LspClientPool;
 }
 
+// ── Core tools (top-level, always advertised to the provider) ────────────────
+
+/** Tools that are always available as top-level function calls. */
+const CORE_TOOL_NAMES = new Set<string>([
+	"list_files",
+	"find",
+	"read_file",
+	"grep",
+	"edit_file",
+	"ast_edit",
+	"write_file",
+	"bash",
+	"todo",
+	"ask_user",
+	"rag_search",
+	"rag_ingest",
+	"eval",
+	"workpool",
+	"completion",
+	"wait",
+]);
+
+/**
+ * Extract only core tools from a tool array.
+ */
+function filterCoreTools(tools: Tool[]): Tool[] {
+	return tools.filter(t => CORE_TOOL_NAMES.has(t.name));
+}
+
+// ── Discoverable tools (xd:// devices) ────────────────────────────────────────
+
+/** Tools accessible via `write xd://<name>` — not advertised to the provider. */
+const DISCOVERABLE_TOOL_NAMES = new Set<string>([
+	"git",
+	"sandbox",
+	"file_diff",
+	"web_fetch",
+	"web_search",
+	"browser",
+	"lsp",
+	"hub",
+	"graphician",
+]);
+
+/**
+ * Extract discoverable tools from a tool array.
+ */
+function filterDiscoverableTools(tools: Tool[]): Tool[] {
+	return tools.filter(t => DISCOVERABLE_TOOL_NAMES.has(t.name));
+}
+
+// ── Factory functions ─────────────────────────────────────────────────────────
+
+/**
+ * Build all default tools. Used by the ToolRouter for dispatch and TUI display.
+ */
 export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 	const webSearch = opts.webSearch ?? { baseUrl: DEFAULT_SEARXNG_URL };
 	const enabled: Record<string, boolean | undefined> = {
@@ -84,4 +140,21 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		...(opts.lspPool ? [createLspTool(opts.lspPool)] : []),
 	];
 	return tools;
+}
+
+/**
+ * Build only core tools. Used for provider tool list and system prompt.
+ * Discoverable tools are NOT advertised to the model as top-level tools.
+ */
+export function createCoreTools(opts: DefaultToolsOptions = {}): Tool[] {
+	const allTools = createDefaultTools(opts);
+	return filterCoreTools(allTools);
+}
+
+/**
+ * Build only discoverable tools. Used for xd:// device mounting.
+ */
+export function createDiscoverableTools(opts: DefaultToolsOptions = {}): Tool[] {
+	const allTools = createDefaultTools(opts);
+	return filterDiscoverableTools(allTools);
 }

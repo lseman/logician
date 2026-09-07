@@ -84,7 +84,15 @@ export interface ToolRegistryOptions {
 	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
 	/** Cache for tool results (P0-1). Pass null to disable caching. */
 	cache?: ToolResultCache | null;
-	/** Maximum entries for the default cache. */
+	/** Loaded skills for skill:// URL resolution. */
+	skills?: Array<{ name: string; content: string; path: string }>;
+	/** Loaded rules for rule:// URL resolution. */
+	rules?: Array<{ name: string; content: string; path: string }>;
+	/** Memoriam gateway for memory:// URL resolution. */
+	memory?: {
+		listObservations: (sessionId: string, limit: number) => Promise<Array<{ id: string; content: string }>>;
+		listMemories: (query?: Record<string, unknown>) => Promise<Array<{ id: string; content: string }>>;
+	};
 	cacheSize?: number;
 	/** TTL in milliseconds for the default cache. */
 	cacheTtlMs?: number;

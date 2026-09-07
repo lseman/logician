@@ -20,6 +20,7 @@ import {
 	type Tool,
 	type ToolResult,
 } from "@logician/log-core";
+import { AgentOutputRegistry } from "../../runtime/bridge/support/internal-urls/agent-registry.js";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import {
 	budgetFromArgs,
@@ -411,6 +412,24 @@ async function _runSpawn(
 			isError: run.status !== "completed",
 			taskIndex: ctx.taskIndex,
 		});
+		// Store in agent:// registry for internal URL access.
+		AgentOutputRegistry.instance().store({
+			agentId,
+			agent: def.name,
+			content: result,
+			status: run.status,
+			details: {
+				metrics: {
+					turns: run.turns,
+					durationMs: run.durationMs,
+					toolCalls: run.toolCalls,
+					toolCallsByName: run.toolCallsByName,
+					validationAttempts: run.validationAttempts,
+				},
+				acceptance: run.acceptance,
+			},
+			timestamp: Date.now(),
+		});
 
 		if (deps.hub) {
 			deps.hub.complete(
@@ -445,6 +464,14 @@ async function _runSpawn(
 			result: message,
 			isError: true,
 			taskIndex: ctx.taskIndex,
+		});
+		AgentOutputRegistry.instance().store({
+			agentId,
+			agent: def.name,
+			content: message,
+			status: "failed",
+			details: { error: (err as Error).message },
+			timestamp: Date.now(),
 		});
 
 		if (deps.hub) {

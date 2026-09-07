@@ -243,6 +243,25 @@ ${toolsList}
 In addition to the tools above, you may have access to other custom tools depending on the project.
 ${mcpWorkflow.join("\n")}
 
+When discoverable tools are enabled (default), additional tools are available behind the \`xd://\` virtual device protocol:
+- Run \`read_file\` with \`path="xd://"\` to list all available devices.
+- Run \`read_file\` with \`path="xd://<device>"\` to see a device's input schema.
+- Run \`write_file\` with \`path="xd://<device>"\` and \`content={<json args>}\` to dispatch a device.
+- Unknown \`xd://\` paths are rejected — they do not become local files. Use \`./xd://<name>\` if a literal file is intended.
+
+You can also read internal resources using special URL schemes:
+- \`skill://<name>\` — reads a loaded skill's full instructions
+- \`rule://<name>\` — reads a frontmatter rule's content
+- \`memory://list\` / \`memory://memories\` — list observations and memories
+- \`local://<path>\` — reads files under .logician/artifacts/
+- \`conflict://<file>\` — lists merge conflicts in a file
+- \`agent://<id>\` — reads a subagent's result; use \`agent://\` to list completed agents, or access fields like \`agent://<id>/content\` or \`agent://<id>/details.metrics.turns\`
+- \`history://\` — lists all completed subagents; \`history://<id>\` returns the same result as \`agent://<id>\`
+- \`mcp://\` — lists configured MCP servers; \`mcp://<resource-uri>\` reads a resource from an MCP server
+- \`log://\` — lists documentation in the workspace \`docs/\` directory; \`log://guides/\` — lists doc categories; \`log://<path>\` — reads a doc file
+- \`ssh://\` — reads files on remote hosts via SSH/scp; \`ssh://<host>/path\` — reads a remote file; \`ssh://\` — lists configured hosts (see \`~/.logician/ssh.json\`)
+- \`artifact://\` — reads session-scoped tool output artifacts; use \`artifact://\` to list available artifacts, or \`artifact://<id>\` to read one
+
 Workflow:
 - Inspect before editing; prefer the most specific tool for the source of truth (MCP over local when both cover it).
 - Read a file before editing or overwriting it. Use replaceAll for renames across a file.

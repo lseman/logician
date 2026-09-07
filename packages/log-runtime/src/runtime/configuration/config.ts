@@ -78,9 +78,9 @@ const KNOWN_KEYS = new Set([
 	"reasoner",
 	"reasonerConfig",
 	"legroom",
-	"memoriam",
 	"simpleTools",
 ]);
+const TOOLS_KEYS = new Set(["xdev"]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
 	"reserveTokens",
@@ -752,7 +752,23 @@ export function validateConfig(
 			if (Object.keys(tcfg).length > 0) cfg.truncation = tcfg;
 		}
 	}
-
+	// tools sub-object.
+	if (obj.tools !== undefined) {
+		if (typeof obj.tools !== "object" || obj.tools === null) {
+			warn(warnings, '"tools" must be an object.');
+		} else {
+			const t = obj.tools as Record<string, unknown>;
+			const tcfg: { xdev?: boolean } = {};
+			for (const key of Object.keys(t)) {
+				if (!TOOLS_KEYS.has(key)) {
+					warn(warnings, `Unknown tools key: "${key}".`);
+				}
+			}
+			const xv = configBool(t.xdev);
+			if (xv !== undefined) tcfg.xdev = xv;
+			if (Object.keys(tcfg).length > 0) cfg.tools = tcfg;
+		}
+	}
 	// MCP fields (passthrough, but warn on unknown sub-keys).
 	if (obj.mcp !== undefined && typeof obj.mcp === "object") {
 		cfg.mcp = obj.mcp as Record<string, unknown>;
@@ -972,6 +988,8 @@ export interface LogicianTuiConfig {
 	/** Explicit list of tool names that should render as simple one-liners.
 	 * Merged with the built-in defaults; only adds tools the user wants as simple. */
 	simpleTools?: string[];
+	/** Enable discoverable tools behind `xd://` URLs (default: true). */
+	tools?: { xdev?: boolean };
 }
 
 export function configString(

@@ -10,6 +10,8 @@ import {
 	createMcpClient,
 	createMcpTool,
 	type McpClient,
+	type McpResourceListResult,
+	type McpResourceReadResult,
 	type McpServerConfig,
 } from "../../capabilities/mcp/client.ts";
 import { updateConfigFile } from "../../runtime/configuration/config-store.ts";
@@ -190,9 +192,41 @@ async function loadPluginMcpServerConfigs(): Promise<
 	return out;
 }
 
+let _instance: McpServerRegistry | undefined;
+
+/** Set the global MCP server registry instance. */
+export function setMcpRegistryInstance(instance: McpServerRegistry): void {
+	_instance = instance;
+}
+
+/** Get the global MCP server registry instance. */
+export function getMcpRegistryInstance(): McpServerRegistry | undefined {
+	return _instance;
+}
 export class McpServerRegistry {
-	private clients: McpClient[] = [];
+	private _clients: McpClient[] = [];
 	private loaded = false;
+
+	get clients(): McpClient[] {
+		return this._clients;
+	}
+
+	// Setter for test access — do not use in production code.
+	set clients(value: McpClient[]) {
+		this._clients = value;
+	}
+
+	/** Get server info derived from loaded clients. */
+	get servers(): McpServerInfo[] {
+		return this._clients.map(client => ({
+			serverName: client.name,
+			server: {} as McpServerConfig,
+			enabled: true,
+			toolCount: 0,
+			loaded: true,
+			configPath: "",
+		}));
+	}
 	private tools: Tool[] = [];
 	private errors: string[] = [];
 	private readonly pluginConfigLoader: () => Promise<
@@ -241,7 +275,7 @@ export class McpServerRegistry {
 		if (this.loaded) {
 			return {
 				tools: this.tools,
-				servers: this.clients.length,
+				servers: this._clients.length,
 				errors: this.errors,
 			};
 		}
@@ -266,7 +300,7 @@ export class McpServerRegistry {
 					usedToolNames.add(exposedName);
 					this.tools.push(createMcpTool(client, def, exposedName) as Tool);
 				}
-				this.clients.push(client);
+				this._clients.push(client);
 				client = null;
 			} catch (error) {
 				client?.close();
@@ -277,16 +311,16 @@ export class McpServerRegistry {
 
 		return {
 			tools: this.tools,
-			servers: this.clients.length,
+			servers: this._clients.length,
 			errors: this.errors,
 		};
 	}
 
 	close(): void {
-		for (const client of this.clients) {
+		for (const client of this._clients) {
 			client.close();
 		}
-		this.clients = [];
+		this._clients = [];
 	}
 
 	async getSnapshot(cwd: string): Promise<McpSnapshotResult> {
@@ -294,7 +328,7 @@ export class McpServerRegistry {
 			await this.resolveConfigs(cwd);
 
 		const loadedEntries = await Promise.all(
-			this.clients.map(
+			this._clients.map(
 				async (client): Promise<[string, { toolCount: number }]> => {
 					try {
 						const tools = await client.listTools();
@@ -362,7 +396,7 @@ export class McpServerRegistry {
 		}
 
 		const loadedServers: Record<string, { toolCount: number }> = {};
-		for (const client of this.clients) {
+		for (const client of this._clients) {
 			try {
 				const tools = await client.listTools();
 				loadedServers[client.name] = { toolCount: tools.length };
@@ -386,5 +420,23 @@ export class McpServerRegistry {
 			servers,
 			loadedServers,
 		};
+	}
+
+	/** List resources from a connected MCP server. */
+	async listResources(serverName: string): Promise<McpResourceListResult> {
+		const client = this._clients.find(c => c.name === serverName);
+		if (!client) throw new Error(`MCP server "${serverName}" not found`);
+		const resources = client.listResources?.();
+		if (!resources) throw new Error(`MCP server "${serverName}" does not support resources`);
+		return resources;
+	}
+
+	/** Read a resource from a connected MCP server. */
+	async readResource(serverName: string, uri: string): Promise<McpResourceReadResult> {
+		const client = this._clients.find(c => c.name === serverName);
+		if (!client) throw new Error(`MCP server "${serverName}" not found`);
+		const read = client.readResource?.(uri);
+		if (!read) throw new Error(`MCP server "${serverName}" does not support resources`);
+		return read;
 	}
 }

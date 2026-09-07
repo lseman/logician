@@ -56,6 +56,22 @@ export function buildMcpProcessEnv(
 	return { ...env, ...expandEnvMap(configured, parent) };
 }
 
+export interface McpResource {
+	uri: string;
+	name: string;
+	description?: string;
+	mimeType?: string;
+}
+
+export interface McpResourceListResult {
+	resources: McpResource[];
+	nextCursor?: string;
+}
+
+export interface McpResourceReadResult {
+	mimeType?: string;
+	contents: Array<{ text?: string; blob?: string }>;
+}
 export interface McpToolDefinition {
 	name: string;
 	title?: string;
@@ -68,6 +84,8 @@ export interface McpClient {
 	initialize(): Promise<void>;
 	listTools(): Promise<McpToolDefinition[]>;
 	callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
+	listResources?(cursor?: string): Promise<McpResourceListResult>;
+	readResource?(uri: string): Promise<McpResourceReadResult>;
 	close(): void;
 }
 
@@ -122,6 +140,20 @@ class StdioMcpClient implements McpClient {
 			clientInfo: { name: "tui", version: "0.2.0" },
 		});
 		this.notify("notifications/initialized");
+	}
+
+	async listResources(cursor?: string): Promise<McpResourceListResult> {
+		const params: Record<string, unknown> = cursor ? { cursor } : {};
+		const result = await this.rpc("resources/list", params);
+		const resources = Array.isArray(result.resources) ? result.resources : [];
+		const nextCursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+		return { resources, nextCursor };
+	}
+
+	async readResource(uri: string): Promise<McpResourceReadResult> {
+		const result = await this.rpc("resources/read", { uri });
+		const contents = Array.isArray(result.contents) ? result.contents : [];
+		return { mimeType: result.mimeType as string | undefined, contents };
 	}
 
 	async listTools(): Promise<McpToolDefinition[]> {
@@ -279,6 +311,20 @@ class HttpMcpClient implements McpClient {
 				typeof result.nextCursor === "string" ? result.nextCursor : undefined;
 		} while (cursor);
 		return tools;
+	}
+
+	async listResources(cursor?: string): Promise<McpResourceListResult> {
+		const params: Record<string, unknown> = cursor ? { cursor } : {};
+		const result = await this.rpc("resources/list", params);
+		const resources = Array.isArray(result.resources) ? result.resources : [];
+		const nextCursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+		return { resources, nextCursor };
+	}
+
+	async readResource(uri: string): Promise<McpResourceReadResult> {
+		const result = await this.rpc("resources/read", { uri });
+		const contents = Array.isArray(result.contents) ? result.contents : [];
+		return { mimeType: result.mimeType as string | undefined, contents };
 	}
 
 	async callTool(

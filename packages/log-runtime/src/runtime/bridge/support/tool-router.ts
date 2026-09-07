@@ -16,6 +16,7 @@ import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import { runPluginBackend } from "../../../adapters/claude-code/plugin-runtime.ts";
 import {
 	McpServerRegistry,
+	setMcpRegistryInstance,
 	type McpSnapshotResult,
 	type McpToggleResult,
 } from "../../../capabilities/mcp/mcp-server-registry.ts";
@@ -45,8 +46,24 @@ import {
 import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
 import type { LspClientPool } from "../../../capabilities/lsp/lsp-client-pool.ts";
 
+import {
+	InternalUrlRouter,
+	SkillProtocolHandler,
+	RuleProtocolHandler,
+	MemoryProtocolHandler,
+	LocalProtocolHandler,
+	ConflictProtocolHandler,
+	HistoryProtocolHandler,
+	McpProtocolHandler,
+	AgentProtocolHandler,
+	LogProtocolHandler,
+	SshProtocolHandler,
+	ArtifactProtocolHandler,
+	ArtifactRegistry,
+} from "./internal-urls/index.ts";
 export interface ToolRouterDeps {
 	cwd: string;
+	sessionId: string;
 	projectTrusted: boolean;
 	tools?: Tool[];
 	extraTools?: Tool[];
@@ -73,6 +90,8 @@ export interface ToolRouterDeps {
 	kernelManager?: KernelManager;
 	/** Pre-constructed LSP client pool for language server queries. */
 	lspPool?: LspClientPool;
+	/** Whether xd:// device mounting is enabled (default: true). */
+	xdevEnabled?: boolean;
 }
 
 /** Snapshot of MCP/skill state as reported by getState()/init(). */
@@ -121,6 +140,7 @@ export interface ToolProvider {
 
 export class ToolRouter {
 	private readonly cwd: string;
+	private readonly sessionId: string;
 	private readonly projectTrusted: boolean;
 	private readonly emit: (event: RuntimeEvent) => void;
 	private readonly onToolAdded: (tool: Tool) => void;
@@ -153,6 +173,8 @@ export class ToolRouter {
 
 	constructor(deps: ToolRouterDeps) {
 		this.cwd = deps.cwd;
+		this.sessionId = deps.sessionId;
+		setMcpRegistryInstance(this.mcpRegistry);
 		this.projectTrusted = deps.projectTrusted;
 		this.emit = deps.emit;
 		this.onToolAdded = deps.onToolAdded;
@@ -184,6 +206,22 @@ export class ToolRouter {
 			this.defaultTools = this.defaultTools.filter(
 				tool => !isFffGrepTool(tool),
 			);
+		}
+		// ── Internal URL router ────────────────────────────────────────────
+		{
+			const router = InternalUrlRouter.instance();
+			router.register(new SkillProtocolHandler());
+			router.register(new RuleProtocolHandler());
+			router.register(new MemoryProtocolHandler());
+			router.register(new LocalProtocolHandler());
+			router.register(new McpProtocolHandler());
+			router.register(new AgentProtocolHandler());
+			router.register(new LogProtocolHandler());
+			router.register(new SshProtocolHandler());
+			ArtifactRegistry.instance().init({ cwd: this.cwd, sessionId: this.sessionId });
+			router.register(new HistoryProtocolHandler());
+			router.register(new ArtifactProtocolHandler());
+			router.register(new ConflictProtocolHandler());
 		}
 		this.mcpProvider = this.createMcpProvider();
 

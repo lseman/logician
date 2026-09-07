@@ -2,10 +2,12 @@
 // Read file contents with line-based pagination, two-axis truncation, and
 // hashline anchors for edit targeting. Output includes a [path#4hex] header
 // followed by numbered lines (1:content).
+// Also resolves internal URL schemes: skill://, rule://, memory://, local://,
+// conflict://, and xd://.
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import type { Tool } from "@logician/log-core";
+import type { Tool, ToolContext } from "@logician/log-core";
 import { recordRead } from "./support/read-tracker.js";
 import {
 	formatHashlineHeader,
@@ -24,6 +26,14 @@ import {
 import {
 	parseConflictBlocks,
 } from "./support/conflict-resolution.js";
+import {
+	listXdDevices,
+	readXdDeviceDocs,
+} from "./support/xd-device-registry.ts";
+import type { ResolveContext } from "../../runtime/bridge/support/internal-urls/types.js";
+import {
+	InternalUrlRouter,
+} from "../../runtime/bridge/support/internal-urls/index.js";
 
 export const read_file: Tool = {
 	readOnly: true,
@@ -69,6 +79,25 @@ export const read_file: Tool = {
 	},
 	execute: async (args, ctx): Promise<string> => {
 		const filePath = String(args.path);
+		// xd:// virtual device listing / docs.
+		if (filePath.toLowerCase() === "xd://") {
+			const devices = listXdDevices();
+			if (devices.size === 0) {
+				return "No xd:// devices are mounted in this session. Check your configuration.";
+			}
+			const lines = [...devices.entries()].map(([name, desc]) => `  ${name}: ${desc}`);
+			return `# Available xd:// devices\n\nVirtual tool devices mounted behind write_file dispatch:\n\n${lines.join("\n")}`;
+		}
+		if (filePath.toLowerCase().startsWith("xd://")) {
+			const deviceName = filePath.slice("xd://".length);
+			const docs = readXdDeviceDocs(deviceName);
+			if (docs !== null) return docs;
+			return `Unknown xd:// device: ${deviceName}. Run read_file with path="xd://" to list available devices.`;
+		}
+		// Internal URL schemes (skill://, rule://, memory://, local://, conflict://).
+		if (isInternalUrl(filePath)) {
+			return resolveInternalUrl(filePath, ctx);
+		}
 		const resolved = resolveReadPath(filePath, ctx.cwd || process.cwd());
 		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 
@@ -174,4 +203,38 @@ function formatConflictNotice(fullContent: string, blocks: { index: number; ours
 	lines.push("[Use conflict://N?q=ours|theirs|ours+theirs|base to resolve]");
 	lines.push("[Use :conflicts selector to view full conflict blocks]");
 	return "\n" + lines.join("\n");
+}
+const INTERNAL_SCHEMES: Record<string, true> = {
+	skill: true,
+	rule: true,
+	memory: true,
+	local: true,
+	history: true,
+	mcp: true,
+	log: true,
+	ssh: true,
+	artifact: true,
+};
+/** Check if a path is an internal URL scheme. */
+function isInternalUrl(path: string): boolean {
+	const m = path.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+	return m !== null && m[1].toLowerCase() in INTERNAL_SCHEMES;
+}
+
+/** Resolve an internal URL to its content. */
+async function resolveInternalUrl(input: string, ctx: ToolContext): Promise<string> {
+	const router = InternalUrlRouter.instance();
+	const context: ResolveContext = {
+		cwd: ctx.cwd || process.cwd(),
+		skills: ctx.skills,
+		rules: ctx.rules,
+		memory: ctx.memory,
+	};
+	try {
+		const resource = await router.resolve(input, context);
+		return resource.content;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return `Error: ${message}`;
+	}
 }

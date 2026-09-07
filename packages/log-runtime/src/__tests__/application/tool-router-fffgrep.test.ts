@@ -23,6 +23,7 @@ function makeRouter(
 
 	const router = new ToolRouter({
 		cwd: "/tmp/test",
+		sessionId: "test-session",
 		projectTrusted: true,
 		tools: opts.tools,
 		extraTools: opts.extraTools,

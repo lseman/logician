@@ -26,9 +26,10 @@ import {
 	truncateHead,
 } from "./support/utils/truncate.ts";
 import {
-	executeResolutionDevice,
-	isResolutionDeviceName,
-} from "./support/resolve-devices.ts";
+	dispatchXdDevice,
+	hasXdDevice,
+	readXdDeviceDocs,
+} from "./support/xd-device-registry.ts";
 import { createMutationSession } from "./mutation/session.js";
 import { createEditStore } from "./support/edit-store.js";
 import { createHash } from "node:crypto";
@@ -79,23 +80,26 @@ export const write_file: Tool = {
 		const append = Boolean(args.append);
 		const resolved = resolvePath(ctx.cwd, filePath);
 		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
-		// xdev dispatch: resolve/reject for staged edits
-		if (filePath.startsWith("xd://")) {
-			const deviceName = filePath.replace("xd://", "");
-			if (isResolutionDeviceName(deviceName)) {
-				const result = await executeResolutionDevice(
-					deviceName,
-					content,
-					ctx.cwd || process.cwd(),
-				);
-				return {
-					content: result.message,
-					details: {
-						filesAffected: result.filesAffected,
-						linesChanged: result.linesChanged,
-					},
-				};
+		// xd:// virtual device dispatch.
+		if (filePath.toLowerCase().startsWith("xd://")) {
+			const deviceName = filePath.slice("xd://".length);
+			const deviceDocs = readXdDeviceDocs(deviceName);
+			if (deviceDocs !== null) {
+				// Writing to a device that exists but has no handler yet.
+				// Return the docs so the model knows how to dispatch properly.
+				return `Device "${deviceName}" is not mounted. See documentation:\n\n${deviceDocs}`;
 			}
+			if (!hasXdDevice(deviceName)) {
+				return `Unknown xd:// device: ${deviceName}. Run read_file with path="xd://" to list available devices, or run write_file with path="./xd://<name>" (prefixed with ./) to create a literal file.`;
+			}
+			let parsedArgs: Record<string, unknown>;
+			try {
+				parsedArgs = JSON.parse(content) as Record<string, unknown>;
+			} catch {
+				return `Invalid JSON for xd:// device "${deviceName}": ${content.slice(0, 100)}...`;
+			}
+			const result = await dispatchXdDevice(deviceName, parsedArgs);
+			return result;
 		}
 
 		const store = createEditStore();

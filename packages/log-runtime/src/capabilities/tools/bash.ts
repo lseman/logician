@@ -3,7 +3,7 @@
 // Ported from Pi with logician integration.
 
 import { spawn } from "node:child_process";
-import { constants, access as fsAccess } from "node:fs/promises";
+import { constants, access as fsAccess, readFile } from "node:fs/promises";
 
 import type { Tool, ToolResult } from "@logician/log-core";
 import { defaultTaskManager } from "./support/utils/background-task-registry.ts";
@@ -23,6 +23,7 @@ import {
 	OutputAccumulator,
 	type TruncationResult,
 } from "./support/utils/truncate.ts";
+import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
 
 const bashSchema = {
 	type: "object",
@@ -135,6 +136,10 @@ export interface BashDetails {
 		maxBytes: number;
 	};
 	fullOutputPath?: string;
+	taskId?: string;
+	pid?: number | null;
+	logFilePath?: string;
+	status?: string;
 	[key: string]: unknown;
 }
 
@@ -431,11 +436,16 @@ async function executeSingleCommand(
 			if (timeoutHandle) clearTimeout(timeoutHandle);
 			ctx.signal?.removeEventListener("abort", onAbort);
 
-			settle(() => {
+			settle(async () => {
 				const snapshot = output.snapshot({ persistIfTruncated: true });
-				output.closeTempFile().catch(() => {});
 
-				// If we already had an error (e.g. abort during close), skip
+				output.closeTempFile().catch(() => {});
+				// Save truncated output to artifact if available
+				let artifactId: string | undefined;
+				if (snapshot.fullOutputPath && snapshot.truncation.truncated) {
+					const id = await saveTruncatedOutput(snapshot.fullOutputPath);
+					artifactId = id ?? undefined;
+				}
 				if (hasError) return;
 
 				// Check for abort
@@ -445,6 +455,7 @@ async function executeSingleCommand(
 						code,
 						signal,
 						output.getLastLineBytes(),
+						artifactId,
 					);
 					resolve({
 						content: appendStatus(
@@ -466,6 +477,7 @@ async function executeSingleCommand(
 						code,
 						signal,
 						output.getLastLineBytes(),
+						artifactId,
 					);
 					resolve({
 						content: appendStatus(
@@ -486,6 +498,7 @@ async function executeSingleCommand(
 					code,
 					signal,
 					output.getLastLineBytes(),
+					artifactId,
 				);
 				resolve({
 					content: text,
@@ -690,6 +703,19 @@ function isBatchFailure(result: BashBatchResult): boolean {
 	return ["failed", "timed_out", "aborted"].includes(result.status);
 }
 
+/** Save truncated output to artifact storage and return the artifact ID. */
+async function saveTruncatedOutput(fullOutputPath: string): Promise<string | null> {
+	const registry = ArtifactRegistry.instance();
+	if (!registry.getManager()) return null;
+	try {
+		const content = await readFile(fullOutputPath, "utf-8").catch(() => null);
+		if (!content) return null;
+		return registry.save(content, "bash");
+	} catch {
+		return null;
+	}
+}
+
 function formatOutput(
 	snapshot: {
 		content: string;
@@ -699,6 +725,7 @@ function formatOutput(
 	code: number | null,
 	signal: string | null,
 	lastLineBytes = 0,
+	artifactId?: string,
 ): { text: string; details: BashDetails | undefined } {
 	const truncation = snapshot.truncation;
 	const emptyText = "(no output)";
@@ -708,20 +735,20 @@ function formatOutput(
 	if (truncation.truncated) {
 		const startLine = truncation.totalLines - truncation.outputLines + 1;
 		const endLine = truncation.totalLines;
-		const fullPath = snapshot.fullOutputPath;
+		const displayPath = artifactId ? `artifact://${artifactId}` : snapshot.fullOutputPath;
 
 		const notices: string[] = [];
 		if (truncation.lastLinePartial) {
 			notices.push(
-				`Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${formatSize(lastLineBytes)}). Full output: ${fullPath}`,
+				`Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${formatSize(lastLineBytes)}). Full output: ${displayPath}`,
 			);
 		} else if (truncation.truncatedBy === "lines") {
 			notices.push(
-				`Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${fullPath}`,
+				`Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${displayPath}`,
 			);
 		} else {
 			notices.push(
-				`Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${fullPath}`,
+				`Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${displayPath}`,
 			);
 		}
 
@@ -738,7 +765,8 @@ function formatOutput(
 				maxLines: truncation.maxLines,
 				maxBytes: truncation.maxBytes,
 			},
-			fullOutputPath: fullPath,
+			fullOutputPath: snapshot.fullOutputPath,
+			artifactId,
 		};
 	}
 

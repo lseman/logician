@@ -129,6 +129,7 @@ export interface AgentBridgeOptions {
 	rtkProxyEnabled?: boolean;
 	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
+	xdevEnabled?: boolean;
 	autoRetryEnabled?: boolean;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;

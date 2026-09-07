@@ -191,6 +191,14 @@ export interface ToolContext {
 	signal?: AbortSignal;
 	onUpdate?: (partialResult: string) => void;
 	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
+	/** Loaded skills for skill:// URL resolution. */
+	skills?: Array<{ name: string; content: string; path: string }>;
+	/** Loaded rules for rule:// URL resolution. */
+	rules?: Array<{ name: string; content: string; path: string }>;
+	memory?: {
+		listObservations: (sessionId: string, limit: number) => Promise<Array<{ id: string; content: string }>>;
+		listMemories: (query?: Record<string, unknown>) => Promise<Array<{ id: string; content: string }>>;
+	};
 }
 
 // ── Event types ───────────────────────────────────────────────────────────

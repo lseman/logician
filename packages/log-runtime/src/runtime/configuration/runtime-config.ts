@@ -158,7 +158,7 @@ export function resolveRuntimeConfig(
 			rtkProxyEnabled: configBool(config.rtkProxyEnabled),
 			graphicianEnabled: configBool(config.graphicianEnabled, true),
 			fffgrepEnabled: configBool(config.fffgrepEnabled, true),
-			autoRetryEnabled: configBool(config.autoRetryEnabled, true),
+			xdevEnabled: configBool(config.tools?.xdev, true),
 			maxRetries: configNumber(config.maxRetries),
 			retryBaseDelayMs: configNumber(config.retryBaseDelayMs),
 			turnTimeoutMs: configNumber(config.turnTimeoutMs),

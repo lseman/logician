@@ -298,6 +298,7 @@ export class AgentRuntime {
 			: undefined;
 		this.toolRouter = new ToolRouter({
 			cwd: this.cwd,
+			sessionId: this.sessionId,
 			projectTrusted: this.projectTrusted,
 			tools: opts.tools,
 			extraTools,
@@ -306,8 +307,8 @@ export class AgentRuntime {
 			fffgrepEnabled: opts.fffgrepEnabled,
 			autoStartMcp: false,
 			kernelManager: this.kernelManager,
-			lspPool: this.lsp,
 			emit: event => this.emit(event),
+			xdevEnabled: opts.xdevEnabled,
 			onToolAdded: _tool => {
 				if (!this.config) return;
 				this.config.tools = this.toolRouter.getDefaultTools();
@@ -1362,6 +1363,29 @@ export class AgentRuntime {
 			cacheSize: this.config.cacheSize,
 			cacheTtlMs: this.config.cacheTtlMs,
 			maxResultChars: this.config.truncation?.toolResultMaxChars,
+			skills: this.toolRouter.getLoadedSkills().map(skill => ({
+				name: skill.name,
+				content: skill.content,
+				path: skill.filePath,
+			})),
+			memory: this.memoriamEnabled
+				? {
+						listObservations: (sessionId: string, limit: number) =>
+							this.memoriamListObservations(sessionId, limit).then((results: unknown[]) =>
+								results.map((r) => ({
+									id: String((r as Record<string, unknown>).id ?? ""),
+									content: String((r as Record<string, unknown>).content ?? ""),
+								})),
+							),
+						listMemories: (query?: Record<string, unknown>) =>
+							this.memoriamListMemories(query).then((results: unknown[]) =>
+								results.map((r) => ({
+									id: String((r as Record<string, unknown>).id ?? ""),
+									content: String((r as Record<string, unknown>).content ?? ""),
+								})),
+							),
+					}
+				: undefined,
 		});
 	}
 
