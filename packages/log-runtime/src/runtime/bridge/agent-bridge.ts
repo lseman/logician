@@ -1,10 +1,10 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
-import { readdirSync, readFileSync, type Dirent } from "node:fs";
+import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { AgentConfig, Message, QueueMode, Tool } from "@logician/log-core";
+import { OpenAIBackend, TtsrManager } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
-import { OpenAIBackend } from "@logician/log-core";
 import type { PermissionMode } from "@logician/log-core/permissions";
 import type { AbortResult, SessionStore } from "@logician/log-core/runtime";
 import {
@@ -16,6 +16,7 @@ import {
 	configurePluginRuntimeEnv,
 	type PluginCommandResult,
 } from "../../adapters/claude-code/plugin-runtime.ts";
+import { createKernelManager } from "../../capabilities/eval/kernel-manager.ts";
 import type { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
 import type { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
 import { LegroomGateway } from "../../capabilities/legroom/legroom-gateway.ts";
@@ -37,11 +38,13 @@ import { MemoriamGateway } from "../../capabilities/memoriam/memoriam-gateway.ts
 import type { MemoriamWorker } from "../../capabilities/memoriam/worker.ts";
 import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
+import {
+	frontmatterToRule,
+	parseFrontmatter,
+} from "../../capabilities/rules/loader.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
-import { parseFrontmatter, frontmatterToRule } from "../../capabilities/rules/loader.ts";
-import { createKernelManager } from "../../capabilities/eval/kernel-manager.ts";
-import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type { TaskPhase } from "../../capabilities/tasks/todo.ts";
+import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
 import type { SandboxProfile } from "../../capabilities/tools/sandbox.ts";
 import { killAllTrackedChildren } from "../../capabilities/tools/support/utils/shell.ts";
 import {
@@ -51,13 +54,10 @@ import {
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
 import { createAgentConfig } from "./application/agent-config-factory.ts";
-import { ConversationSession } from "./application/conversation-session.ts";
 import { AgentCoordinator } from "./application/agent-coordinator.ts";
-import { TtsrCoordinator } from "./ttsr-coordinator.ts";
 import { CommandDispatcher } from "./application/command-dispatcher.ts";
-import { TtsrManager } from "@logician/log-core";
 import { ConversationIdentity } from "./application/conversation-identity.ts";
-import { TodoTracker } from "./todo-tracker.ts";
+import { ConversationSession } from "./application/conversation-session.ts";
 import { PluginLifecycle } from "./application/plugin-lifecycle.ts";
 import { executeProcessCommand } from "./application/process-command.ts";
 import { RuntimeActivity } from "./application/runtime-activity.ts";
@@ -81,6 +81,8 @@ import { SessionRunner } from "./session-runner.ts";
 import { ModelSelector } from "./support/model-selector.ts";
 import { buildToolRegistry } from "./support/runtime-context.ts";
 import { ToolRouter } from "./support/tool-router.ts";
+import { TodoTracker } from "./todo-tracker.ts";
+import { TtsrCoordinator } from "./ttsr-coordinator.ts";
 
 export { findJbPrompt } from "./project-prompt.ts";
 
@@ -175,9 +177,7 @@ export class AgentRuntime {
 
 	private readonly todoTracker: TodoTracker;
 
-
 	#ttsrSettings: NonNullable<AgentBridgeOptions["ttsr"]> = {};
-
 
 	#ttsrSubscribed = false;
 
@@ -196,7 +196,9 @@ export class AgentRuntime {
 		this.loadTtsrRules(manager);
 		return new TtsrCoordinator({
 			manager,
-			abort: async () => { await this.abort(); },
+			abort: async () => {
+				await this.abort();
+			},
 			steer: message => this.sessions.queues.steer(message),
 			followUp: message => this.sessions.queues.followUp(message),
 			emit: event => this.emit(event),
@@ -212,10 +214,19 @@ export class AgentRuntime {
 			return;
 		}
 		for (const entry of entries) {
-			if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name.startsWith(".")) continue;
+			if (
+				!entry.isFile() ||
+				!entry.name.endsWith(".md") ||
+				entry.name.startsWith(".")
+			)
+				continue;
 			const filePath = path.join(rulesDir, entry.name);
 			let content: string;
-			try { content = readFileSync(filePath, "utf-8"); } catch { continue; }
+			try {
+				content = readFileSync(filePath, "utf-8");
+			} catch {
+				continue;
+			}
 			const parsed = parseFrontmatter(content);
 			if (!parsed) continue;
 			const rule = frontmatterToRule(parsed.frontmatter, filePath);
@@ -236,7 +247,6 @@ export class AgentRuntime {
 	#lastPhases: TaskPhase[] = [];
 	private readonly unsubscribeTodos: () => void;
 	readonly compactionSettings?: AgentBridgeOptions["compaction"];
-
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
 
@@ -389,37 +399,30 @@ export class AgentRuntime {
 		}
 		// ── TodoTracker (phased todo enforcement) ──────────────────────────
 		this.todoTracker = new TodoTracker({
-			getActiveToolNames: () =>
-				this.config?.tools?.map(t => t.name) ?? [],
+			getActiveToolNames: () => this.config?.tools?.map(t => t.name) ?? [],
 			getMutatingToolNames: () =>
 				this.config?.tools
 					?.filter(t =>
-						[
-							"bash",
-							"edit",
-							"write",
-							"ast_edit",
-						].includes(t.name ?? ""),
+						["bash", "edit", "write", "ast_edit"].includes(t.name ?? ""),
 					)
 					.map(t => t.name ?? "") ?? [],
 			getCurrentPromptText: () => {
 				const msgs = this.session?.messages ?? [];
-				const userMsg = [...msgs].reverse().find(
-					m => m.role === "user",
-				);
+				const userMsg = [...msgs].reverse().find(m => m.role === "user");
 				return typeof userMsg?.content === "string"
 					? userMsg.content
 					: undefined;
 			},
 			isFirstTurn: () => {
 				const msgs = this.session?.messages ?? [];
-				return msgs.filter(
-					m => m.role === "user" || m.role === "assistant",
-				).length <= 1;
+				return (
+					msgs.filter(m => m.role === "user" || m.role === "assistant")
+						.length <= 1
+				);
 			},
 			isPlanMode: () => false,
 			modelSupportsToolChoice: () => true,
-			steer: (text) => this.sessions.queues.steer(text),
+			steer: text => this.sessions.queues.steer(text),
 		});
 		this.commands = new CommandDispatcher({
 			session: () => this.session,
@@ -439,7 +442,8 @@ export class AgentRuntime {
 			const completedTasks = new Map<string, string>(); // "phase\x00content" -> true
 			for (const last of this.#lastPhases) {
 				for (const t of last.tasks) {
-					if (t.status === "completed") completedTasks.set(`${last.name}\x00${t.content}`, t.content);
+					if (t.status === "completed")
+						completedTasks.set(`${last.name}\x00${t.content}`, t.content);
 				}
 			}
 			const transitions: Array<{ phase: string; content: string }> = [];
@@ -456,9 +460,12 @@ export class AgentRuntime {
 				}
 			}
 			this.#lastPhases = currentPhases;
-			this.emit({ type: "todos", phases: currentPhases, completedTasks: transitions });
+			this.emit({
+				type: "todos",
+				phases: currentPhases,
+				completedTasks: transitions,
+			});
 		});
-
 
 		// Create agent coordinator for reasoner, EoH, and subagents
 		this.agentCoordinator = new AgentCoordinator(
@@ -544,7 +551,10 @@ export class AgentRuntime {
 		});
 		this.lifecycle = new RuntimeLifecycle({
 			cancel: () => this.cancel(),
-			resetTurns: () => { this.ttsrCoordinator.reset(); this.turns.reset(); },
+			resetTurns: () => {
+				this.ttsrCoordinator.reset();
+				this.turns.reset();
+			},
 			dropSession: () => this.sessions.drop(),
 			clearSession: () => this.sessions.clearAndDrop(),
 			resetIdentity: () => this.identity.reset(),
@@ -665,10 +675,12 @@ export class AgentRuntime {
 											| "abandoned",
 									})),
 								}));
-								const completedTasks = obj.completedTasks as Array<{
-									phase: string;
-									content: string;
-								}> | undefined;
+								const completedTasks = obj.completedTasks as
+									| Array<{
+											phase: string;
+											content: string;
+									  }>
+									| undefined;
 								const completed = tracker.setPhases(
 									typedPhases,
 									completedTasks,
@@ -1192,13 +1204,13 @@ export class AgentRuntime {
 	}
 
 	/** Manual context compaction. Returns { tokensSaved, tokensBefore, tokensAfter } or null if nothing to compact. */
-	async compact(): Promise<{
+	async compact(mode?: "shake" | "auto" | "llm"): Promise<{
 		tokensSaved: number;
 		tokensBefore: number;
 		tokensAfter: number;
 	} | null> {
 		const injected = this.ttsrCoordinator.persistInjected();
-		const result = await this.sessions.compact();
+		const result = await this.sessions.compact(mode);
 		if (result) {
 			this.ttsrCoordinator.restoreInjected(injected);
 		}
@@ -1371,15 +1383,18 @@ export class AgentRuntime {
 			memory: this.memoriamEnabled
 				? {
 						listObservations: (sessionId: string, limit: number) =>
-							this.memoriamListObservations(sessionId, limit).then((results: unknown[]) =>
-								results.map((r) => ({
-									id: String((r as Record<string, unknown>).id ?? ""),
-									content: String((r as Record<string, unknown>).content ?? ""),
-								})),
+							this.memoriamListObservations(sessionId, limit).then(
+								(results: unknown[]) =>
+									results.map(r => ({
+										id: String((r as Record<string, unknown>).id ?? ""),
+										content: String(
+											(r as Record<string, unknown>).content ?? "",
+										),
+									})),
 							),
 						listMemories: (query?: Record<string, unknown>) =>
 							this.memoriamListMemories(query).then((results: unknown[]) =>
-								results.map((r) => ({
+								results.map(r => ({
 									id: String((r as Record<string, unknown>).id ?? ""),
 									content: String((r as Record<string, unknown>).content ?? ""),
 								})),
@@ -1416,5 +1431,7 @@ export class AgentRuntime {
 	}
 }
 
-export { getSkillsDirs } from "./support/resource-directories.ts";
-export { getProjectRulesDirs } from "./support/resource-directories.ts";
+export {
+	getProjectRulesDirs,
+	getSkillsDirs,
+} from "./support/resource-directories.ts";

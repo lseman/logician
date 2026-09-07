@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Tool } from "@logician/log-core";
 import { loadContextFiles } from "./files/loader.ts";
+import { SYSTEM_PROMPT_TEMPLATE } from "./system-prompt-embed.ts";
 
 // ============================================================================
 // Options interface
@@ -174,11 +175,12 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 // ============================================================================
 
 /**
- * Builds the static, immutable system prompt prefix.
- * Contains: Persona, deterministic tool snippets, workflow, project guidelines (LOGICIAN.md),
- * and skills.
- * Guarantees 100% prompt cache prefix hits across multi-turn sessions for Anthropic & OpenAI.
+ * Builds the static, immutable system prompt prefix from system-prompt.md template.
+ * Substitutes dynamic sections (tools, MCP workflow, web workflow) and appends
+ * project context files, skills, and custom overrides.
+ * Guarantees 100% prompt cache prefix hits across multi-turn sessions.
  */
+
 export function buildStaticSystemPromptPrefix(
 	options: Omit<BuildSystemPromptOptions, "cwd"> & { cwd?: string },
 ): string {
@@ -204,7 +206,6 @@ export function buildStaticSystemPromptPrefix(
 		...loadedContext.contextFiles,
 	];
 
-	// Sort tools deterministically to preserve prompt cache stability
 	const tools = [...(selectedTools ?? [])].sort((a, b) =>
 		a.name.localeCompare(b.name),
 	);
@@ -217,13 +218,10 @@ export function buildStaticSystemPromptPrefix(
 			: "(none)";
 
 	const mcpWorkflow = buildMcpWorkflow(tools);
-
-	// Web workflow (logician extension)
 	const hasWebSearch = tools.some(t => t.name === "web_search");
 	const hasWebFetch = tools.some(t => t.name === "web_fetch");
 	const webWorkflow = buildWebWorkflow(hasWebSearch, hasWebFetch);
 
-	// Append custom/project system text.
 	const resolvedAppendSystemPrompt = [
 		appendSystemPrompt,
 		loadedContext.appendSystemFile?.content,
@@ -232,47 +230,11 @@ export function buildStaticSystemPromptPrefix(
 		.join("\n\n");
 	const webSection = webWorkflow.length > 0 ? webWorkflow.join("\n") : "";
 
-	// Build the base prompt
-	let prompt = `You are Logician, a coding agent running in a terminal TUI. You inspect the repository, edit files, run commands, and verify changes — prefer doing the work with tools over describing it.
-
-Work each task to completion: don't stop after one step if more remains. Keep todo items accurate and finish with a clear final response.
-
-Available tools:
-${toolsList}
-
-In addition to the tools above, you may have access to other custom tools depending on the project.
-${mcpWorkflow.join("\n")}
-
-When discoverable tools are enabled (default), additional tools are available behind the \`xd://\` virtual device protocol:
-- Run \`read_file\` with \`path="xd://"\` to list all available devices.
-- Run \`read_file\` with \`path="xd://<device>"\` to see a device's input schema.
-- Run \`write_file\` with \`path="xd://<device>"\` and \`content={<json args>}\` to dispatch a device.
-- Unknown \`xd://\` paths are rejected — they do not become local files. Use \`./xd://<name>\` if a literal file is intended.
-
-You can also read internal resources using special URL schemes:
-- \`skill://<name>\` — reads a loaded skill's full instructions
-- \`rule://<name>\` — reads a frontmatter rule's content
-- \`memory://list\` / \`memory://memories\` — list observations and memories
-- \`local://<path>\` — reads files under .logician/artifacts/
-- \`conflict://<file>\` — lists merge conflicts in a file
-- \`agent://<id>\` — reads a subagent's result; use \`agent://\` to list completed agents, or access fields like \`agent://<id>/content\` or \`agent://<id>/details.metrics.turns\`
-- \`history://\` — lists all completed subagents; \`history://<id>\` returns the same result as \`agent://<id>\`
-- \`mcp://\` — lists configured MCP servers; \`mcp://<resource-uri>\` reads a resource from an MCP server
-- \`log://\` — lists documentation in the workspace \`docs/\` directory; \`log://guides/\` — lists doc categories; \`log://<path>\` — reads a doc file
-- \`ssh://\` — reads files on remote hosts via SSH/scp; \`ssh://<host>/path\` — reads a remote file; \`ssh://\` — lists configured hosts (see \`~/.logician/ssh.json\`)
-- \`artifact://\` — reads session-scoped tool output artifacts; use \`artifact://\` to list available artifacts, or \`artifact://<id>\` to read one
-
-Workflow:
-- Inspect before editing; prefer the most specific tool for the source of truth (MCP over local when both cover it).
-- Read a file before editing or overwriting it. Use replaceAll for renames across a file.
-- Organize work into phased todo lists (init → start → done): use phases to group related tasks, mark in_progress before work, completed immediately when done.
-- After a change, verify it — read the diff, run the narrowest relevant test/typecheck/lint.
-- Keep changes scoped to the request. Never use destructive git operations (reset --hard, checkout --, deletions) unless explicitly asked.
-Rules:
-- Before writing a helper, check whether one already exists — search first. Two implementations of the same thing is a bug even when both work.
-- Before yielding: all affected callsites/tests/docs updated or intentionally unchanged. Never yield unfinished work: stubs, placeholders, no-ops, fake fallbacks, 'TODO: implement' are not acceptable.
-- Fix the source; never suppress symptoms or special-case inputs unless asked. Migrate every caller with a clean cutover.
-- Code that may run while the TUI is active must not use 'console.log'/'error'/'warn'; use the centralized logger.${webSection}`;
+	// Load template and substitute placeholders
+	let prompt = SYSTEM_PROMPT_TEMPLATE;
+	prompt = prompt.replace("{toolsList}", toolsList);
+	prompt = prompt.replace("{mcpWorkflow}", mcpWorkflow.join("\n"));
+	prompt = prompt.replace("{webSection}", webSection);
 
 	// Custom prompt overrides everything
 	const resolvedCustomPrompt =
@@ -295,7 +257,7 @@ Rules:
 	}
 	// Append skills section (only if read tool is available)
 	if (
-		tools.some(t => t.name === "read_file") &&
+		tools.some(t => t.name === "read") &&
 		providedSkills &&
 		providedSkills.length > 0
 	) {
@@ -305,7 +267,6 @@ Rules:
 		prompt += formatSkillsForPrompt(sortedSkills);
 	}
 	return normalizeCodeBlockSpacing(prompt);
-
 }
 
 /**

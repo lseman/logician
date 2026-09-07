@@ -13,9 +13,12 @@ binary:
 	@cd $(CURDIR)/../.. && $(BUN) install
 	@mkdir -p dist
 	@rm -f $(TMP_BIN)
+	@cd $(CURDIR)/../.. && node scripts/embed-md.mjs \
+		packages/log-runtime/src/runtime/context/system-prompt.md \
+		packages/log-runtime/src/runtime/context/system-prompt-embed.ts \
+		SYSTEM_PROMPT_TEMPLATE
 	$(BUN) build --target=bun --compile $(ENTRY) --outfile $(TMP_BIN)
 	@mv -f $(TMP_BIN) $(BIN)
-	@chmod +x $(BIN)
 	@echo "Built $(abspath $(BIN))"
 
 install: binary

@@ -1116,11 +1116,11 @@ export class AgentSession {
 
 	// ── Compaction ─────────────────────────────────────────────────────────
 
-	async compact(): Promise<number | null> {
+	async compact(mode?: "shake" | "auto" | "llm"): Promise<number | null> {
 		this.assertIdle("compact");
 		if (!this.session.conversation.history.length) return null;
 		return this.runInPhase("compaction", "compact", () =>
-			this.compactor.compact("manual", /* force */ true),
+			this.compactor.compact("manual", /* force */ true, mode),
 		);
 	}
 

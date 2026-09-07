@@ -12,7 +12,11 @@ import type {
 	CompactableMessage,
 	Message,
 } from "../../system/types/types-messages.ts";
-import { type CompactionSettings, compactToFit } from "./engine.ts";
+import {
+	type CompactionSettings,
+	compactToFit,
+	shakeCompaction,
+} from "./engine.ts";
 
 export interface CompactionOutcome {
 	changed: boolean;
@@ -22,11 +26,13 @@ export interface CompactionOutcome {
 }
 
 /**
- * Run the shared compaction engine against `history`, using either a
- * pre-supplied summary (from a beforeCompact hook) or an LLM-generated one.
- * Returns the outcome; caller applies `messages` to its own history field on
- * `changed`. Forced (`triggerTokens: 0`) — the caller has already decided to
- * compact via its own token estimate.
+ * Run the shared compaction engine against `history`.
+ *
+ * Modes:
+ * - "llm" (default): LLM-summarize older turns
+ * - "shake": drop recoverable heavy content without LLM (bash output, large
+ *   tool results, oversized messages)
+ * - "auto": try shake first, fall back to LLM if shake wasn't enough
  */
 export async function runCompaction(
 	backend: LLMBackend,
@@ -34,12 +40,52 @@ export async function runCompaction(
 	tokensBefore: number,
 	options: {
 		reason: "auto" | "manual";
+		mode?: "llm" | "shake" | "auto";
 		presetSummary?: string;
 		temperature?: number;
 		maxTokens?: number;
 		thinkingLevel?: ThinkingLevel;
 	},
 ): Promise<CompactionOutcome> {
+	const { mode = "auto" } = options;
+
+	// Shake pass: drop recoverable heavy content without LLM
+	const shakeResult = shakeCompaction(history as CompactableMessage[], {});
+
+	if (!shakeResult.changed) {
+		return {
+			changed: false,
+			messages: history,
+			tokensBefore,
+			tokensAfter: tokensBefore,
+		};
+	}
+
+	// Shake-only mode: use the shake result as-is
+	if (mode === "shake") {
+		return {
+			changed: true,
+			messages: shakeResult.messages as unknown as Message[],
+			tokensBefore,
+			tokensAfter: shakeResult.tokensAfter,
+		};
+	}
+
+	// Auto mode: if shake brought us well under budget, use it; otherwise LLM
+	const shakeTokens = shakeResult.tokensAfter;
+	const shakeSaved = tokensBefore - shakeTokens;
+
+	// If shake saved enough tokens (8k+), use shake result
+	if (mode === "auto" && shakeSaved >= 8000) {
+		return {
+			changed: true,
+			messages: shakeResult.messages as unknown as Message[],
+			tokensBefore,
+			tokensAfter: shakeTokens,
+		};
+	}
+
+	// LLM or auto-needs-LLM: summarize with LLM (on shake-processed history)
 	const summarize = async (older: CompactableMessage[]) => {
 		if (options.presetSummary) return options.presetSummary;
 		return generateCompactionSummary(
@@ -54,25 +100,19 @@ export async function runCompaction(
 		);
 	};
 
-	const result = await compactToFit(history as CompactableMessage[], {
-		triggerTokens: 0,
-		summarize,
-	});
-
-	if (!result.changed) {
-		return {
-			changed: false,
-			messages: history,
-			tokensBefore,
-			tokensAfter: tokensBefore,
-		};
-	}
+	const llmResult = await compactToFit(
+		shakeResult.messages as CompactableMessage[],
+		{
+			triggerTokens: 0,
+			summarize,
+		},
+	);
 
 	return {
-		changed: true,
-		messages: result.messages as unknown as Message[],
+		changed: llmResult.changed,
+		messages: llmResult.messages as unknown as Message[],
 		tokensBefore,
-		tokensAfter: result.tokensAfter,
+		tokensAfter: llmResult.tokensAfter,
 	};
 }
 

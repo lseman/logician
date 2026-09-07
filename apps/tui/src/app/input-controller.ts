@@ -274,7 +274,36 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			// onChange hook re-syncs the popup query afterwards.
 		}
 
-		// Inline slash autocomplete: while the popup is showing matches, the
+		// Inline skill:// autocomplete: same pattern as @-mention — input bar
+		// keeps focus, we only intercept nav/accept keys.
+		if (ctx.skillPopup.isVisibleOverlay()) {
+			if (data === "\x1b[A" || data === "\x1bOA") {
+				ctx.skillPopup.moveSelection(-1);
+				ctx.tui.requestRender();
+				return { consume: true };
+			}
+			if (data === "\x1b[B" || data === "\x1bOB") {
+				ctx.skillPopup.moveSelection(1);
+				ctx.tui.requestRender();
+				return { consume: true };
+			}
+			if (data === "\t" || data === "\r" || data === "\n") {
+				const name = ctx.skillPopup.currentSkill();
+				if (name) {
+					ctx.inputBar.insertSkill(name);
+				}
+				ctx.skillPopup.hide();
+				ctx.tui.requestRender();
+				return { consume: true };
+			}
+			if (data === "\x1b") {
+				ctx.skillPopup.hide();
+				ctx.tui.requestRender();
+				return { consume: true };
+			}
+			// Everything else goes to the input bar; onChange re-syncs.
+		}
+
 		// input bar keeps focus and ordinary typing flows through to it. We only
 		// intercept the navigation/accept keys here.
 		if (ctx.slashPopup.isVisibleOverlay()) {
@@ -512,8 +541,15 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			void ctx.updateFileMentionPopup(mentionQuery);
 		} else if (ctx.fileMentionPopup.isVisibleOverlay()) {
 			ctx.fileMentionPopup.hide();
+		} else {
+			// Check for skill:// prefix
+			const skillQuery = ctx.inputBar.getActiveSkillQuery();
+			if (skillQuery !== null) {
+				void ctx.updateSkillPopup(skillQuery);
+			} else if (ctx.skillPopup.isVisibleOverlay()) {
+				ctx.skillPopup.hide();
+			}
 		}
-
 		// Update input bar mode color for bash (!) and python ($) prefixes.
 		const trimmed = text.trimStart();
 		if (trimmed.startsWith("!")) {

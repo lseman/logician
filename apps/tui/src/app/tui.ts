@@ -30,6 +30,7 @@ import {
 } from "../overlays/autoresearch-dashboard.ts";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
+import { SkillPopup } from "../overlays/skill-popup.ts";
 import {
 	InferenceModeSelector,
 	type InferenceModeSelectorAction,
@@ -134,6 +135,7 @@ import {
 	openThinkingLevelSelector as openThinkingLevelSelectorImpl,
 	setThemeByName as setThemeByNameImpl,
 	updateFileMentionPopup as updateFileMentionPopupImpl,
+	updateSkillPopup as updateSkillPopupImpl,
 } from "./overlay-controllers/index.ts";
 import {
 	autoSaveTurn,
@@ -165,6 +167,7 @@ export class LogicianTUI {
 	inputBar: InputBar;
 	slashPopup: SlashPopup;
 	fileMentionPopup: FileMentionPopup;
+	skillPopup: SkillPopup;
 	choicePopup: ChoicePopup;
 	choicePopupPreview = false;
 	workflowMode: "act" | "plan";
@@ -324,6 +327,7 @@ export class LogicianTUI {
 		this.inputBar = new InputBar();
 		this.slashPopup = new SlashPopup();
 		this.fileMentionPopup = new FileMentionPopup();
+		this.skillPopup = new SkillPopup();
 		this.choicePopup = new ChoicePopup();
 		this.permissionPopup = new PermissionPopup();
 		this.pluginManager = new PluginManagerOverlay();
@@ -623,7 +627,7 @@ export class LogicianTUI {
 			align: "left",
 			maxHeight: 12,
 		});
-		this.tui.showOverlay(this.pluginManager, {
+		this.tui.showOverlay(this.skillPopup, {
 			anchor: "aboveInput",
 			align: "left",
 			maxHeight: 18,
@@ -766,8 +770,9 @@ export class LogicianTUI {
 		await updateFileMentionPopupImpl(this, query);
 	}
 
-	// ── Model selector ───────────────────────────────────────────────────
-
+	async updateSkillPopup(query: string): Promise<void> {
+		updateSkillPopupImpl(this, query);
+	}
 	openModelSelector(): void {
 		openModelSelectorImpl(this);
 	}

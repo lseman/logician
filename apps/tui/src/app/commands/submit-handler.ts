@@ -54,12 +54,21 @@ export function createSlashSubmitHandler(
 				void handleTheme(ctx, args);
 			}
 			if (match && match.command === "/compact") {
-				void ctx.bridge.compact().then(result => {
+				const trimmed = args.trim().toLowerCase();
+				const validMode: "shake" | "auto" | "llm" | undefined = [
+					"shake",
+					"auto",
+					"llm",
+				].includes(trimmed)
+					? (trimmed as "shake" | "auto" | "llm")
+					: undefined;
+				void ctx.bridge.compact(validMode).then(result => {
 					if (result === null) {
 						ctx.transcript.addSystemMessage("Nothing to compact.");
 					} else {
+						const modeLabel = validMode ? ` (${validMode})` : "";
 						ctx.transcript.addSystemMessage(
-							`Context compacted (${formatContextSize(
+							`Context compacted${modeLabel} (${formatContextSize(
 								result.tokensBefore,
 							)} -> ${formatContextSize(
 								result.tokensAfter,

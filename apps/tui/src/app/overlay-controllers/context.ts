@@ -4,6 +4,7 @@ import type { Transcript } from "@logician/log-runtime/sessions";
 import type { InputBar } from "../../input/input-bar.ts";
 import type { AutoresearchDashboardOverlay } from "../../overlays/autoresearch-dashboard.ts";
 import type { FileMentionPopup } from "../../overlays/file-mention-popup.ts";
+import type { SkillPopup } from "../../overlays/skill-popup.ts";
 import type { InferenceModeSelector } from "../../overlays/inference-mode-selector.ts";
 import type { McpManagerOverlay } from "../../overlays/mcp-manager.ts";
 import type { ModelSelectorOverlay } from "../../overlays/model-selector.ts";
@@ -40,6 +41,7 @@ export interface OverlayHandlersCtx {
 	queueManager: QueueManagerOverlay;
 	sessionTree: SessionTreeOverlay;
 	fileMentionPopup: FileMentionPopup;
+	skillPopup: SkillPopup;
 	fileMentionListedCwd: string | null;
 	fileMentionListing: Promise<string[]> | null;
 	modelSelector: InstanceType<typeof ModelSelectorOverlay>;

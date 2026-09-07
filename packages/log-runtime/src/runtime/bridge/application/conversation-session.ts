@@ -162,13 +162,13 @@ export class ConversationSession {
 		return (await this.currentSession?.abort()) ?? null;
 	}
 
-	async compact(): Promise<{
+	async compact(mode?: "shake" | "auto" | "llm"): Promise<{
 		tokensSaved: number;
 		tokensBefore: number;
 		tokensAfter: number;
 	} | null> {
 		if (!this.currentSession) return null;
-		const tokensSaved = await this.currentSession.compact();
+		const tokensSaved = await this.currentSession.compact(mode);
 		if (tokensSaved === null) return null;
 		const tokensAfter = estimateChatPayloadTokens(this.currentSession.messages);
 		const tokensBefore = tokensAfter + tokensSaved;

@@ -6,12 +6,14 @@ import type {
 	BeforeCompactResult,
 	Message,
 } from "../../../system/types/types-messages.ts";
-import type { CompactionSettings } from "../../compaction/engine.ts";
+import type {
+	CompactionMode,
+	CompactionSettings,
+} from "../../compaction/engine.ts";
 import {
 	runCompaction,
 	shouldAutoCompact,
 } from "../../compaction/orchestration.ts";
-
 export type CompactionReason = "auto" | "manual";
 
 export interface SessionCompactorDependencies {
@@ -93,7 +95,11 @@ export class SessionCompactor {
 		);
 	}
 
-	async compact(reason: CompactionReason, force: boolean): Promise<number> {
+	async compact(
+		reason: CompactionReason,
+		force: boolean,
+		mode?: CompactionMode,
+	): Promise<number> {
 		const messages = this.dependencies.history();
 		this.dependencies.emit({ type: "compaction", reason });
 		let postCompactEmitted = false;
@@ -147,7 +153,7 @@ export class SessionCompactor {
 					presetSummary: preResult?.summary,
 					temperature: config.temperature,
 					maxTokens: config.maxTokens,
-					thinkingLevel: config.thinkingLevel,
+					mode,
 				},
 			);
 

@@ -768,3 +768,126 @@ ${filesList}
 
 	return summary;
 }
+// ============================================================================
+// Shake compaction — drop recoverable heavy content without LLM
+// ============================================================================
+
+export interface ShakeCompactionOptions {
+	/** Number of recent turns to keep fully intact. Default: 2. */
+	keepRecentTurns?: number;
+	/** Max chars for a historical tool result before dropping it entirely. Default: 2000. */
+	historicalToolResultThreshold?: number;
+	/** Max chars for a historical assistant message content. Default: 500. */
+	historicalAssistantThreshold?: number;
+	/** Max chars for a historical user message content. Default: 500. */
+	historicalUserThreshold?: number;
+}
+
+const DEFAULT_SHAKE_OPTIONS: ShakeCompactionOptions = {
+	keepRecentTurns: 2,
+	historicalToolResultThreshold: 2000,
+	historicalAssistantThreshold: 500,
+	historicalUserThreshold: 500,
+};
+
+/**
+ * Shake compaction: drop recoverable heavy content from old turns.
+ *
+ * Strategy:
+ * - Bash tool results: keep command + exit code, drop stdout/stderr
+ * - File read/write tool results: keep file path + error/summary, drop content
+ * - Large assistant messages: truncate to minimal summary
+ * - Large user messages: truncate to minimal summary
+ * - Recent turns (last N): untouched
+ *
+ * This is the "shake" from oh-my-pi — content can be re-read/re-run, so
+ * dropping it loses nothing essential. The model can always re-read a file
+ * or re-run a command if needed.
+ */
+export function shakeCompaction(
+	messages: CompactableMessage[],
+	options: ShakeCompactionOptions = DEFAULT_SHAKE_OPTIONS,
+): CompactToFitResult {
+	const {
+		keepRecentTurns,
+		historicalToolResultThreshold,
+		historicalAssistantThreshold,
+		historicalUserThreshold,
+	} = { ...DEFAULT_SHAKE_OPTIONS, ...options };
+
+	const tokensBefore = estimateContextTokens(messages).tokens;
+
+	// Find the boundary of the recent-turn protection zone
+	let userTurnsSeen = 0;
+	let protectedEndIndex = messages.length;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i]?.role === "user") {
+			userTurnsSeen++;
+			if (userTurnsSeen === keepRecentTurns) {
+				protectedEndIndex = i;
+				break;
+			}
+		}
+	}
+
+	let changed = false;
+	const shaken = messages.map((msg, index) => {
+		const role = msg.role;
+		const content = typeof msg.content === "string" ? msg.content : "";
+
+		// Recent turns are fully protected
+		if (index >= protectedEndIndex) return msg;
+
+		let newContent: string = content;
+
+		if (role === "toolResult" || role === "tool" || role === "bashExecution") {
+			// For tool results, keep only a minimal summary if content is large
+			if (content.length > (historicalToolResultThreshold ?? 2000)) {
+				newContent = `[Tool output dropped (${content.length} chars, can be re-run/re-read)]`;
+				changed = true;
+			} else if (content.length > 800) {
+				// Trim large outputs to head/tail with summary
+				const lines = content.split("\n");
+				if (lines.length > 30) {
+					const head = lines.slice(0, 10).join("\n");
+					const tail = lines.slice(-10).join("\n");
+					newContent = `${head}\n\n[... ${lines.length - 20} lines omitted]...\n\n${tail}`;
+					changed = true;
+				}
+			}
+		} else if (role === "assistant") {
+			// Truncate long assistant messages to summary
+			if (content.length > (historicalAssistantThreshold ?? 500)) {
+				const threshold = historicalAssistantThreshold ?? 500;
+				const summary = content.slice(0, threshold);
+				newContent = `${summary}\n\n... [truncated, ${content.length - threshold} chars dropped]`;
+				changed = true;
+			}
+		} else if (role === "user") {
+			// Truncate long user messages to summary
+			if (content.length > (historicalUserThreshold ?? 500)) {
+				const threshold = historicalUserThreshold ?? 500;
+				const summary = content.slice(0, threshold);
+				newContent = `${summary}\n\n... [truncated, ${content.length - threshold} chars dropped]`;
+				changed = true;
+			}
+		}
+
+		if (newContent !== content) {
+			return { ...msg, content: newContent };
+		}
+		return msg;
+	});
+
+	const tokensAfter = estimateContextTokens(shaken).tokens;
+
+	return {
+		messages: shaken,
+		tokensBefore,
+		tokensAfter,
+		changed: changed || tokensAfter < tokensBefore,
+	};
+}
+
+/** Compaction mode: shake, auto, or llm. */
+export type CompactionMode = "shake" | "auto" | "llm";

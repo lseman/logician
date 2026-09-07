@@ -180,7 +180,39 @@ export class InputBar implements Component, Focusable {
 		this._invalidate();
 	}
 
-	// ── History ────────────────────────────────────────────────────────────
+	// ── Skill:// prefix detection ────────────────────────────────────────
+
+	/**
+	 * The "skill://partial" token immediately before the cursor, if any (query
+	 * text only, without "skill://"). Returns null when the cursor isn't inside
+	 * an active skill:// token.
+	 */
+	getActiveSkillQuery(): string | null {
+		const segs = this._segments();
+		const before = segs.slice(0, this.cursor).join("");
+		const idx = before.lastIndexOf("skill://");
+		if (idx === -1) return null;
+		const afterSlash = idx + "skill://".length;
+		if (afterSlash >= before.length) return "";
+		const token = before.slice(afterSlash);
+		if (/\s/.test(token)) return null;
+		return token;
+	}
+
+	/** Replace the active "skill://partial" token at the cursor with "skill://name ". */
+	insertSkill(name: string): void {
+		const segs = this._segments();
+		const before = segs.slice(0, this.cursor).join("");
+		const after = segs.slice(this.cursor).join("");
+		const idx = before.lastIndexOf("skill://");
+		if (idx === -1) return;
+		this._pushUndo();
+		const newBefore = `${before.slice(0, idx)}skill://${name} `;
+		this.value = newBefore + after;
+		this.cursor = this._graphemeCount(newBefore);
+		this._invalidate();
+	}
+
 
 	pushHistory(text: string): void {
 		if (

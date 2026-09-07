@@ -137,9 +137,21 @@ export async function updateFileMentionPopup(
 		ctx.fileMentionPopup.hide();
 	}
 	ctx.tui.requestRender();
-}
+	}
 
-// ── Model selector ───────────────────────────────────────────────────
+// ── Skill autocomplete ───────────────────────────────────────────────
+
+export function updateSkillPopup(ctx: OverlayHandlersCtx, query: string): void {
+	const skills = ctx.bridge.getSkills();
+	ctx.skillPopup.setSkills(skills);
+	ctx.skillPopup.setQuery(query);
+	if (ctx.skillPopup.hasMatches()) {
+		if (!ctx.skillPopup.isVisibleOverlay()) ctx.skillPopup.show();
+	} else {
+		ctx.skillPopup.hide();
+	}
+	ctx.tui.requestRender();
+}
 
 export function openModelSelector(ctx: OverlayHandlersCtx): void {
 	const modelInfos: ModelInfo[] = ctx.bridge.models.options().map(option => ({

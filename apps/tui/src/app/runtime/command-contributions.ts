@@ -44,21 +44,6 @@ export function registerRuntimeCommandContributions(
 		});
 	}
 
-	for (const skill of ctx.bridge.getSkills()) {
-		const name = `/${skill.slashName}`;
-		if (taken.has(name)) continue;
-		taken.add(name);
-		additions.push({
-			command: name,
-			usage: `${name}${skill.argumentHint ? ` ${skill.argumentHint}` : ""}`,
-			description: `Skill: ${skill.description.slice(0, 80)}`,
-			dispatch: "local",
-			acceptsArgs: true,
-			bridgeHandler: args => {
-				ctx.bridge.invokeSkill(skill.name, args);
-			},
-		});
-	}
 
 	for (const prompt of ctx.bridge.getPrompts()) {
 		const name = `/${prompt.slashName}`;
