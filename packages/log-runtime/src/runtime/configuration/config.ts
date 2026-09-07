@@ -75,10 +75,10 @@ const KNOWN_KEYS = new Set([
 	"truncation",
 	"transcriptMaxTurns",
 	"transcriptMaxRenderedLines",
+	"memoriam",
+	"legroom",
 	"reasoner",
 	"reasonerConfig",
-	"legroom",
-	"simpleTools",
 ]);
 const TOOLS_KEYS = new Set(["xdev"]);
 const COMPACTION_KEYS = new Set([
