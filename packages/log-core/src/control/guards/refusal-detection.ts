@@ -48,6 +48,7 @@ export function filterProviderReplayMessages(
 	messages: readonly Message[],
 ): Message[] {
 	return messages.filter(
-		message => message.role !== "assistant" || !isProviderRefusalMessage(message),
+		message =>
+			message.role !== "assistant" || !isProviderRefusalMessage(message),
 	);
 }

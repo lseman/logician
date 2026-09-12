@@ -3,8 +3,8 @@
 // tags, clipboard registers, and the no-op loop guard. One store instance per
 // edit session; every edit_file call that reads a file shares it.
 
-import * as fs from "node:fs";
 import { createHash } from "node:crypto";
+import * as fs from "node:fs";
 import { quickFileFingerprint } from "./hashline";
 
 /**
@@ -86,9 +86,7 @@ export class EditStore {
 	 */
 	recordSnapshot(path: string, content: string): FileSnapshot {
 		const raw = Buffer.from(content, "utf-8");
-		const hash = createHash("sha256")
-			.update(raw)
-			.digest("hex");
+		const hash = createHash("sha256").update(raw).digest("hex");
 		const tag = hash.slice(0, 4);
 		const fingerprint = quickFileFingerprint(content);
 
@@ -122,9 +120,7 @@ export class EditStore {
 		try {
 			const currentRaw = fs.readFileSync(path);
 			// Fast path: compare hashes
-			const currentHash = createHash("sha256")
-				.update(currentRaw)
-				.digest("hex");
+			const currentHash = createHash("sha256").update(currentRaw).digest("hex");
 			if (currentHash === snapshot.hash) {
 				return undefined; // Not stale
 			}
@@ -225,7 +221,10 @@ export class EditStore {
 	 */
 	stageEdit(entries: StagedEdit["entries"]): StagedEdit {
 		const id = `edit-${++this.#stagedCounter}`;
-		const totalLines = entries.reduce((sum, e) => sum + e.newContent.split("\n").length, 0);
+		const totalLines = entries.reduce(
+			(sum, e) => sum + e.newContent.split("\n").length,
+			0,
+		);
 		const staged: StagedEdit = {
 			id,
 			entries,
@@ -262,7 +261,7 @@ export class EditStore {
 	 * List all unresolved staged edits.
 	 */
 	listStagedEdits(): StagedEdit[] {
-		return Array.from(this.#staged.values()).filter((s) => !s.resolved);
+		return Array.from(this.#staged.values()).filter(s => !s.resolved);
 	}
 
 	/**

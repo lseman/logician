@@ -7,18 +7,39 @@
 //   memory://observe/<id>  — get observation by ID
 //   memory://memory/<id>   — get memory by ID
 
-import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext } from "./types";
+import type {
+	InternalResource,
+	InternalUrl,
+	ProtocolHandler,
+	ResolveContext,
+} from "./types";
 
 type MemoryGateway = {
-	getContext: (sessionId: string, query: string, budget: number) => Promise<string>;
-	listObservations: (sessionId: string, limit: number) => Promise<Array<{ id: string; content: string; metadata?: Record<string, unknown> }>>;
-	listMemories: (query?: Record<string, unknown>) => Promise<Array<{ id: string; content: string; metadata?: Record<string, unknown> }>>;
+	getContext: (
+		sessionId: string,
+		query: string,
+		budget: number,
+	) => Promise<string>;
+	listObservations: (
+		sessionId: string,
+		limit: number,
+	) => Promise<
+		Array<{ id: string; content: string; metadata?: Record<string, unknown> }>
+	>;
+	listMemories: (
+		query?: Record<string, unknown>,
+	) => Promise<
+		Array<{ id: string; content: string; metadata?: Record<string, unknown> }>
+	>;
 };
 
 export class MemoryProtocolHandler implements ProtocolHandler {
 	readonly scheme = "memory";
 
-	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
+	async resolve(
+		url: InternalUrl,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
 		const gateway = context?.memory as MemoryGateway | undefined;
 		const hostname = url.rawHost || url.hostname;
 		const pathname = url.pathname;
@@ -27,9 +48,12 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		if (hostname === "memory" && pathname === "/") {
 			return {
 				url: url.href,
-				content: "# Memory\n\nUse `memory://list` for observations or `memory://memories` for memories.\n",
+				content:
+					"# Memory\n\nUse `memory://list` for observations or `memory://memories` for memories.\n",
 				contentType: "text/markdown",
-				notes: ["Memory gateway is not available. Configure Memoriam SDK to enable."],
+				notes: [
+					"Memory gateway is not available. Configure Memoriam SDK to enable.",
+				],
 			};
 		}
 
@@ -38,7 +62,9 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 				url: url.href,
 				content: "# Memory\n\nMemory gateway is not available.\n",
 				contentType: "text/markdown",
-				notes: ["Configure the Memoriam SDK in .logician.json to enable memory:// access."],
+				notes: [
+					"Configure the Memoriam SDK in .logician.json to enable memory:// access.",
+				],
 			};
 		}
 
@@ -59,7 +85,8 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		// memory://observe/<id> — get observation by ID
 		if (pathname.startsWith("/observe/")) {
 			const id = pathname.slice("/observe/".length);
-			if (!id) throw new Error("memory://observe/<id> requires an observation ID");
+			if (!id)
+				throw new Error("memory://observe/<id> requires an observation ID");
 			return this.handleObserve(gateway, id, url);
 		}
 
@@ -75,10 +102,13 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		);
 	}
 
-	private async handleList(gateway: MemoryGateway, url: InternalUrl): Promise<InternalResource> {
+	private async handleList(
+		gateway: MemoryGateway,
+		url: InternalUrl,
+	): Promise<InternalResource> {
 		const observations = await gateway.listObservations("all", 20);
-		const lines = observations.map(o =>
-			`- ${o.id}: ${o.content.slice(0, 120)}`,
+		const lines = observations.map(
+			o => `- ${o.id}: ${o.content.slice(0, 120)}`,
 		);
 		return {
 			url: url.href,
@@ -87,11 +117,12 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		};
 	}
 
-	private async handleListMemories(gateway: MemoryGateway, url: InternalUrl): Promise<InternalResource> {
+	private async handleListMemories(
+		gateway: MemoryGateway,
+		url: InternalUrl,
+	): Promise<InternalResource> {
 		const memories = await gateway.listMemories();
-		const lines = memories.map(m =>
-			`- ${m.id}: ${m.content.slice(0, 120)}`,
-		);
+		const lines = memories.map(m => `- ${m.id}: ${m.content.slice(0, 120)}`);
 		return {
 			url: url.href,
 			content: `# Memories (${memories.length})\n\n${lines.join("\n") || "No memories."}`,
@@ -99,7 +130,11 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		};
 	}
 
-	private async handleObserve(gateway: MemoryGateway, id: string, url: InternalUrl): Promise<InternalResource> {
+	private async handleObserve(
+		gateway: MemoryGateway,
+		id: string,
+		url: InternalUrl,
+	): Promise<InternalResource> {
 		const observations = await gateway.listObservations("all", 100);
 		const obs = observations.find(o => o.id === id);
 		if (!obs) {
@@ -113,7 +148,11 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		};
 	}
 
-	private async handleMemory(_gateway: MemoryGateway, _id: string, _url: InternalUrl): Promise<InternalResource> {
+	private async handleMemory(
+		_gateway: MemoryGateway,
+		_id: string,
+		_url: InternalUrl,
+	): Promise<InternalResource> {
 		throw new Error(`memory://memory/<id> not yet implemented`);
 	}
 }

@@ -29,17 +29,25 @@ export interface TtsrRule {
 
 // ── Scope ─────────────────────────────────────────────────────────────────────
 
-export type TtsrScope =
-	| "text"
-	| "thinking"
-	| "tool"
-	| `tool:${string}`;
+export type TtsrScope = "text" | "thinking" | "tool" | `tool:${string}`;
 
-export const TTSR_SCOPES: readonly TtsrScope[] = ["text", "thinking", "tool", "tool:bash", "tool:eval", "tool:bun"];
+export const TTSR_SCOPES: readonly TtsrScope[] = [
+	"text",
+	"thinking",
+	"tool",
+	"tool:bash",
+	"tool:eval",
+	"tool:bun",
+];
 
 /** Validate that a scope string is a recognized TTSR scope. */
 export function isTtsrScope(value: string): value is TtsrScope {
-	return TTSR_SCOPES.some(s => s === value || s === "tool" || s.startsWith("tool:"));
+	return (
+		value === "text" ||
+		value === "thinking" ||
+		value === "tool" ||
+		/^tool:[^\s:]+$/.test(value)
+	);
 }
 
 // ── Match Context ─────────────────────────────────────────────────────────────

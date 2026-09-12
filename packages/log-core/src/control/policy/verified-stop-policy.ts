@@ -1,8 +1,8 @@
+import type { MutationReceipt } from "../../system/types/types-messages.ts";
 import type {
 	NamedAgentStopPolicy,
 	StopPolicyContext,
 } from "./execution-policy.ts";
-import type { MutationReceipt } from "../../system/types/types-messages.ts";
 
 const MUTATION_TOOLS = new Set(["apply_patch", "edit_file", "write_file"]);
 const VERIFICATION_TOOLS = new Set(["bash", "sandbox"]);
@@ -13,7 +13,10 @@ const FAILED_RESULT =
 
 function verificationMissing(context: StopPolicyContext): boolean {
 	let lastMutation = -1;
-	const calls = new Map<string, { index: number; name: string; verification: boolean }>();
+	const calls = new Map<
+		string,
+		{ index: number; name: string; verification: boolean }
+	>();
 	let verifiedAfterMutation = false;
 
 	for (const [index, message] of context.newMessages.entries()) {

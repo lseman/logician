@@ -44,7 +44,6 @@ export function registerRuntimeCommandContributions(
 		});
 	}
 
-
 	for (const prompt of ctx.bridge.getPrompts()) {
 		const name = `/${prompt.slashName}`;
 		if (taken.has(name)) continue;

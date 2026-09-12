@@ -174,7 +174,6 @@ export interface TodosEvent {
 	completedTasks?: TodoCompletionTransition[];
 }
 
-
 export interface SteeredEvent {
 	type: "steered";
 	message: string;

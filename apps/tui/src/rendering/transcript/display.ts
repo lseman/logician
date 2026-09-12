@@ -12,15 +12,14 @@ import {
 	BOLD,
 	type Component,
 	clampLineToWidth,
-	DIM,
 	RESET,
 	visibleWidth,
 } from "../../terminal/core.ts";
+import type { ImageBudget } from "../../terminal/image-budget.ts";
 import { theme } from "../../terminal/theme.ts";
 import type { ScrollView } from "../scroll-view.ts";
 import { wrapText } from "./layout.ts";
 import { truncateText } from "./render/content.ts";
-import type { ImageBudget } from "../../terminal/image-budget.ts";
 import { renderMarkdownLines } from "./render/markdown-table.ts";
 import { renderThinkingChunk } from "./render/thinking.ts";
 import {
@@ -961,10 +960,10 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					);
 					for (const line of thinkLines) lines.push(padToWidth(`  ${line}`));
 				} else if (chunk.type === "tool" && chunk.tool) {
-				// Blank line before tool boxes to separate from preceding text.
-				if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
-					lines.push(padToWidth(""));
-				}
+					// Blank line before tool boxes to separate from preceding text.
+					if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
+						lines.push(padToWidth(""));
+					}
 					const toolKey = chunk.tool.tool_call_id ?? `${turn.id}:${chunk.seq}`;
 					const regionStart = lines.length;
 					// Clear per-task hit regions before rendering so this tool's
@@ -1008,10 +1007,10 @@ export class TranscriptDisplay implements Component, RenderCtx {
 							key: toolKey,
 						});
 					}
-				// Blank line after tool boxes to separate from following text.
-				if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
-					lines.push(padToWidth(""));
-				}
+					// Blank line after tool boxes to separate from following text.
+					if (lines.length > 0 && lines[lines.length - 1].trim() !== "") {
+						lines.push(padToWidth(""));
+					}
 				} else if (chunk.type === "notice" && chunk.notice) {
 					const n = chunk.notice;
 					if (n.label === "Skills" && n.level === "info") {

@@ -6,8 +6,8 @@ import {
 } from "@logician/log-runtime/commands";
 import { beginPendingTurn } from "../state/turn-state.ts";
 import { logInputTrace } from "../terminal/input-protocol.ts";
-import type { LogicianTUI } from "./tui.ts";
 import { theme } from "../terminal/theme.ts";
+import type { LogicianTUI } from "./tui.ts";
 
 /** Ctrl+Enter encodings emitted by terminals with CSI-u or modifyOtherKeys. */
 export function isCtrlEnter(data: string): boolean {
@@ -556,7 +556,10 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			ctx.inputBar.modeColor = theme.fgRaw("bashMode");
 		} else if (trimmed.startsWith("$")) {
 			const prefixLen = pythonCommandPrefixLength(trimmed);
-			if (prefixLen > 0 && !looksLikePastedShellPrompt(trimmed.slice(prefixLen).trim())) {
+			if (
+				prefixLen > 0 &&
+				!looksLikePastedShellPrompt(trimmed.slice(prefixLen).trim())
+			) {
 				ctx.inputBar.modeColor = theme.fgRaw("pythonMode");
 			} else {
 				ctx.inputBar.modeColor = null;
@@ -634,7 +637,10 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		if (text.startsWith("$")) {
 			const trimmed = text.trimStart();
 			const prefixLength = pythonCommandPrefixLength(trimmed);
-			if (prefixLength > 0 && !looksLikePastedShellPrompt(trimmed.slice(prefixLength).trim())) {
+			if (
+				prefixLength > 0 &&
+				!looksLikePastedShellPrompt(trimmed.slice(prefixLength).trim())
+			) {
 				const excludeFromContext = prefixLength === 2;
 				const code = trimmed.slice(prefixLength).trim();
 				if (code) {
@@ -660,7 +666,6 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 				}
 			}
 		}
-
 
 		// Check for slash commands
 		if (text.startsWith("/")) {
@@ -782,13 +787,16 @@ function pythonCommandPrefixLength(trimmedText: string): 0 | 1 | 2 {
 	const prefixLength = trimmedText.charCodeAt(1) === 36 /* $ */ ? 2 : 1;
 	const next = trimmedText.charCodeAt(prefixLength);
 	if (Number.isNaN(next)) return prefixLength;
-	return next === 32 || next === 9 || next === 10 || next === 13 ? prefixLength : 0;
+	return next === 32 || next === 9 || next === 10 || next === 13
+		? prefixLength
+		: 0;
 }
 
 // Regex patterns to detect pasted shell prompts that should NOT trigger Python mode.
 const SHELL_PROMPT_COMMAND_RE =
 	/^(?:\.{0,2}\/|~\/|cd(?:\s|$)|sudo(?:\s|$)|git(?:\s|$)|bun(?:\s|$)|npm(?:\s|$)|pnpm(?:\s|$)|yarn(?:\s|$)|node(?:\s|$)|python\d*(?:\s|$)|cargo(?:\s|$)|go(?:\s|$)|make(?:\s|$)|docker(?:\s|$)|kubectl(?:\s|$))/;
-const SHELL_PROMPT_OPERATOR_RE = /(?:^|\s)(?:&&|\|\||\||2>&1|[<>]{1,2})(?:\s|$)/;
+const SHELL_PROMPT_OPERATOR_RE =
+	/(?:^|\s)(?:&&|\|\||\||2>&1|[<>]{1,2})(?:\s|$)/;
 
 function looksLikePastedShellPrompt(code: string): boolean {
 	const firstLine = code.split("\n", 1)[0]?.trimStart() ?? "";

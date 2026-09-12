@@ -18,6 +18,13 @@ import {
 	verifyAcceptanceCommands,
 } from "../../control/guards/acceptance-contract.ts";
 import {
+	MAX_ESCALATIONS,
+	SoftToolRequirementExceededError,
+	SoftToolRequirementManager,
+} from "../../control/guards/soft-tool-requirement.ts";
+import { StablePrefix } from "../../control/guards/stable-prefix.ts";
+import { TextLoopDetector } from "../../control/guards/text-loop-detector.ts";
+import {
 	evaluateStopPolicies,
 	resolveExecutionPolicy,
 } from "../../control/policy/execution-policy.ts";
@@ -29,9 +36,6 @@ import {
 import { RunBudgetController } from "../../control/policy/run-budget.ts";
 import { AgentRunController } from "../../control/policy/run-controller.ts";
 import { createVerifiedStopPolicy } from "../../control/policy/verified-stop-policy.ts";
-import { MAX_ESCALATIONS, SoftToolRequirementExceededError, SoftToolRequirementManager } from "../../control/guards/soft-tool-requirement.ts";
-import { StablePrefix } from "../../control/guards/stable-prefix.ts";
-import { TextLoopDetector } from "../../control/guards/text-loop-detector.ts";
 import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
 import type { RunBudgetDecision } from "../../system/types/run-budget.ts";
 import type {
@@ -279,7 +283,8 @@ async function runAgentLoopInternal(
 	// Freeze the system prompt + tool spec into a cached prefix.
 	// Subsequent turns reuse it if the fingerprint hasn't changed.
 	const stablePrefix = new StablePrefix();
-	const systemPromptText = messages.find(m => m.role === "system")?.content ?? "";
+	const systemPromptText =
+		messages.find(m => m.role === "system")?.content ?? "";
 	stablePrefix.build(systemPromptText, registry.list());
 
 	while (iteration < maxIterations) {
@@ -433,7 +438,8 @@ async function runAgentLoopInternal(
 						});
 						return finish({
 							status: "blocked",
-							summary: "Agent entered a text stagnation loop — repeating content without progress.",
+							summary:
+								"Agent entered a text stagnation loop — repeating content without progress.",
 							source: "runtime",
 						});
 					}
@@ -508,7 +514,8 @@ async function runAgentLoopInternal(
 						});
 						return finish({
 							status: "blocked",
-							summary: "Soft tool requirement was not met after repeated escalations.",
+							summary:
+								"Soft tool requirement was not met after repeated escalations.",
 							source: "runtime",
 						});
 					}
@@ -794,7 +801,9 @@ async function runAgentLoopInternal(
 		}
 
 		const hasFailures = verificationResults.some(
-			r => r.result === "failed" && !resolved.verify.find(v => v.command === r.command)?.allowFailure,
+			r =>
+				r.result === "failed" &&
+				!resolved.verify.find(v => v.command === r.command)?.allowFailure,
 		);
 
 		acceptanceFailed = hasFailures;

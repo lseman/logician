@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { constants, access as fsAccess, readFile } from "node:fs/promises";
 
 import type { Tool, ToolResult } from "@logician/log-core";
+import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
 import { defaultTaskManager } from "./support/utils/background-task-registry.ts";
 import {
 	getShellConfig,
@@ -23,7 +24,6 @@ import {
 	OutputAccumulator,
 	type TruncationResult,
 } from "./support/utils/truncate.ts";
-import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
 
 const bashSchema = {
 	type: "object",
@@ -704,7 +704,9 @@ function isBatchFailure(result: BashBatchResult): boolean {
 }
 
 /** Save truncated output to artifact storage and return the artifact ID. */
-async function saveTruncatedOutput(fullOutputPath: string): Promise<string | null> {
+async function saveTruncatedOutput(
+	fullOutputPath: string,
+): Promise<string | null> {
 	const registry = ArtifactRegistry.instance();
 	if (!registry.getManager()) return null;
 	try {
@@ -735,7 +737,9 @@ function formatOutput(
 	if (truncation.truncated) {
 		const startLine = truncation.totalLines - truncation.outputLines + 1;
 		const endLine = truncation.totalLines;
-		const displayPath = artifactId ? `artifact://${artifactId}` : snapshot.fullOutputPath;
+		const displayPath = artifactId
+			? `artifact://${artifactId}`
+			: snapshot.fullOutputPath;
 
 		const notices: string[] = [];
 		if (truncation.lastLinePartial) {

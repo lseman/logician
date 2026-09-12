@@ -6,8 +6,8 @@
 //   history://<id>/content  — final output text only
 //   history://<id>/status   — completion status
 
-import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 import { AgentOutputRegistry, resolvePath } from "./agent-registry";
+import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
 /** Format a timestamp as "Ns/Nm/Nh/Nd ago". */
 function formatAgo(timestamp: number): string {
@@ -40,7 +40,9 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			}
 
 			// Sort by timestamp (most recent first)
-			const entries = ids.map(id => registry.get(id)).filter((e): e is NonNullable<typeof e> => e !== undefined);
+			const entries = ids
+				.map(id => registry.get(id))
+				.filter((e): e is NonNullable<typeof e> => e !== undefined);
 			entries.sort((a, b) => b.timestamp - a.timestamp);
 			const lines = entries.map(e => {
 				const statusIcon = e.status === "completed" ? "✅" : "❌";
@@ -58,9 +60,10 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		const entry = registry.get(agentId);
 		if (!entry) {
 			const ids = registry.ids();
-			const hint = ids.length > 0
-				? `\nKnown agents: ${ids.join(", ")}`
-				: "\nNo agents have completed yet.";
+			const hint =
+				ids.length > 0
+					? `\nKnown agents: ${ids.join(", ")}`
+					: "\nNo agents have completed yet.";
 			throw new Error(`Unknown agent: ${agentId}${hint}`);
 		}
 

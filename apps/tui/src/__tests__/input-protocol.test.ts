@@ -10,9 +10,13 @@ test("extended arrow reports normalize presses and repeats with lock state", () 
 	for (const direction of ["A", "B", "C", "D"]) {
 		for (const modifier of [1, 65, 129, 193]) {
 			for (const event of ["", ":1", ":2"]) {
-				expect(normalizeKeyboardInput(`\x1b[1;${modifier}${event}${direction}`)).toBe(`\x1b[${direction}`);
+				expect(
+					normalizeKeyboardInput(`\x1b[1;${modifier}${event}${direction}`),
+				).toBe(`\x1b[${direction}`);
 			}
-			expect(normalizeKeyboardInput(`\x1b[1;${modifier}:3${direction}`)).toBe("");
+			expect(normalizeKeyboardInput(`\x1b[1;${modifier}:3${direction}`)).toBe(
+				"",
+			);
 		}
 		for (const modifier of [2, 3, 5, 133]) {
 			const sequence = `\x1b[1;${modifier}${direction}`;

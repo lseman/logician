@@ -17,8 +17,6 @@ import {
 	unwrapThinkingChannel,
 } from "../text-utils.ts";
 
-
-
 export function renderThinkingChunk(
 	chunk: AssistantChunk,
 	_streaming: boolean,

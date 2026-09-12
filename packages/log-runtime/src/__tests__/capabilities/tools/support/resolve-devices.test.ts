@@ -1,11 +1,11 @@
 // ── resolve-devices tests ─────────────────────────────────────────────────────
 
-import { test, describe, beforeEach } from "bun:test";
+import { beforeEach, describe, test } from "bun:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import * as path from "node:path";
-import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { handleResolve } from "../../../../capabilities/tools/support/resolve-devices.ts";
 
 describe("handleResolve", () => {
@@ -26,7 +26,10 @@ describe("handleResolve", () => {
 
 	test("writes new file and reports affected", async () => {
 		const filePath = path.join(tmp, "new.txt");
-		const result = await handleResolve(makeArgs([{ path: "new.txt", content: "hello world\n" }]), tmp);
+		const result = await handleResolve(
+			makeArgs([{ path: "new.txt", content: "hello world\n" }]),
+			tmp,
+		);
 		assert.ok(result.success);
 		assert.equal(result.filesAffected, 1);
 		assert.equal(result.linesChanged, 2);
@@ -37,7 +40,10 @@ describe("handleResolve", () => {
 		const filePath = path.join(tmp, "unchanged.txt");
 		fs.writeFileSync(filePath, "same content\n");
 
-		const result = await handleResolve(makeArgs([{ path: "unchanged.txt", content: "same content\n" }]), tmp);
+		const result = await handleResolve(
+			makeArgs([{ path: "unchanged.txt", content: "same content\n" }]),
+			tmp,
+		);
 		assert.ok(result.success);
 		assert.equal(result.filesAffected, 0);
 		assert.equal(result.linesChanged, 0);

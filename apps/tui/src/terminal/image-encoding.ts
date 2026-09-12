@@ -22,7 +22,10 @@ function chunkKittyApc(params: string, base64Data: string): string {
  * subsequent frames display it with a tiny placement sequence instead of
  * re-sending the base64.
  */
-export function encodeKittyTransmit(base64Data: string, imageId: number): string {
+export function encodeKittyTransmit(
+	base64Data: string,
+	imageId: number,
+): string {
 	return chunkKittyApc(`i=${imageId}`, base64Data);
 }
 
@@ -50,6 +53,7 @@ export function encodeKittyPlacement(options: {
  * prefix, the placement APC, optional `ESC 8` suffix.
  */
 const KITTY_DIRECT_PLACEMENT_LINE =
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 	/^(?:\x1b7(?:\x1b\[(\d+)A)?)?\x1b_Ga=p,q=2,C=1,i=(\d+)(?:,p=(\d+))?(?:,c=(\d+))?(?:,r=(\d+))?\x1b\\(?:\x1b8)?$/;
 
 export interface ParsedKittyPlacementLine {
@@ -90,12 +94,22 @@ export function encodeKittyPlacementLine(options: {
 	imageHeightPx: number;
 }): string {
 	const clippable = options.imageHeightPx > 0;
-	const hiddenRows = clippable ? Math.max(0, options.rows - 1 - options.screenRow) : 0;
+	const hiddenRows = clippable
+		? Math.max(0, options.rows - 1 - options.screenRow)
+		: 0;
 	const visibleRows = options.rows - hiddenRows;
-	const params: string[] = ["a=p", "q=2", "C=1", `i=${options.imageId}`, `p=${options.placementId}`];
+	const params: string[] = [
+		"a=p",
+		"q=2",
+		"C=1",
+		`i=${options.imageId}`,
+		`p=${options.placementId}`,
+	];
 	params.push(`c=${options.columns}`, `r=${visibleRows}`);
 	if (hiddenRows > 0) {
-		const srcY = Math.floor((options.imageHeightPx * hiddenRows) / options.rows);
+		const srcY = Math.floor(
+			(options.imageHeightPx * hiddenRows) / options.rows,
+		);
 		params.push(`y=${srcY}`, `h=${Math.max(1, options.imageHeightPx - srcY)}`);
 	}
 	const apc = `\x1b_G${params.join(",")}\x1b\\`;
@@ -121,7 +135,10 @@ export function encodeKittyDeleteAllImages(): string {
  * Delete a single placement of an image (`d=i`, lowercase): removes its cells
  * and registry entry but keeps the transmitted data.
  */
-export function encodeKittyDeletePlacement(imageId: number, placementId: number): string {
+export function encodeKittyDeletePlacement(
+	imageId: number,
+	placementId: number,
+): string {
 	return wrapTmuxPassthroughIfNeeded(
 		`\x1b_Ga=d,d=i,i=${imageId},p=${placementId},q=2\x1b\\`,
 	);
@@ -145,9 +162,7 @@ export function encodeKitty(
 		const chunk = base64Data.slice(pos, pos + CHUNK_SIZE);
 		const isLast = pos + CHUNK_SIZE >= base64Data.length;
 		const action = isLast ? "T" : "t";
-		parts.push(
-			`\x1b_G${params.join(",")},a=${action},${chunk}\x1b\\`,
-		);
+		parts.push(`\x1b_G${params.join(",")},a=${action},${chunk}\x1b\\`);
 		pos += CHUNK_SIZE;
 	}
 	return parts.join("");
@@ -158,7 +173,12 @@ export function encodeKitty(
  */
 export function encodeITerm2(
 	base64Data: string,
-	options: { width?: number; height?: string; name?: string; preserveAspectRatio?: boolean } = {},
+	options: {
+		width?: number;
+		height?: string;
+		name?: string;
+		preserveAspectRatio?: boolean;
+	} = {},
 ): string {
 	let params = "filename=";
 	if (options.name) params += options.name;
@@ -173,7 +193,11 @@ export function encodeITerm2(
  * Encode Sixel image data. Uses the `@oh-my-pi/pi-natives` encodeSixel if
  * available, otherwise falls back to a basic implementation.
  */
-export function encodeSixel(data: Uint8Array, width: number, height: number): string {
+export function encodeSixel(
+	data: Uint8Array,
+	width: number,
+	height: number,
+): string {
 	// Basic Sixel encoding: resize + encode
 	// A proper implementation would use pi-natives' encodeSixel for accuracy.
 	// This is a simplified fallback.

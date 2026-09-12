@@ -28,10 +28,12 @@ function themed(value: string): string {
 			line =>
 				plain +
 				line
+					// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 					.replace(/\x1b\[38;5;(\d+)m/g, (ansi, index: string) => {
 						const token = syntaxColors[index];
 						return token ? theme.fgRaw(token) : ansi;
 					})
+					// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 					.replace(/\x1b\[39m/g, plain) +
 				"\x1b[39m",
 		)

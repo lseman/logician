@@ -165,28 +165,32 @@ function scoreSkill(
 	};
 
 	for (const name of lookupNames) {
-		if (phraseMatches(prompt, promptTokens, name, 0.66)) {
-			consider(24, `matched “${name}”`);
-		} else {
-			const similarity = fuzzyPhraseSimilarity(promptTokens, name);
-			if (similarity >= 0.86) {
-				consider(18, fuzzyReason(name, similarity));
+		if (!isNameInUrlPath(explicitPrompt, name)) {
+			if (phraseMatches(prompt, promptTokens, name, 0.66)) {
+				consider(24, `matched "${name}"`);
+			} else {
+				const similarity = fuzzyPhraseSimilarity(promptTokens, name);
+				if (similarity >= 0.86) {
+					consider(18, fuzzyReason(name, similarity));
+				}
 			}
 		}
 	}
 	for (const trigger of skill.triggers ?? []) {
-		if (phraseMatches(prompt, promptTokens, trigger, 0.66)) {
-			consider(20, `matched “${trigger}”`);
-		} else {
-			const similarity = fuzzyPhraseSimilarity(promptTokens, trigger);
-			if (similarity >= 0.84) {
-				consider(17, fuzzyReason(trigger, similarity));
+		if (!isNameInUrlPath(explicitPrompt, trigger)) {
+			if (phraseMatches(prompt, promptTokens, trigger, 0.66)) {
+				consider(20, `matched "${trigger}"`);
+			} else {
+				const similarity = fuzzyPhraseSimilarity(promptTokens, trigger);
+				if (similarity >= 0.84) {
+					consider(17, fuzzyReason(trigger, similarity));
+				}
 			}
 		}
 	}
 	for (const example of skill.exampleQueries ?? []) {
 		if (phraseMatches(prompt, promptTokens, example, 0.7)) {
-			consider(16, `similar to “${example}”`);
+			consider(16, `similar to "${example}"`);
 		} else {
 			const similarity = fuzzyPhraseSimilarity(promptTokens, example);
 			if (similarity >= 0.82) {
@@ -204,7 +208,12 @@ function scoreSkill(
 	}
 	const family = tokens(skill.name)[0];
 	const matched = best as SkillActivation | null;
-	if (matched && family && promptTokens.has(family)) {
+	if (
+		matched &&
+		family &&
+		!isNameInUrlPath(explicitPrompt, family) &&
+		promptTokens.has(family)
+	) {
 		matched.score += 12;
 	}
 	return matched;
@@ -322,4 +331,36 @@ function normalize(value: string): string {
 function sameSkillFamily(a: Skill, b: Skill): boolean {
 	const family = (skill: Skill): string => skill.name.split(/[-/:]/, 1)[0];
 	return family(a) === family(b);
+}
+/**
+ * Returns true when `name` appears in `prompt` solely as part of a URL path
+ * (e.g. `skill://adhd`, `skill://i-have-adhd`, `agent://foo/adhd-bar`).
+ * When true, name/trigger matching should be skipped because the mention is
+ * a URL artifact, not genuine intent to activate the skill.
+ */
+function isNameInUrlPath(prompt: string, name: string): boolean {
+	const urlPathSep: Record<string, true> = {
+		"/": true,
+		"-": true,
+		_: true,
+		".": true,
+	};
+	let idx = 0;
+	while (idx < prompt.length) {
+		idx = prompt.indexOf(name, idx);
+		if (idx === -1) break;
+		if (idx === 0) {
+			idx += name.length;
+			continue;
+		}
+		const before = prompt[idx - 1];
+		if (urlPathSep[before]) {
+			const schemeAnchor = prompt.lastIndexOf("://", idx);
+			if (schemeAnchor !== -1) {
+				return true;
+			}
+		}
+		idx += name.length;
+	}
+	return false;
 }

@@ -278,8 +278,9 @@ export class HubProcessManager {
 		entry: ProcessEntry,
 		timeoutMs: number,
 	): Promise<boolean> {
+		const readySpec = entry.spec.ready;
+		if (!readySpec) return true;
 		return new Promise(resolve => {
-			const readySpec = entry.spec.ready!;
 			const readyLog = readySpec.log ? new RegExp(readySpec.log, "u") : null;
 			const readyPort = readySpec.port;
 			const readyHost = readySpec.host ?? "127.0.0.1";

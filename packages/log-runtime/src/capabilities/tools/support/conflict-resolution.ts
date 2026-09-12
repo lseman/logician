@@ -60,7 +60,10 @@ export function parseConflictBlocks(
 			if (oursEnd >= lines.length) break;
 
 			let theirsEnd = oursEnd + 1;
-			while (theirsEnd < lines.length && !lines[theirsEnd].startsWith(">>>>>>> ")) {
+			while (
+				theirsEnd < lines.length &&
+				!lines[theirsEnd].startsWith(">>>>>>> ")
+			) {
 				theirsEnd++;
 			}
 

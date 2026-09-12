@@ -23,8 +23,8 @@ import {
 	stripTextToolCalls,
 } from "../../capabilities/provider/text-tool-calls.ts";
 import type { ToolRegistry } from "../../capabilities/tools/registry.ts";
-import { isProviderRefusal } from "../../control/guards/refusal-detection.ts";
 import type { OutputGuard } from "../../control/guards/output-guard.ts";
+import { isProviderRefusal } from "../../control/guards/refusal-detection.ts";
 import type {
 	AgentEventSink,
 	AgentMessage,
@@ -96,11 +96,10 @@ export function processProviderResponse(
 	// so the history layer can strip them from replay context.
 	const refusal = response?.refusal;
 	if (isProviderRefusal(assistantContent, refusal)) {
-		const refusalAssistant = createAssistantMessage(
-			assistantContent,
-			[],
-		);
-		(refusalAssistant as unknown as Record<string, unknown>).details = { refusal: true };
+		const refusalAssistant = createAssistantMessage(assistantContent, []);
+		(refusalAssistant as unknown as Record<string, unknown>).details = {
+			refusal: true,
+		};
 		messages.push(refusalAssistant);
 		newMessages.push(refusalAssistant);
 

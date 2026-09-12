@@ -8,11 +8,14 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import type { Tool, ToolContext } from "@logician/log-core";
-import { recordRead } from "./support/read-tracker.js";
+import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/index.js";
+import type { ResolveContext } from "../../runtime/bridge/support/internal-urls/types.js";
+import { parseConflictBlocks } from "./support/conflict-resolution.js";
 import {
 	formatHashlineHeader,
 	splitAddressableFileLines,
 } from "./support/hashline.js";
+import { recordRead } from "./support/read-tracker.js";
 import {
 	ensureInsideCwd,
 	resolveReadPath,
@@ -24,16 +27,9 @@ import {
 	truncateHead,
 } from "./support/utils/truncate.js";
 import {
-	parseConflictBlocks,
-} from "./support/conflict-resolution.js";
-import {
 	listXdDevices,
 	readXdDeviceDocs,
 } from "./support/xd-device-registry.ts";
-import type { ResolveContext } from "../../runtime/bridge/support/internal-urls/types.js";
-import {
-	InternalUrlRouter,
-} from "../../runtime/bridge/support/internal-urls/index.js";
 
 export const read_file: Tool = {
 	readOnly: true,
@@ -85,7 +81,9 @@ export const read_file: Tool = {
 			if (devices.size === 0) {
 				return "No xd:// devices are mounted in this session. Check your configuration.";
 			}
-			const lines = [...devices.entries()].map(([name, desc]) => `  ${name}: ${desc}`);
+			const lines = [...devices.entries()].map(
+				([name, desc]) => `  ${name}: ${desc}`,
+			);
 			return `# Available xd:// devices\n\nVirtual tool devices mounted behind write_file dispatch:\n\n${lines.join("\n")}`;
 		}
 		if (filePath.toLowerCase().startsWith("xd://")) {
@@ -123,7 +121,10 @@ export const read_file: Tool = {
 		recordRead(resolved);
 
 		// Compute hashline tag from full file content
-		const fileHash = createHash("sha256").update(buffer).digest("hex").slice(0, 4);
+		const fileHash = createHash("sha256")
+			.update(buffer)
+			.digest("hex")
+			.slice(0, 4);
 		const header = formatHashlineHeader(filePath, fileHash);
 
 		// Split into addressable lines (no trailing empty line)
@@ -131,7 +132,6 @@ export const read_file: Tool = {
 		const totalLines = allLines.length;
 		// Detect merge conflicts
 		const conflictBlocks = parseConflictBlocks(fullContent, resolved);
-
 
 		// 1-based offset -> 0-based start.
 		const startLine = offset > 0 ? offset - 1 : 0;
@@ -186,7 +186,16 @@ export const read_file: Tool = {
 };
 
 /** Build a conflict notice to append to read_file output. */
-function formatConflictNotice(fullContent: string, blocks: { index: number; oursLabel: string; theirsLabel: string; offset: number; file: string }[]): string {
+function formatConflictNotice(
+	fullContent: string,
+	blocks: {
+		index: number;
+		oursLabel: string;
+		theirsLabel: string;
+		offset: number;
+		file: string;
+	}[],
+): string {
 	if (blocks.length === 0) return "";
 	const lines = [
 		"",
@@ -222,7 +231,10 @@ function isInternalUrl(path: string): boolean {
 }
 
 /** Resolve an internal URL to its content. */
-async function resolveInternalUrl(input: string, ctx: ToolContext): Promise<string> {
+async function resolveInternalUrl(
+	input: string,
+	ctx: ToolContext,
+): Promise<string> {
 	const router = InternalUrlRouter.instance();
 	const context: ResolveContext = {
 		cwd: ctx.cwd || process.cwd(),

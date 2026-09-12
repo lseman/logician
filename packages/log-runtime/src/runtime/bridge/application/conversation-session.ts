@@ -63,7 +63,10 @@ export class ConversationSession {
 			config.cwd ?? process.cwd(),
 		);
 		const session = new AgentSession({
-			config: { ...config, taskLedger: getTasks().length > 0 ? taskLedger : undefined },
+			config: {
+				...config,
+				taskLedger: getTasks().length > 0 ? taskLedger : undefined,
+			},
 			backend,
 			cwd: config.cwd,
 			maxIterations: config.maxIterations,

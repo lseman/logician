@@ -7,7 +7,7 @@ import {
 	type EvalResult,
 } from "../kernel-manager.ts";
 
-let km: ReturnType<typeof createKernelManager> | undefined;
+let km: ReturnType<typeof createKernelManager>;
 
 beforeEach(() => {
 	km = createKernelManager();
@@ -15,7 +15,6 @@ beforeEach(() => {
 
 afterEach(async () => {
 	await km?.stop();
-	km = undefined;
 });
 
 test("createKernelManager returns manager with all methods", () => {
@@ -51,7 +50,7 @@ test("kernel states are initially unavailable", () => {
 });
 
 test("python eval executes simple print", async () => {
-	const result: EvalResult = await km!.eval({
+	const result: EvalResult = await km.eval({
 		language: "python",
 		code: "print('hello')",
 	});
@@ -61,10 +60,10 @@ test("python eval executes simple print", async () => {
 });
 
 test("python eval preserves state across calls", async () => {
-	const r1: EvalResult = await km!.eval({ language: "python", code: "x = 42" });
+	const r1: EvalResult = await km.eval({ language: "python", code: "x = 42" });
 	expect(r1.status).toBe("success");
 
-	const r2: EvalResult = await km!.eval({
+	const r2: EvalResult = await km.eval({
 		language: "python",
 		code: "print(x)",
 	});
@@ -73,7 +72,7 @@ test("python eval preserves state across calls", async () => {
 });
 
 test("python eval with import works", async () => {
-	const result: EvalResult = await km!.eval({
+	const result: EvalResult = await km.eval({
 		language: "python",
 		code: "import json; print(json.dumps({'a': 1}))",
 	});
@@ -83,7 +82,7 @@ test("python eval with import works", async () => {
 });
 
 test("python eval with syntax error returns error status", async () => {
-	const result: EvalResult = await km!.eval({
+	const result: EvalResult = await km.eval({
 		language: "python",
 		code: "def invalid syntax here",
 	});
@@ -93,9 +92,9 @@ test("python eval with syntax error returns error status", async () => {
 });
 
 test("python eval respects reset flag", async () => {
-	await km!.eval({ language: "python", code: "my_var = 'preserved'" });
+	await km.eval({ language: "python", code: "my_var = 'preserved'" });
 
-	const result: EvalResult = await km!.eval({
+	const result: EvalResult = await km.eval({
 		language: "python",
 		code: "print('my_var' in globals())",
 		reset: true,
@@ -106,7 +105,7 @@ test("python eval respects reset flag", async () => {
 });
 
 test("python eval respects custom timeout", async () => {
-	const result: EvalResult = await km!.eval({
+	const result: EvalResult = await km.eval({
 		language: "python",
 		code: "import time; time.sleep(0.01); print('done')",
 		timeoutMs: 5000,
@@ -117,7 +116,7 @@ test("python eval respects custom timeout", async () => {
 });
 
 test("js eval executes simple code", async () => {
-	const result: EvalResult = await km!.eval({
+	const result: EvalResult = await km.eval({
 		language: "js",
 		code: "console.log('hi from bun')",
 	});
@@ -127,10 +126,10 @@ test("js eval executes simple code", async () => {
 });
 
 test("js eval preserves state across calls", async () => {
-	const r1: EvalResult = await km!.eval({ language: "js", code: "y = 100" });
+	const r1: EvalResult = await km.eval({ language: "js", code: "y = 100" });
 	expect(r1.status).toBe("success");
 
-	const r2: EvalResult = await km!.eval({
+	const r2: EvalResult = await km.eval({
 		language: "js",
 		code: "console.log(y)",
 	});
@@ -139,7 +138,7 @@ test("js eval preserves state across calls", async () => {
 });
 
 test("js eval with syntax error returns error status", async () => {
-	const result: EvalResult = await km!.eval({
+	const result: EvalResult = await km.eval({
 		language: "js",
 		code: "def invalid syntax here",
 	});
@@ -150,8 +149,8 @@ test("js eval with syntax error returns error status", async () => {
 
 test("concurrent eval calls work", async () => {
 	const [r1, r2] = await Promise.all([
-		km!.eval({ language: "python", code: "print('python')" }),
-		km!.eval({ language: "js", code: "console.log('js')" }),
+		km.eval({ language: "python", code: "print('python')" }),
+		km.eval({ language: "js", code: "console.log('js')" }),
 	]);
 
 	expect(r1.status).toBe("success");
@@ -175,6 +174,6 @@ test("kernel manager with custom config accepts all options", () => {
 
 test("eval with no code returns error", async () => {
 	// Empty code should still execute (no-op)
-	const result: EvalResult = await km!.eval({ language: "python", code: "" });
+	const result: EvalResult = await km.eval({ language: "python", code: "" });
 	expect(result.status).toBe("success");
 });

@@ -11,7 +11,7 @@ import { LegroomWorker } from "./worker.ts";
 
 /** Owns Legroom enablement, hooks, CCR operations, and worker lifecycle. */
 export class LegroomGateway {
-	readonly worker: LegroomWorker;
+	private readonly worker: LegroomWorker;
 	private enabled: boolean;
 
 	constructor(options: LegroomSdkConfig = {}) {

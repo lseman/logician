@@ -36,7 +36,6 @@ export class SoftToolRequirementManager {
 		escalations: 0,
 	};
 
-
 	/**
 	 * Set (or clear) the current soft requirement. Clears state when `req` is
 	 * undefined. Returns true if this is a new/changed requirement (triggering
@@ -64,7 +63,9 @@ export class SoftToolRequirementManager {
 	 * Returns true if the requirement is satisfied (or not active).
 	 * Updates escalation count on non-compliance.
 	 */
-	checkCompliance(toolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>): boolean {
+	checkCompliance(
+		toolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>,
+	): boolean {
 		const { requirement } = this.state;
 		if (!requirement) return true;
 
@@ -74,8 +75,7 @@ export class SoftToolRequirementManager {
 			: (tc: { name: string; arguments?: Record<string, unknown> }) =>
 					tc.name === requirement.toolName;
 
-		const allSatisfied =
-			toolCalls.length === 0 || toolCalls.every(satisfies);
+		const allSatisfied = toolCalls.length === 0 || toolCalls.every(satisfies);
 
 		if (allSatisfied) {
 			// Reset escalations on compliance

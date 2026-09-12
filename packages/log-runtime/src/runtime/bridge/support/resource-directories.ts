@@ -49,4 +49,3 @@ function projectResourceDirs(cwd: string, resource: string): string[] {
 export function getProjectRulesDirs(cwd: string): string[] {
 	return Array.from(new Set(projectResourceDirs(cwd, "rules")));
 }
-

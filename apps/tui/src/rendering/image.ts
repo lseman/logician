@@ -3,16 +3,16 @@
 // back to a styled text placeholder when the protocol is unavailable or
 // the image has been suppressed by the budget.
 
-import type { Component } from "../terminal/primitives.ts";
-import { theme } from "../terminal/theme.ts";
+import type { ImageBudget } from "../terminal/image-budget.ts";
 import {
 	getTERMINAL,
-	imageFallback,
-	renderImage,
 	type ImageDimensions,
 	type ImageRenderOptions,
+	imageFallback,
+	renderImage,
 } from "../terminal/image-protocol.ts";
-import type { ImageBudget } from "../terminal/image-budget.ts";
+import type { Component } from "../terminal/primitives.ts";
+import { theme } from "../terminal/theme.ts";
 
 const SAVE_CURSOR = "\x1b7";
 const RESTORE_CURSOR = "\x1b8";
@@ -61,7 +61,9 @@ export class ImageComponent implements Component {
 		this.#options = options;
 		this.#dimensions = dimensions || { widthPx: 800, heightPx: 600 };
 		this.#budget = options.budget;
-		this.#imageId = options.budget ? options.budget.acquireId(options.imageKey) : undefined;
+		this.#imageId = options.budget
+			? options.budget.acquireId(options.imageKey)
+			: undefined;
 	}
 
 	invalidate(): void {
@@ -72,14 +74,16 @@ export class ImageComponent implements Component {
 	render(width: number): string[] {
 		const terminal = getTERMINAL();
 		const imageProtocol = terminal.imageProtocol;
-		const imageProtocolStr = imageProtocol === null ? "none" : String(imageProtocol);
+		const imageProtocolStr =
+			imageProtocol === null ? "none" : String(imageProtocol);
 		const hasProtocol = imageProtocol != null;
 		const cellDimensions = { widthPx: 8, heightPx: 16 }; // Will be replaced when proper cell dims are available
 
 		// observe() must run on every pass so the image keeps its display-order slot.
-		const suppressed = hasProtocol && this.#budget !== undefined
-			? this.#budget.observe(this.#imageId ?? 0)
-			: false;
+		const suppressed =
+			hasProtocol && this.#budget !== undefined
+				? this.#budget.observe(this.#imageId ?? 0)
+				: false;
 
 		if (
 			this.#cachedLines &&
@@ -93,12 +97,15 @@ export class ImageComponent implements Component {
 		}
 
 		const cap = this.#options.maxWidthCells;
-		const maxWidth = cap != null && cap > 0 ? Math.min(width - 2, cap) : width - 2;
+		const maxWidth =
+			cap != null && cap > 0 ? Math.min(width - 2, cap) : width - 2;
 
 		let lines: string[];
 
 		if (hasProtocol && !suppressed) {
-			const needsTransmit = this.#imageId != null && (this.#budget?.shouldTransmit(this.#imageId) ?? false);
+			const needsTransmit =
+				this.#imageId != null &&
+				(this.#budget?.shouldTransmit(this.#imageId) ?? false);
 			const result = renderImage(this.#base64Data, this.#dimensions, {
 				maxWidthCells: maxWidth,
 				maxHeightCells: this.#options.maxHeightCells,
@@ -107,7 +114,11 @@ export class ImageComponent implements Component {
 				preserveAspectRatio: true,
 			});
 
-			if (result?.transmit && this.#imageId != null && this.#budget !== undefined) {
+			if (
+				result?.transmit &&
+				this.#imageId != null &&
+				this.#budget !== undefined
+			) {
 				this.#budget.enqueueTransmit(this.#imageId, result.transmit);
 			}
 
@@ -131,11 +142,18 @@ export class ImageComponent implements Component {
 				}
 				const cursorRows = result.rows - 1;
 				const moveUp = cursorRows > 0 ? `\x1b[${cursorRows}A` : "";
-				lines.push(cursorRows > 0 ? SAVE_CURSOR + moveUp + result.sequence + RESTORE_CURSOR : result.sequence);
+				lines.push(
+					cursorRows > 0
+						? SAVE_CURSOR + moveUp + result.sequence + RESTORE_CURSOR
+						: result.sequence,
+				);
 			} else {
 				lines = this.#fallbackLines();
 			}
-			this.#renderedGraphicRows = Math.max(this.#renderedGraphicRows, lines.length);
+			this.#renderedGraphicRows = Math.max(
+				this.#renderedGraphicRows,
+				lines.length,
+			);
 		} else {
 			lines = this.#fallbackLines();
 		}

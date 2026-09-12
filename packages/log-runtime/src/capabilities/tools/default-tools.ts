@@ -1,9 +1,16 @@
-import type { KernelManager } from "../eval/kernel-manager.ts";
-import { createEvalTool } from "../eval/eval-tool.ts";
-import { createWorkpoolTool } from "../eval/workpool-tool.ts";
-import { createCompletionTool } from "../eval/completion-tool.ts";
-import { createWaitTool } from "../eval/wait-tool.ts";
 import type { Tool, WebSearchConfig } from "@logician/log-core";
+import type { BrowserManager } from "../browser/browser-manager.ts";
+import { createBrowserTool } from "../browser/browser-tool.ts";
+import { createCompletionTool } from "../eval/completion-tool.ts";
+import { createEvalTool } from "../eval/eval-tool.ts";
+import type { KernelManager } from "../eval/kernel-manager.ts";
+import { createWaitTool } from "../eval/wait-tool.ts";
+import { createWorkpoolTool } from "../eval/workpool-tool.ts";
+import { createHubTool } from "../hub/hub-tool.ts";
+import { defaultHub } from "../hub/process-manager.ts";
+import type { LspClientPool } from "../lsp/lsp-client-pool.ts";
+import { createLspTool } from "../lsp/lsp-tool.ts";
+import { ast_edit } from "./ast-edit.ts";
 import { bash } from "./bash.ts";
 import { getBuiltInTools } from "./builtin-blocks.ts";
 import { edit_file } from "./edit-file.ts";
@@ -18,13 +25,6 @@ import { grep } from "./search.ts";
 import { web_fetch } from "./web-fetch.ts";
 import { createWebSearchTool } from "./web-search.ts";
 import { write_file } from "./write-file.ts";
-import { ast_edit } from "./ast-edit.ts";
-import type { BrowserManager } from "../browser/browser-manager.ts";
-import { createBrowserTool } from "../browser/browser-tool.ts";
-import { createHubTool } from "../hub/hub-tool.ts";
-import { defaultHub } from "../hub/process-manager.ts";
-import type { LspClientPool } from "../lsp/lsp-client-pool.ts";
-import { createLspTool } from "../lsp/lsp-tool.ts";
 
 // Default SearXNG instance assumed for local development.
 export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
@@ -154,7 +154,9 @@ export function createCoreTools(opts: DefaultToolsOptions = {}): Tool[] {
 /**
  * Build only discoverable tools. Used for xd:// device mounting.
  */
-export function createDiscoverableTools(opts: DefaultToolsOptions = {}): Tool[] {
+export function createDiscoverableTools(
+	opts: DefaultToolsOptions = {},
+): Tool[] {
 	const allTools = createDefaultTools(opts);
 	return filterDiscoverableTools(allTools);
 }

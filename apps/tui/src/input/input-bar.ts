@@ -100,7 +100,9 @@ export class InputBar implements Component, Focusable {
 	onChange?: (text: string) => void;
 	// Bash/Python mode indicator — changes input text color when ! or $ is typed.
 	private _modeColor: string | null = null;
-	public get modeColor(): string | null { return this._modeColor; }
+	public get modeColor(): string | null {
+		return this._modeColor;
+	}
 	public set modeColor(value: string | null) {
 		if (this._modeColor === value) return;
 		this._modeColor = value;
@@ -212,7 +214,6 @@ export class InputBar implements Component, Focusable {
 		this.cursor = this._graphemeCount(newBefore);
 		this._invalidate();
 	}
-
 
 	pushHistory(text: string): void {
 		if (

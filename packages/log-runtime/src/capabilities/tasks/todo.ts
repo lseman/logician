@@ -3,17 +3,17 @@
 // Phases group tasks; completion transitions track what changed per update.
 
 import type { Tool } from "@logician/log-core";
+
 /** Read-only task state supplied by an optional capability package. */
 interface TaskLedger {
 	snapshot(): readonly { id: number; subject: string; status: string }[];
 }
 
-import { getTasks, mutateTasks } from "./state.ts";
 import type { Task, TaskPhase } from "./state.ts";
+import { getTasks, mutateTasks } from "./state.ts";
 
-export { getTasks } from "./state.ts";
 export type { Task, TaskPhase, TaskStatus } from "./state.ts";
-export { onTodosChanged } from "./state.ts";
+export { getTasks, onTodosChanged } from "./state.ts";
 
 export type TodoOp =
 	| "init"
@@ -275,12 +275,8 @@ function opView(): string {
 
 	const lines: string[] = [];
 	for (const phase of phases) {
-		const done = phase.tasks.filter(
-			t => t.status === "completed",
-		).length;
-		const active = phase.tasks.filter(
-			t => t.status === "in_progress",
-		).length;
+		const done = phase.tasks.filter(t => t.status === "completed").length;
+		const active = phase.tasks.filter(t => t.status === "in_progress").length;
 		lines.push(
 			`Phase: ${phase.name} (${done} done, ${active} active, ${phase.tasks.length} total)`,
 		);
@@ -291,9 +287,7 @@ function opView(): string {
 				completed: "✓",
 				abandoned: "✕",
 			};
-			const dep = t.blocker
-				? ` [blocked by: ${t.blocker}]`
-				: "";
+			const dep = t.blocker ? ` [blocked by: ${t.blocker}]` : "";
 			lines.push(`  ${mark[t.status]} ${t.content}${dep}`);
 		}
 		lines.push("");
@@ -339,13 +333,11 @@ export const todo_tool: Tool = {
 			},
 			phase: {
 				type: "string",
-				description:
-					"Phase name (required for most operations)",
+				description: "Phase name (required for most operations)",
 			},
 			task: {
 				type: "string",
-				description:
-					"Task content (required for start/done/rm/block/unblock)",
+				description: "Task content (required for start/done/rm/block/unblock)",
 			},
 			blocker: {
 				type: "string",
@@ -354,13 +346,11 @@ export const todo_tool: Tool = {
 			tasks: {
 				type: "array",
 				items: { type: "string" },
-				description:
-					"Task content strings (for append or init items)",
+				description: "Task content strings (for append or init items)",
 			},
 			items: {
 				type: "array",
-				description:
-					"Init items: phase names or { phase, items } objects",
+				description: "Init items: phase names or { phase, items } objects",
 			},
 		},
 		required: ["op"],
@@ -379,7 +369,11 @@ export const todo_tool: Tool = {
 	execute: async (args): Promise<string> => {
 		const entry = (raw => {
 			if (typeof raw === "string") {
-				try { return JSON.parse(raw); } catch { return {}; }
+				try {
+					return JSON.parse(raw);
+				} catch {
+					return {};
+				}
 			}
 			if (!raw || typeof raw !== "object") return {};
 			return raw as Record<string, unknown>;

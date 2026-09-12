@@ -70,7 +70,7 @@ void test("validate rejects empty criteria", () => {
 void test("validate rejects unknown keys", () => {
 	const errors = validateAcceptanceInput({
 		criteria: ["ok"],
-		
+
 		foo: "bar",
 	} as AcceptanceConfig);
 	assert.equal(errors.length > 0, true);

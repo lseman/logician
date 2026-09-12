@@ -18,7 +18,13 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
+import type {
+	InternalResource,
+	InternalUrl,
+	ProtocolHandler,
+	ResolveContext,
+	UrlCompletion,
+} from "./types";
 
 const SSH_TEXT_MAX_BYTES = 1 * 1024 * 1024;
 const SSH_CONFIG_PATH = path.join(os.homedir(), ".logician", "ssh.json");
@@ -67,7 +73,10 @@ async function loadConfiguredHosts(): Promise<SshHostEntry[]> {
 		const raw = await fs.readFile(SSH_CONFIG_PATH, "utf-8");
 		const parsed = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((h: unknown) => typeof h === "object" && h !== null && "name" in h && "host" in h) as SshHostEntry[];
+		return parsed.filter(
+			(h: unknown) =>
+				typeof h === "object" && h !== null && "name" in h && "host" in h,
+		) as SshHostEntry[];
 	} catch {
 		// No config file or parse error — fall back to ~.ssh/config resolution
 		return [];
@@ -80,7 +89,11 @@ function execSsh(
 	args: string[],
 	timeoutMs: number = 30_000,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
-	const { promise, resolve, reject } = Promise.withResolvers<{ stdout: string; stderr: string; code: number | null }>();
+	const { promise, resolve, reject } = Promise.withResolvers<{
+		stdout: string;
+		stderr: string;
+		code: number | null;
+	}>();
 	const proc = spawn(command, args, {
 		timeout: timeoutMs,
 		stdio: ["pipe", "pipe", "pipe"],
@@ -92,19 +105,31 @@ function execSsh(
 	proc.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
 	proc.on("error", (err: NodeJS.ErrnoException) => {
 		if (err.code === "ETIMEDOUT" || err.code === "SIGTERM") {
-			resolve({ stdout: Buffer.concat(stdoutChunks).toString("utf-8"), stderr: Buffer.concat(stderrChunks).toString("utf-8"), code: null });
+			resolve({
+				stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+				stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+				code: null,
+			});
 		} else {
 			reject(err);
 		}
 	});
 	proc.on("close", code => {
-		resolve({ stdout: Buffer.concat(stdoutChunks).toString("utf-8"), stderr: Buffer.concat(stderrChunks).toString("utf-8"), code });
+		resolve({
+			stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+			stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+			code,
+		});
 	});
 	return promise;
 }
 
 /** Build scp arguments for a target. */
-function buildScpArgs(target: SshTarget, remotePath: string, args: string[]): string[] {
+function buildScpArgs(
+	target: SshTarget,
+	remotePath: string,
+	args: string[],
+): string[] {
 	const { username, port, host, keyPath } = target;
 	const scpArgs: string[] = [...args];
 	if (keyPath) scpArgs.push("-i", keyPath);
@@ -116,7 +141,12 @@ function buildScpArgs(target: SshTarget, remotePath: string, args: string[]): st
 /** Build ssh arguments for a target. */
 function buildSshArgs(target: SshTarget, command: string): string[] {
 	const { username, port, host, keyPath } = target;
-	const sshArgs: string[] = ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"];
+	const sshArgs: string[] = [
+		"-o",
+		"StrictHostKeyChecking=accept-new",
+		"-o",
+		"BatchMode=yes",
+	];
 	if (username) sshArgs.push("-l", username);
 	if (port) sshArgs.push("-p", String(port));
 	if (keyPath) sshArgs.push("-i", keyPath);
@@ -133,7 +163,10 @@ function remotePathFromUrl(url: InternalUrl): string {
 }
 
 /** Resolve URL authority to an SSH target. */
-async function resolveTarget(url: InternalUrl, _cwd?: string): Promise<SshTarget> {
+async function resolveTarget(
+	url: InternalUrl,
+	_cwd?: string,
+): Promise<SshTarget> {
 	const bareHost = url.hostname;
 	const rawAuthority = url.rawHost || bareHost;
 	const username = url.username || undefined;
@@ -144,7 +177,9 @@ async function resolveTarget(url: InternalUrl, _cwd?: string): Promise<SshTarget
 	}
 
 	if (url.password) {
-		throw new Error("ssh://: password authentication is not supported — use key/agent auth");
+		throw new Error(
+			"ssh://: password authentication is not supported — use key/agent auth",
+		);
 	}
 
 	// Parse user@host:port or bare host
@@ -153,7 +188,9 @@ async function resolveTarget(url: InternalUrl, _cwd?: string): Promise<SshTarget
 
 	// Try configured hosts first
 	const configured = await loadConfiguredHosts();
-	const match = configured.find(h => h.name === (url.rawHost || url.hostname)) ?? configured.find(h => h.name === bareHost);
+	const match =
+		configured.find(h => h.name === (url.rawHost || url.hostname)) ??
+		configured.find(h => h.name === bareHost);
 	if (match) {
 		return {
 			name: match.name,
@@ -177,7 +214,10 @@ async function resolveTarget(url: InternalUrl, _cwd?: string): Promise<SshTarget
 function formatDirListing(output: string): string {
 	const trimmed = output.trim();
 	if (!trimmed) return "(empty directory)\n";
-	const lines = trimmed.split("\n").map(line => `  ${line}`).join("\n");
+	const lines = trimmed
+		.split("\n")
+		.map(line => `  ${line}`)
+		.join("\n");
 	return `${lines}\n`;
 }
 
@@ -185,9 +225,23 @@ function formatDirListing(output: string): string {
 function contentTypeFor(remotePath: string): InternalResource["contentType"] {
 	if (remotePath.endsWith(".md")) return "text/markdown";
 	if (remotePath.endsWith(".json")) return "application/json";
-	if (remotePath.endsWith(".ts") || remotePath.endsWith(".js") || remotePath.endsWith(".tsx") || remotePath.endsWith(".jsx")) return "text/plain";
-	if (remotePath.endsWith(".yaml") || remotePath.endsWith(".yml") || remotePath.endsWith(".toml") || remotePath.endsWith(".ini") || remotePath.endsWith(".cfg")) return "text/plain";
-	if (remotePath.endsWith(".log") || remotePath.endsWith(".txt")) return "text/plain";
+	if (
+		remotePath.endsWith(".ts") ||
+		remotePath.endsWith(".js") ||
+		remotePath.endsWith(".tsx") ||
+		remotePath.endsWith(".jsx")
+	)
+		return "text/plain";
+	if (
+		remotePath.endsWith(".yaml") ||
+		remotePath.endsWith(".yml") ||
+		remotePath.endsWith(".toml") ||
+		remotePath.endsWith(".ini") ||
+		remotePath.endsWith(".cfg")
+	)
+		return "text/plain";
+	if (remotePath.endsWith(".log") || remotePath.endsWith(".txt"))
+		return "text/plain";
 	return "text/plain";
 }
 
@@ -200,7 +254,10 @@ export class SshProtocolHandler implements ProtocolHandler {
 	readonly scheme = "ssh";
 	readonly immutable = false;
 
-	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
+	async resolve(
+		url: InternalUrl,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
 		// Bare ssh:// with no host — list configured hosts
 		if (!(url.rawHost || url.hostname)) {
 			const rawPath = url.pathname;
@@ -223,7 +280,10 @@ export class SshProtocolHandler implements ProtocolHandler {
 
 		if (isDirectory) {
 			// Directory listing via ssh + ls
-			const { stdout, stderr, code } = await execSsh("ssh", buildSshArgs(target, `ls -1A "${remotePath}"`));
+			const { stdout, stderr, code } = await execSsh(
+				"ssh",
+				buildSshArgs(target, `ls -1A "${remotePath}"`),
+			);
 			if (code !== 0) {
 				throw new Error(`ssh://: ${stderr || `ls failed (exit ${code})`}`);
 			}
@@ -238,7 +298,10 @@ export class SshProtocolHandler implements ProtocolHandler {
 		}
 
 		// File read via scp
-		const { stdout, stderr, code } = await execSsh("scp", buildScpArgs(target, remotePath, ["-q", "-C"]));
+		const { stdout, stderr, code } = await execSsh(
+			"scp",
+			buildScpArgs(target, remotePath, ["-q", "-C"]),
+		);
 		if (code !== 0) {
 			throw new Error(`ssh://: ${stderr || `scp failed (exit ${code})`}`);
 		}
@@ -249,10 +312,14 @@ export class SshProtocolHandler implements ProtocolHandler {
 		// Check for binary content
 		const buffer = Buffer.from(stdout, "binary");
 		if (isLikelyBinary(buffer)) {
-			throw new Error(`ssh://: ${remotePath} appears to be binary; ssh:// supports UTF-8 text only`);
+			throw new Error(
+				`ssh://: ${remotePath} appears to be binary; ssh:// supports UTF-8 text only`,
+			);
 		}
 		if (buffer.length > SSH_TEXT_MAX_BYTES) {
-			throw new Error(`ssh://: ${remotePath} exceeds ${SSH_TEXT_MAX_BYTES / 1024 / 1024} MiB limit`);
+			throw new Error(
+				`ssh://: ${remotePath} exceeds ${SSH_TEXT_MAX_BYTES / 1024 / 1024} MiB limit`,
+			);
 		}
 
 		const content = buffer.toString("utf-8");
@@ -264,7 +331,10 @@ export class SshProtocolHandler implements ProtocolHandler {
 		};
 	}
 
-	async complete(query?: string, _context?: ResolveContext): Promise<UrlCompletion[]> {
+	async complete(
+		query?: string,
+		_context?: ResolveContext,
+	): Promise<UrlCompletion[]> {
 		const hosts = await loadConfiguredHosts();
 		if (!query) {
 			return hosts.map(host => ({

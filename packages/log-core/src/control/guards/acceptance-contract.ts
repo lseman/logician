@@ -48,7 +48,6 @@ export function formatVerificationRepair(
 	].join("\n");
 }
 
-
 export function resolveEffectiveAcceptance(params: {
 	explicit?: AcceptanceConfig;
 }): ResolvedAcceptance {
@@ -156,9 +155,7 @@ export async function verifyAcceptanceCommands(
 							clearTimeout(timeoutId);
 							resolve({
 								command: verification.command,
-								result: verification.allowFailure
-									? "passed"
-									: "failed",
+								result: verification.allowFailure ? "passed" : "failed",
 								summary: error.message.slice(0, 500),
 							});
 						},

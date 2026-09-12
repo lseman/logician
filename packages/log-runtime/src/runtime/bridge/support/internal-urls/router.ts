@@ -2,7 +2,12 @@
 // Process-global router with one handler per scheme.
 // Access via InternalUrlRouter.instance().
 
-import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext } from "./types";
+import type {
+	InternalResource,
+	InternalUrl,
+	ProtocolHandler,
+	ResolveContext,
+} from "./types";
 
 let _instance: InternalUrlRouter | undefined;
 
@@ -37,7 +42,10 @@ export class InternalUrlRouter {
 		return handler !== undefined;
 	}
 
-	async resolve(input: string, context?: ResolveContext): Promise<InternalResource> {
+	async resolve(
+		input: string,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
 		const scheme = extractUriScheme(input);
 		if (!scheme) throw new Error(`Unknown scheme in: ${input}`);
 		const handler = this.#handlers.get(scheme);

@@ -92,7 +92,9 @@ function partialStrikethrough(text: string, visibleChars: number): string {
 	if (visibleChars <= 0) return text;
 	const fullStrike = STRIKE + text + STRIKE_END;
 	if (visibleChars >= text.length) return fullStrike;
-	return STRIKE + text.slice(0, visibleChars) + STRIKE_END + text.slice(visibleChars);
+	return (
+		STRIKE + text.slice(0, visibleChars) + STRIKE_END + text.slice(visibleChars)
+	);
 }
 
 function strikeRevealCount(totalChars: number, frame: number): number {
@@ -116,15 +118,17 @@ function computeTouchedPhases(
 }
 
 function formatPhaseProgress(phase: TodoPhase): string {
-	const done = phase.tasks.filter(t => t.status === "completed" || t.status === "abandoned").length;
+	const done = phase.tasks.filter(
+		t => t.status === "completed" || t.status === "abandoned",
+	).length;
 	return theme.fg("dim", `  ${done}/${phase.tasks.length}`);
 }
 
-function formatPhaseSummary(
-	phase: TodoPhase,
-	oneBasedIndex: number,
-): string {
-	const header = theme.fg("muted", formatPhaseDisplayName(phase.name, oneBasedIndex));
+function formatPhaseSummary(phase: TodoPhase, oneBasedIndex: number): string {
+	const header = theme.fg(
+		"muted",
+		formatPhaseDisplayName(phase.name, oneBasedIndex),
+	);
 	return header + formatPhaseProgress(phase);
 }
 
@@ -147,7 +151,10 @@ export class TodoBar implements Component {
 		this.onInvalidate = cb;
 	}
 
-	setPhases(phases: TodoPhase[], completedTasks?: CompletionTransition[]): void {
+	setPhases(
+		phases: TodoPhase[],
+		completedTasks?: CompletionTransition[],
+	): void {
 		this.phases = phases;
 		this.completedTasks = completedTasks;
 
@@ -212,7 +219,12 @@ export class TodoBar implements Component {
 		if (width === this.cachedWidth && this.cachedLines !== null) {
 			return this.cachedLines;
 		}
-		const lines = renderRaw(width, this.phases, this.completedTasks, this.completionFrames);
+		const lines = renderRaw(
+			width,
+			this.phases,
+			this.completedTasks,
+			this.completionFrames,
+		);
 		this.cachedWidth = width;
 		this.cachedLines = lines;
 		return lines;
@@ -236,7 +248,10 @@ function renderRaw(
 		(sum, p) => sum + p.tasks.filter(t => t.status === "completed").length,
 		0,
 	);
-	const total = phases.reduce((sum, p) => sum + p.tasks.filter(t => t.status !== "abandoned").length, 0);
+	const total = phases.reduce(
+		(sum, p) => sum + p.tasks.filter(t => t.status !== "abandoned").length,
+		0,
+	);
 	const active = total - done;
 
 	const lines: string[] = [];
@@ -273,7 +288,12 @@ function renderRaw(
 
 		if (isTouched(phase.name)) {
 			// Full phase rendering
-			lines.push(pad(clampLine(formatPhaseDisplayName(phase.name, oneBasedIndex), width), width));
+			lines.push(
+				pad(
+					clampLine(formatPhaseDisplayName(phase.name, oneBasedIndex), width),
+					width,
+				),
+			);
 			for (const t of phase.tasks) {
 				if (shownRows >= MAX_ROWS) break;
 				const line = buildTaskLine(t, completionFrames);
@@ -285,7 +305,9 @@ function renderRaw(
 		} else {
 			// Collapsed summary
 			if (shownRows >= MAX_ROWS) break;
-			lines.push(pad(clampLine(formatPhaseSummary(phase, oneBasedIndex), width), width));
+			lines.push(
+				pad(clampLine(formatPhaseSummary(phase, oneBasedIndex), width), width),
+			);
 			shownRows++;
 		}
 	}
@@ -295,12 +317,16 @@ function renderRaw(
 		phases.reduce(
 			(sum, p) =>
 				sum +
-				(isTouched(p.name) ? p.tasks.filter(t => t.status !== "abandoned").length : 0),
+				(isTouched(p.name)
+					? p.tasks.filter(t => t.status !== "abandoned").length
+					: 0),
 			0,
 		);
 
 	if (hiddenCount > 0) {
-		lines.push(pad(clampLine(`   ${DIM}… ${hiddenCount} more${RESET}`, width), width));
+		lines.push(
+			pad(clampLine(`   ${DIM}… ${hiddenCount} more${RESET}`, width), width),
+		);
 	}
 
 	return lines;

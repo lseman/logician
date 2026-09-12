@@ -5,13 +5,12 @@
 // untouched regions are never rewritten) → line-trimmed with indentation re-application.
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
-import type { MutationReceipt, Tool, ToolResult } from "@logician/log-core";
 import { createHash } from "node:crypto";
+import type { MutationReceipt, Tool, ToolResult } from "@logician/log-core";
+import { createMutationSession, mutationReceipt } from "./mutation/session.js";
 import { checkFileParse } from "./support/auto-repair.js";
-import { executeHashlineEdit } from "./support/hashline-engine.js";
 import { createEditStore } from "./support/edit-store.js";
-import { createMutationSession } from "./mutation/session.js";
-import { mutationReceipt } from "./mutation/session.js";
+import { executeHashlineEdit } from "./support/hashline-engine.js";
 import { withFileMutationQueue } from "./support/mutation-queue.js";
 import {
 	hasBeenRead,
@@ -347,7 +346,10 @@ function combineMutationReceipts(receipts: MutationReceipt[]): MutationReceipt {
 		applied: receipts.some(receipt => receipt.applied),
 		changed: receipts.some(receipt => receipt.changed),
 		paths: receipts.flatMap(receipt => receipt.paths),
-		filesAffected: receipts.reduce((total, receipt) => total + receipt.filesAffected, 0),
+		filesAffected: receipts.reduce(
+			(total, receipt) => total + receipt.filesAffected,
+			0,
+		),
 		revisions: receipts.flatMap(receipt => receipt.revisions),
 		error: receipts.find(receipt => receipt.error)?.error,
 	};
@@ -627,7 +629,8 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 		}
 	}
 
-	const input = typeof args.input === "string" && args.input ? args.input : undefined;
+	const input =
+		typeof args.input === "string" && args.input ? args.input : undefined;
 	return { path, edits, input };
 }
 
@@ -666,7 +669,8 @@ export const edit_file: Tool = {
 			return "Error: edit_file requires a path.";
 		}
 
-		if (input && edits.length > 0) return "Error: Use either input or text edits, not both.";
+		if (input && edits.length > 0)
+			return "Error: Use either input or text edits, not both.";
 		if (!input && edits.length === 0) {
 			return "Error: Provide oldText/newText or edits[].";
 		}
@@ -690,25 +694,44 @@ export const edit_file: Tool = {
 			);
 		}
 		const store = createEditStore();
-			const mutation = createMutationSession(store, ctx.cwd || process.cwd(), { allowedPaths: ctx.allowedPaths, allowAllPaths: ctx.allowAllPaths });
+		const mutation = createMutationSession(store, ctx.cwd || process.cwd(), {
+			allowedPaths: ctx.allowedPaths,
+			allowAllPaths: ctx.allowAllPaths,
+		});
 
-			return withFileMutationQueue(resolved, async () => {
-				if (isStaleSinceRead(resolved)) {
-					return (
-						`${resolved} has been modified since it was last read. ` +
-						"Read it again before editing."
-					);
+		return withFileMutationQueue(resolved, async () => {
+			if (isStaleSinceRead(resolved)) {
+				return (
+					`${resolved} has been modified since it was last read. ` +
+					"Read it again before editing."
+				);
+			}
+			if (input) {
+				const result = await executeHashlineEdit(
+					input,
+					store,
+					mutation,
+					ctx.cwd || process.cwd(),
+					resolved,
+				);
+				const receipt = combineMutationReceipts(result.receipts ?? []);
+				if (result.error)
+					return {
+						content: `Error: ${result.error}`,
+						isError: true,
+						details: { mutation: receipt },
+					};
+				if (!result.applied) {
+					const noopWarning = store.recordNoop(resolved);
+					if (noopWarning)
+						return { content: noopWarning, details: { mutation: receipt } };
+					return {
+						content:
+							"No changes made: hashline edits matched the current content.",
+						details: { mutation: receipt },
+					};
 				}
-				if (input) {
-					const result = await executeHashlineEdit(input, store, mutation, ctx.cwd || process.cwd(), resolved);
-					const receipt = combineMutationReceipts(result.receipts ?? []);
-					if (result.error) return { content: `Error: ${result.error}`, isError: true, details: { mutation: receipt } };
-					if (!result.applied) {
-						const noopWarning = store.recordNoop(resolved);
-						if (noopWarning) return { content: noopWarning, details: { mutation: receipt } };
-						return { content: "No changes made: hashline edits matched the current content.", details: { mutation: receipt } };
-					}
-					store.recordSuccess(resolved);
+				store.recordSuccess(resolved);
 				refreshAfterWrite(resolved);
 				// Auto-recovery: check parse after edit
 				const hashlineParseError = await checkFileParse(resolved);
@@ -729,7 +752,8 @@ export const edit_file: Tool = {
 					};
 				}
 				return {
-					content: `Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
+					content:
+						`Applied ${result.linesChanged} line change(s) across ${result.filesAffected} file(s).` +
 						(result.diff ? `\n\nDiff:\n${result.diff}` : ""),
 					details: {
 						mutation: receipt,
@@ -738,35 +762,46 @@ export const edit_file: Tool = {
 						filesAffected: result.filesAffected,
 					},
 				};
-				}
-				const buffer = await defaultEditOperations.readFile(resolved);
-				const rawContent = buffer.toString("utf-8");
-				const { bom, text: fileContent } = stripBom(rawContent);
-				const lineEnding = detectLineEnding(fileContent);
-				const normalizedContent = normalizeToLF(fileContent);
+			}
+			const buffer = await defaultEditOperations.readFile(resolved);
+			const rawContent = buffer.toString("utf-8");
+			const { bom, text: fileContent } = stripBom(rawContent);
+			const lineEnding = detectLineEnding(fileContent);
+			const normalizedContent = normalizeToLF(fileContent);
 
-				const { baseContent, newContent } = applyEditsToNormalizedContent(
-					normalizedContent,
-					edits,
-					path,
-				);
+			const { baseContent, newContent } = applyEditsToNormalizedContent(
+				normalizedContent,
+				edits,
+				path,
+			);
 
-				const proposal = {
-					path: resolved,
-					before: rawContent,
-					beforeHash: createHash("sha256").update(rawContent, "utf-8").digest("hex"),
-					after: bom + restoreLineEndings(newContent, lineEnding),
+			const proposal = {
+				path: resolved,
+				before: rawContent,
+				beforeHash: createHash("sha256")
+					.update(rawContent, "utf-8")
+					.digest("hex"),
+				after: bom + restoreLineEndings(newContent, lineEnding),
+			};
+			const result = await mutation.apply(proposal);
+			refreshAfterWrite(resolved);
+
+			const receipt = mutationReceipt(result);
+			if (result.error)
+				return {
+					content: `Error: ${result.error}`,
+					isError: true,
+					details: { mutation: receipt },
 				};
-				const result = await mutation.apply(proposal);
-				refreshAfterWrite(resolved);
-
-				const receipt = mutationReceipt(result);
-				if (result.error) return { content: `Error: ${result.error}`, isError: true, details: { mutation: receipt } };
-				if (!result.applied) {
-					const noopWarning = store.recordNoop(resolved);
-					if (noopWarning) return { content: noopWarning, details: { mutation: receipt } };
-					return { content: "No changes made: the edit produced identical content.", details: { mutation: receipt } };
-				}
+			if (!result.applied) {
+				const noopWarning = store.recordNoop(resolved);
+				if (noopWarning)
+					return { content: noopWarning, details: { mutation: receipt } };
+				return {
+					content: "No changes made: the edit produced identical content.",
+					details: { mutation: receipt },
+				};
+			}
 			store.recordSuccess(resolved);
 
 			// Generate diff first (needed for parse error message)
@@ -796,12 +831,12 @@ export const edit_file: Tool = {
 					`Successfully replaced ${edits.length} block(s) in ${path}.\n` +
 					(diffResult.diff ? `\n\nDiff:\n${diffResult.diff}` : ""),
 				details: {
-							mutation: receipt,
-				diff: diffResult.diff,
-				patch: diffResult.patch,
-				firstChangedLine: diffResult.firstChangedLine,
-			},
-		};
-			});
+					mutation: receipt,
+					diff: diffResult.diff,
+					patch: diffResult.patch,
+					firstChangedLine: diffResult.firstChangedLine,
+				},
+			};
+		});
 	},
 };

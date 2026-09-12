@@ -15,18 +15,18 @@
 // - Finalize by writing to xd://resolve (apply) or xd://reject (discard)
 
 import type { Tool } from "@logician/log-core";
-import { executeAstOp, type AstEditResult, type AstOp } from "./support/ast-grep.js";
-import { resolvePath } from "./support/utils/path-utils.js";
-import { ensureInsideCwd } from "./support/utils/path-utils.js";
+import {
+	type AstEditResult,
+	type AstOp,
+	executeAstOp,
+} from "./support/ast-grep.js";
 import { setStagedEdit } from "./support/staged-edits.js";
+import { ensureInsideCwd, resolvePath } from "./support/utils/path-utils.js";
 
 // ── Preview rendering ──────────────────────────────────────────────────────────
 
 /** Render a diff-style preview for an ast_edit result. */
-function renderEditPreview(
-	file: string,
-	edits: AstEditResult[],
-): string {
+function renderEditPreview(file: string, edits: AstEditResult[]): string {
 	const lines: string[] = [];
 	lines.push(`### Staged Edits for \`${file}\``);
 	lines.push("");
@@ -41,7 +41,7 @@ function renderEditPreview(
 	lines.push("");
 	lines.push(
 		`Total: ${edits.length} change(s) across 1 file. ` +
-		"Write `xd://resolve` to apply or `xd://reject` to discard.",
+			"Write `xd://resolve` to apply or `xd://reject` to discard.",
 	);
 
 	return lines.join("\n");
@@ -54,7 +54,7 @@ function buildStagedFiles(
 ): Array<{ path: string; content: string }> {
 	// For ast_edit, we return file paths and replacements
 	// The resolve handler will apply these to disk
-	return edits.map((edit) => ({
+	return edits.map(edit => ({
 		path: file,
 		content: edit.replacement,
 	}));
@@ -122,16 +122,11 @@ export const ast_edit: Tool = {
 
 		// Resolve paths
 		const cwd = ctx.cwd || process.cwd();
-		const resolvedPaths = paths.map((p) => resolvePath(cwd, p));
+		const resolvedPaths = paths.map(p => resolvePath(cwd, p));
 
 		// Validate paths
 		for (const p of resolvedPaths) {
-			ensureInsideCwd(
-				cwd,
-				p,
-				ctx.allowedPaths,
-				ctx.allowAllPaths ?? false,
-			);
+			ensureInsideCwd(cwd, p, ctx.allowedPaths, ctx.allowAllPaths ?? false);
 		}
 
 		try {
@@ -143,7 +138,9 @@ export const ast_edit: Tool = {
 			}
 
 			// Render preview
-			const previews = fileEdits.map((fe) => renderEditPreview(fe.file, fe.edits));
+			const previews = fileEdits.map(fe =>
+				renderEditPreview(fe.file, fe.edits),
+			);
 			const preview = previews.join("\n\n---\n\n");
 
 			// Build staged files for xd://resolve

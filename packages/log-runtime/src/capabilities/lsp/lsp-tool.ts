@@ -5,8 +5,8 @@
 // Wraps the LspClientPool's action() dispatch method and formats results
 // into human-readable output for the agent to consume and act on.
 
-import type { LspClientPool } from "./lsp-client-pool.ts";
 import type { Tool } from "@logician/log-core";
+import type { LspClientPool } from "./lsp-client-pool.ts";
 
 // ── Action enum ────────────────────────────────────────────────────────────────
 
@@ -26,22 +26,35 @@ const ACTIONS = [
 	"reload",
 ] as const;
 
-
 // ── Formatting helpers ─────────────────────────────────────────────────────────
 
-function formatLocation(loc: { file: string; line: number; column: number }): string {
+function formatLocation(loc: {
+	file: string;
+	line: number;
+	column: number;
+}): string {
 	const file = loc.file.replace(/^file:\/\//, "");
 	return `  ${file}:${loc.line}:${loc.column}`;
 }
 
-function formatHover(hover: { contents: string; signature?: string } | null): string {
-	if (!hover || !hover.contents?.trim()) return "No hover information.";
+function formatHover(
+	hover: { contents: string; signature?: string } | null,
+): string {
+	if (!hover?.contents?.trim()) return "No hover information.";
 	const lines = [hover.contents.trim()];
 	if (hover.signature) lines.push(hover.signature);
 	return lines.join("\n");
 }
 
-function formatSymbols(symbols: { name: string; kind: string; file: string; line: number; column: number }[]): string {
+function formatSymbols(
+	symbols: {
+		name: string;
+		kind: string;
+		file: string;
+		line: number;
+		column: number;
+	}[],
+): string {
 	if (symbols.length === 0) return "No symbols found.";
 	const lines = symbols.map(s => {
 		const file = s.file.replace(/^file:\/\//, "");
@@ -50,7 +63,9 @@ function formatSymbols(symbols: { name: string; kind: string; file: string; line
 	return lines.join("\n");
 }
 
-function formatCodeActions(actions: { title: string; kind?: string; command?: string }[]): string {
+function formatCodeActions(
+	actions: { title: string; kind?: string; command?: string }[],
+): string {
 	if (actions.length === 0) return "No code actions available.";
 	const lines = actions.map((a, i) => {
 		const kind = a.kind ? ` [${a.kind}]` : "";
@@ -60,7 +75,14 @@ function formatCodeActions(actions: { title: string; kind?: string; command?: st
 }
 
 function formatDiagnostics(
-	diagnostics: { line: number; column: number; message: string; code?: string | number; severity?: number; source?: string }[],
+	diagnostics: {
+		line: number;
+		column: number;
+		message: string;
+		code?: string | number;
+		severity?: number;
+		source?: string;
+	}[],
 ): string {
 	if (diagnostics.length === 0) return "No diagnostics.";
 	const lines = diagnostics.map((d, i) => {
@@ -71,7 +93,9 @@ function formatDiagnostics(
 	return lines.join("\n");
 }
 
-function formatLocations(locations: { file: string; line: number; column: number }[]): string {
+function formatLocations(
+	locations: { file: string; line: number; column: number }[],
+): string {
 	if (locations.length === 0) return "No locations found.";
 	return locations.map(formatLocation).join("\n");
 }
@@ -79,7 +103,6 @@ function formatLocations(locations: { file: string; line: number; column: number
 // ── Tool ───────────────────────────────────────────────────────────────────────
 
 export function createLspTool(pool: LspClientPool): Tool {
-
 	return {
 		readOnly: true,
 		cacheable: false,
@@ -180,38 +203,89 @@ export function createLspTool(pool: LspClientPool): Tool {
 
 			switch (action) {
 				case "diagnostics":
-					return formatDiagnostics(result as Array<{ line: number; column: number; message: string; code?: string | number; severity?: number; source?: string }>);
+					return formatDiagnostics(
+						result as Array<{
+							line: number;
+							column: number;
+							message: string;
+							code?: string | number;
+							severity?: number;
+							source?: string;
+						}>,
+					);
 				case "go-to-definition":
 				case "definition":
-					return formatLocations(result as Array<{ file: string; line: number; column: number }>);
+					return formatLocations(
+						result as Array<{ file: string; line: number; column: number }>,
+					);
 				case "references":
-					return formatLocations(result as Array<{ file: string; line: number; column: number }>);
+					return formatLocations(
+						result as Array<{ file: string; line: number; column: number }>,
+					);
 				case "hover":
-					return formatHover(result as { contents: string; signature?: string } | null);
+					return formatHover(
+						result as { contents: string; signature?: string } | null,
+					);
 				case "symbols":
-					return formatSymbols(result as Array<{ name: string; kind: string; file: string; line: number; column: number }>);
+					return formatSymbols(
+						result as Array<{
+							name: string;
+							kind: string;
+							file: string;
+							line: number;
+							column: number;
+						}>,
+					);
 				case "workspace-symbols":
-					return formatSymbols(result as Array<{ name: string; kind: string; file: string; line: number; column: number }>);
+					return formatSymbols(
+						result as Array<{
+							name: string;
+							kind: string;
+							file: string;
+							line: number;
+							column: number;
+						}>,
+					);
 				case "code-actions":
-					return formatCodeActions(result as Array<{ title: string; kind?: string; command?: string }>);
+					return formatCodeActions(
+						result as Array<{ title: string; kind?: string; command?: string }>,
+					);
 				case "rename":
 					if (result) {
-						const edit = result as { changes?: Array<{ file: string; range: { startLine: number; startCol: number; endLine: number; endCol: number }; newText: string }> };
+						const edit = result as {
+							changes?: Array<{
+								file: string;
+								range: {
+									startLine: number;
+									startCol: number;
+									endLine: number;
+									endCol: number;
+								};
+								newText: string;
+							}>;
+						};
 						if (edit.changes) {
 							const locations = edit.changes.map(c => ({
 								file: c.file,
 								line: c.range.startLine,
 								column: c.range.startCol,
 							}));
-							return `Rename to '${newName}' affects ${locations.length} location(s):\n` + locations.map(formatLocation).join("\n");
+							return (
+								`Rename to '${newName}' affects ${locations.length} location(s):\n` +
+								locations.map(formatLocation).join("\n")
+							);
 						}
 						return "No references found to rename.";
 					}
 					return "No references found to rename.";
 				case "type-definition":
-					return formatLocations(result as Array<{ file: string; line: number; column: number }>);
+					return formatLocations(
+						result as Array<{ file: string; line: number; column: number }>,
+					);
 				case "implementation":
-					return formatLocations(result as Array<{ file: string; line: number; column: number }>);
+					return formatLocations(
+						result as Array<{ file: string; line: number; column: number }>,
+					);
 				case "status": {
 					const statuses = await pool.action("status");
 					return `LSP Server Status:\n${formatStatusList(Array.isArray(statuses) ? statuses : [])}`;
@@ -226,11 +300,16 @@ export function createLspTool(pool: LspClientPool): Tool {
 }
 
 function formatStatusList(statuses: unknown[]): string {
-	if (!Array.isArray(statuses) || statuses.length === 0) return "  No LSP servers active.";
+	if (!Array.isArray(statuses) || statuses.length === 0)
+		return "  No LSP servers active.";
 	return statuses
 		.map(s => {
 			if (typeof s !== "object" || !s) return "  unknown";
-			const server = s as { command?: string; languageId?: string; ready?: boolean };
+			const server = s as {
+				command?: string;
+				languageId?: string;
+				ready?: boolean;
+			};
 			const state = server.ready ? "ready" : "starting";
 			return `  ${server.languageId ?? "?"} → ${server.command ?? "?"} (${state})`;
 		})

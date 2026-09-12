@@ -34,8 +34,10 @@ export class TerminalInfo {
 		if (this.imageProtocol === ImageProtocol.Sixel) {
 			return hasSixelDcsStart(line);
 		}
-		return hasNeedleBefore(line, this.imageProtocol, 512)
-			|| hasNeedleBefore(line, "\u{10eeee}", 512);
+		return (
+			hasNeedleBefore(line, this.imageProtocol, 512) ||
+			hasNeedleBefore(line, "\u{10eeee}", 512)
+		);
 	}
 }
 
@@ -152,7 +154,9 @@ export function setTERMINAL(info: TerminalInfo): void {
 
 // ── Detection logic ───────────────────────────────────────────────────────────
 
-export function detectImageProtocol(env: NodeJS.ProcessEnv = Bun.env): TerminalInfo {
+export function detectImageProtocol(
+	env: NodeJS.ProcessEnv = Bun.env,
+): TerminalInfo {
 	const forced = getForcedImageProtocol();
 	if (forced !== undefined) {
 		return new TerminalInfo("forced", forced, true);
@@ -192,12 +196,16 @@ export function detectImageProtocol(env: NodeJS.ProcessEnv = Bun.env): TerminalI
 	return new TerminalInfo(id, imageProtocol, trueColor);
 }
 
-function detectKittyPlaceholders(terminalId: string, env: NodeJS.ProcessEnv): boolean {
+function detectKittyPlaceholders(
+	terminalId: string,
+	env: NodeJS.ProcessEnv,
+): boolean {
 	if (env.PI_NO_KITTY_PLACEHOLDERS === "1") return false;
 	if (env.PI_KITTY_PLACEHOLDERS === "1") return true;
 	if (env.PI_KITTY_PLACEHOLDERS === "0") return false;
 	if (terminalId === "kitty" || terminalId === "ghostty") return true;
-	if (terminalId === "wezterm" && env.PI_FORCE_IMAGE_PROTOCOL === "kitty") return true;
+	if (terminalId === "wezterm" && env.PI_FORCE_IMAGE_PROTOCOL === "kitty")
+		return true;
 	if (env.TMUX && env.PI_FORCE_IMAGE_PROTOCOL === "kitty") return true;
 	return false;
 }
@@ -207,8 +215,17 @@ function detectKittyPlaceholders(terminalId: string, env: NodeJS.ProcessEnv): bo
 export function renderImage(
 	base64Data: string,
 	imageDimensions: ImageDimensions,
-	options: ImageRenderOptions & { imageId?: number; placementId?: number; includeTransmit?: boolean } = {},
-): { sequence?: string; lines?: string[]; rows: number; transmit?: string } | null {
+	options: ImageRenderOptions & {
+		imageId?: number;
+		placementId?: number;
+		includeTransmit?: boolean;
+	} = {},
+): {
+	sequence?: string;
+	lines?: string[];
+	rows: number;
+	transmit?: string;
+} | null {
 	if (!TERMINAL.imageProtocol) return null;
 
 	const cellDims = getCellDimensions();
@@ -223,7 +240,11 @@ export function renderImage(
 		}
 
 		// Unicode placeholders render as real text cells.
-		if (graphics.unicodePlaceholders && fit.columns <= KITTY_PLACEHOLDER_MAX_CELLS && fit.rows <= KITTY_PLACEHOLDER_MAX_CELLS) {
+		if (
+			graphics.unicodePlaceholders &&
+			fit.columns <= KITTY_PLACEHOLDER_MAX_CELLS &&
+			fit.rows <= KITTY_PLACEHOLDER_MAX_CELLS
+		) {
 			const lines = renderKittyPlaceholderLines({
 				imageId: options.imageId ?? 0,
 				placementId: options.placementId ?? options.imageId,
@@ -247,7 +268,10 @@ export function renderImage(
 		const rawHeightPx = Math.max(1, fit.rows * cellDims.heightPx);
 		const targetHeightPx = Math.max(6, Math.floor(rawHeightPx / 6) * 6);
 		const heightScale = targetHeightPx / rawHeightPx;
-		const targetWidthPx = Math.max(1, Math.round(fit.columns * cellDims.widthPx * heightScale));
+		const targetWidthPx = Math.max(
+			1,
+			Math.round(fit.columns * cellDims.widthPx * heightScale),
+		);
 		const rows = Math.max(1, Math.ceil(targetHeightPx / cellDims.heightPx));
 		try {
 			const decoded = new Uint8Array(Buffer.from(base64Data, "base64"));

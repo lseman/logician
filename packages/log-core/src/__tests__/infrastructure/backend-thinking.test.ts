@@ -29,7 +29,7 @@ async function captureRequestBody(
 		globalThis.fetch = originalFetch;
 	}
 	assert.ok(captured, "expected a request to be sent");
-	return captured!;
+	return captured;
 }
 
 void test("qwen format sends explicit enable_thinking:false when thinking is off", async () => {

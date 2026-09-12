@@ -16,7 +16,7 @@ import { MemoriamWorker } from "./worker.ts";
 
 /** Owns Memoriam enablement, hooks, and worker lifecycle. */
 export class MemoriamGateway {
-	readonly worker: MemoriamWorker;
+	private readonly worker: MemoriamWorker;
 	private enabled: boolean;
 
 	constructor(options: MemoriamSdkConfig = {}) {

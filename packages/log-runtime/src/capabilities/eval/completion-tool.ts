@@ -7,7 +7,10 @@ import type { KernelManager, KernelManagerConfig } from "./kernel-manager.ts";
 
 export interface CompletionToolDeps {
 	kernel: KernelManager;
-	config?: KernelManagerConfig & { baseUrl?: string; chatTemplate?: string | null };
+	config?: KernelManagerConfig & {
+		baseUrl?: string;
+		chatTemplate?: string | null;
+	};
 }
 
 const completionSchema = {
@@ -26,12 +29,12 @@ const completionSchema = {
 		},
 		temperature: {
 			type: "number",
-			description: "Sampling temperature (0.0–2.0). Defaults to runtime config.",
+			description:
+				"Sampling temperature (0.0–2.0). Defaults to runtime config.",
 		},
 		max_tokens: {
 			type: "number",
-			description:
-				"Maximum output tokens. Defaults to runtime config.",
+			description: "Maximum output tokens. Defaults to runtime config.",
 		},
 		schema: {
 			type: "object",
@@ -175,12 +178,20 @@ export function createCompletionTool(deps: CompletionToolDeps): Tool {
 
 			const handleId = `omp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-			const code = COMPLETION_KERNEL_CODE
-				.replace("%BASE_URL%", JSON.stringify(deps.config?.baseUrl ?? ""))
+			const code = COMPLETION_KERNEL_CODE.replace(
+				"%BASE_URL%",
+				JSON.stringify(deps.config?.baseUrl ?? ""),
+			)
 				.replace("%DEFAULT_MODEL%", JSON.stringify(model ?? "default"))
-				.replace("%CHAT_TEMPLATE%", JSON.stringify(deps.config?.chatTemplate ?? null))
+				.replace(
+					"%CHAT_TEMPLATE%",
+					JSON.stringify(deps.config?.chatTemplate ?? null),
+				)
 				.replace("%PROMPT%", JSON.stringify(prompt))
-				.replace("%OPTIONS%", JSON.stringify({ model, temperature, max_tokens: maxTokens, schema }))
+				.replace(
+					"%OPTIONS%",
+					JSON.stringify({ model, temperature, max_tokens: maxTokens, schema }),
+				)
 				.replace("%HANDLE_ID%", JSON.stringify(handleId));
 
 			const result = await deps.kernel.js.eval(code, 30_000);

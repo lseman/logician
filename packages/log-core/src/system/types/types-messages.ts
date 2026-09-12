@@ -196,8 +196,13 @@ export interface ToolContext {
 	/** Loaded rules for rule:// URL resolution. */
 	rules?: Array<{ name: string; content: string; path: string }>;
 	memory?: {
-		listObservations: (sessionId: string, limit: number) => Promise<Array<{ id: string; content: string }>>;
-		listMemories: (query?: Record<string, unknown>) => Promise<Array<{ id: string; content: string }>>;
+		listObservations: (
+			sessionId: string,
+			limit: number,
+		) => Promise<Array<{ id: string; content: string }>>;
+		listMemories: (
+			query?: Record<string, unknown>,
+		) => Promise<Array<{ id: string; content: string }>>;
 	};
 }
 
@@ -707,7 +712,10 @@ export interface AgentHooks {
 	getToolChoice?: (
 		ctx: GetToolChoiceContext,
 		signal?: AbortSignal,
-	) => Promise<ToolChoiceDirective | undefined> | ToolChoiceDirective | undefined;
+	) =>
+		| Promise<ToolChoiceDirective | undefined>
+		| ToolChoiceDirective
+		| undefined;
 	getFollowUpMessages?: (
 		ctx: GetFollowUpMessagesContext,
 		signal?: AbortSignal,
@@ -747,7 +755,10 @@ export interface SoftToolRequirement {
 	 * Per-call compliance check: a turn satisfies the requirement only when
 	 * every tool call passes. Defaults to `name === toolName`.
 	 */
-	satisfies?(toolCall: { name: string; arguments?: Record<string, unknown> }): boolean;
+	satisfies?(toolCall: {
+		name: string;
+		arguments?: Record<string, unknown>;
+	}): boolean;
 	/** Host-owned reminder messages, injected once per id activation. */
 	reminder: Message[];
 }

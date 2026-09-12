@@ -14,11 +14,13 @@ import type { Tool } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import { runPluginBackend } from "../../../adapters/claude-code/plugin-runtime.ts";
+import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
+import type { LspClientPool } from "../../../capabilities/lsp/lsp-client-pool.ts";
 import {
 	McpServerRegistry,
-	setMcpRegistryInstance,
 	type McpSnapshotResult,
 	type McpToggleResult,
+	setMcpRegistryInstance,
 } from "../../../capabilities/mcp/mcp-server-registry.ts";
 import {
 	loadPrompts,
@@ -40,27 +42,24 @@ import {
 } from "../../../capabilities/tools/sandbox.ts";
 import { resolveWebSearchConfig } from "../environment.ts";
 import {
+	AgentProtocolHandler,
+	ArtifactProtocolHandler,
+	ArtifactRegistry,
+	ConflictProtocolHandler,
+	HistoryProtocolHandler,
+	InternalUrlRouter,
+	LocalProtocolHandler,
+	LogProtocolHandler,
+	McpProtocolHandler,
+	MemoryProtocolHandler,
+	RuleProtocolHandler,
+	SkillProtocolHandler,
+	SshProtocolHandler,
+} from "./internal-urls/index.ts";
+import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,
 } from "./resource-directories.ts";
-import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
-import type { LspClientPool } from "../../../capabilities/lsp/lsp-client-pool.ts";
-
-import {
-	InternalUrlRouter,
-	SkillProtocolHandler,
-	RuleProtocolHandler,
-	MemoryProtocolHandler,
-	LocalProtocolHandler,
-	ConflictProtocolHandler,
-	HistoryProtocolHandler,
-	McpProtocolHandler,
-	AgentProtocolHandler,
-	LogProtocolHandler,
-	SshProtocolHandler,
-	ArtifactProtocolHandler,
-	ArtifactRegistry,
-} from "./internal-urls/index.ts";
 export interface ToolRouterDeps {
 	cwd: string;
 	sessionId: string;
@@ -218,7 +217,10 @@ export class ToolRouter {
 			router.register(new AgentProtocolHandler());
 			router.register(new LogProtocolHandler());
 			router.register(new SshProtocolHandler());
-			ArtifactRegistry.instance().init({ cwd: this.cwd, sessionId: this.sessionId });
+			ArtifactRegistry.instance().init({
+				cwd: this.cwd,
+				sessionId: this.sessionId,
+			});
 			router.register(new HistoryProtocolHandler());
 			router.register(new ArtifactProtocolHandler());
 			router.register(new ConflictProtocolHandler());

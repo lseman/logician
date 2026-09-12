@@ -20,14 +20,6 @@ import { createKernelManager } from "../../capabilities/eval/kernel-manager.ts";
 import type { ExtensionRegistry } from "../../capabilities/extensions/extensions.ts";
 import type { InteractionGateway } from "../../capabilities/interactions/interaction-gateway.ts";
 import { LegroomGateway } from "../../capabilities/legroom/legroom-gateway.ts";
-import type {
-	CalibrationStatus,
-	CompressResult,
-	LegroomWorker,
-	StoreStats,
-	WorkerHistory,
-	WorkerStats,
-} from "../../capabilities/legroom/worker.ts";
 import type { LspClientPool } from "../../capabilities/lsp/lsp-client-pool.ts";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
 import type {
@@ -35,7 +27,6 @@ import type {
 	McpToggleResult,
 } from "../../capabilities/mcp/mcp-server-registry.ts";
 import { MemoriamGateway } from "../../capabilities/memoriam/memoriam-gateway.ts";
-import type { MemoriamWorker } from "../../capabilities/memoriam/worker.ts";
 import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
 import {
@@ -230,7 +221,7 @@ export class AgentRuntime {
 			const parsed = parseFrontmatter(content);
 			if (!parsed) continue;
 			const rule = frontmatterToRule(parsed.frontmatter, filePath);
-			if (!rule || !rule.name || rule.conditions.length === 0) continue;
+			if (!rule?.name || rule.conditions.length === 0) continue;
 			manager.addRule(rule);
 		}
 	}
@@ -1022,147 +1013,37 @@ export class AgentRuntime {
 		return this.runtimeConfiguration.read();
 	}
 
-	/** Get the underlying LegroomWorker for advanced CCR store operations. */
-	getLegroomWorker(): LegroomWorker | null {
-		return this.legroom.worker;
+	get compression(): Pick<
+		LegroomGateway,
+		| "isEnabled"
+		| "compressWithStore"
+		| "storeRetrieve"
+		| "storeStats"
+		| "workerStats"
+		| "workerHistory"
+		| "calibrationStatus"
+		| "calibrationRecord"
+	> {
+		return this.legroom;
 	}
 
-	// ── Legroom CCR Store ──────────────────────────────────────────────────
-
-	/** Compress messages using a named CCR store (enables CCR automatically). */
-	async compressWithStore(
-		storeId: string,
-		messages: Record<string, unknown>[],
-		model: string,
-	): Promise<CompressResult> {
-		return this.legroom.compressWithStore(storeId, messages, model);
-	}
-
-	/** Retrieve original content from a CCR store by hash. */
-	async storeRetrieve(storeId: string, hash: string): Promise<string> {
-		return this.legroom.storeRetrieve(storeId, hash);
-	}
-
-	/** Get CCR store statistics. */
-	async storeStats(storeId: string): Promise<StoreStats> {
-		return this.legroom.storeStats(storeId);
-	}
-
-	/** Get aggregate worker statistics (includes CCR store metrics). */
-	async getLegroomStats(): Promise<WorkerStats> {
-		return this.legroom.workerStats();
-	}
-
-	/** Get recent compression request history. */
-	async getLegroomHistory(limit = 50, offset = 0): Promise<WorkerHistory> {
-		return this.legroom.workerHistory(limit, offset);
-	}
-
-	/** Query current calibration state. */
-	async getCalibrationStatus(): Promise<CalibrationStatus> {
-		return this.legroom.calibrationStatus();
-	}
-
-	/** Record quality feedback for phase calibration. */
-	async calibrationRecord(
-		phaseReports: Record<string, unknown>[],
-		quality: number,
-	): Promise<CalibrationStatus> {
-		return this.legroom.calibrationRecord(phaseReports, quality);
-	}
-
-	// ── Memoriam ──────────────────────────────────────────────────────────
-
-	/** Get the underlying MemoriamWorker for advanced memory-store operations. */
-	getMemoriamWorker(): MemoriamWorker | null {
-		return this.memoriamEnabled ? this.memoriam.worker : null;
-	}
-
-	/** Observe a tool interaction or conversation turn. */
-	async memoriamObserve(
-		sessionId: string,
-		hookType: string,
-		opts?: {
-			toolName?: string;
-			toolInput?: unknown;
-			toolOutput?: unknown;
-			userPrompt?: string;
-			raw?: unknown;
-		},
-	): Promise<unknown> {
-		return this.memoriam.observe(sessionId, hookType, opts);
-	}
-
-	/** Get memory context as plain text for a query. */
-	async memoriamGetContext(
-		sessionId: string,
-		query: string,
-		budget: number,
-	): Promise<string> {
-		return this.memoriam.getContext(sessionId, query, budget);
-	}
-
-	/** Recall memories in a formatted string (markdown/plain). */
-	async memoriamRecall(
-		query: Record<string, unknown>,
-		format: string,
-	): Promise<string> {
-		return this.memoriam.recall(query, format);
-	}
-
-	/** List memories, optionally filtered by a query. */
-	async memoriamListMemories(
-		query?: Record<string, unknown>,
-	): Promise<unknown[]> {
-		return this.memoriam.listMemories(query);
-	}
-
-	/** Remove a single memory by id. */
-	async memoriamRemoveMemory(id: string): Promise<boolean> {
-		return this.memoriam.removeMemory(id);
-	}
-
-	/** Consolidate a session's observations into memories. */
-	async memoriamConsolidate(sessionId: string): Promise<unknown[]> {
-		return this.memoriam.consolidate(sessionId);
-	}
-
-	/** List observations for a session. */
-	async memoriamListObservations(
-		sessionId: string,
-		limit: number,
-	): Promise<unknown[]> {
-		return this.memoriam.listObservations(sessionId, limit);
-	}
-
-	/** Search observations across sessions. */
-	async memoriamSearchObservations(
-		query: string,
-		limit: number,
-	): Promise<unknown[]> {
-		return this.memoriam.searchObservations(query, limit);
-	}
-
-	/** Clear all observations. Returns the number removed. */
-	async memoriamClearObservations(): Promise<number> {
-		return this.memoriam.clearObservations();
-	}
-
-	/** List memory sessions. */
-	async memoriamListSessions(
-		query?: Record<string, unknown>,
-	): Promise<unknown[]> {
-		return this.memoriam.listSessions(query);
-	}
-
-	/** Clear stored sessions, optionally keeping one. */
-	async memoriamClearSessions(keepSessionId?: string | null): Promise<void> {
-		return this.memoriam.clearSessions(keepSessionId ?? null);
-	}
-
-	/** Aggregate Memoriam worker statistics. */
-	async getMemoriamStats(): Promise<Record<string, unknown>> {
-		return this.memoriam.workerStats();
+	get memory(): Pick<
+		MemoriamGateway,
+		| "isEnabled"
+		| "observe"
+		| "getContext"
+		| "recall"
+		| "listMemories"
+		| "removeMemory"
+		| "consolidate"
+		| "listObservations"
+		| "searchObservations"
+		| "clearObservations"
+		| "listSessions"
+		| "clearSessions"
+		| "workerStats"
+	> {
+		return this.memoriam;
 	}
 
 	/** Use the user-facing conversation session as the hook and memory session. */
@@ -1383,17 +1264,18 @@ export class AgentRuntime {
 			memory: this.memoriamEnabled
 				? {
 						listObservations: (sessionId: string, limit: number) =>
-							this.memoriamListObservations(sessionId, limit).then(
-								(results: unknown[]) =>
+							this.memory
+								.listObservations(sessionId, limit)
+								.then((results: unknown[]) =>
 									results.map(r => ({
 										id: String((r as Record<string, unknown>).id ?? ""),
 										content: String(
 											(r as Record<string, unknown>).content ?? "",
 										),
 									})),
-							),
+								),
 						listMemories: (query?: Record<string, unknown>) =>
-							this.memoriamListMemories(query).then((results: unknown[]) =>
+							this.memory.listMemories(query).then((results: unknown[]) =>
 								results.map(r => ({
 									id: String((r as Record<string, unknown>).id ?? ""),
 									content: String((r as Record<string, unknown>).content ?? ""),

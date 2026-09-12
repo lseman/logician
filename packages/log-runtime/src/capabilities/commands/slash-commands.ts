@@ -279,9 +279,15 @@ export function createSlashCommands(
 			},
 			args => String(localHandlers.obs?.(args as any) ?? ""),
 		),
-		cmd("/compact", "Compact history (options: shake, auto, llm)", "bridge", true, {
-			category: "context",
-		}),
+		cmd(
+			"/compact",
+			"Compact history (options: shake, auto, llm)",
+			"bridge",
+			true,
+			{
+				category: "context",
+			},
+		),
 		cmd("/fork", "Fork the conversation into a branch", "local", false, {
 			category: "context",
 			examples: ["/fork"],

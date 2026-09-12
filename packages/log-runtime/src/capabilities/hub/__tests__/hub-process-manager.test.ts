@@ -1,7 +1,7 @@
 // ── hub process manager tests ────────────────────────────────────────────────
 
-import { test, expect } from "bun:test";
-import { HubProcessManager, type HubConfig } from "../process-manager.ts";
+import { expect, test } from "bun:test";
+import { type HubConfig, HubProcessManager } from "../process-manager.ts";
 
 test("creates manager with default config", () => {
 	const mgr = new HubProcessManager();

@@ -61,12 +61,20 @@ export interface ParsedMouseInput {
  */
 export function normalizeKeyboardInput(data: string): string {
 	return data
-		.replace(CSI_ARROW_KEY, (sequence, modifierText: string, eventText: string | undefined, direction: string) => {
-			if (eventText === "3") return "";
-			// Ignore Caps/Num Lock state, but preserve actual navigation modifiers.
-			const modifiers = Number(modifierText) - 1;
-			return (modifiers & ~192) === 0 ? `${ESCAPE}[${direction}` : sequence;
-		})
+		.replace(
+			CSI_ARROW_KEY,
+			(
+				sequence,
+				modifierText: string,
+				eventText: string | undefined,
+				direction: string,
+			) => {
+				if (eventText === "3") return "";
+				// Ignore Caps/Num Lock state, but preserve actual navigation modifiers.
+				const modifiers = Number(modifierText) - 1;
+				return (modifiers & ~192) === 0 ? `${ESCAPE}[${direction}` : sequence;
+			},
+		)
 		.replace(
 			KITTY_KEY,
 			(

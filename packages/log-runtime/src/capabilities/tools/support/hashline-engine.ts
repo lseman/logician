@@ -1,11 +1,12 @@
 // Hashline line edits are planned before writing. The mutation session owns the
 // full lifecycle: parsing, validation, atomic writes, and diagnostic events.
+
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
-import type { EditStore } from "./edit-store.js";
 import type { MutationSession } from "../mutation/session.js";
 import { mutationReceipt } from "../mutation/session.js";
+import type { EditStore } from "./edit-store.js";
 import {
 	type HashlineEdit,
 	type HashlineEditResult,
@@ -14,7 +15,12 @@ import {
 	splitAddressableFileLines,
 } from "./hashline.js";
 import { generateEditDiffs } from "./utils/diff-utils.js";
-import { detectLineEnding, normalizeToLF, restoreLineEndings, stripBom } from "./utils/helpers.ts";
+import {
+	detectLineEnding,
+	normalizeToLF,
+	restoreLineEndings,
+	stripBom,
+} from "./utils/helpers.ts";
 
 interface FileEdit {
 	path: string;
@@ -22,7 +28,11 @@ interface FileEdit {
 	edits: HashlineEdit[];
 }
 
-function parseDocument(input: string, cwd: string, targetPath?: string): FileEdit[] {
+function parseDocument(
+	input: string,
+	cwd: string,
+	targetPath?: string,
+): FileEdit[] {
 	const files: FileEdit[] = [];
 	for (const line of input.split(/\r?\n/)) {
 		if (!line.trim()) continue;
@@ -41,18 +51,31 @@ function parseDocument(input: string, cwd: string, targetPath?: string): FileEdi
 		const file = files.at(-1);
 		const edit = parseHashlineEdit(line);
 		if (!file || !edit) throw new Error(`Invalid hashline input: ${line}`);
-		if ((edit.operation !== "PUT" && edit.operation !== "CUT") || edit.register || edit.block || !edit.range || edit.range.includes("*")) {
-			throw new Error("Unsupported hashline operation. Use PUT/CUT line edits; use another tool for moves, removal, or registers.");
+		if (
+			(edit.operation !== "PUT" && edit.operation !== "CUT") ||
+			edit.register ||
+			edit.block ||
+			!edit.range ||
+			edit.range.includes("*")
+		) {
+			throw new Error(
+				"Unsupported hashline operation. Use PUT/CUT line edits; use another tool for moves, removal, or registers.",
+			);
 		}
 		file.edits.push(edit);
 	}
 	if (!files.length || files.some(file => !file.edits.length)) {
-		throw new Error("Provide a [path#hash] header followed by at least one line edit.");
+		throw new Error(
+			"Provide a [path#hash] header followed by at least one line edit.",
+		);
 	}
 	return files;
 }
 
-function applyLineEdits(original: string, edits: HashlineEdit[]): { content: string; linesChanged: number } {
+function applyLineEdits(
+	original: string,
+	edits: HashlineEdit[],
+): { content: string; linesChanged: number } {
 	const { bom, text } = stripBom(original);
 	const ending = detectLineEnding(text);
 	const normalized = normalizeToLF(text);
@@ -73,16 +96,33 @@ function applyLineEdits(original: string, edits: HashlineEdit[]): { content: str
 		} else {
 			throw new Error(`Unsupported line range: ${range}`);
 		}
-		if (!Number.isSafeInteger(start) || !Number.isSafeInteger(count) || start < 0 || count < 0 || (replacement && count === 0) || start + count > lines.length) {
+		if (
+			!Number.isSafeInteger(start) ||
+			!Number.isSafeInteger(count) ||
+			start < 0 ||
+			count < 0 ||
+			(replacement && count === 0) ||
+			start + count > lines.length
+		) {
 			throw new Error(`Line range out of bounds: ${range}`);
 		}
-		const body = edit.operation === "CUT" ? [] : edit.body ?? [];
+		const body = edit.operation === "CUT" ? [] : (edit.body ?? []);
 		const before = lines.slice(start, start + count);
-		if (before.length === body.length && before.every((line, i) => line === body[i])) continue;
+		if (
+			before.length === body.length &&
+			before.every((line, i) => line === body[i])
+		)
+			continue;
 		lines.splice(start, count, ...body);
 		linesChanged += Math.max(count, body.length);
 	}
-	const content = bom + restoreLineEndings(lines.join("\n") + (lines.length > 0 && normalized.endsWith("\n") ? "\n" : ""), ending);
+	const content =
+		bom +
+		restoreLineEndings(
+			lines.join("\n") +
+				(lines.length > 0 && normalized.endsWith("\n") ? "\n" : ""),
+			ending,
+		);
 	return { content, linesChanged };
 }
 
@@ -103,26 +143,41 @@ export async function executeHashlineEdit(
 	const receipts: HashlineEditResult["receipts"] = [];
 	try {
 		const files = parseDocument(input, cwd, targetPath);
-		const plans = files.map(file => {
-			const original = fs.readFileSync(file.path, "utf8");
-			const stale = store.checkStale(file.path);
-			if (stale) throw new Error(stale);
-			if (hashlineHash(original) !== file.tag) {
-				throw new Error(`Stale hashline anchor for ${file.path}. Read it again before editing.`);
-			}
-			const result = applyLineEdits(original, file.edits);
-			return { ...file, original, ...result };
-		}).filter(plan => plan.original !== plan.content);
-		if (!plans.length) return { applied: false, filesAffected: 0, linesChanged: 0, diff: "", receipts };
+		const plans = files
+			.map(file => {
+				const original = fs.readFileSync(file.path, "utf8");
+				const stale = store.checkStale(file.path);
+				if (stale) throw new Error(stale);
+				if (hashlineHash(original) !== file.tag) {
+					throw new Error(
+						`Stale hashline anchor for ${file.path}. Read it again before editing.`,
+					);
+				}
+				const result = applyLineEdits(original, file.edits);
+				return { ...file, original, ...result };
+			})
+			.filter(plan => plan.original !== plan.content);
+		if (!plans.length)
+			return {
+				applied: false,
+				filesAffected: 0,
+				linesChanged: 0,
+				diff: "",
+				receipts,
+			};
 
 		for (const plan of plans) {
 			if (fs.readFileSync(plan.path, "utf8") !== plan.original) {
-				throw new Error(`${plan.path} changed while preparing the edit. Read it again.`);
+				throw new Error(
+					`${plan.path} changed while preparing the edit. Read it again.`,
+				);
 			}
 			const proposal = {
 				path: plan.path,
 				before: plan.original,
-				beforeHash: createHash("sha256").update(plan.original, "utf-8").digest("hex"),
+				beforeHash: createHash("sha256")
+					.update(plan.original, "utf-8")
+					.digest("hex"),
 				after: plan.content,
 			};
 			const result = await mutation.apply(proposal);
@@ -134,10 +189,19 @@ export async function executeHashlineEdit(
 			linesChanged += plan.linesChanged;
 			diff += result.diff + "\n";
 		}
-		return { applied: true, filesAffected, linesChanged, diff: diff.trimEnd(), receipts };
+		return {
+			applied: true,
+			filesAffected,
+			linesChanged,
+			diff: diff.trimEnd(),
+			receipts,
+		};
 	} catch (error) {
 		return {
-			applied: false, filesAffected, linesChanged, diff,
+			applied: false,
+			filesAffected,
+			linesChanged,
+			diff,
 			receipts,
 			error: error instanceof Error ? error.message : String(error),
 		};
@@ -160,17 +224,28 @@ export async function previewHashlineEdit(
 	const receipts: HashlineEditResult["receipts"] = [];
 	try {
 		const files = parseDocument(input, cwd, targetPath);
-		const plans = files.map(file => {
-			const original = fs.readFileSync(file.path, "utf8");
-			const stale = store.checkStale(file.path);
-			if (stale) throw new Error(stale);
-			if (hashlineHash(original) !== file.tag) {
-				throw new Error(`Stale hashline anchor for ${file.path}. Read it again before editing.`);
-			}
-			const result = applyLineEdits(original, file.edits);
-			return { ...file, original, ...result };
-		}).filter(plan => plan.original !== plan.content);
-		if (!plans.length) return { applied: false, filesAffected: 0, linesChanged: 0, diff: "", receipts };
+		const plans = files
+			.map(file => {
+				const original = fs.readFileSync(file.path, "utf8");
+				const stale = store.checkStale(file.path);
+				if (stale) throw new Error(stale);
+				if (hashlineHash(original) !== file.tag) {
+					throw new Error(
+						`Stale hashline anchor for ${file.path}. Read it again before editing.`,
+					);
+				}
+				const result = applyLineEdits(original, file.edits);
+				return { ...file, original, ...result };
+			})
+			.filter(plan => plan.original !== plan.content);
+		if (!plans.length)
+			return {
+				applied: false,
+				filesAffected: 0,
+				linesChanged: 0,
+				diff: "",
+				receipts,
+			};
 
 		for (const plan of plans) {
 			receipts.push({
@@ -179,15 +254,22 @@ export async function previewHashlineEdit(
 				changed: true,
 				paths: [plan.path],
 				filesAffected: 1,
-				revisions: [{
-					path: plan.path,
-					beforeHash: createHash("sha256").update(plan.original, "utf8").digest("hex"),
-					afterHash: createHash("sha256").update(plan.content, "utf8").digest("hex"),
-				}],
+				revisions: [
+					{
+						path: plan.path,
+						beforeHash: createHash("sha256")
+							.update(plan.original, "utf8")
+							.digest("hex"),
+						afterHash: createHash("sha256")
+							.update(plan.content, "utf8")
+							.digest("hex"),
+					},
+				],
 			});
 			filesAffected++;
 			linesChanged += plan.linesChanged;
-			diff += generateEditDiffs(plan.path, plan.original, plan.content).diff + "\n";
+			diff +=
+				generateEditDiffs(plan.path, plan.original, plan.content).diff + "\n";
 		}
 		return {
 			applied: false,
@@ -198,10 +280,12 @@ export async function previewHashlineEdit(
 		};
 	} catch (error) {
 		return {
-			applied: false, filesAffected, linesChanged, diff,
+			applied: false,
+			filesAffected,
+			linesChanged,
+			diff,
 			receipts,
 			error: error instanceof Error ? error.message : String(error),
 		};
 	}
 }
-

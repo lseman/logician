@@ -137,7 +137,7 @@ export async function updateFileMentionPopup(
 		ctx.fileMentionPopup.hide();
 	}
 	ctx.tui.requestRender();
-	}
+}
 
 // ── Skill autocomplete ───────────────────────────────────────────────
 

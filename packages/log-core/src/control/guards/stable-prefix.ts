@@ -189,7 +189,10 @@ export class AppendOnlyContextManager {
 	/**
 	 * Build context with stable prefix + append-only messages.
 	 */
-	build(systemPrompt: string, tools: Tool[]): {
+	build(
+		systemPrompt: string,
+		tools: Tool[],
+	): {
 		systemPrompt: string;
 		tools: Tool[];
 		messages: Message[];
@@ -271,8 +274,10 @@ export class AppendOnlyContextManager {
 	#lastStablePrefix(normalizedMessages: readonly unknown[]): number {
 		const bound = Math.min(this.#lastSyncCount, normalizedMessages.length);
 		for (let i = 0; i < bound; i++) {
-			if (JSON.stringify(normalizedMessages[i]) !==
-				JSON.stringify((this.log.entries() as unknown[])[i])) {
+			if (
+				JSON.stringify(normalizedMessages[i]) !==
+				JSON.stringify((this.log.entries() as unknown[])[i])
+			) {
 				return i;
 			}
 		}

@@ -157,3 +157,18 @@ flowchart LR
     Core --> Runtime
     Runtime --> Protocol["versioned notifications"] --> TUI --> User
 ```
+
+### Worker and capability ownership
+
+`AgentRuntime.memory` and `AgentRuntime.compression` expose capability operations.
+Callers use these instead of top-level memory/compression forwarding methods or
+raw worker accessors. Their interfaces omit lifecycle and enablement controls.
+Configuration changes go through `updateSettings`; runtime shutdown closes the
+capability gateways.
+
+Each gateway owns its enabled state and its private worker. Workers translate
+domain operations and responses. The shared internal `JsonlWorker` owns process
+startup, ordered initialization, request IDs, timers, pending requests, and
+shutdown. Responses, timeouts, write failures, and process termination settle
+requests through one removal operation. Pending requests belong to a process
+generation, so a late event from an old process cannot affect its replacement.

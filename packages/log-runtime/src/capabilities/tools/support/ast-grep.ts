@@ -5,8 +5,8 @@
 // produce staged edit proposals.
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import * as path from "node:path";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,14 +68,12 @@ async function findAstGrepBin(): Promise<string | null> {
 		try {
 			await execFileAsync(bin, ["--version"]);
 			return bin;
-		} catch {
-			continue;
-		}
+		} catch {}
 	}
 	return null;
 }
 
-let cachedBin: string | null | undefined = undefined;
+let cachedBin: string | null | undefined;
 
 /**
  * Get the ast-grep binary path, cached.
@@ -100,12 +98,12 @@ const EXT_TO_LANG: Record<string, string> = {
 	go: "go",
 	java: "java",
 	c: "c",
-cpp: "cpp",
+	cpp: "cpp",
 	cs: "csharp",
 	rb: "ruby",
- php: "php",
+	php: "php",
 	swift: "swift",
- kt: "kotlin",
+	kt: "kotlin",
 };
 
 /**
@@ -117,7 +115,6 @@ function detectLanguage(filePath: string): string {
 }
 
 // ── Query execution ────────────────────────────────────────────────────────────
-
 
 /**
  * Run ast-grep rewrite and return matches with replacements.
@@ -173,11 +170,9 @@ export function computeFileEdits(matches: AstMatch[]): Array<{
 		const repl = match.replacement ?? "";
 		const file = match.file;
 
-		if (!fileMap.has(file)) {
-			fileMap.set(file, []);
-		}
-
-		fileMap.get(file)!.push({
+		const edits = fileMap.get(file) ?? [];
+		fileMap.set(file, edits);
+		edits.push({
 			file,
 			replacement: repl,
 			originalStart: origStart,

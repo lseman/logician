@@ -85,7 +85,10 @@ export function quickFileFingerprint(text: string): string {
 /**
  * Check if a file has been modified since a fingerprint was recorded.
  */
-export function isFileStale(currentFingerprint: string, recordedFingerprint: string): boolean {
+export function isFileStale(
+	currentFingerprint: string,
+	recordedFingerprint: string,
+): boolean {
 	return currentFingerprint !== recordedFingerprint;
 }
 
@@ -143,23 +146,44 @@ export function parseHashlineEdit(line: string): HashlineEdit | null {
 function parsePutOperation(line: string): HashlineEdit | null {
 	const insert = /^PUT ([<>])(\d+):(.*)$/.exec(line);
 	if (insert) {
-		return { operation: "PUT", path: "", range: insert[1] + insert[2], body: [insert[3]] };
+		return {
+			operation: "PUT",
+			path: "",
+			range: insert[1] + insert[2],
+			body: [insert[3]],
+		};
 	}
 	const replace = /^PUT (\d+)\.=(\d+):(.*)$/.exec(line);
 	if (replace) {
-		return { operation: "PUT", path: "", range: `${replace[1]}-${replace[2]}`, body: [replace[3]] };
+		return {
+			operation: "PUT",
+			path: "",
+			range: `${replace[1]}-${replace[2]}`,
+			body: [replace[3]],
+		};
 	}
 	// Accept the earlier range spelling as well.
 	const legacy = /^PUT (\d+)(?:-(\d+))?\.=(.*)$/.exec(line);
 	if (legacy) {
-		return { operation: "PUT", path: "", range: `${legacy[1]}-${legacy[2] ?? legacy[1]}`, body: [legacy[3]] };
+		return {
+			operation: "PUT",
+			path: "",
+			range: `${legacy[1]}-${legacy[2] ?? legacy[1]}`,
+			body: [legacy[3]],
+		};
 	}
 	return null;
 }
 
 function parseCutOperation(line: string): HashlineEdit | null {
 	const match = /^CUT (\d+)(?:\.=(\d+))?$/.exec(line);
-	return match ? { operation: "CUT", path: "", range: `${match[1]}-${match[2] ?? match[1]}` } : null;
+	return match
+		? {
+				operation: "CUT",
+				path: "",
+				range: `${match[1]}-${match[2] ?? match[1]}`,
+			}
+		: null;
 }
 
 // ── Edit result ────────────────────────────────────────────────────────────────
@@ -181,5 +205,9 @@ export interface HashlineEditResult {
 	/** Structured receipts for each planned file mutation. */
 	receipts?: import("@logician/log-core").MutationReceipt[];
 	/** Stale anchor error: which anchor(s) are stale. */
-	staleAnchors?: Array<{ path: string; expectedTag: string; computedTag: string }>;
+	staleAnchors?: Array<{
+		path: string;
+		expectedTag: string;
+		computedTag: string;
+	}>;
 }

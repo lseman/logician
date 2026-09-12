@@ -45,8 +45,17 @@ export interface ResolveContext {
 	skills?: Array<{ name: string; content: string; path: string }>;
 	rules?: Array<{ name: string; content: string; path: string }>;
 	memory?: {
-		listObservations: (sessionId: string, limit: number) => Promise<Array<{ id: string; content: string; metadata?: Record<string, unknown> }>>;
-		listMemories: (query?: Record<string, unknown>) => Promise<Array<{ id: string; content: string; metadata?: Record<string, unknown> }>>;
+		listObservations: (
+			sessionId: string,
+			limit: number,
+		) => Promise<
+			Array<{ id: string; content: string; metadata?: Record<string, unknown> }>
+		>;
+		listMemories: (
+			query?: Record<string, unknown>,
+		) => Promise<
+			Array<{ id: string; content: string; metadata?: Record<string, unknown> }>
+		>;
 	};
 	cwd?: string;
 }
@@ -62,6 +71,12 @@ export interface MemoryEntry {
 export interface ProtocolHandler {
 	scheme: string;
 	immutable?: boolean;
-	resolve: (url: InternalUrl, context?: ResolveContext) => Promise<InternalResource>;
-	complete?: (query: string, context?: ResolveContext) => Promise<UrlCompletion[]>;
+	resolve: (
+		url: InternalUrl,
+		context?: ResolveContext,
+	) => Promise<InternalResource>;
+	complete?: (
+		query: string,
+		context?: ResolveContext,
+	) => Promise<UrlCompletion[]>;
 }

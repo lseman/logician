@@ -5,8 +5,12 @@
 //
 // Also persists injected-rule state across compaction via session entries.
 
-import type { TtsrRule, TtsrMatchContext, TtsrBridgeSettings } from "@logician/log-core";
-import type { TtsrManager } from "@logician/log-core";
+import type {
+	TtsrBridgeSettings,
+	TtsrManager,
+	TtsrMatchContext,
+	TtsrRule,
+} from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
 
 // ── Coordinator state ─────────────────────────────────────────────────────────
@@ -129,19 +133,19 @@ export class TtsrCoordinator {
 	#extractDelta(event: RuntimeEvent): string | null {
 		switch (event.type) {
 			case "token":
-				return ("token" in event && typeof event.token === "string")
+				return "token" in event && typeof event.token === "string"
 					? event.token
 					: null;
 			case "thinking_token":
-				return ("token" in event && typeof event.token === "string")
+				return "token" in event && typeof event.token === "string"
 					? event.token
 					: null;
 			case "tool_call_update":
-				return ("delta" in event && typeof event.delta === "string")
+				return "delta" in event && typeof event.delta === "string"
 					? event.delta
 					: null;
 			case "tool_execution_update":
-				return ("delta" in event && typeof event.delta === "string")
+				return "delta" in event && typeof event.delta === "string"
 					? event.delta
 					: null;
 			default:
@@ -162,13 +166,19 @@ export class TtsrCoordinator {
 
 		if (event.type === "tool_call_update") {
 			source = "tool";
-			toolName = "toolName" in event && typeof event.toolName === "string" ? event.toolName : undefined;
+			toolName =
+				"toolName" in event && typeof event.toolName === "string"
+					? event.toolName
+					: undefined;
 			if (toolName) streamKey = `tool:${toolName}`;
 		} else if (event.type === "tool_execution_update") {
 			source = "tool";
 			toolName = "toolName" in event ? event.toolName : undefined;
 			if (toolName) streamKey = `tool:${toolName}`;
-			filePaths = "filePaths" in event ? (event as { filePaths?: string[] }).filePaths : undefined;
+			filePaths =
+				"filePaths" in event
+					? (event as { filePaths?: string[] }).filePaths
+					: undefined;
 		}
 
 		return { source, toolName, filePaths, streamKey };
@@ -192,7 +202,10 @@ export class TtsrCoordinator {
 		for (const rule of unique) {
 			this.#activeRules.set(rule.name, {
 				rule,
-				injectedAt: this.#manager.getSettings().repeatMode === "once" ? 0 : this.#manager.getSettings().repeatGap,
+				injectedAt:
+					this.#manager.getSettings().repeatMode === "once"
+						? 0
+						: this.#manager.getSettings().repeatGap,
 			});
 
 			const injectionText = this.#buildInjectionText(rule, context);
@@ -228,9 +241,7 @@ export class TtsrCoordinator {
 		const description = rule.description
 			? `Description: ${rule.description}\n`
 			: "";
-		const body = rule.content
-			? `Content: ${rule.content}\n`
-			: "";
+		const body = rule.content ? `Content: ${rule.content}\n` : "";
 		const contextHint = context.toolName
 			? `Context: tool="${context.toolName}"\n`
 			: "";

@@ -16,21 +16,28 @@ import * as path from "node:path";
 
 /** Sanitize a tool name for safe use as the middle segment of the artifact filename. */
 function sanitizeToolType(toolType: string): string {
-	return toolType
-		.replace(/[^A-Za-z0-9_-]+/g, "_")
-		.slice(0, 64)
-		.replace(/^_+|_+$/g, "") || "tool";
+	return (
+		toolType
+			.replace(/[^A-Za-z0-9_-]+/g, "_")
+			.slice(0, 64)
+			.replace(/^_+|_+$/g, "") || "tool"
+	);
 }
 
 /** Persist an artifact atomically: write to temp, then rename. */
-async function writeArtifact(filePath: string, content: string): Promise<number> {
+async function writeArtifact(
+	filePath: string,
+	content: string,
+): Promise<number> {
 	const tmpFile = filePath + `.tmp.${process.pid}.${Date.now()}`;
 	const contentBytes = Buffer.byteLength(content, "utf-8");
 	await fs.writeFile(tmpFile, content, "utf-8");
 	const stat = await fs.stat(tmpFile);
 	if (stat.size !== contentBytes) {
 		await fs.unlink(tmpFile).catch(() => {});
-		throw new Error(`Artifact write mismatch: expected ${contentBytes} bytes, got ${stat.size}`);
+		throw new Error(
+			`Artifact write mismatch: expected ${contentBytes} bytes, got ${stat.size}`,
+		);
 	}
 	await fs.rename(tmpFile, filePath);
 	return contentBytes;

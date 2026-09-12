@@ -7,7 +7,10 @@ import type { InternalUrl } from "./types";
 const SCHEME_HOST_RE = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/i;
 const OPAQUE_URI_RE = /^([a-z][a-z0-9+.-]*):(.+)$/is;
 const SELECTOR_CHUNK_SRC = String.raw`(?:raw|conflicts|-?\d+(?:[-+]\d+)?(?:,\d+(?:[-+]\d+)?)*)`;
-const SELECTOR_CHAIN_RE = new RegExp(`^${SELECTOR_CHUNK_SRC}(?::${SELECTOR_CHUNK_SRC})*$`, "i");
+const SELECTOR_CHAIN_RE = new RegExp(
+	`^${SELECTOR_CHUNK_SRC}(?::${SELECTOR_CHUNK_SRC})*$`,
+	"i",
+);
 
 /** Extract the lowercased scheme from a URI-shaped input. */
 export function extractUriScheme(input: string): string | undefined {

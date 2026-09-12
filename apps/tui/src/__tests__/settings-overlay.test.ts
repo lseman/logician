@@ -6,9 +6,12 @@ import {
 	type SettingDef,
 	SettingsSelectorOverlay,
 } from "../overlays/settings-overlay.ts";
+import {
+	normalizeKeyboardInput,
+	TerminalInputBuffer,
+} from "../terminal/input-protocol.ts";
 import { visibleWidth } from "../terminal/primitives.ts";
 import { initTheme } from "../terminal/theme.ts";
-import { normalizeKeyboardInput, TerminalInputBuffer } from "../terminal/input-protocol.ts";
 
 // Initialize theme before any overlay rendering.
 const setupTheme = (): void => {
@@ -82,7 +85,12 @@ describe("SettingsSelectorOverlay", () => {
 
 	it("jumps sections with Tab and keeps tabs on left/right", () => {
 		const overlay = new SettingsSelectorOverlay();
-		overlay.setSettings(makeSettings().map((setting, i) => ({ ...setting, section: i < 2 ? "Model" : "Safety" })));
+		overlay.setSettings(
+			makeSettings().map((setting, i) => ({
+				...setting,
+				section: i < 2 ? "Model" : "Safety",
+			})),
+		);
 		overlay.show();
 		overlay.handleInput("\t");
 		assert.strictEqual(overlay.selectedIndex, 2);
@@ -109,11 +117,15 @@ describe("SettingsSelectorOverlay", () => {
 	it("keeps selected rows and the footer visible across terminal sizes", () => {
 		setupTheme();
 		const overlay = new SettingsSelectorOverlay();
-		overlay.setSettings(Array.from({ length: 35 }, (_, i) => ({
-			name: `Setting ${i}`, section: `Section ${Math.floor(i / 5)}`,
-			currentValue: "enabled", description: `Description ${i}`,
-			options: [{ label: "enabled", value: "true" }],
-		})));
+		overlay.setSettings(
+			Array.from({ length: 35 }, (_, i) => ({
+				name: `Setting ${i}`,
+				section: `Section ${Math.floor(i / 5)}`,
+				currentValue: "enabled",
+				description: `Description ${i}`,
+				options: [{ label: "enabled", value: "true" }],
+			})),
+		);
 		overlay.show();
 		for (let i = 0; i < 34; i++) overlay.handleInput("\x1b[B");
 		for (const width of [40, 80, 120]) {
@@ -124,7 +136,9 @@ describe("SettingsSelectorOverlay", () => {
 				assert.ok(lines.every(line => visibleWidth(line) <= width));
 				assert.ok(lines.join("\n").includes("Setting 34"));
 				assert.ok(lines.join("\n").includes("Description 34"));
-				assert.ok(lines.at(-1)?.endsWith("\x1b[0m") || lines.at(-1)?.includes("┘"));
+				assert.ok(
+					lines.at(-1)?.endsWith("\x1b[0m") || lines.at(-1)?.includes("┘"),
+				);
 			}
 		}
 	});
@@ -280,7 +294,10 @@ describe("SettingsSelectorOverlay", () => {
 
 		// Page down
 		overlay.handleInput("\x1b[6~");
-		assert.ok(overlay.selectedIndex >= 8, `expected >= 8, got ${overlay.selectedIndex}`);
+		assert.ok(
+			overlay.selectedIndex >= 8,
+			`expected >= 8, got ${overlay.selectedIndex}`,
+		);
 		overlay.handleInput("\x1b[5~");
 		assert.ok(overlay.selectedIndex < 8);
 	});

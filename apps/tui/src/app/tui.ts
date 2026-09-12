@@ -22,7 +22,6 @@ import {
 import { StatusBar } from "../footer/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";
-import { ImageBudget } from "../terminal/image-budget.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import {
 	type AutoresearchDashboardAction,
@@ -30,7 +29,6 @@ import {
 } from "../overlays/autoresearch-dashboard.ts";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
-import { SkillPopup } from "../overlays/skill-popup.ts";
 import {
 	InferenceModeSelector,
 	type InferenceModeSelectorAction,
@@ -65,6 +63,7 @@ import {
 	type SettingsSelectorAction,
 	SettingsSelectorOverlay,
 } from "../overlays/settings-overlay.ts";
+import { SkillPopup } from "../overlays/skill-popup.ts";
 import { SlashPopup } from "../overlays/slash-popup.ts";
 import {
 	type ThemeSelectorAction,
@@ -91,6 +90,7 @@ import { SteerQueue, type SteerQueueAction } from "../status/steer-queue.ts";
 import { TodoBar } from "../status/todo-bar.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { Container, TUI } from "../terminal/core.ts";
+import { ImageBudget } from "../terminal/image-budget.ts";
 import { theme } from "../terminal/theme.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
 import {

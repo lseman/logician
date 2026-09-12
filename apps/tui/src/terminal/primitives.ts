@@ -73,7 +73,9 @@ export function visibleWidth(text: string): number {
 
 	const width = stringWidth(
 		text
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 			.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 			.replace(/\x1b[\]_][\s\S]*?(?:\x07|\x1b\\)/g, ""),
 	);
 

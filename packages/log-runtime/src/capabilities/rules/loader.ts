@@ -1,10 +1,10 @@
 // ── TTSR Rule Loader ─────────────────────────────────────────────────────────
 // Loads TTSR rules from .logician/rules/*.md files with YAML frontmatter.
+
+import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Dirent } from "node:fs";
 import type { TtsrRule, TtsrScope } from "@logician/log-core";
-
 
 // ── YAML Frontmatter Parser ─────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ export function parseFrontmatter(content: string): FrontmatterEntry | null {
 		if (colonIdx === -1) continue;
 
 		const key = line.slice(0, colonIdx).trim();
-		let value = line.slice(colonIdx + 1).trim();
+		const value = line.slice(colonIdx + 1).trim();
 
 		if (value.startsWith("[") && value.endsWith("]")) {
 			const items = value
@@ -53,7 +53,10 @@ function isValidScope(value: string): value is TtsrScope {
 }
 
 /** Convert frontmatter to a TtsrRule. */
-export function frontmatterToRule(fm: Record<string, string | string[]>, filePath: string): TtsrRule | null {
+export function frontmatterToRule(
+	fm: Record<string, string | string[]>,
+	filePath: string,
+): TtsrRule | null {
 	const name = typeof fm.name === "string" ? fm.name : null;
 	if (!name) return null;
 
@@ -73,17 +76,15 @@ export function frontmatterToRule(fm: Record<string, string | string[]>, filePat
 	const scope = rawScope.filter((s: string): s is TtsrScope => isValidScope(s));
 	if (scope.length === 0) scope.push("text" as TtsrScope);
 
-	const globs = Array.isArray(fm.globs)
-		? (fm.globs as string[])
-		: undefined;
+	const globs = Array.isArray(fm.globs) ? (fm.globs as string[]) : undefined;
 
 	const astConditions = Array.isArray(fm.astConditions)
 		? (fm.astConditions as string[])
 		: undefined;
 
-	const interruptMode = (typeof fm.interruptMode === "string"
-		? fm.interruptMode
-		: "always") as TtsrRule["interruptMode"];
+	const interruptMode = (
+		typeof fm.interruptMode === "string" ? fm.interruptMode : "always"
+	) as TtsrRule["interruptMode"];
 
 	if (!content && conditions.length === 0) return null;
 

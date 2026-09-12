@@ -10,7 +10,13 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
+import type {
+	InternalResource,
+	InternalUrl,
+	ProtocolHandler,
+	ResolveContext,
+	UrlCompletion,
+} from "./types";
 
 const DOCS_DIR_NAME = "docs";
 const MAX_DOCS_FILE_BYTES = 512 * 1024;
@@ -29,8 +35,12 @@ function resolveDocsDir(cwd: string): string {
 }
 
 /** Format a directory listing as markdown. */
-function formatDirectoryListing(entries: Array<{ name: string; isDir: boolean }>, url: InternalUrl): string {
-	if (entries.length === 0) return `# ${url.pathname === "/" ? "Docs" : url.pathname.slice(1)}\n\n(empty directory)\n`;
+function formatDirectoryListing(
+	entries: Array<{ name: string; isDir: boolean }>,
+	url: InternalUrl,
+): string {
+	if (entries.length === 0)
+		return `# ${url.pathname === "/" ? "Docs" : url.pathname.slice(1)}\n\n(empty directory)\n`;
 	const lines = entries
 		.map(e => {
 			const prefix = e.isDir ? "📁" : "📄";
@@ -49,7 +59,10 @@ export class LogProtocolHandler implements ProtocolHandler {
 	readonly scheme = "log";
 	readonly immutable = true;
 
-	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
+	async resolve(
+		url: InternalUrl,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
 		const cwd = context?.cwd ?? process.cwd();
 		const docsDir = resolveDocsDir(cwd);
 		const hostname = url.rawHost || url.hostname;
@@ -86,7 +99,11 @@ export class LogProtocolHandler implements ProtocolHandler {
 			}
 			return this.#readFile(resolvedAbs, url);
 		} catch (err) {
-			if (err instanceof Error && "code" in err && (err as { code: string }).code === "ENOENT") {
+			if (
+				err instanceof Error &&
+				"code" in err &&
+				(err as { code: string }).code === "ENOENT"
+			) {
 				// Provide helpful listing of available docs
 				const available = await this.#listAvailable(docsDir, url);
 				throw new Error(`Not found: ${url.href}\n${available}`);
@@ -95,7 +112,10 @@ export class LogProtocolHandler implements ProtocolHandler {
 		}
 	}
 
-	async complete(query: string, context?: ResolveContext): Promise<UrlCompletion[]> {
+	async complete(
+		query: string,
+		context?: ResolveContext,
+	): Promise<UrlCompletion[]> {
 		const cwd = context?.cwd ?? process.cwd();
 		const docsDir = resolveDocsDir(cwd);
 
@@ -124,7 +144,10 @@ export class LogProtocolHandler implements ProtocolHandler {
 	}
 
 	/** List a directory within docs/. */
-	async #listDirectory(dir: string, _url: InternalUrl): Promise<InternalResource> {
+	async #listDirectory(
+		dir: string,
+		_url: InternalUrl,
+	): Promise<InternalResource> {
 		const entries = await this.#listEntries(dir);
 		const content = formatDirectoryListing(entries, _url);
 		return {
@@ -136,7 +159,10 @@ export class LogProtocolHandler implements ProtocolHandler {
 	}
 
 	/** Read a file within docs/. */
-	async #readFile(filePath: string, _url: InternalUrl): Promise<InternalResource> {
+	async #readFile(
+		filePath: string,
+		_url: InternalUrl,
+	): Promise<InternalResource> {
 		const stat = await fs.stat(filePath);
 		if (stat.size > MAX_DOCS_FILE_BYTES) {
 			throw new Error(
@@ -162,7 +188,9 @@ export class LogProtocolHandler implements ProtocolHandler {
 	}
 
 	/** List directory entries (dirs and files) with isDir flag. */
-	async #listEntries(dir: string): Promise<Array<{ name: string; isDir: boolean }>> {
+	async #listEntries(
+		dir: string,
+	): Promise<Array<{ name: string; isDir: boolean }>> {
 		try {
 			const items = await fs.readdir(dir, { withFileTypes: true });
 			return items

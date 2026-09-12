@@ -4,13 +4,21 @@
 //   skill://<name> — Reads SKILL.md
 //   skill://<name>/<path> — Reads relative path within skill's baseDir
 
-import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext } from "./types";
+import type {
+	InternalResource,
+	InternalUrl,
+	ProtocolHandler,
+	ResolveContext,
+} from "./types";
 
 export class SkillProtocolHandler implements ProtocolHandler {
 	readonly scheme = "skill";
 	readonly immutable = true;
 
-	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
+	async resolve(
+		url: InternalUrl,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
 		const skills = context?.skills;
 		const skillName = url.rawHost || url.hostname;
 
@@ -25,7 +33,7 @@ export class SkillProtocolHandler implements ProtocolHandler {
 		if (!skill) {
 			const available = skills?.map(s => s.name) ?? [];
 			throw new Error(
-				`Unknown skill: ${skillName}\nAvailable: ${available.join(", ") || "none"}`,
+				`Unknown skill: ${skillName}. The skill name must be an exact match from the available list. Do not guess or infer alternative names. Available: ${available.join(", ") || "none"}`,
 			);
 		}
 
@@ -40,9 +48,10 @@ export class SkillProtocolHandler implements ProtocolHandler {
 		};
 	}
 
-	async complete(_query: string, context?: ResolveContext): Promise<
-		Array<{ value: string; description?: string }>
-	> {
+	async complete(
+		_query: string,
+		context?: ResolveContext,
+	): Promise<Array<{ value: string; description?: string }>> {
 		return (context?.skills ?? []).map(skill => ({
 			value: skill.name,
 			description: skill.name,

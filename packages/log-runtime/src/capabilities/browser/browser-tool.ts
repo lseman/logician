@@ -17,10 +17,22 @@ const browserSchema = {
 			description:
 				"Browser operation: open, close, goto, click, type, fill, press, screenshot, evaluate, ariaSnapshot, getUrl, getTitle, waitForSelector, waitForUrl, listTabs, closeAll.",
 			enum: [
-				"open", "close", "goto", "click", "type", "fill",
-				"press", "screenshot", "evaluate", "ariaSnapshot",
-				"getUrl", "getTitle", "waitForSelector", "waitForUrl",
-				"listTabs", "closeAll",
+				"open",
+				"close",
+				"goto",
+				"click",
+				"type",
+				"fill",
+				"press",
+				"screenshot",
+				"evaluate",
+				"ariaSnapshot",
+				"getUrl",
+				"getTitle",
+				"waitForSelector",
+				"waitForUrl",
+				"listTabs",
+				"closeAll",
 			],
 		},
 		name: {
@@ -49,11 +61,13 @@ const browserSchema = {
 		},
 		expression: {
 			type: "string",
-			description: "JavaScript expression to evaluate in page context (used by evaluate).",
+			description:
+				"JavaScript expression to evaluate in page context (used by evaluate).",
 		},
 		timeout_ms: {
 			type: "integer",
-			description: "Timeout in milliseconds (used by waitForSelector, waitForUrl).",
+			description:
+				"Timeout in milliseconds (used by waitForSelector, waitForUrl).",
 		},
 		type_format: {
 			type: "string",
@@ -173,7 +187,8 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 				}
 
 				case "evaluate": {
-					if (!name || !expression) return 'evaluate requires "name" and "expression"';
+					if (!name || !expression)
+						return 'evaluate requires "name" and "expression"';
 					const result = await manager.evaluate(name, expression);
 					return `evaluated expression on tab "${name}": ${JSON.stringify(result)}`;
 				}
@@ -195,8 +210,13 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 				}
 
 				case "waitForSelector": {
-					if (!name || !selector) return 'waitForSelector requires "name" and "selector"';
-					const found = await manager.waitForSelector(name, selector, timeout_ms);
+					if (!name || !selector)
+						return 'waitForSelector requires "name" and "selector"';
+					const found = await manager.waitForSelector(
+						name,
+						selector,
+						timeout_ms,
+					);
 					return found
 						? `Selector "${selector}" found on tab "${name}"`
 						: `Selector "${selector}" not found on tab "${name}"`;

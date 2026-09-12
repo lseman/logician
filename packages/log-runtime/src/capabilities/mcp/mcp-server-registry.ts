@@ -427,16 +427,21 @@ export class McpServerRegistry {
 		const client = this._clients.find(c => c.name === serverName);
 		if (!client) throw new Error(`MCP server "${serverName}" not found`);
 		const resources = client.listResources?.();
-		if (!resources) throw new Error(`MCP server "${serverName}" does not support resources`);
+		if (!resources)
+			throw new Error(`MCP server "${serverName}" does not support resources`);
 		return resources;
 	}
 
 	/** Read a resource from a connected MCP server. */
-	async readResource(serverName: string, uri: string): Promise<McpResourceReadResult> {
+	async readResource(
+		serverName: string,
+		uri: string,
+	): Promise<McpResourceReadResult> {
 		const client = this._clients.find(c => c.name === serverName);
 		if (!client) throw new Error(`MCP server "${serverName}" not found`);
 		const read = client.readResource?.(uri);
-		if (!read) throw new Error(`MCP server "${serverName}" does not support resources`);
+		if (!read)
+			throw new Error(`MCP server "${serverName}" does not support resources`);
 		return read;
 	}
 }

@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentHooks } from "@logician/log-core";
-import { ensureInsideCwd } from "../tools/support/utils/path-utils.ts";
 import type { MutationSession } from "../tools/mutation/session.js";
+import { ensureInsideCwd } from "../tools/support/utils/path-utils.ts";
 import type { LspClientPool } from "./lsp-client-pool.ts";
 
 const MAX_SOURCE_BYTES = 1_000_000;
@@ -18,7 +18,12 @@ export interface PostEditDiagnostic {
 
 function successfulMutation(toolName: string, result: string): boolean {
 	if (toolName === "edit_file")
-	return result.startsWith("Successfully replaced ") || /^Applied [1-9]\d* line change\(s\) across [1-9]\d* file\(s\)\./.test(result);
+		return (
+			result.startsWith("Successfully replaced ") ||
+			/^Applied [1-9]\d* line change\(s\) across [1-9]\d* file\(s\)\./.test(
+				result,
+			)
+		);
 	if (toolName === "write_file") {
 		return result.startsWith("Created ") || result.startsWith("Wrote ");
 	}
@@ -91,7 +96,7 @@ export function createPostEditDiagnosticHooks(
 		allowedPaths?: string[];
 		allowAllPaths?: boolean;
 	},
-mutation?: MutationSession,
+	mutation?: MutationSession,
 ): AgentHooks {
 	return {
 		afterToolCall: async ({ toolCall, args, result, isError }) => {
@@ -109,29 +114,32 @@ mutation?: MutationSession,
 			try {
 				const resolved = path.resolve(cwd, fileName);
 				// Mutation session path: register diagnostic for version tracking.
-			if (mutation) {
+				if (mutation) {
+					const lspDiagnostics = await lspManager?.diagnosticsFor(resolved);
+					const diagnostics = lspDiagnostics?.length
+						? lspDiagnostics
+						: await diagnoseEditedFile(
+								cwd,
+								fileName,
+								pathPolicy?.allowedPaths,
+								pathPolicy?.allowAllPaths,
+							);
+					if (diagnostics.length === 0) return undefined;
+
+					mutation.registerDiagnostic(
+						resolved,
+						`Diagnostics for ${fileName}`,
+						diagnostics.map(
+							d =>
+								`${d.line}:${d.column}: ${d.message}${d.code ? ` [${d.code}]` : ""}`,
+						),
+						false,
+					);
+					return { content: result + formatDiagnostics(fileName, diagnostics) };
+				}
+
+				// Fallback: no mutation session.
 				const lspDiagnostics = await lspManager?.diagnosticsFor(resolved);
-				const diagnostics = lspDiagnostics?.length
-					? lspDiagnostics
-					: await diagnoseEditedFile(
-							cwd,
-							fileName,
-							pathPolicy?.allowedPaths,
-							pathPolicy?.allowAllPaths,
-						);
-				if (diagnostics.length === 0) return undefined;
-
-				mutation.registerDiagnostic(
-					resolved,
-					`Diagnostics for ${fileName}`,
-					diagnostics.map(d => `${d.line}:${d.column}: ${d.message}${d.code ? ` [${d.code}]` : ""}`),
-					false,
-				);
-				return { content: result + formatDiagnostics(fileName, diagnostics) };
-			}
-
-			// Fallback: no mutation session.
-			const lspDiagnostics = await lspManager?.diagnosticsFor(resolved);
 				const diagnostics = lspDiagnostics?.length
 					? lspDiagnostics
 					: await diagnoseEditedFile(

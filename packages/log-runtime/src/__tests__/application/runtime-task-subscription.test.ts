@@ -22,7 +22,11 @@ test("stopping a runtime detaches it from global task updates", async () => {
 	await stopped.stop();
 	const stoppedSequence = stopped.events.snapshot().at(-1)?.sequence ?? 0;
 	const activeSequence = active.events.snapshot().at(-1)?.sequence ?? 0;
-	await mutateTodo({ op: "append", phase: "Verification", tasks: ["Verify detachment"] });
+	await mutateTodo({
+		op: "append",
+		phase: "Verification",
+		tasks: ["Verify detachment"],
+	});
 
 	expect(stopped.events.snapshot().at(-1)?.sequence ?? 0).toBe(stoppedSequence);
 	expect(active.events.snapshot().at(-1)?.sequence ?? 0).toBeGreaterThan(

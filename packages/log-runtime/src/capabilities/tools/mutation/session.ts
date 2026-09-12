@@ -6,11 +6,14 @@
 // Format parsers (edit-file.ts, hashline.ts, ast-edit.ts) produce MutationProposal
 // objects; the session owns the lifecycle: begin → apply/preview → commit.
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
 import type { EditStore } from "../support/edit-store.js";
-import { atomicWriteFile, AtomicWriteOptions } from "../support/utils/atomic-write.js";
+import {
+	type AtomicWriteOptions,
+	atomicWriteFile,
+} from "../support/utils/atomic-write.js";
 import { generateEditDiffs } from "../support/utils/diff-utils.js";
 import { ensureInsideCwd } from "../support/utils/path-utils.js";
 
@@ -115,11 +118,7 @@ export class MutationSession {
 	/** Pending diagnostic callbacks. */
 	readonly #pendingDiagnostics = new Map<string, MutationDiagnosticEvent>();
 
-	constructor(
-		store: EditStore,
-		cwd: string,
-		policy: MutationPathPolicy = {},
-	) {
+	constructor(store: EditStore, cwd: string, policy: MutationPathPolicy = {}) {
 		this.#store = store;
 		this.#cwd = cwd;
 		this.#policy = policy;
@@ -182,7 +181,12 @@ export class MutationSession {
 		const resolved = proposal.path.startsWith("/")
 			? proposal.path
 			: path.resolve(this.#cwd, proposal.path);
-		ensureInsideCwd(this.#cwd, resolved, this.#policy.allowedPaths, this.#policy.allowAllPaths);
+		ensureInsideCwd(
+			this.#cwd,
+			resolved,
+			this.#policy.allowedPaths,
+			this.#policy.allowAllPaths,
+		);
 
 		const beforeHash = this.#hash(proposal.before);
 		const afterHash = this.#hash(proposal.after);
@@ -221,7 +225,8 @@ export class MutationSession {
 					afterHash,
 					linesChanged,
 					filesAffected: 0,
-					diff: generateEditDiffs(resolved, proposal.before, proposal.after).diff,
+					diff: generateEditDiffs(resolved, proposal.before, proposal.after)
+						.diff,
 					error: `${resolved} already exists. Cannot create new file.`,
 				};
 			}
@@ -240,7 +245,8 @@ export class MutationSession {
 						afterHash,
 						linesChanged,
 						filesAffected: 0,
-						diff: generateEditDiffs(resolved, proposal.before, proposal.after).diff,
+						diff: generateEditDiffs(resolved, proposal.before, proposal.after)
+							.diff,
 						error: `${resolved} has been modified since it was last read. Read it again before editing.`,
 					};
 				}
@@ -259,9 +265,16 @@ export class MutationSession {
 			this.#store.clearSnapshot(resolved);
 
 			// Update the mutation version for this path.
-			this.#mutationVersions.set(this.#normalizePath(resolved), (this.#mutationVersions.get(this.#normalizePath(resolved)) ?? 0) + 1);
+			this.#mutationVersions.set(
+				this.#normalizePath(resolved),
+				(this.#mutationVersions.get(this.#normalizePath(resolved)) ?? 0) + 1,
+			);
 
-			const diff = generateEditDiffs(resolved, proposal.before, proposal.after).diff;
+			const diff = generateEditDiffs(
+				resolved,
+				proposal.before,
+				proposal.after,
+			).diff;
 
 			return {
 				applied: true,
@@ -300,7 +313,8 @@ export class MutationSession {
 		messages: string[],
 		errored: boolean,
 	): MutationDiagnosticEvent {
-		const version = (this.#mutationVersions.get(this.#normalizePath(path)) ?? 0) + 1;
+		const version =
+			(this.#mutationVersions.get(this.#normalizePath(path)) ?? 0) + 1;
 		this.#mutationVersions.set(this.#normalizePath(path), version);
 
 		const entry: MutationDiagnosticEvent = {
@@ -308,7 +322,8 @@ export class MutationSession {
 			summary,
 			messages,
 			errored,
-			isStale: () => this.#mutationVersions.get(this.#normalizePath(path)) !== version,
+			isStale: () =>
+				this.#mutationVersions.get(this.#normalizePath(path)) !== version,
 		};
 
 		this.#pendingDiagnostics.set(path, entry);

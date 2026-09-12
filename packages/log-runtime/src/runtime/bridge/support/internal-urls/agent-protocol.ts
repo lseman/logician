@@ -6,8 +6,8 @@
 //   agent://<id>/status           — completion status
 //   agent://<id>/details.metrics  — nested dot-notation access
 
-import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 import { AgentOutputRegistry, resolvePath } from "./agent-registry";
+import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
 export class AgentProtocolHandler implements ProtocolHandler {
 	readonly scheme = "agent";
@@ -21,9 +21,10 @@ export class AgentProtocolHandler implements ProtocolHandler {
 			const ids = registry.ids();
 			return {
 				url: url.href,
-				content: ids.length > 0
-					? `# Agent Results\n\n${ids.map(id => `  - ${id}`).join("\n")}`
-					: "# Agent Results\n\nNo agents have completed yet.",
+				content:
+					ids.length > 0
+						? `# Agent Results\n\n${ids.map(id => `  - ${id}`).join("\n")}`
+						: "# Agent Results\n\nNo agents have completed yet.",
 				contentType: "text/markdown",
 			};
 		}
@@ -31,9 +32,10 @@ export class AgentProtocolHandler implements ProtocolHandler {
 		const entry = registry.get(agentId);
 		if (!entry) {
 			const ids = registry.ids();
-			const hint = ids.length > 0
-				? `\nAvailable: ${ids.join(", ")}`
-				: "\nNo agents have completed yet.";
+			const hint =
+				ids.length > 0
+					? `\nAvailable: ${ids.join(", ")}`
+					: "\nNo agents have completed yet.";
 			throw new Error(`Unknown agent: ${agentId}${hint}`);
 		}
 

@@ -48,7 +48,7 @@ behind the `xd://` virtual device protocol:
   `./xd://<name>` if a literal file is intended.
 
 You can also read internal resources using special URL schemes:
-- `skill://<name>` — reads a loaded skill's full instructions
+- `skill://<name>` — reads a loaded skill's full instructions. The `<name>` must be an exact skill name; invalid names are rejected, not matched against similar skills. NEVER infer a different skill name from a malformed `skill://` URL — if the name doesn't match exactly, report the error and do not attempt an alternative.
 - `rule://<name>` — reads a frontmatter rule's content
 - `memory://list` / `memory://memories` — list observations and memories
 - `local://<path>` — reads files under `.logician/artifacts/`
@@ -67,6 +67,10 @@ You can also read internal resources using special URL schemes:
 - `artifact://` — reads session-scoped tool output artifacts; use
   `artifact://` to list available artifacts, or `artifact://<id>` to read one
 
+### Critical rule for skill:// URLs
+When the user provides a `skill://` URL, call `read_skill` with the EXACT name from the URL.
+NEVER modify, truncate, or substitute the name. If the name does not match an available
+skill exactly, report the error — do not try a different skill name.
 § Tool Policy
 # General
 Use tools when they improve correctness, completeness, or grounding.

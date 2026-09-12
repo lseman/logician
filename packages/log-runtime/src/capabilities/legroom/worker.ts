@@ -1,5 +1,4 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { createInterface, type Interface } from "node:readline";
+import { JsonlWorker } from "../sdk/jsonl-worker.ts";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -13,12 +12,6 @@ export interface LegroomSdkConfig {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-interface PendingRequest {
-	resolve: (value: unknown) => void;
-	reject: (error: Error) => void;
-	timer: ReturnType<typeof setTimeout>;
-}
 
 /** Response from the SDK worker — v2 format. */
 interface WorkerResponse {
@@ -103,23 +96,25 @@ export interface WorkerHistory {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseResponse(line: string): WorkerResponse | undefined {
-	let value: unknown;
-	try {
-		value = JSON.parse(line);
-	} catch {
-		return undefined;
-	}
-	if (!value || typeof value !== "object") return undefined;
-	const response = value as Record<string, unknown>;
-	if (typeof response.id !== "string" || typeof response.ok !== "boolean")
-		return undefined;
-	return response as unknown as WorkerResponse;
+/** Normalize schema field names only; message bodies and keyed maps stay untouched. */
+function fields(value: Record<string, unknown>): Record<string, unknown> {
+	return Object.fromEntries(
+		Object.entries(value).map(([key, item]) => [
+			key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+			item,
+		]),
+	);
 }
 
-function buildCompressResult(stats: Record<string, unknown>): CompressResult {
+function buildCompressResult(
+	rawStats: Record<string, unknown>,
+	messages?: unknown[],
+): CompressResult {
+	const stats = fields(rawStats);
 	const metadata: Record<string, unknown> = {};
-	const statsMetadata = stats.metadata as Record<string, unknown> | undefined;
+	const statsMetadata = stats.metadata
+		? fields(stats.metadata as Record<string, unknown>)
+		: undefined;
 	if (statsMetadata) {
 		if (statsMetadata.ccrHashes)
 			metadata.ccrHashes = statsMetadata.ccrHashes as string[];
@@ -135,10 +130,14 @@ function buildCompressResult(stats: Record<string, unknown>): CompressResult {
 			metadata.salienceScoresAfter =
 				statsMetadata.salienceScoresAfter as number[];
 		if (statsMetadata.storeStats)
-			metadata.storeStats = statsMetadata.storeStats;
+			metadata.storeStats = fields(
+				statsMetadata.storeStats as Record<string, unknown>,
+			);
 	}
 	return {
-		messages: (statsMetadata?.messages as Record<string, unknown>[]) ?? [],
+		messages:
+			((statsMetadata?.messages ?? messages) as Record<string, unknown>[]) ??
+			[],
 		tokensBefore: (stats.tokensBefore as number) ?? 0,
 		tokensAfter: (stats.tokensAfter as number) ?? 0,
 		tokensSaved: (stats.tokensSaved as number) ?? 0,
@@ -155,14 +154,15 @@ function buildCompressResult(stats: Record<string, unknown>): CompressResult {
 
 /** A lazy, persistent JSONL client for Legroom's Python SDK worker (v2). */
 export class LegroomWorker {
-	private process?: ChildProcessWithoutNullStreams;
-	private lines?: Interface;
-	private readonly pending = new Map<string, PendingRequest>();
-	private nextId = 0;
-	private stopping = false;
-	private stderrTail = "";
-
-	constructor(private readonly options: LegroomSdkConfig) {}
+	private readonly transport: JsonlWorker;
+	constructor(private readonly options: LegroomSdkConfig) {
+		this.transport = new JsonlWorker({
+			name: "Legroom",
+			python: options.python,
+			args: options.args ?? ["-m", "legroom.integration.sdk_worker"],
+			timeoutMs: options.timeoutMs,
+		});
+	}
 
 	// ── Compression ────────────────────────────────────────────────────────
 
@@ -185,36 +185,11 @@ export class LegroomWorker {
 		messages: Record<string, unknown>[],
 		model: string,
 	): Promise<CompressResult> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "compress",
-				messages,
-				model: model || "gpt-4o",
-				config: this.options.config ?? {},
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "compress",
+			messages,
+			model: model || "gpt-4o",
+			config: this.options.config ?? {},
 		});
 	}
 
@@ -226,104 +201,29 @@ export class LegroomWorker {
 		messages: Record<string, unknown>[],
 		model: string,
 	): Promise<CompressResult> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "compress_with_store",
-				storeId,
-				messages,
-				model: model || "gpt-4o",
-				config: this.options.config ?? {},
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "compress_with_store",
+			store_id: storeId,
+			messages,
+			model: model || "gpt-4o",
+			config: this.options.config ?? {},
 		});
 	}
 
 	/** Retrieve original content from a CCR store by hash. */
 	async storeRetrieve(storeId: string, hash: string): Promise<string> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "store_retrieve",
-				storeId,
-				hash,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "store_retrieve",
+			store_id: storeId,
+			hash,
 		});
 	}
 
 	/** Get CCR store statistics. */
 	async storeStats(storeId: string): Promise<StoreStats> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "store_stats",
-				storeId,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "store_stats",
+			store_id: storeId,
 		});
 	}
 
@@ -333,34 +233,9 @@ export class LegroomWorker {
 	async cacheGet(
 		key: string,
 	): Promise<{ hit: boolean; result?: CompressResult } | null> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "cache_get",
-				key,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "cache_get",
+			key,
 		});
 	}
 
@@ -371,67 +246,17 @@ export class LegroomWorker {
 		phaseReports: Record<string, unknown>[],
 		quality: number,
 	): Promise<CalibrationStatus> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "calibration_record",
-				phaseReports,
-				quality,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "calibration_record",
+			phase_reports: phaseReports,
+			quality,
 		});
 	}
 
 	/** Query current calibration state. */
 	async calibrationStatus(): Promise<CalibrationStatus> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "calibration_status",
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "calibration_status",
 		});
 	}
 
@@ -439,166 +264,77 @@ export class LegroomWorker {
 
 	/** Get aggregate worker statistics. */
 	async workerStats(): Promise<WorkerStats> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "worker_stats",
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "worker_stats",
 		});
 	}
 
 	/** Get recent request history. */
 	async workerHistory(limit = 50, offset = 0): Promise<WorkerHistory> {
-		const child = this.ensureStarted();
-		const id = `legroom-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`Legroom SDK request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "worker_history",
-				limit,
-				offset,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Legroom SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "worker_history",
+			limit,
+			offset,
 		});
 	}
 
 	// ── Lifecycle ──────────────────────────────────────────────────────────
 
-	private ensureStarted(): ChildProcessWithoutNullStreams {
-		if (this.process && this.process.exitCode === null) return this.process;
-		this.stopping = false;
-		this.stderrTail = "";
-		const child = spawn(
-			this.options.python ?? "python3",
-			this.options.args ?? ["-m", "legroom.integration.sdk_worker"],
-			{ stdio: ["pipe", "pipe", "pipe"] },
-		);
-		this.process = child;
-		this.lines = createInterface({ input: child.stdout });
-		this.lines.on("line", line => this.handleLine(line));
-		child.stderr.setEncoding("utf8");
-		child.stderr.on("data", (chunk: string) => {
-			this.stderrTail = `${this.stderrTail}${chunk}`.slice(-4_096);
-		});
-		child.on("error", error => this.failAll(error));
-		child.on("exit", (code, signal) => {
-			if (this.process === child) this.process = undefined;
-			if (!this.stopping) {
-				const detail = this.stderrTail.trim();
-				this.failAll(
-					new Error(
-						`Legroom SDK worker exited (${signal ?? code ?? "unknown"})${detail ? `: ${detail}` : ""}`,
-					),
-				);
-			}
-		});
-		return child;
+	private async request<T>(payload: Record<string, unknown>): Promise<T> {
+		const response = await this.transport.request(payload);
+		return this.decode(
+			response as unknown as WorkerResponse,
+			payload.method,
+		) as T;
 	}
 
-	private handleLine(line: string): void {
-		const response = parseResponse(line);
-		if (!response) return;
-		const pending = this.pending.get(response.id);
-		if (!pending) return;
-		clearTimeout(pending.timer);
-		this.pending.delete(response.id);
-		if (!response.ok) {
-			pending.reject(new Error(response.error ?? "Legroom SDK request failed"));
-			return;
+	private decode(response: WorkerResponse, method: unknown): unknown {
+		switch (method) {
+			case "compress":
+			case "compress_with_store":
+				if (response.stats)
+					return buildCompressResult(response.stats, response.messages);
+				break;
+			case "store_stats":
+			case "worker_stats":
+				if (response.stats) return fields(response.stats);
+				break;
+			case "calibration_status":
+			case "calibration_record":
+				if (response.calibration) {
+					const calibration = fields(response.calibration);
+					return {
+						...calibration,
+						snapshots: Array.isArray(calibration.snapshots)
+							? calibration.snapshots.map(snapshot => fields(snapshot))
+							: [],
+					};
+				}
+				break;
+			case "worker_history":
+				if (response.history)
+					return {
+						history: response.history.map(fields),
+						total: response.total ?? 0,
+					};
+				break;
+			case "cache_get":
+				if (response.hit !== undefined)
+					return {
+						hit: response.hit,
+						result: response.stats
+							? buildCompressResult(response.stats, response.messages)
+							: undefined,
+					};
+				break;
+			case "store_retrieve":
+				if (response.content !== undefined) return response.content;
+				break;
 		}
-		// v2: compress returns stats.metadata.messages
-		if (response.stats) {
-			pending.resolve(buildCompressResult(response.stats));
-			return;
-		}
-		// v2: calibration methods return calibration field
-		if (response.calibration !== undefined) {
-			pending.resolve(response.calibration);
-			return;
-		}
-		// v2: worker_history returns history + total
-		if (response.history !== undefined) {
-			pending.resolve({
-				history: response.history,
-				total: response.total ?? 0,
-			});
-			return;
-		}
-		// v2: cache_get returns hit + optional result
-		if (response.hit !== undefined) {
-			const result = response.stats
-				? buildCompressResult(response.stats)
-				: undefined;
-			pending.resolve({ hit: response.hit as boolean, result });
-			return;
-		}
-		// v2: store_retrieve returns content
-		if (response.content !== undefined) {
-			pending.resolve(response.content);
-			return;
-		}
-		// Fallback: should not happen with v2 worker
-		pending.reject(new Error("Legroom SDK response format unrecognized"));
-	}
-
-	private failAll(error: Error): void {
-		for (const pending of this.pending.values()) {
-			clearTimeout(pending.timer);
-			pending.reject(error);
-		}
-		this.pending.clear();
+		throw new Error("Legroom SDK response format unrecognized");
 	}
 
 	close(): void {
-		this.stopping = true;
-		this.lines?.close();
-		this.lines = undefined;
-		this.failAll(new Error("Legroom SDK worker closed"));
-		const child = this.process;
-		this.process = undefined;
-		if (!child) return;
-		child.stdin.end();
-		if (child.exitCode === null) child.kill("SIGTERM");
+		this.transport.close();
 	}
 }

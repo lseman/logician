@@ -10,7 +10,11 @@
 //   if (matches.length > 0) { /* abort + inject */ }
 //   manager.markInjected(matches);
 
-import type { TtsrMatchContext, TtsrRule, TtsrSettings } from "../types/ttsr-types.ts";
+import type {
+	TtsrMatchContext,
+	TtsrRule,
+	TtsrSettings,
+} from "../types/ttsr-types.ts";
 
 // ── Internal types ────────────────────────────────────────────────────────────
 
@@ -26,7 +30,10 @@ interface TtsrScopeConfig {
 	allowText: boolean;
 	allowThinking: boolean;
 	allowAnyTool: boolean;
-	toolScopes: Array<{ toolName: string | undefined; pathPattern: string | undefined }>;
+	toolScopes: Array<{
+		toolName: string | undefined;
+		pathPattern: string | undefined;
+	}>;
 }
 
 interface InjectionRecord {
@@ -63,7 +70,7 @@ export class TtsrManager {
 	#canMatchText = false;
 	#canMatchThinking = false;
 
-	constructor(settings?: TtsrSettings) {
+	constructor(settings?: Partial<TtsrSettings>) {
 		this.#settings = { ...DEFAULT_SETTINGS, ...settings };
 	}
 
@@ -108,7 +115,9 @@ export class TtsrManager {
 		}
 		const record = this.#injectionRecords.get(ruleName);
 		if (!record) return true;
-		return this.#messageCount - record.lastInjectedAt >= this.#settings.repeatGap;
+		return (
+			this.#messageCount - record.lastInjectedAt >= this.#settings.repeatGap
+		);
 	}
 
 	/** Compile regex conditions from a rule. */
@@ -125,15 +134,25 @@ export class TtsrManager {
 	}
 
 	/** Parse a scope token into a TtsrScopeConfig entry. */
-	#parseScopeToken(token: string): { toolName: string | undefined; pathPattern: string | undefined } | undefined {
-		const match = /^(?:(?:tool)(?::(?<tool>[a-z0-9_-]+))?|(?<bare>[a-z0-9_-]+))(?:\((?<path>[^)]+)\))?$/i.exec(
-			token,
-		);
+	#parseScopeToken(
+		token: string,
+	):
+		| { toolName: string | undefined; pathPattern: string | undefined }
+		| undefined {
+		const match =
+			/^(?:(?:tool)(?::(?<tool>[a-z0-9_-]+))?|(?<bare>[a-z0-9_-]+))(?:\((?<path>[^)]+)\))?$/i.exec(
+				token,
+			);
 		if (!match) return undefined;
 
 		const groups = match.groups;
-		const hasToolPrefix = groups?.tool !== undefined || token.toLowerCase().startsWith("tool:");
-		const toolName = (groups?.tool ?? (hasToolPrefix ? undefined : groups?.bare))?.trim().toLowerCase();
+		const hasToolPrefix =
+			groups?.tool !== undefined || token.toLowerCase().startsWith("tool:");
+		const toolName = (
+			groups?.tool ?? (hasToolPrefix ? undefined : groups?.bare)
+		)
+			?.trim()
+			.toLowerCase();
 		const pathPattern = groups?.path?.trim();
 
 		if (!pathPattern) return { toolName, pathPattern: undefined };
@@ -175,7 +194,8 @@ export class TtsrManager {
 
 	/** Check if scope has any reachable targets. */
 	#hasReachableScope(scope: TtsrScopeConfig): boolean {
-		if (scope.allowText || scope.allowThinking || scope.allowAnyTool) return true;
+		if (scope.allowText || scope.allowThinking || scope.allowAnyTool)
+			return true;
 		if (scope.toolScopes.length > 0) return true;
 		return false;
 	}
@@ -201,12 +221,18 @@ export class TtsrManager {
 
 	/** Match globs against file paths. */
 	#matchesGlobs(entry: TtsrEntry, context: TtsrMatchContext): boolean {
-		if (!entry.globalGlobs || !context.filePaths || context.filePaths.length === 0) return true;
+		if (
+			!entry.globalGlobs ||
+			!context.filePaths ||
+			context.filePaths.length === 0
+		)
+			return true;
 		for (const glob of entry.globalGlobs) {
 			for (const filePath of context.filePaths) {
 				if (glob.match(filePath)) return true;
 				const slashIndex = filePath.lastIndexOf("/");
-				const basename = slashIndex === -1 ? filePath : filePath.slice(slashIndex + 1);
+				const basename =
+					slashIndex === -1 ? filePath : filePath.slice(slashIndex + 1);
 				if (basename !== filePath && glob.match(basename)) return true;
 			}
 		}
@@ -229,7 +255,9 @@ export class TtsrManager {
 		if (this.#settings.disabledRules.includes(rule.name)) return false;
 
 		const conditions = this.#compileConditions(rule);
-		const astConditions = (rule.astConditions ?? []).map(p => p.trim()).filter(p => p.length > 0);
+		const astConditions = (rule.astConditions ?? [])
+			.map(p => p.trim())
+			.filter(p => p.length > 0);
 		if (conditions.length === 0 && astConditions.length === 0) return false;
 
 		const scope = this.#buildScope(rule);
@@ -266,7 +294,8 @@ export class TtsrManager {
 	/** Derive a buffer key from match context for isolation. */
 	#bufferKey(context: TtsrMatchContext): string {
 		if (context.streamKey) return context.streamKey;
-		if (context.source === "tool" && context.toolName) return `tool:${context.toolName}`;
+		if (context.source === "tool" && context.toolName)
+			return `tool:${context.toolName}`;
 		return context.source;
 	}
 
@@ -300,7 +329,10 @@ export class TtsrManager {
 	 * Check AST conditions eligibility. Returns rule names that should be
 	 * AST-matched; the caller must perform the actual AST matching.
 	 */
-	async checkAstSnapshot(_snapshot: string, context: TtsrMatchContext): Promise<TtsrRule[]> {
+	async checkAstSnapshot(
+		_snapshot: string,
+		context: TtsrMatchContext,
+	): Promise<TtsrRule[]> {
 		if (!this.#settings.enabled || context.source !== "tool") return [];
 
 		const lang = this.#deriveLang(context.filePaths);

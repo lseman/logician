@@ -18,6 +18,7 @@ binary:
 		packages/log-runtime/src/runtime/context/system-prompt-embed.ts \
 		SYSTEM_PROMPT_TEMPLATE
 	$(BUN) build --target=bun --compile $(ENTRY) --outfile $(TMP_BIN)
+	@cp -r themes dist/themes
 	@mv -f $(TMP_BIN) $(BIN)
 	@echo "Built $(abspath $(BIN))"
 

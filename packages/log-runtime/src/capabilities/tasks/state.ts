@@ -60,7 +60,9 @@ export function mutateTasks<T>(
 	const ctx = {
 		phases: draft,
 		allocateId: () => draftNextTaskId++,
-		resetIds: () => { draftNextTaskId = 1; },
+		resetIds: () => {
+			draftNextTaskId = 1;
+		},
 	};
 	const result = mutation(ctx);
 	if (!result.changed) return result.value;

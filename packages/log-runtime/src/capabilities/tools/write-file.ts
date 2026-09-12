@@ -8,9 +8,12 @@
 // it. The file must have been read first if it already exists (same safety check).
 // Appending is useful for streaming large files across multiple tool calls.
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Tool, ToolResult } from "@logician/log-core";
+import { createMutationSession } from "./mutation/session.js";
+import { createEditStore } from "./support/edit-store.js";
 import { withFileMutationQueue } from "./support/mutation-queue.ts";
 import {
 	hasBeenRead,
@@ -30,9 +33,6 @@ import {
 	hasXdDevice,
 	readXdDeviceDocs,
 } from "./support/xd-device-registry.ts";
-import { createMutationSession } from "./mutation/session.js";
-import { createEditStore } from "./support/edit-store.js";
-import { createHash } from "node:crypto";
 
 export const write_file: Tool = {
 	name: "write_file",
@@ -103,83 +103,89 @@ export const write_file: Tool = {
 		}
 
 		const store = createEditStore();
-			const mutation = createMutationSession(store, ctx.cwd || process.cwd(), { allowedPaths: ctx.allowedPaths, allowAllPaths: ctx.allowAllPaths });
+		const mutation = createMutationSession(store, ctx.cwd || process.cwd(), {
+			allowedPaths: ctx.allowedPaths,
+			allowAllPaths: ctx.allowAllPaths,
+		});
 
-			return withFileMutationQueue(resolved, async () => {
-				const fileExists = fs.existsSync(resolved);
+		return withFileMutationQueue(resolved, async () => {
+			const fileExists = fs.existsSync(resolved);
 
-				if (fileExists && !append) {
-					// Overwrite mode: must have been read first.
-					if (!hasBeenRead(resolved)) {
-						return (
-							`${resolved} already exists but has not been read. ` +
-							"Read it with read_file before overwriting, or use edit_file for targeted changes."
-						);
-					}
-					if (isStaleSinceRead(resolved)) {
-						return (
-							`${resolved} has been modified since it was last read. ` +
-							"Read it again before overwriting."
-						);
-					}
+			if (fileExists && !append) {
+				// Overwrite mode: must have been read first.
+				if (!hasBeenRead(resolved)) {
+					return (
+						`${resolved} already exists but has not been read. ` +
+						"Read it with read_file before overwriting, or use edit_file for targeted changes."
+					);
 				}
-
-				// Append mode: also require read if file exists, but the check is
-				// about whether the model last saw this file's contents — same
-				// stale-after-write protection, no content comparison needed.
-				if (fileExists && append) {
-					if (!hasBeenRead(resolved)) {
-						return (
-							`${resolved} already exists but has not been read. ` +
-							"Read it with read_file before appending, or use write_file for a complete overwrite."
-						);
-					}
-					if (isStaleSinceRead(resolved)) {
-						return (
-							`${resolved} has been modified since it was last read. ` +
-							"Read it again before appending."
-						);
-					}
+				if (isStaleSinceRead(resolved)) {
+					return (
+						`${resolved} has been modified since it was last read. ` +
+						"Read it again before overwriting."
+					);
 				}
+			}
 
-				fs.mkdirSync(path.dirname(resolved), { recursive: true });
+			// Append mode: also require read if file exists, but the check is
+			// about whether the model last saw this file's contents — same
+			// stale-after-write protection, no content comparison needed.
+			if (fileExists && append) {
+				if (!hasBeenRead(resolved)) {
+					return (
+						`${resolved} already exists but has not been read. ` +
+						"Read it with read_file before appending, or use write_file for a complete overwrite."
+					);
+				}
+				if (isStaleSinceRead(resolved)) {
+					return (
+						`${resolved} has been modified since it was last read. ` +
+						"Read it again before appending."
+					);
+				}
+			}
 
-				const chunkBytes = Buffer.byteLength(content, "utf-8");
-				let result: string;
+			fs.mkdirSync(path.dirname(resolved), { recursive: true });
 
-				if (append && fileExists) {
-					// Append mode with existing file: size-based concurrency guard.
-					const fileStat = fs.statSync(resolved);
-					await appendToFile(resolved, content, {
-						expectedSizeBefore: fileStat.size,
-					});
-					refreshAfterWrite(resolved);
-					result =
-						`Appended to ${resolved} (+${chunkBytes} bytes, file size now ${formatSize(chunkBytes + fileStat.size - Buffer.byteLength(content, "utf-8"))}). ` +
-						"Call write_file with the next chunk, or stop if this was the last one.";
-				} else if (append && !fileExists) {
-					// Append mode with new file: just create and write.
-					await appendToFile(resolved, content);
-					refreshAfterWrite(resolved);
-					result =
-						`Created ${resolved} (${chunkBytes} bytes) with append mode. ` +
-						"Call write_file with the next chunk, or stop if this was the last one.";
-				} else {
-					// Overwrite mode (normal) — use mutation session for stale detection.
-					const beforeContent = fileExists
-						? fs.readFileSync(resolved, "utf-8")
-						: "";
-					const proposal = {
-						path: resolved,
-						before: beforeContent,
-						beforeHash: createHash("sha256").update(beforeContent, "utf-8").digest("hex"),
-						after: content,
-					};
-					const result2 = await mutation.apply(proposal);
-					refreshAfterWrite(resolved);
+			const chunkBytes = Buffer.byteLength(content, "utf-8");
+			let result: string;
 
-					if (result2.error) return `Error: ${result2.error}`;
-					if (!result2.applied) return "No changes made: the file content is unchanged.";
+			if (append && fileExists) {
+				// Append mode with existing file: size-based concurrency guard.
+				const fileStat = fs.statSync(resolved);
+				await appendToFile(resolved, content, {
+					expectedSizeBefore: fileStat.size,
+				});
+				refreshAfterWrite(resolved);
+				result =
+					`Appended to ${resolved} (+${chunkBytes} bytes, file size now ${formatSize(chunkBytes + fileStat.size - Buffer.byteLength(content, "utf-8"))}). ` +
+					"Call write_file with the next chunk, or stop if this was the last one.";
+			} else if (append && !fileExists) {
+				// Append mode with new file: just create and write.
+				await appendToFile(resolved, content);
+				refreshAfterWrite(resolved);
+				result =
+					`Created ${resolved} (${chunkBytes} bytes) with append mode. ` +
+					"Call write_file with the next chunk, or stop if this was the last one.";
+			} else {
+				// Overwrite mode (normal) — use mutation session for stale detection.
+				const beforeContent = fileExists
+					? fs.readFileSync(resolved, "utf-8")
+					: "";
+				const proposal = {
+					path: resolved,
+					before: beforeContent,
+					beforeHash: createHash("sha256")
+						.update(beforeContent, "utf-8")
+						.digest("hex"),
+					after: content,
+				};
+				const result2 = await mutation.apply(proposal);
+				refreshAfterWrite(resolved);
+
+				if (result2.error) return `Error: ${result2.error}`;
+				if (!result2.applied)
+					return "No changes made: the file content is unchanged.";
 
 				const lineCount = content === "" ? 0 : content.split("\n").length;
 				const byteLen = Buffer.byteLength(content, "utf-8");

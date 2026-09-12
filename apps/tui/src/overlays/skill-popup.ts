@@ -2,8 +2,8 @@
 // Inline skill://-autocomplete: fuzzy-matches available skills as the user types
 // after "skill://". Mirrors FileMentionPopup's inline-autocomplete pattern.
 
-import type { Component } from "../terminal/core.ts";
 import type { Skill } from "@logician/log-runtime/skills";
+import type { Component } from "../terminal/core.ts";
 import {
 	clampPopupLines,
 	type ListItem,

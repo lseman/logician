@@ -11,8 +11,7 @@ Usage:
   const result = await worker.observe({ session_id: "s1", ... });
 */
 
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { createInterface, type Interface } from "node:readline";
+import { JsonlWorker } from "../sdk/jsonl-worker.ts";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -26,20 +25,6 @@ export interface MemoriamSdkConfig {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-interface PendingRequest {
-	resolve: (value: unknown) => void;
-	reject: (error: Error) => void;
-	timer: ReturnType<typeof setTimeout>;
-}
-
-/** Response from the Memoriam SDK worker. */
-interface WorkerResponse {
-	id: string;
-	ok: boolean;
-	error?: string;
-	result?: unknown;
-}
 
 // ── Type aliases for memory entities (lightweight — no circular deps) ────────
 
@@ -170,32 +155,23 @@ export interface ImportResult {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseResponse(line: string): WorkerResponse | undefined {
-	let value: unknown;
-	try {
-		value = JSON.parse(line);
-	} catch {
-		return undefined;
-	}
-	if (!value || typeof value !== "object") return undefined;
-	const response = value as Record<string, unknown>;
-	if (typeof response.id !== "string" || typeof response.ok !== "boolean")
-		return undefined;
-	return response as unknown as WorkerResponse;
-}
-
 // ── Worker ───────────────────────────────────────────────────────────────────
 
 /** A lazy, persistent JSONL client for Memoriam's Python SDK worker. */
 export class MemoriamWorker {
-	private process?: ChildProcessWithoutNullStreams;
-	private lines?: Interface;
-	private readonly pending = new Map<string, PendingRequest>();
-	private nextId = 0;
-	private stopping = false;
-	private stderrTail = "";
-
-	constructor(private readonly options: MemoriamSdkConfig) {}
+	private readonly transport: JsonlWorker;
+	constructor(options: MemoriamSdkConfig) {
+		this.transport = new JsonlWorker({
+			name: "Memoriam",
+			python: options.python,
+			args: options.args ?? ["-m", "memoriam.integration.sdk_worker"],
+			timeoutMs: options.timeoutMs,
+			initialize:
+				options.config && Object.keys(options.config).length
+					? { method: "init", config: options.config }
+					: undefined,
+		});
+	}
 
 	// ── Sessions ───────────────────────────────────────────────────────────
 
@@ -205,109 +181,28 @@ export class MemoriamWorker {
 		project: string,
 		cwd: string,
 	): Promise<Session> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "create_session",
-				session_id: sessionId,
-				name,
-				project,
-				cwd,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "create_session",
+			session_id: sessionId,
+			name,
+			project,
+			cwd,
 		});
 	}
 
 	async getSession(sessionId: string): Promise<Session | null> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "get_session",
-				session_id: sessionId,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "get_session",
+			session_id: sessionId,
 		});
 	}
 
 	async listSessions(
 		query: Record<string, unknown> | null,
 	): Promise<Session[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "list_sessions",
-				query,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "list_sessions",
+			query,
 		});
 	}
 
@@ -315,71 +210,17 @@ export class MemoriamWorker {
 		sessionId: string,
 		updates: Record<string, unknown>,
 	): Promise<Session | null> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "update_session",
-				session_id: sessionId,
-				updates,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "update_session",
+			session_id: sessionId,
+			updates,
 		});
 	}
 
 	async clearSessions(keepSessionId: string | null): Promise<void> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "clear_sessions",
-				keep_session_id: keepSessionId,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "clear_sessions",
+			keep_session_id: keepSessionId,
 		});
 	}
 
@@ -396,42 +237,15 @@ export class MemoriamWorker {
 			raw?: unknown;
 		} = {},
 	): Promise<CompressedObservation | null> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "observe",
-				session_id: sessionId,
-				hook_type: hookType,
-				tool_name: opts.toolName,
-				tool_input: opts.toolInput,
-				tool_output: opts.toolOutput,
-				user_prompt: opts.userPrompt,
-				raw: opts.raw,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "observe",
+			session_id: sessionId,
+			hook_type: hookType,
+			tool_name: opts.toolName,
+			tool_input: opts.toolInput,
+			tool_output: opts.toolOutput,
+			user_prompt: opts.userPrompt,
+			raw: opts.raw,
 		});
 	}
 
@@ -439,37 +253,10 @@ export class MemoriamWorker {
 		sessionId: string,
 		limit: number,
 	): Promise<CompressedObservation[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "list_observations",
-				session_id: sessionId,
-				limit,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "list_observations",
+			session_id: sessionId,
+			limit,
 		});
 	}
 
@@ -477,104 +264,23 @@ export class MemoriamWorker {
 		query: string,
 		limit: number,
 	): Promise<SearchResult[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "search_observations",
-				query,
-				limit,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "search_observations",
+			query,
+			limit,
 		});
 	}
 
 	async expandEntries(ids: string[]): Promise<ExpandedMemoryEntry[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "expand_entries",
-				ids,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "expand_entries",
+			ids,
 		});
 	}
 
 	async clearObservations(): Promise<number> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "clear_observations",
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "clear_observations",
 		});
 	}
 
@@ -590,143 +296,35 @@ export class MemoriamWorker {
 			sessionIds?: string[];
 		} = {},
 	): Promise<Memory> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "create_memory",
-				content,
-				type: opts.type,
-				concepts: opts.concepts,
-				files: opts.files,
-				strength: opts.strength,
-				session_ids: opts.sessionIds,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "create_memory",
+			content,
+			type: opts.type,
+			concepts: opts.concepts,
+			files: opts.files,
+			strength: opts.strength,
+			session_ids: opts.sessionIds,
 		});
 	}
 
 	async getMemory(memoryId: string): Promise<Memory | null> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "get_memory",
-				memory_id: memoryId,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "get_memory",
+			memory_id: memoryId,
 		});
 	}
 
 	async listMemories(query: Record<string, unknown> | null): Promise<Memory[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "list_memories",
-				query,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "list_memories",
+			query,
 		});
 	}
 
 	async removeMemory(memoryId: string): Promise<boolean> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "remove_memory",
-				memory_id: memoryId,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "remove_memory",
+			memory_id: memoryId,
 		});
 	}
 
@@ -734,71 +332,17 @@ export class MemoriamWorker {
 		query: Record<string, unknown>,
 		format: string,
 	): Promise<string> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "recall",
-				query,
-				format,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "recall",
+			query,
+			format,
 		});
 	}
 
 	async consolidate(sessionId: string): Promise<Memory[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "consolidate",
-				session_id: sessionId,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "consolidate",
+			session_id: sessionId,
 		});
 	}
 
@@ -809,38 +353,11 @@ export class MemoriamWorker {
 		query: string,
 		budget: number,
 	): Promise<MemoryRetrievalResult> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "retrieve",
-				session_id: sessionId,
-				query,
-				budget,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "retrieve",
+			session_id: sessionId,
+			query,
+			budget,
 		});
 	}
 
@@ -849,72 +366,18 @@ export class MemoriamWorker {
 		query: string,
 		budget: number,
 	): Promise<string> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "get_context",
-				session_id: sessionId,
-				query,
-				budget,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "get_context",
+			session_id: sessionId,
+			query,
+			budget,
 		});
 	}
 
 	async listTraces(limit: number): Promise<RetrievalTrace[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "list_traces",
-				limit,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "list_traces",
+			limit,
 		});
 	}
 
@@ -923,74 +386,20 @@ export class MemoriamWorker {
 	async autoTier(
 		config?: Record<string, unknown>,
 	): Promise<Record<string, string>> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "auto_tier",
-				config,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "auto_tier",
+			config,
 		});
 	}
 
 	async autoForget(
 		opts: { ttlMs?: number; minImportance?: number; maxDeletes?: number } = {},
 	): Promise<Record<string, unknown>> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "auto_forget",
-				ttl_ms: opts.ttlMs,
-				min_importance: opts.minImportance,
-				max_deletes: opts.maxDeletes,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "auto_forget",
+			ttl_ms: opts.ttlMs,
+			min_importance: opts.minImportance,
+			max_deletes: opts.maxDeletes,
 		});
 	}
 
@@ -1002,108 +411,27 @@ export class MemoriamWorker {
 		type: string,
 		confidence: number,
 	): Promise<MemoryRelation | null> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "relate",
-				source_id: sourceId,
-				target_id: targetId,
-				type,
-				confidence,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "relate",
+			source_id: sourceId,
+			target_id: targetId,
+			type,
+			confidence,
 		});
 	}
 
 	async getRelations(memoryId: string): Promise<MemoryRelation[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "get_relations",
-				memory_id: memoryId,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "get_relations",
+			memory_id: memoryId,
 		});
 	}
 
 	// ── Export / Import ────────────────────────────────────────────────────
 
 	async exportData(): Promise<ExportData> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "export_data",
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "export_data",
 		});
 	}
 
@@ -1111,37 +439,10 @@ export class MemoriamWorker {
 		data: ExportData,
 		onConflict: string,
 	): Promise<ImportResult> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "import_data",
-				data,
-				on_conflict: onConflict,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "import_data",
+			data,
+			on_conflict: onConflict,
 		});
 	}
 
@@ -1154,40 +455,13 @@ export class MemoriamWorker {
 		budget: number = 4000,
 		limit: number = 50,
 	): Promise<Record<string, unknown>[]> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "temporal_query",
-				query_text: queryText,
-				workspace,
-				query_time: queryTime,
-				budget,
-				limit,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "temporal_query",
+			query_text: queryText,
+			workspace,
+			query_time: queryTime,
+			budget,
+			limit,
 		});
 	}
 
@@ -1195,35 +469,8 @@ export class MemoriamWorker {
 
 	/** Get aggregate worker statistics. */
 	async workerStats(): Promise<Record<string, unknown>> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "worker_stats",
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "worker_stats",
 		});
 	}
 
@@ -1232,119 +479,21 @@ export class MemoriamWorker {
 		limit: number,
 		offset: number,
 	): Promise<Record<string, unknown>> {
-		const child = this.ensureStarted();
-		const id = `memoriam-${process.pid}-${++this.nextId}`;
-		const timeoutMs = this.options.timeoutMs ?? 30_000;
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(
-					new Error(`Memoriam SDK request timed out after ${timeoutMs}ms`),
-				);
-			}, timeoutMs);
-			this.pending.set(id, {
-				resolve: resolve as PendingRequest["resolve"],
-				reject,
-				timer,
-			});
-			const payload = JSON.stringify({
-				id,
-				method: "worker_history",
-				limit,
-				offset,
-			});
-			child.stdin.write(`${payload}\n`, error => {
-				if (!error) return;
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
-				this.pending.delete(id);
-				pending.reject(
-					new Error(`Unable to write to Memoriam SDK worker: ${error.message}`),
-				);
-			});
+		return this.request({
+			method: "worker_history",
+			limit,
+			offset,
 		});
 	}
 
 	// ── Lifecycle ──────────────────────────────────────────────────────────
 
-	private ensureStarted(): ChildProcessWithoutNullStreams {
-		if (this.process && this.process.exitCode === null) return this.process;
-		this.stopping = false;
-		this.stderrTail = "";
-		const child = spawn(
-			this.options.python ?? "python3",
-			this.options.args ?? ["-m", "memoriam.integration.sdk_worker"],
-			{ stdio: ["pipe", "pipe", "pipe"] },
-		);
-		this.process = child;
-		this.lines = createInterface({ input: child.stdout });
-		this.lines.on("line", line => this.handleLine(line));
-		child.stderr.setEncoding("utf8");
-		child.stderr.on("data", (chunk: string) => {
-			this.stderrTail = `${this.stderrTail}${chunk}`.slice(-4_096);
-		});
-		child.on("error", error => this.failAll(error));
-		child.on("exit", (code, signal) => {
-			if (this.process === child) this.process = undefined;
-			if (!this.stopping) {
-				const detail = this.stderrTail.trim();
-				this.failAll(
-					new Error(
-						`Memoriam SDK worker exited (${signal ?? code ?? "unknown"})${detail ? `: ${detail}` : ""}`,
-					),
-				);
-			}
-		});
-		// Hand the worker its configuration (db_path, fail_open) up front. The
-		// worker also accepts config on `init`, so fire-and-forget: the response
-		// is ignored and later requests queue behind it on the same pipe.
-		if (this.options.config && Object.keys(this.options.config).length > 0) {
-			const initId = `memoriam-${process.pid}-init-${++this.nextId}`;
-			const initPayload = JSON.stringify({
-				id: initId,
-				method: "init",
-				config: this.options.config,
-			});
-			child.stdin.write(`${initPayload}\n`, () => {});
-		}
-		return child;
-	}
-
-	private handleLine(line: string): void {
-		const response = parseResponse(line);
-		if (!response) return;
-		const pending = this.pending.get(response.id);
-		if (!pending) return;
-		clearTimeout(pending.timer);
-		this.pending.delete(response.id);
-		if (!response.ok) {
-			pending.reject(
-				new Error(response.error ?? "Memoriam SDK request failed"),
-			);
-			return;
-		}
-		// All responses use the "result" field.
-		pending.resolve(response.result);
-	}
-
-	private failAll(error: Error): void {
-		for (const pending of this.pending.values()) {
-			clearTimeout(pending.timer);
-			pending.reject(error);
-		}
-		this.pending.clear();
+	private async request<T>(payload: Record<string, unknown>): Promise<T> {
+		const response = await this.transport.request(payload);
+		return response.result as T;
 	}
 
 	close(): void {
-		this.stopping = true;
-		this.lines?.close();
-		this.lines = undefined;
-		this.failAll(new Error("Memoriam SDK worker closed"));
-		const child = this.process;
-		this.process = undefined;
-		if (!child) return;
-		child.stdin.end();
-		if (child.exitCode === null) child.kill("SIGTERM");
+		this.transport.close();
 	}
 }

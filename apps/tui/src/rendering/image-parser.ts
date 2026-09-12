@@ -23,17 +23,19 @@ const DATA_URI_PATTERN = /^data:image\/(\w+);base64,(.+)$/;
  * that replace their original positions in the text, plus the text with
  * image placeholders removed.
  */
-export function parseInlineImages(text: string): { images: ParsedImage[]; text: string } {
+export function parseInlineImages(text: string): {
+	images: ParsedImage[];
+	text: string;
+} {
 	const images: ParsedImage[] = [];
 	const segments: Array<string | ParsedImage> = [];
 
 	// First pass: find all images
 	let lastIndex = 0;
-	let match: RegExpExecArray | null;
 	// Reset regex state
 	MARKDOWN_IMAGE_PATTERN.lastIndex = 0;
 
-	while ((match = MARKDOWN_IMAGE_PATTERN.exec(text)) !== null) {
+	for (const match of text.matchAll(MARKDOWN_IMAGE_PATTERN)) {
 		// Add text before this image
 		if (match.index > lastIndex) {
 			segments.push(text.slice(lastIndex, match.index));
@@ -76,7 +78,7 @@ export function parseInlineImages(text: string): { images: ParsedImage[]; text: 
 		}
 	}
 
-	const textOnly = segments.map(s => typeof s === "string" ? s : "").join("");
+	const textOnly = segments.map(s => (typeof s === "string" ? s : "")).join("");
 
 	return { images, text: textOnly };
 }
@@ -85,7 +87,10 @@ export function parseInlineImages(text: string): { images: ParsedImage[]; text: 
  * Parse inline images from a single line of markdown. Returns the first
  * image found (if any) and the line with the image reference removed.
  */
-export function parseInlineImageFromLine(line: string): { image: ParsedImage | null; text: string } {
+export function parseInlineImageFromLine(line: string): {
+	image: ParsedImage | null;
+	text: string;
+} {
 	const imageRegex = /!\[([^\]]*)\]\((data:[^)]+)\)/;
 	const match = imageRegex.exec(line);
 	if (!match) return { image: null, text: line };

@@ -11,8 +11,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { EditStore } from "./edit-store.js";
 import { createEditStore } from "./edit-store.js";
+import { clearStagedEdit, getStagedEdit } from "./staged-edits.js";
 import { atomicWriteFile } from "./utils/atomic-write.js";
-import { getStagedEdit, clearStagedEdit } from "./staged-edits.js";
 
 // ── Resolution device result ──────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ export async function handleResolve(
 	// Fall back to staged edits singleton if no files provided
 	if (!files || files.length === 0) {
 		const staged = getStagedEdit();
-		if (!staged || !staged.files?.length) {
+		if (!staged?.files?.length) {
 			return { success: false, message: "No staged edits to apply." };
 		}
 		files = staged.files;
@@ -160,7 +160,10 @@ export async function executeResolutionDevice(
 	try {
 		args = JSON.parse(content) as ResolutionArgs;
 	} catch {
-		return { success: false, message: `Invalid JSON: ${content.slice(0, 100)}...` };
+		return {
+			success: false,
+			message: `Invalid JSON: ${content.slice(0, 100)}...`,
+		};
 	}
 
 	if (deviceName === RESOLVE_DEVICE_NAME) {
@@ -169,7 +172,10 @@ export async function executeResolutionDevice(
 		return handleReject(args, store);
 	}
 
-	return { success: false, message: `Unknown resolution device: ${deviceName}` };
+	return {
+		success: false,
+		message: `Unknown resolution device: ${deviceName}`,
+	};
 }
 
 /**

@@ -90,7 +90,9 @@ function filterSettingsForTab(
 ): SettingDef[] {
 	const items = settings.filter(s => (s.tab ?? "General") === tabName);
 	const sections = [...new Set(items.map(s => s.section ?? tabName))];
-	return sections.flatMap(section => items.filter(s => (s.section ?? tabName) === section));
+	return sections.flatMap(section =>
+		items.filter(s => (s.section ?? tabName) === section),
+	);
 }
 
 // ── Fuzzy filter ─────────────────────────────────────────────────────────────
@@ -199,10 +201,18 @@ export class SettingsSelectorOverlay implements Component {
 		this._availableHeight = Math.max(1, Math.floor(height));
 	}
 
-	get selectedIndex(): number { return this._selectedIndex; }
-	get selectedOptionIndex(): number { return this._selectedOptionIndex; }
-	get inDetailView(): boolean { return this._inDetailView; }
-	get currentTabId(): number { return this._currentTabId; }
+	get selectedIndex(): number {
+		return this._selectedIndex;
+	}
+	get selectedOptionIndex(): number {
+		return this._selectedOptionIndex;
+	}
+	get inDetailView(): boolean {
+		return this._inDetailView;
+	}
+	get currentTabId(): number {
+		return this._currentTabId;
+	}
 
 	invalidate(): void {
 		// Rendering is inexpensive and reflects terminal resize and theme changes.
@@ -231,7 +241,10 @@ export class SettingsSelectorOverlay implements Component {
 		this._selectedOptionIndex = 0;
 		this._searchQuery = "";
 		this._currentTabId = 0;
-		this._filtered = filterSettingsForTab(this._settings, this._tabs[0]?.name ?? "");
+		this._filtered = filterSettingsForTab(
+			this._settings,
+			this._tabs[0]?.name ?? "",
+		);
 		this.invalidate();
 	}
 
@@ -254,7 +267,10 @@ export class SettingsSelectorOverlay implements Component {
 			}
 			if (this._searchQuery) {
 				this._searchQuery = "";
-				this._filtered = filterSettingsForTab(this._settings, this._tabs[this._currentTabId]?.name ?? "");
+				this._filtered = filterSettingsForTab(
+					this._settings,
+					this._tabs[this._currentTabId]?.name ?? "",
+				);
 				this._selectedIndex = 0;
 				return null;
 			}
@@ -263,14 +279,21 @@ export class SettingsSelectorOverlay implements Component {
 		if (this._inDetailView) return this.handleDetailInput(data);
 		if (data === "\x7f" || data === "\x08") {
 			this._searchQuery = this._searchQuery.slice(0, -1);
-		} else if ([...data].length === 1 && data >= " " && (data !== " " || this._searchQuery)) {
+		} else if (
+			[...data].length === 1 &&
+			data >= " " &&
+			(data !== " " || this._searchQuery)
+		) {
 			this._searchQuery += data;
 		} else {
 			return this.handleMenuInput(data);
 		}
 		this._filtered = this._searchQuery
 			? filterSettings(this._settings, this._searchQuery)
-			: filterSettingsForTab(this._settings, this._tabs[this._currentTabId]?.name ?? "");
+			: filterSettingsForTab(
+					this._settings,
+					this._tabs[this._currentTabId]?.name ?? "",
+				);
 		this._selectedIndex = 0;
 		return null;
 	}
@@ -283,7 +306,12 @@ export class SettingsSelectorOverlay implements Component {
 				return { type: "open", settingName: s.name };
 			}
 			this._inDetailView = true;
-			this._selectedOptionIndex = s.options ? Math.max(0, s.options.findIndex(option => option.current)) : 0;
+			this._selectedOptionIndex = s.options
+				? Math.max(
+						0,
+						s.options.findIndex(option => option.current),
+					)
+				: 0;
 			this.invalidate();
 			return null;
 		}
@@ -292,7 +320,11 @@ export class SettingsSelectorOverlay implements Component {
 			const sections = deriveSections(this._filtered);
 			if (sections.length) {
 				const delta = data === "\t" ? 1 : -1;
-				const next = (findActiveSection(sections, this._selectedIndex) + delta + sections.length) % sections.length;
+				const next =
+					(findActiveSection(sections, this._selectedIndex) +
+						delta +
+						sections.length) %
+					sections.length;
 				this._selectedIndex = sections[next].firstItemIndex;
 			}
 			return null;
@@ -378,7 +410,10 @@ export class SettingsSelectorOverlay implements Component {
 		const len = this._filtered.length;
 		if (!len) return;
 		const jump = 8;
-		this._selectedIndex = Math.max(0, Math.min(this._selectedIndex + delta * jump, len - 1));
+		this._selectedIndex = Math.max(
+			0,
+			Math.min(this._selectedIndex + delta * jump, len - 1),
+		);
 		this.invalidate();
 	}
 
@@ -394,7 +429,8 @@ export class SettingsSelectorOverlay implements Component {
 		if (!s) return;
 		const n = s.options?.length ?? 0;
 		if (!n) return;
-		this._selectedOptionIndex = ((this._selectedOptionIndex + delta) % n + n) % n;
+		this._selectedOptionIndex =
+			(((this._selectedOptionIndex + delta) % n) + n) % n;
 		this.invalidate();
 	}
 
@@ -403,9 +439,18 @@ export class SettingsSelectorOverlay implements Component {
 		const height = this._availableHeight ?? (process.stdout.rows || 40);
 		const inner = Math.max(0, width - 4);
 		const selected = this._filtered[this._selectedIndex];
-		const lines = [topBorder(width, " Settings "), row(this.renderTabs(inner), width), divider(width)];
+		const lines = [
+			topBorder(width, " Settings "),
+			row(this.renderTabs(inner), width),
+			divider(width),
+		];
 		if (this._searchQuery) {
-			lines.push(row(`${getHeader()}Search${RESET}  ${this._searchQuery}  ${getMuted()}${this._filtered.length} matches${RESET}`, width));
+			lines.push(
+				row(
+					`${getHeader()}Search${RESET}  ${this._searchQuery}  ${getMuted()}${this._filtered.length} matches${RESET}`,
+					width,
+				),
+			);
 		}
 		const contentRows = Math.max(1, height - lines.length - 6);
 		const content = this._inDetailView
@@ -413,10 +458,20 @@ export class SettingsSelectorOverlay implements Component {
 			: this.renderSettings(inner, contentRows);
 		for (const line of content) lines.push(row(line, width));
 		lines.push(row("", width));
-		lines.push(row(`${getMuted()}${selected?.description ?? "Choose a setting to configure Logician."}${RESET}`, width));
-		lines.push(row(selected?.warning
-			? `${getWarning()}⚠ ${selected.warning}${RESET}`
-			: `${getMuted()}${this._message}${RESET}`, width));
+		lines.push(
+			row(
+				`${getMuted()}${selected?.description ?? "Choose a setting to configure Logician."}${RESET}`,
+				width,
+			),
+		);
+		lines.push(
+			row(
+				selected?.warning
+					? `${getWarning()}⚠ ${selected.warning}${RESET}`
+					: `${getMuted()}${this._message}${RESET}`,
+				width,
+			),
+		);
 		lines.push(divider(width));
 		const hint = this._inDetailView
 			? "↑↓ select · Enter/Space apply · Tab/Esc back"
@@ -428,35 +483,64 @@ export class SettingsSelectorOverlay implements Component {
 	}
 
 	private renderTabs(width: number): string {
-		const symbols: Record<string, string> = { Model: "◇", Behavior: "≡", Tools: "⚒", Guards: "◆", Appearance: "◐" };
-		const labels = this._tabs.map(tab => ` ${symbols[tab.name] ?? "·"} ${tab.name} `);
+		const symbols: Record<string, string> = {
+			Model: "◇",
+			Behavior: "≡",
+			Tools: "⚒",
+			Guards: "◆",
+			Appearance: "◐",
+		};
+		const labels = this._tabs.map(
+			tab => ` ${symbols[tab.name] ?? "·"} ${tab.name} `,
+		);
 		let start = this._currentTabId;
 		let end = start + 1;
 		let used = visibleWidth(labels[start] ?? "") + 4;
 		while (start > 0 && used + visibleWidth(labels[start - 1]) + 1 <= width) {
 			used += visibleWidth(labels[--start]) + 1;
 		}
-		while (end < labels.length && used + visibleWidth(labels[end]) + 1 <= width) {
+		while (
+			end < labels.length &&
+			used + visibleWidth(labels[end]) + 1 <= width
+		) {
 			used += visibleWidth(labels[end++]) + 1;
 		}
-		return `${start > 0 ? "‹ " : ""}${labels.slice(start, end).map((label, offset) =>
-			start + offset === this._currentTabId
-				? `${getHeader()}${BOLD}\x1b[7m${label}${RESET}`
-				: `${getMuted()}${label}${RESET}`,
-		).join(" ")}${end < labels.length ? " ›" : ""}`;
+		return `${start > 0 ? "‹ " : ""}${labels
+			.slice(start, end)
+			.map((label, offset) =>
+				start + offset === this._currentTabId
+					? `${getHeader()}${BOLD}\x1b[7m${label}${RESET}`
+					: `${getMuted()}${label}${RESET}`,
+			)
+			.join(" ")}${end < labels.length ? " ›" : ""}`;
 	}
 
 	private renderSettings(width: number, height: number): string[] {
 		if (!this._filtered.length) {
-			return Array.from({ length: height }, (_, i) => i === 0
-				? `${getMuted()}${this._settings.length ? "No matching settings · Backspace to edit · Esc clear" : "No settings available"}${RESET}` : "");
+			return Array.from({ length: height }, (_, i) =>
+				i === 0
+					? `${getMuted()}${this._settings.length ? "No matching settings · Backspace to edit · Esc clear" : "No settings available"}${RESET}`
+					: "",
+			);
 		}
 		const sections = deriveSections(this._filtered);
 		const active = findActiveSection(sections, this._selectedIndex);
-		const sidebar = width >= 70 && !this._searchQuery
-			? Math.min(22, Math.max(14, ...sections.map(section => visibleWidth(section.name) + 3))) : 0;
+		const sidebar =
+			width >= 70 && !this._searchQuery
+				? Math.min(
+						22,
+						Math.max(
+							14,
+							...sections.map(section => visibleWidth(section.name) + 3),
+						),
+					)
+				: 0;
 		const paneWidth = Math.max(0, width - (sidebar ? sidebar + 3 : 0));
-		const labelWidth = Math.min(32, Math.floor(paneWidth * 0.55), Math.max(...this._filtered.map(s => visibleWidth(s.name))));
+		const labelWidth = Math.min(
+			32,
+			Math.floor(paneWidth * 0.55),
+			Math.max(...this._filtered.map(s => visibleWidth(s.name))),
+		);
 		const rows: string[] = [];
 		let selectedRow = 0;
 		for (let i = 0; i < this._filtered.length; i++) {
@@ -473,16 +557,22 @@ export class SettingsSelectorOverlay implements Component {
 			const cursor = isSelected ? `${getHeader()}❯${RESET}` : " ";
 			const color = isSelected ? getWarning() + BOLD : theme.fgRaw("text");
 			const valueColor = isSelected ? getWarning() + BOLD : getMuted();
-			rows.push(`${cursor} ${color}${label}${pad}${RESET}  ${valueColor}${setting.currentValue}${RESET}${setting.warning ? ` ${getWarning()}⚠${RESET}` : ""}`);
+			rows.push(
+				`${cursor} ${color}${label}${pad}${RESET}  ${valueColor}${setting.currentValue}${RESET}${setting.warning ? ` ${getWarning()}⚠${RESET}` : ""}`,
+			);
 		}
-		const start = Math.max(0, Math.min(selectedRow - Math.floor(height / 2), rows.length - height));
+		const start = Math.max(
+			0,
+			Math.min(selectedRow - Math.floor(height / 2), rows.length - height),
+		);
 		const sidebarStart = Math.max(0, active - height + 1);
 		return Array.from({ length: height }, (_, index) => {
 			const content = clampLineToWidth(rows[start + index] ?? "", paneWidth);
 			if (!sidebar) return content;
 			const section = sections[sidebarStart + index];
 			const name = clampLineToWidth(section?.name ?? "", sidebar);
-			const color = sidebarStart + index === active ? getHeader() + BOLD : getMuted();
+			const color =
+				sidebarStart + index === active ? getHeader() + BOLD : getMuted();
 			return `${color}${name}${RESET}${" ".repeat(Math.max(0, sidebar - visibleWidth(name)))} ${getMuted()}│${RESET} ${content}`;
 		});
 	}
@@ -490,17 +580,35 @@ export class SettingsSelectorOverlay implements Component {
 	private renderOptions(width: number, height: number): string[] {
 		const setting = this._filtered[this._selectedIndex];
 		if (!setting) return Array.from({ length: height }, () => "");
-		const lines = [`${getHeader()}${BOLD}${setting.section ?? setting.tab ?? "General"}${RESET} ${getMuted()}/ ${setting.name}${RESET}`, ""];
+		const lines = [
+			`${getHeader()}${BOLD}${setting.section ?? setting.tab ?? "General"}${RESET} ${getMuted()}/ ${setting.name}${RESET}`,
+			"",
+		];
 		const count = Math.max(1, height - lines.length);
 		const options = setting.options ?? [];
-		const start = Math.max(0, Math.min(this._selectedOptionIndex - Math.floor(count / 2), options.length - count));
+		const start = Math.max(
+			0,
+			Math.min(
+				this._selectedOptionIndex - Math.floor(count / 2),
+				options.length - count,
+			),
+		);
 		for (let i = start; i < Math.min(options.length, start + count); i++) {
 			const option = options[i];
 			const selected = i === this._selectedOptionIndex;
 			const color = selected ? getWarning() + BOLD : theme.fgRaw("text");
-			const mark = typeof option.toggleOn === "boolean"
-				? option.toggleOn ? `${getSuccess()} [on]` : `${getMuted()} [off]` : "";
-			lines.push(clampLineToWidth(`${selected ? getHeader() + "❯" : " "}${RESET} ${color}${option.label}${RESET}${mark}${option.current ? `${getSuccess()} ✓` : ""}${RESET}`, width));
+			const mark =
+				typeof option.toggleOn === "boolean"
+					? option.toggleOn
+						? `${getSuccess()} [on]`
+						: `${getMuted()} [off]`
+					: "";
+			lines.push(
+				clampLineToWidth(
+					`${selected ? getHeader() + "❯" : " "}${RESET} ${color}${option.label}${RESET}${mark}${option.current ? `${getSuccess()} ✓` : ""}${RESET}`,
+					width,
+				),
+			);
 		}
 		while (lines.length < height) lines.push("");
 		return lines.slice(0, height);

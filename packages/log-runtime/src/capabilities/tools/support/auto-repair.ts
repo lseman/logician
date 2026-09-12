@@ -6,9 +6,9 @@
 // 3. Generates a repair suggestion (for consumption by a small model)
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,25 +35,31 @@ export interface FileEdit {
 export async function checkFileParse(filePath: string): Promise<string | null> {
 	try {
 		// Try to load the file with tsx and capture syntax errors
-		const { stderr } = await execFileAsync("npx", [
-			"tsx",
-			"--no-warnings",
-			"--eval",
-			`import("${path.resolve(filePath)}");`,
-		], { timeout: 5000 });
+		const { stderr } = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"--no-warnings",
+				"--eval",
+				`import("${path.resolve(filePath)}");`,
+			],
+			{ timeout: 5000 },
+		);
 
 		// Check for common syntax error patterns
 		if (stderr.includes("SyntaxError") || stderr.includes("Unexpected token")) {
 			// Extract the relevant error line
-			const errorLine = stderr
-				.split("\n")
-				.find((line) =>
-					line.includes("SyntaxError") ||
-					line.includes("Unexpected token") ||
-					line.includes("Cannot use import statement") ||
-					line.includes("Unterminated") ||
-					line.includes("Unexpected end")
-				) ?? stderr.split("\n")[0];
+			const errorLine =
+				stderr
+					.split("\n")
+					.find(
+						line =>
+							line.includes("SyntaxError") ||
+							line.includes("Unexpected token") ||
+							line.includes("Cannot use import statement") ||
+							line.includes("Unterminated") ||
+							line.includes("Unexpected end"),
+					) ?? stderr.split("\n")[0];
 			return errorLine?.trim() ?? "Syntax error";
 		}
 
@@ -62,13 +68,15 @@ export async function checkFileParse(filePath: string): Promise<string | null> {
 		const err = e as { stderr?: string; code?: number };
 		// tsx returns non-zero for syntax errors
 		if (err.code !== 0 && err.stderr) {
-			const errorLine = err.stderr
-				.split("\n")
-				.find((line) =>
-					line.includes("SyntaxError") ||
-					line.includes("Unexpected token") ||
-					line.includes("Cannot use import statement")
-				) ?? err.stderr.split("\n")[0];
+			const errorLine =
+				err.stderr
+					.split("\n")
+					.find(
+						line =>
+							line.includes("SyntaxError") ||
+							line.includes("Unexpected token") ||
+							line.includes("Cannot use import statement"),
+					) ?? err.stderr.split("\n")[0];
 			return errorLine?.trim() ?? "Syntax error";
 		}
 		// File doesn't exist or other error — not a syntax issue
@@ -94,7 +102,7 @@ export function checkBracketBalance(content: string): string | null {
 	};
 	let inString = false;
 	let stringChar = "";
-	let inComment = false;
+	const inComment = false;
 	let prevChar = "";
 
 	for (let i = 0; i < content.length; i++) {
@@ -204,9 +212,10 @@ export function isolateCulpritHunks(
 
 	for (const edit of edits) {
 		const midPoint = (edit.originalStart + edit.originalEnd) / 2;
-		const distance = errorPosition !== null
-			? Math.abs(midPoint - errorPosition!)
-			: edit.originalStart;
+		const distance =
+			errorPosition !== null
+				? Math.abs(midPoint - errorPosition)
+				: edit.originalStart;
 
 		if (distance < closestDistance) {
 			closestDistance = distance;
@@ -254,17 +263,21 @@ export function generateRepairSuggestion(
 		for (const edit of edits) {
 			suggestions.push("");
 			suggestions.push("### Offending edit:");
-			const origPreview = edit.original.length > 100
-				? edit.original.slice(0, 100) + "..."
-				: edit.original;
-			const replPreview = edit.replacement.length > 100
-				? edit.replacement.slice(0, 100) + "..."
-				: edit.replacement;
+			const origPreview =
+				edit.original.length > 100
+					? edit.original.slice(0, 100) + "..."
+					: edit.original;
+			const replPreview =
+				edit.replacement.length > 100
+					? edit.replacement.slice(0, 100) + "..."
+					: edit.replacement;
 			suggestions.push(`**Original:** \`${origPreview}\``);
 			suggestions.push(`**Replacement:** \`${replPreview}\``);
 			suggestions.push("");
 			suggestions.push("Common fixes:");
-			suggestions.push("- Check for unbalanced braces, brackets, or parentheses");
+			suggestions.push(
+				"- Check for unbalanced braces, brackets, or parentheses",
+			);
 			suggestions.push("- Look for missing semicolons or commas");
 			suggestions.push("- Verify proper JSX/TSX syntax if applicable");
 			suggestions.push("- Check for unterminated strings or comments");

@@ -5,8 +5,8 @@
 //   mcp://<server>/<resource-uri>   — read a resource from a specific server
 //   mcp://<resource-uri>            — auto-discover the server that owns the resource
 
-import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 import { getMcpRegistryInstance } from "../../../../capabilities/mcp/mcp-server-registry.ts";
+import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
 export class McpProtocolHandler implements ProtocolHandler {
 	readonly scheme = "mcp";
@@ -37,10 +37,12 @@ export class McpProtocolHandler implements ProtocolHandler {
 
 			const lines = servers
 				.filter((s: { enabled?: boolean }) => s.enabled !== false)
-				.map((s: { serverName: string; toolCount: number; loaded: boolean }) => {
-					const status = s.loaded ? "✅" : "❌";
-					return `- ${status} \`${s.serverName}\` (${s.toolCount} tools, ${s.loaded ? "loaded" : "unavailable"})`;
-				});
+				.map(
+					(s: { serverName: string; toolCount: number; loaded: boolean }) => {
+						const status = s.loaded ? "✅" : "❌";
+						return `- ${status} \`${s.serverName}\` (${s.toolCount} tools, ${s.loaded ? "loaded" : "unavailable"})`;
+					},
+				);
 
 			return {
 				url: url.href,
@@ -55,7 +57,9 @@ export class McpProtocolHandler implements ProtocolHandler {
 		const resourceUri = hasServerPath ? `${host}${rawPathname}` : host;
 
 		// Find a client that supports resource reads
-		const client = registry.clients.find(c => typeof c.readResource === "function");
+		const client = registry.clients.find(
+			c => typeof c.readResource === "function",
+		);
 		if (!client) {
 			return {
 				url: url.href,
@@ -66,10 +70,13 @@ export class McpProtocolHandler implements ProtocolHandler {
 
 		// Attempt to read the resource
 		try {
-			if (!client.readResource) throw new Error("No MCP server supports resource reads");
+			if (!client.readResource)
+				throw new Error("No MCP server supports resource reads");
 			const result = await client.readResource(resourceUri);
 			const textParts = result.contents
-				.filter((c: { text?: string }) => c.text !== undefined && c.text !== null)
+				.filter(
+					(c: { text?: string }) => c.text !== undefined && c.text !== null,
+				)
 				.map(c => c.text as string);
 
 			if (textParts.length === 0) {
@@ -83,7 +90,10 @@ export class McpProtocolHandler implements ProtocolHandler {
 			return {
 				url: url.href,
 				content: textParts.join("\n---\n"),
-				contentType: (result as { mimeType?: string }).mimeType === "application/json" ? "application/json" : "text/plain",
+				contentType:
+					(result as { mimeType?: string }).mimeType === "application/json"
+						? "application/json"
+						: "text/plain",
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

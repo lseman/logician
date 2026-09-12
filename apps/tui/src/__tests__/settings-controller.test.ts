@@ -1,7 +1,10 @@
 import { spyOn, test } from "bun:test";
 import assert from "node:assert/strict";
 import * as configuration from "@logician/log-runtime/configuration";
-import { handleSettingsSelectorAction, openSettingsSelector } from "../app/overlay-controllers/settings.ts";
+import {
+	handleSettingsSelectorAction,
+	openSettingsSelector,
+} from "../app/overlay-controllers/settings.ts";
 import type { SettingDef } from "../overlays/settings-overlay.ts";
 
 void test("settings exposes tri-state guards and every inference provider mode", async () => {
@@ -63,10 +66,11 @@ void test("settings exposes tri-state guards and every inference provider mode",
 	await openSettingsSelector(ctx);
 
 	const guards = settings.find(setting => setting.name === "Guards");
-	assert.deepEqual(
-		guards?.options?.map(option => option.value) ?? [],
-		["auto", "on", "off"],
-	);
+	assert.deepEqual(guards?.options?.map(option => option.value) ?? [], [
+		"auto",
+		"on",
+		"off",
+	]);
 	assert.equal(guards?.currentValue, "auto");
 	const inference = settings.find(setting => setting.name === "Inference mode");
 	assert.ok(inference?.options?.some(option => option.value === "auto"));
@@ -75,18 +79,31 @@ void test("settings exposes tri-state guards and every inference provider mode",
 		settings.find(setting => setting.name === "Legroom SDK")?.currentValue,
 		"on",
 	);
-	const budgetStop = settings.find(setting => setting.name === "Budget early-stop");
+	const budgetStop = settings.find(
+		setting => setting.name === "Budget early-stop",
+	);
 	assert.ok(budgetStop);
 	const save = spyOn(configuration, "saveConfigField").mockReturnValue(true);
 	try {
 		for (const option of budgetStop.options ?? []) {
-			handleSettingsSelectorAction(ctx, { type: "change", settingName: budgetStop.name, value: option.value });
-			assert.deepEqual(updates.at(-1), { progressStopEnabled: option.value === "true" });
-			assert.deepEqual(save.mock.calls.at(-1), ["progressStopEnabled", option.value === "true"]);
+			handleSettingsSelectorAction(ctx, {
+				type: "change",
+				settingName: budgetStop.name,
+				value: option.value,
+			});
+			assert.deepEqual(updates.at(-1), {
+				progressStopEnabled: option.value === "true",
+			});
+			assert.deepEqual(save.mock.calls.at(-1), [
+				"progressStopEnabled",
+				option.value === "true",
+			]);
 		}
-		assert.equal(notifications.some(message => message.includes("Unknown setting")), false);
+		assert.equal(
+			notifications.some(message => message.includes("Unknown setting")),
+			false,
+		);
 	} finally {
 		save.mockRestore();
 	}
-
 });

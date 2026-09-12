@@ -21,8 +21,7 @@ const waitSchema = {
 		},
 		timeout_ms: {
 			type: "number",
-			description:
-				"Maximum wait time in milliseconds. Defaults to 30000.",
+			description: "Maximum wait time in milliseconds. Defaults to 30000.",
 		},
 	},
 	required: ["handles"],
@@ -102,9 +101,10 @@ export function createWaitTool(deps: WaitToolDeps): Tool {
 				return "Error: handles must be a non-empty array of handle IDs.";
 			}
 
-			const code = WAIT_KERNEL_CODE
-				.replace("%HANDLES%", JSON.stringify(handles))
-				.replace("%TIMEOUT_MS%", String(timeoutMs));
+			const code = WAIT_KERNEL_CODE.replace(
+				"%HANDLES%",
+				JSON.stringify(handles),
+			).replace("%TIMEOUT_MS%", String(timeoutMs));
 
 			const result = await deps.kernel.js.eval(code, timeoutMs);
 

@@ -56,7 +56,9 @@ test("verified-stop requests verification after an edit", async () => {
 						changed: true,
 						paths: ["a.ts"],
 						filesAffected: 1,
-						revisions: [{ path: "a.ts", beforeHash: "before", afterHash: "after" }],
+						revisions: [
+							{ path: "a.ts", beforeHash: "before", afterHash: "after" },
+						],
 					},
 				},
 			},
@@ -88,7 +90,9 @@ test("verified-stop accepts successful verification after the final edit", async
 						changed: true,
 						paths: ["a.ts"],
 						filesAffected: 1,
-						revisions: [{ path: "a.ts", beforeHash: "before", afterHash: "after" }],
+						revisions: [
+							{ path: "a.ts", beforeHash: "before", afterHash: "after" },
+						],
 					},
 				},
 			},
@@ -136,7 +140,9 @@ test("verified-stop rejects failed or stale verification", async () => {
 						changed: true,
 						paths: ["a.ts"],
 						filesAffected: 1,
-						revisions: [{ path: "a.ts", beforeHash: "before", afterHash: "after" }],
+						revisions: [
+							{ path: "a.ts", beforeHash: "before", afterHash: "after" },
+						],
 					},
 				},
 			},

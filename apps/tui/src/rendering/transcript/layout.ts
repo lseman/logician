@@ -78,6 +78,7 @@ function scanUnits(rawLine: string, initialCodes: string): Unit[] {
 		if (seq) {
 			current += seq;
 			inWord = true;
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 			if (/^\x1b\[0m$/.test(seq)) activeCodes = "";
 			else if (seq.startsWith("\x1b[")) activeCodes += seq;
 			index += seq.length;
@@ -125,6 +126,7 @@ function hardWrapUnit(unit: Unit, leadingCodes: string, width: number): Unit[] {
 		const seq = scanAnsiSequence(unit.text, index);
 		if (seq) {
 			slice += seq;
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 			if (/^\x1b\[0m$/.test(seq)) activeCodes = "";
 			else if (seq.startsWith("\x1b[")) activeCodes += seq;
 			index += seq.length;

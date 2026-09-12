@@ -148,9 +148,10 @@ export class TodoTracker {
 			for (const t of p.tasks) {
 				if (t.status === "completed" || t.status === "abandoned") {
 					const key = `${p.name}\x00${t.content}`;
-					if (!prev.has(key) && !newCompleted.some(
-						ct => `${ct.phase}\x00${ct.content}` === key,
-					)) {
+					if (
+						!prev.has(key) &&
+						!newCompleted.some(ct => `${ct.phase}\x00${ct.content}` === key)
+					) {
 						newCompleted.push({ phase: p.name, content: t.content });
 					}
 				}
@@ -247,10 +248,7 @@ export class TodoTracker {
 
 		if (this.#reminderCount >= REMINDERS_MAX) return false;
 
-		const reminder = buildCompletionReminder(
-			phases,
-			this.#reminderCount + 1,
-		);
+		const reminder = buildCompletionReminder(phases, this.#reminderCount + 1);
 		if (reminder.content) this.host.steer(reminder.content);
 		this.#reminderCount++;
 		this.#reminderAwaitingProgress = true;

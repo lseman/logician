@@ -195,5 +195,6 @@ export function turnPhaseLabel(phase: TurnPhase): string {
 }
 
 export function turnPhaseIsActive(phase: TurnPhase): boolean {
+	// True for phases where the user sees an active indicator (spinner, progress bar, etc.)
 	return !["idle", "complete", "failed", "waiting", "approval"].includes(phase);
 }

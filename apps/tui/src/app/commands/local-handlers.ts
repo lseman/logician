@@ -262,7 +262,7 @@ export function createLocalHandlers(
 			}
 			if (ctx.bridge.getConfig()?.memoriamEnabled) {
 				try {
-					await ctx.bridge.memoriamClearSessions(currentSessionId || undefined);
+					await ctx.bridge.memory.clearSessions(currentSessionId || undefined);
 				} catch {
 					// Memoriam session cleanup is best-effort.
 				}
@@ -421,7 +421,7 @@ export function createLocalHandlers(
 				`${feature} is not supported on the memoriam-py backend yet.`;
 			if (!trimmed) {
 				try {
-					const stats = (await ctx.bridge.getMemoriamStats()) as Record<
+					const stats = (await ctx.bridge.memory.workerStats()) as Record<
 						string,
 						unknown
 					>;
@@ -449,9 +449,9 @@ export function createLocalHandlers(
 							parts[0] && !/^\d+$/.test(parts[0]) ? parts[0] : undefined;
 						const limitRaw = type ? parts[1] : parts[0];
 						const limit = limitRaw ? Math.min(Number(limitRaw), 100) : 20;
-						const memories = (await ctx.bridge.memoriamListMemories(
+						const memories = await ctx.bridge.memory.listMemories(
 							type ? { type, limit } : { limit },
-						)) as Array<Record<string, unknown>>;
+						);
 						if (!memories.length) return "No memories found.";
 						const items = memories
 							.slice(0, limit)
@@ -466,7 +466,7 @@ export function createLocalHandlers(
 						const query = parts[0] || "";
 						const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 10;
 						if (!query) return "Usage: /memory search <query> [limit]";
-						const result = await ctx.bridge.memoriamRecall(
+						const result = await ctx.bridge.memory.recall(
 							{ search: query, limit },
 							"markdown",
 						);
@@ -478,7 +478,7 @@ export function createLocalHandlers(
 						const query = parts[0] || "";
 						const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 20;
 						if (!query) return "Usage: /memory obs <query> [limit]";
-						const results = (await ctx.bridge.memoriamSearchObservations(
+						const results = (await ctx.bridge.memory.searchObservations(
 							query,
 							limit,
 						)) as Array<Record<string, unknown>>;
@@ -494,13 +494,13 @@ export function createLocalHandlers(
 					}
 					case "forget": {
 						if (!subArgs) return "Usage: /memory forget <id>";
-						const deleted = await ctx.bridge.memoriamRemoveMemory(subArgs);
+						const deleted = await ctx.bridge.memory.removeMemory(subArgs);
 						return deleted
 							? `Memory ${subArgs} deleted.`
 							: `Memory ${subArgs} not found.`;
 					}
 					case "clean": {
-						const removed = await ctx.bridge.memoriamClearObservations();
+						const removed = await ctx.bridge.memory.clearObservations();
 						return removed
 							? `Removed ${removed} observations.`
 							: "No observations to remove.";
@@ -508,9 +508,7 @@ export function createLocalHandlers(
 					case "consolidate": {
 						const target = subArgs.trim() || sessionId;
 						if (!target) return "No active memory session for this folder.";
-						const memories = (await ctx.bridge.memoriamConsolidate(
-							target,
-						)) as Array<Record<string, unknown>>;
+						const memories = await ctx.bridge.memory.consolidate(target);
 						if (!memories.length)
 							return `No unconsolidated high-signal observations for session ${target.slice(0, 12)}.`;
 						return `Consolidated ${memories.length} memories:\n${memories
@@ -522,7 +520,7 @@ export function createLocalHandlers(
 						const target = parts[0] || sessionId;
 						if (!target) return "Usage: /memory context <session-id> [budget]";
 						const budget = parts[1] ? Number(parts[1]) : 4000;
-						const context = await ctx.bridge.memoriamGetContext(
+						const context = await ctx.bridge.memory.getContext(
 							target,
 							"recent",
 							budget,
@@ -575,7 +573,7 @@ export function createLocalHandlers(
 						const limit = limitRaw
 							? Math.min(Math.max(Number(limitRaw), 1), 100)
 							: 50;
-						const allObs = (await ctx.bridge.memoriamListObservations(
+						const allObs = (await ctx.bridge.memory.listObservations(
 							sessionId,
 							limit,
 						)) as MemoriamObservation[];
@@ -590,7 +588,7 @@ export function createLocalHandlers(
 						const query = parts[0] || "";
 						const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 30;
 						if (!query) return "Usage: /obs search <query> [limit]";
-						const results = (await ctx.bridge.memoriamSearchObservations(
+						const results = (await ctx.bridge.memory.searchObservations(
 							query,
 							limit,
 						)) as Array<Record<string, unknown>>;
@@ -605,7 +603,7 @@ export function createLocalHandlers(
 						return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
 					}
 					case "clean": {
-						const removed = await ctx.bridge.memoriamClearObservations();
+						const removed = await ctx.bridge.memory.clearObservations();
 						return removed
 							? `Removed ${removed} observations.`
 							: "No observations to remove.";

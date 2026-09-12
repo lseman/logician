@@ -2,20 +2,26 @@
 // Resolves frontmatter rule names to their content.
 // URL form: rule://<name>
 
-import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext } from "./types";
+import type {
+	InternalResource,
+	InternalUrl,
+	ProtocolHandler,
+	ResolveContext,
+} from "./types";
 
 export class RuleProtocolHandler implements ProtocolHandler {
 	readonly scheme = "rule";
 	readonly immutable = true;
 
-	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
+	async resolve(
+		url: InternalUrl,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
 		const rules = context?.rules;
 		const ruleName = url.rawHost || url.hostname;
 
 		if (!ruleName) {
-			throw new Error(
-				`rule:// URL requires a rule name: rule://<name>`,
-			);
+			throw new Error(`rule:// URL requires a rule name: rule://<name>`);
 		}
 
 		const rule = rules?.find(r => r.name === ruleName);
@@ -37,9 +43,10 @@ export class RuleProtocolHandler implements ProtocolHandler {
 		};
 	}
 
-	async complete(_query: string, context?: ResolveContext): Promise<
-		Array<{ value: string; description?: string }>
-	> {
+	async complete(
+		_query: string,
+		context?: ResolveContext,
+	): Promise<Array<{ value: string; description?: string }>> {
 		return (context?.rules ?? []).map(rule => ({
 			value: rule.name,
 			description: rule.name,

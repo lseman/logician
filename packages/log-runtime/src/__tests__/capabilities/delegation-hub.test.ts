@@ -13,7 +13,12 @@ import {
 	createSubagentConcurrencyLimiter,
 } from "../../capabilities/delegation/definitions.ts";
 import { createHubMessageBus } from "../../capabilities/delegation/hub.ts";
-import { hubSendTool, hubWaitTool, hubJobsTool, hubInboxTool } from "../../capabilities/delegation/hub-tools.ts";
+import {
+	hubInboxTool,
+	hubJobsTool,
+	hubSendTool,
+	hubWaitTool,
+} from "../../capabilities/delegation/hub-tools.ts";
 
 // ── Fake backend ──────────────────────────────────────────────────────────────
 
@@ -30,7 +35,11 @@ class FakeBackend implements LLMBackend {
 		_messages: Record<string, unknown>[],
 		_options?: GenerateOptions,
 	): Promise<LLMResponse> {
-		const resp = this.responses.shift() ?? { content: "done", toolCalls: [], stopReason: "stop" };
+		const resp = this.responses.shift() ?? {
+			content: "done",
+			toolCalls: [],
+			stopReason: "stop",
+		};
 		return resp;
 	}
 }
@@ -88,11 +97,20 @@ test("spawn_agents registers agents in the hub", async () => {
 
 	// Check that agents were registered by querying jobs().
 	const jobs = hub.jobs();
-	assert.ok(jobs.length >= 2, `Expected >= 2 registered agents, got ${jobs.length}`);
+	assert.ok(
+		jobs.length >= 2,
+		`Expected >= 2 registered agents, got ${jobs.length}`,
+	);
 	for (const job of jobs) {
-		assert.ok(job.id.startsWith("agent_"), `Agent ID should start with "agent_": ${job.id}`);
+		assert.ok(
+			job.id.startsWith("agent_"),
+			`Agent ID should start with "agent_": ${job.id}`,
+		);
 		assert.equal(job.agent, "general");
-		assert.ok(job.status === "running" || job.status === "completed", `Unexpected status: ${job.status}`);
+		assert.ok(
+			job.status === "running" || job.status === "completed",
+			`Unexpected status: ${job.status}`,
+		);
 	}
 });
 
@@ -110,7 +128,10 @@ test("hub.complete is called with correct status on subagent exit", async () => 
 
 	const jobs = hub.jobs();
 	const completed = jobs.filter(j => j.status === "completed");
-	assert.ok(completed.length >= 2, `Expected >= 2 completed agents, got ${completed.length}`);
+	assert.ok(
+		completed.length >= 2,
+		`Expected >= 2 completed agents, got ${completed.length}`,
+	);
 });
 
 // ── Hub tools availability ────────────────────────────────────────────────────
@@ -142,8 +163,18 @@ test("hub-send delivers messages to another agent", async () => {
 	const senderId = "agent_sender";
 	const receiverId = "agent_receiver";
 
-	hub.register(senderId, { id: senderId, agent: "general", task: "Send", status: "running" });
-	hub.register(receiverId, { id: receiverId, agent: "general", task: "Receive", status: "running" });
+	hub.register(senderId, {
+		id: senderId,
+		agent: "general",
+		task: "Send",
+		status: "running",
+	});
+	hub.register(receiverId, {
+		id: receiverId,
+		agent: "general",
+		task: "Receive",
+		status: "running",
+	});
 
 	const sendTool = hubSendTool({ hub, agentId: senderId });
 	const result = await sendTool.execute(
@@ -164,7 +195,10 @@ test("hub-send delivers messages to another agent", async () => {
 	const inboxResult = await inboxTool.execute({}, { onUpdate: () => {} });
 
 	if (typeof inboxResult === "string") {
-		assert.ok(inboxResult.includes("hello from sender"), `Inbox should contain sent message: ${inboxResult}`);
+		assert.ok(
+			inboxResult.includes("hello from sender"),
+			`Inbox should contain sent message: ${inboxResult}`,
+		);
 	} else {
 		assert.ok(
 			inboxResult.content.includes("hello from sender"),
@@ -178,13 +212,21 @@ test("hub-send delivers messages to another agent", async () => {
 test("hub-jobs returns registered agents", async () => {
 	const hub = createHubMessageBus();
 	const agentId = "agent_0";
-	hub.register(agentId, { id: agentId, agent: "general", task: "Work", status: "running" });
+	hub.register(agentId, {
+		id: agentId,
+		agent: "general",
+		task: "Work",
+		status: "running",
+	});
 
 	const jobsTool = hubJobsTool({ hub, agentId: "test" });
 	const result = await jobsTool.execute({}, { onUpdate: () => {} });
 
 	if (typeof result === "string") {
-		assert.ok(result.includes(agentId), `Jobs output should include ${agentId}: ${result}`);
+		assert.ok(
+			result.includes(agentId),
+			`Jobs output should include ${agentId}: ${result}`,
+		);
 	} else {
 		assert.ok(
 			result.content.includes(agentId),
@@ -199,18 +241,28 @@ test("hub-wait returns messages after target completes", async () => {
 	const hub = createHubMessageBus();
 	const targetId = "agent_target";
 
-	hub.register(targetId, { id: targetId, agent: "general", task: "Work", status: "running" });
+	hub.register(targetId, {
+		id: targetId,
+		agent: "general",
+		task: "Work",
+		status: "running",
+	});
 
 	const waitTool = hubWaitTool({ hub, agentId: "waiter" });
 	// Wait returns immediately with an empty array when no messages are pending.
-	const result = await waitTool.execute({ handles: [targetId], timeout_ms: 100 }, { onUpdate: () => {} });
+	const result = await waitTool.execute(
+		{ handles: [targetId], timeout_ms: 100 },
+		{ onUpdate: () => {} },
+	);
 
 	// Result should indicate the target (empty or with messages).
 	if (typeof result === "string") {
 		assert.ok(result.length > 0, `Wait result should not be empty: ${result}`);
 	} else {
-		assert.ok(result.content.includes(targetId) || result.content.includes("[]"),
-			`Wait content should mention target or empty: ${result.content}`);
+		assert.ok(
+			result.content.includes(targetId) || result.content.includes("[]"),
+			`Wait content should mention target or empty: ${result.content}`,
+		);
 	}
 });
 
@@ -240,5 +292,8 @@ test("spawn_agent works when hub is present", async () => {
 
 	// Hub should have received registration and completion for the spawned agent.
 	const jobs = hub.jobs();
-	assert.ok(jobs.length >= 1, `Hub should have registered agents, got ${jobs.length}`);
+	assert.ok(
+		jobs.length >= 1,
+		`Hub should have registered agents, got ${jobs.length}`,
+	);
 });

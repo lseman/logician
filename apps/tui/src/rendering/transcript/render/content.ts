@@ -101,6 +101,7 @@ export function renderFileContent(
 			const hlLine = hlLines[i] || "";
 
 			// If highlighted output is empty for this line, fall back to plain
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 			const content = hlLine.replace(/\x1b\[[\d;]*m/g, "");
 			const displayContent =
 				visibleWidth(content) > availableContentWidth
@@ -153,6 +154,7 @@ export function renderFileContent(
 function extractHlSpan(hlLine: string, displayLine: string): string | null {
 	if (!hlLine || hlLine.trim().length === 0) return null;
 	// If the plain text of the hl line matches the display line, use it directly
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 	const stripped = hlLine.replace(/\x1b\[[\d;]*m/g, "");
 	if (stripped === displayLine) return hlLine;
 	// Otherwise approximate: if displayLine is shorter (wrapped), take first N chars of hl

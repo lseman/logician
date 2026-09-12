@@ -25,9 +25,20 @@ export {
 	stripTextToolCalls,
 } from "./capabilities/provider/text-tool-calls.ts";
 export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
-export { MAX_ESCALATIONS, SoftToolRequirementExceededError, SoftToolRequirementManager } from "./control/guards/soft-tool-requirement.ts";
-export { StablePrefix, AppendOnlyLog, AppendOnlyContextManager } from "./control/guards/stable-prefix.ts";
-export { TextLoopDetector, type TextLoopDetectorOptions } from "./control/guards/text-loop-detector.ts";
+export {
+	MAX_ESCALATIONS,
+	SoftToolRequirementExceededError,
+	SoftToolRequirementManager,
+} from "./control/guards/soft-tool-requirement.ts";
+export {
+	AppendOnlyContextManager,
+	AppendOnlyLog,
+	StablePrefix,
+} from "./control/guards/stable-prefix.ts";
+export {
+	TextLoopDetector,
+	type TextLoopDetectorOptions,
+} from "./control/guards/text-loop-detector.ts";
 export type {
 	NamedAgentStopPolicy,
 	StopPolicy,
@@ -64,7 +75,18 @@ export {
 	CancellationScope,
 	type CancellationScopeOptions,
 } from "./system/lifecycle/cancellation-scope.ts";
+export { TtsrManager } from "./system/ttsr/ttsr-manager.ts";
 export type { AcceptanceConfig } from "./system/types/acceptance.ts";
+// TTSR (Time-Traveling Stream Rules) types
+export type {
+	TtsrBridgeSettings,
+	TtsrInjectionEntry,
+	TtsrMatchContext,
+	TtsrMatchSource,
+	TtsrRule,
+	TtsrScope,
+	TtsrSettings,
+} from "./system/types/ttsr-types.ts";
 export {
 	type AgentConfig,
 	type AgentModelConfig,
@@ -87,28 +109,16 @@ export {
 export type {
 	AgentEvent,
 	AgentHooks,
-	GetToolChoiceContext,
-	SoftToolRequirement,
-	SoftToolRequirementState,
-	ToolChoiceDirective,
 	AskUserContext,
 	CompactableMessage,
+	GetToolChoiceContext,
 	Message,
 	MutationReceipt,
+	SoftToolRequirement,
+	SoftToolRequirementState,
 	Tool,
 	ToolCall,
+	ToolChoiceDirective,
 	ToolContext,
 	ToolResult,
 } from "./system/types/types-messages.ts";
-// TTSR (Time-Traveling Stream Rules) types
-export type {
-	TtsrRule,
-	TtsrScope,
-	TtsrSettings,
-	TtsrMatchContext,
-	TtsrMatchSource,
-	TtsrInjectionEntry,
-	TtsrBridgeSettings,
-} from "./system/types/ttsr-types.ts";
-export { TtsrManager } from "./system/ttsr/ttsr-manager.ts";
-

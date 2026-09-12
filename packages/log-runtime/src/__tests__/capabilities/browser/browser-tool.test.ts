@@ -1,6 +1,6 @@
 // ── Browser tool tests ───────────────────────────────────────────────────────
 
-import { test, describe } from "bun:test";
+import { describe, test } from "bun:test";
 import assert from "node:assert/strict";
 
 // ── Stub BrowserManager ───────────────────────────────────────────────────────
@@ -85,9 +85,7 @@ class StubBrowserManager {
 
 // Create the tool with a stub (type-cast for test isolation).
 function makeTool(manager: StubBrowserManager) {
-	return import(
-		"../../../capabilities/browser/browser-tool.ts"
-	).then((m) => {
+	return import("../../../capabilities/browser/browser-tool.ts").then(m => {
 		// @ts-expect-error stub satisfies BrowserManager interface
 		return m.createBrowserTool({ manager });
 	});
@@ -219,10 +217,7 @@ describe("browser tool", () => {
 	test("unknown operation returns error string", async () => {
 		const manager = new StubBrowserManager();
 		const tool = await makeTool(manager);
-		const result = await tool.execute(
-			{ operation: "nonexistent" },
-			makeCtx(),
-		);
+		const result = await tool.execute({ operation: "nonexistent" }, makeCtx());
 		assert.ok(typeof result === "string");
 		assert.ok((result as string).includes("Unknown operation"));
 	});

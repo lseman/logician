@@ -4,7 +4,6 @@ import { decideAutonomousContinuation } from "../../control/policy/autonomy-poli
 
 const pendingTask = { id: "1", subject: "Run tests", status: "in_progress" };
 
-
 void test("autonomy recovers a truncated provider response", () => {
 	const decision = decideAutonomousContinuation({
 		assistantText: "I was editing",

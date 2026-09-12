@@ -41,7 +41,12 @@ export interface LspCodeAction {
 
 export interface LspTextEdit {
 	file: string;
-	range: { startLine: number; startCol: number; endLine: number; endCol: number };
+	range: {
+		startLine: number;
+		startCol: number;
+		endLine: number;
+		endCol: number;
+	};
 	newText: string;
 }
 
@@ -68,7 +73,10 @@ interface LspLocationResult {
 }
 
 interface HoverResult {
-	contents?: string | Array<string | { language?: string; value?: string }> | { language?: string; value?: string };
+	contents?:
+		| string
+		| Array<string | { language?: string; value?: string }>
+		| { language?: string; value?: string };
 	range?: { start?: { line?: number } };
 }
 
@@ -82,7 +90,11 @@ interface SymbolResult {
 interface SymbolInfoResult {
 	name?: string;
 	kind?: number;
-	location?: { uri?: string; range?: { start?: { line?: number; character?: number } }; selectionRange?: { start?: { line?: number; character?: number } } };
+	location?: {
+		uri?: string;
+		range?: { start?: { line?: number; character?: number } };
+		selectionRange?: { start?: { line?: number; character?: number } };
+	};
 	containerName?: string;
 }
 
@@ -193,7 +205,9 @@ class LspClient {
 					clearTimeout(timer);
 					this.child.off("error", onError);
 					this.isReady = true;
-					this.capabilitiesResult = (result as { capabilities?: Record<string, unknown> })?.capabilities ?? null;
+					this.capabilitiesResult =
+						(result as { capabilities?: Record<string, unknown> })
+							?.capabilities ?? null;
 					this.notify("initialized", {});
 					resolve();
 				})
@@ -259,7 +273,11 @@ class LspClient {
 		return uri;
 	}
 
-	async goToDefinition(filePath: string, line: number, column: number): Promise<LspLocation[]> {
+	async goToDefinition(
+		filePath: string,
+		line: number,
+		column: number,
+	): Promise<LspLocation[]> {
 		await this.ready;
 		const uri = await this.openFile(filePath);
 		const result = await this.request("textDocument/definition", {
@@ -269,7 +287,11 @@ class LspClient {
 		return this.locationsFromResult(result as unknown as LspLocationResult);
 	}
 
-	async references(filePath: string, line: number, column: number): Promise<LspLocation[]> {
+	async references(
+		filePath: string,
+		line: number,
+		column: number,
+	): Promise<LspLocation[]> {
 		await this.ready;
 		const uri = await this.openFile(filePath);
 		const result = await this.request("textDocument/references", {
@@ -280,7 +302,11 @@ class LspClient {
 		return this.locationsFromResult(result as unknown as LspLocationResult);
 	}
 
-	async hover(filePath: string, line: number, column: number): Promise<LspHover | null> {
+	async hover(
+		filePath: string,
+		line: number,
+		column: number,
+	): Promise<LspHover | null> {
 		await this.ready;
 		const uri = await this.openFile(filePath);
 		const result = await this.request("textDocument/hover", {
@@ -299,7 +325,10 @@ class LspClient {
 		return this.symbolsFromResult(result as unknown as SymbolResult | null);
 	}
 
-	async workspaceSymbols(query: string, limit: number = 100): Promise<LspSymbol[]> {
+	async workspaceSymbols(
+		query: string,
+		limit: number = 100,
+	): Promise<LspSymbol[]> {
 		await this.ready;
 		const result = await this.request("workspace/symbols", {
 			query,
@@ -328,7 +357,9 @@ class LspClient {
 			},
 			context,
 		});
-		return this.codeActionsFromResult(result as unknown as CodeActionResult | null);
+		return this.codeActionsFromResult(
+			result as unknown as CodeActionResult | null,
+		);
 	}
 
 	async applyWorkspaceEdit(edit: LspWorkspaceEdit): Promise<boolean> {
@@ -337,8 +368,14 @@ class LspClient {
 			edits: [
 				{
 					range: {
-						start: { line: change.range.startLine - 1, character: change.range.startCol - 1 },
-						end: { line: change.range.endLine - 1, character: change.range.endCol - 1 },
+						start: {
+							line: change.range.startLine - 1,
+							character: change.range.startCol - 1,
+						},
+						end: {
+							line: change.range.endLine - 1,
+							character: change.range.endCol - 1,
+						},
 					},
 					newText: change.newText,
 				},
@@ -351,7 +388,11 @@ class LspClient {
 		return (result as { applied?: boolean })?.applied !== false;
 	}
 
-	async typeDefinition(filePath: string, line: number, column: number): Promise<LspLocation[]> {
+	async typeDefinition(
+		filePath: string,
+		line: number,
+		column: number,
+	): Promise<LspLocation[]> {
 		await this.ready;
 		const uri = await this.openFile(filePath);
 		const result = await this.request("textDocument/typeDefinition", {
@@ -361,7 +402,11 @@ class LspClient {
 		return this.locationsFromResult(result as unknown as LspLocationResult);
 	}
 
-	async implementation(filePath: string, line: number, column: number): Promise<LspLocation[]> {
+	async implementation(
+		filePath: string,
+		line: number,
+		column: number,
+	): Promise<LspLocation[]> {
 		await this.ready;
 		const uri = await this.openFile(filePath);
 		const result = await this.request("textDocument/implementation", {
@@ -377,7 +422,10 @@ class LspClient {
 		return this.capabilitiesResult as Record<string, unknown> | null;
 	}
 
-	async rawRequest(method: string, payload: Record<string, unknown>): Promise<unknown> {
+	async rawRequest(
+		method: string,
+		payload: Record<string, unknown>,
+	): Promise<unknown> {
 		await this.ready;
 		return this.request(method, payload);
 	}
@@ -392,20 +440,28 @@ class LspClient {
 
 	private locationsFromResult(result: unknown): LspLocation[] {
 		if (!result) return [];
-		const items = Array.isArray(result) ? result : result instanceof Object && "targetUri" in result ? [result] : [];
-		return items.map((item: unknown) => {
-			if (typeof item !== "object" || item === null) return null;
-			const entry = item as Record<string, unknown>;
-			const uri = String(entry.uri ?? entry.targetUri ?? "");
-			const range = entry.range as { start?: { line?: number; character?: number } } | undefined;
-			if (!uri) return null;
-			const filePath = uri.startsWith("file://") ? uri.slice(7) : uri;
-			return {
-				file: filePath,
-				line: Number(range?.start?.line ?? 0) + 1,
-				column: Number(range?.start?.character ?? 0) + 1,
-			};
-		}).filter((loc): loc is LspLocation => loc !== null);
+		const items = Array.isArray(result)
+			? result
+			: result instanceof Object && "targetUri" in result
+				? [result]
+				: [];
+		return items
+			.map((item: unknown) => {
+				if (typeof item !== "object" || item === null) return null;
+				const entry = item as Record<string, unknown>;
+				const uri = String(entry.uri ?? entry.targetUri ?? "");
+				const range = entry.range as
+					| { start?: { line?: number; character?: number } }
+					| undefined;
+				if (!uri) return null;
+				const filePath = uri.startsWith("file://") ? uri.slice(7) : uri;
+				return {
+					file: filePath,
+					line: Number(range?.start?.line ?? 0) + 1,
+					column: Number(range?.start?.character ?? 0) + 1,
+				};
+			})
+			.filter((loc): loc is LspLocation => loc !== null);
 	}
 
 	private hoverFromResult(result: HoverResult | null): LspHover | null {
@@ -416,14 +472,21 @@ class LspClient {
 			text = contents;
 		} else if (Array.isArray(contents)) {
 			text = contents
-				.map((c: unknown) => (typeof c === "string" ? c : typeof c === "object" && c !== null && "value" in c ? String((c as { value: unknown }).value) : ""))
+				.map((c: unknown) =>
+					typeof c === "string"
+						? c
+						: typeof c === "object" && c !== null && "value" in c
+							? String((c as { value: unknown }).value)
+							: "",
+				)
 				.join("\n");
 		} else if (typeof contents === "object" && contents !== null) {
 			text = String((contents as { value?: string }).value ?? "");
 		}
-		const signature = typeof (result as { range?: unknown }).range === "object"
-			? ` at line ${(result as { range: { start?: { line?: number } } }).range?.start?.line ?? 0}`
-			: "";
+		const signature =
+			typeof (result as { range?: unknown }).range === "object"
+				? ` at line ${(result as { range: { start?: { line?: number } } }).range?.start?.line ?? 0}`
+				: "";
 		return { contents: text, signature };
 	}
 
@@ -435,7 +498,9 @@ class LspClient {
 				if (typeof item !== "object" || item === null) return null;
 				const entry = item as Record<string, unknown>;
 				const uri = String(entry.uri ?? "");
-				const range = entry.range as { start?: { line?: number; character?: number } } | undefined;
+				const range = entry.range as
+					| { start?: { line?: number; character?: number } }
+					| undefined;
 				const name = String(entry.name ?? "Unknown");
 				const kind = kindNames[Number(entry.kind) ?? 0] ?? "Unknown";
 				if (!uri) return null;
@@ -451,7 +516,10 @@ class LspClient {
 			.filter((s): s is LspSymbol => s !== null);
 	}
 
-	private workspaceSymbolsFromResult(result: unknown, limit: number): LspSymbol[] {
+	private workspaceSymbolsFromResult(
+		result: unknown,
+		limit: number,
+	): LspSymbol[] {
 		if (!result || !Array.isArray(result)) return [];
 		const kindNames = this.kindNames;
 		return result
@@ -459,10 +527,18 @@ class LspClient {
 			.map((item: unknown) => {
 				if (typeof item !== "object" || item === null) return null;
 				const entry = item as Record<string, unknown>;
-				const location = entry.location as { uri?: string; range?: { start?: { line?: number; character?: number } }; selectionRange?: { start?: number; character?: number } } | undefined;
+				const location = entry.location as
+					| {
+							uri?: string;
+							range?: { start?: { line?: number; character?: number } };
+							selectionRange?: { start?: number; character?: number };
+					  }
+					| undefined;
 				const uri = location?.uri ?? "";
 				const range = location?.range ?? location?.selectionRange;
-				const start = range as { line?: number; character?: number } | undefined;
+				const start = range as
+					| { line?: number; character?: number }
+					| undefined;
 				const name = String(entry.name ?? "Unknown");
 				const kind = kindNames[Number(entry.kind) ?? 0] ?? "Unknown";
 				if (!uri) return null;
@@ -489,19 +565,42 @@ class LspClient {
 			actions.push({
 				title,
 				kind: typeof entry.kind === "string" ? entry.kind : undefined,
-				command: typeof entry.command === "object" && entry.command !== null ? String((entry.command as Record<string, unknown>).title ?? "") : undefined,
+				command:
+					typeof entry.command === "object" && entry.command !== null
+						? String((entry.command as Record<string, unknown>).title ?? "")
+						: undefined,
 			});
 		}
 		return actions;
 	}
 
-
 	private readonly kindNames: Record<number, string> = {
-		1: "File", 2: "Module", 3: "Namespace", 4: "Package", 5: "Class", 6: "Method",
-		7: "Property", 8: "Field", 9: "Constructor", 10: "Enum", 11: "Interface",
-		12: "Function", 13: "Variable", 14: "Constant", 15: "String", 16: "Number",
-		17: "Boolean", 18: "Array", 19: "Object", 20: "Key", 21: "Null", 22: "EnumMember",
-		23: "Struct", 24: "Event", 25: "Operator", 26: "TypeParameter",
+		1: "File",
+		2: "Module",
+		3: "Namespace",
+		4: "Package",
+		5: "Class",
+		6: "Method",
+		7: "Property",
+		8: "Field",
+		9: "Constructor",
+		10: "Enum",
+		11: "Interface",
+		12: "Function",
+		13: "Variable",
+		14: "Constant",
+		15: "String",
+		16: "Number",
+		17: "Boolean",
+		18: "Array",
+		19: "Object",
+		20: "Key",
+		21: "Null",
+		22: "EnumMember",
+		23: "Struct",
+		24: "Event",
+		25: "Operator",
+		26: "TypeParameter",
 	};
 
 	close(): void {
@@ -645,7 +744,8 @@ export class LspClientPool {
 	): Promise<unknown> {
 		if (!filePath) {
 			switch (action.toLowerCase()) {
-				case "status": return Array.from(this.clients.values()).map(c => c.status);
+				case "status":
+					return Array.from(this.clients.values()).map(c => c.status);
 				case "reload": {
 					for (const client of this.clients.values()) client.close();
 					this.clients.clear();
@@ -664,7 +764,8 @@ export class LspClientPool {
 
 		const extension = path.extname(filePath).toLowerCase();
 		const definition = this.servers[extension];
-		if (!definition) return { error: `No LSP server configured for ${extension}` };
+		if (!definition)
+			return { error: `No LSP server configured for ${extension}` };
 		const clientKey = `${definition.command}:${definition.languageId}`;
 		let client = this.clients.get(clientKey);
 		if (!client) {
@@ -677,24 +778,37 @@ export class LspClientPool {
 			const q = query ?? "";
 			const n = newName ?? "";
 			switch (action.toLowerCase()) {
-				case "diagnostics": return await client.diagnose(filePath, this.timeoutMs);
-				case "definition": return await client.goToDefinition(filePath, l, c);
-				case "references": return await client.references(filePath, l, c);
-				case "hover": return await client.hover(filePath, l, c);
-				case "symbols": return await client.symbols(filePath);
-				case "workspace-symbols": return await client.workspaceSymbols(q);
-				case "code-actions": return await client.codeActions(filePath, l, c, q);
-				case "rename": return await this.doRename(client, filePath, l, c, n);
-				case "type-definition": return await client.typeDefinition(filePath, l, c);
-				case "implementation": return await client.implementation(filePath, l, c);
-				case "status": return client.status;
-				case "capabilities": return client.capabilities();
+				case "diagnostics":
+					return await client.diagnose(filePath, this.timeoutMs);
+				case "definition":
+					return await client.goToDefinition(filePath, l, c);
+				case "references":
+					return await client.references(filePath, l, c);
+				case "hover":
+					return await client.hover(filePath, l, c);
+				case "symbols":
+					return await client.symbols(filePath);
+				case "workspace-symbols":
+					return await client.workspaceSymbols(q);
+				case "code-actions":
+					return await client.codeActions(filePath, l, c, q);
+				case "rename":
+					return await this.doRename(client, filePath, l, c, n);
+				case "type-definition":
+					return await client.typeDefinition(filePath, l, c);
+				case "implementation":
+					return await client.implementation(filePath, l, c);
+				case "status":
+					return client.status;
+				case "capabilities":
+					return client.capabilities();
 				case "reload": {
 					client.close();
 					this.clients.delete(clientKey);
 					return "Server reloaded";
 				}
-				default: return { error: `Unknown LSP action: ${action}` };
+				default:
+					return { error: `Unknown LSP action: ${action}` };
 			}
 		} catch (error) {
 			return { error: String(error) };
@@ -714,7 +828,12 @@ export class LspClientPool {
 		for (const ref of refs) {
 			changes.push({
 				file: ref.file,
-				range: { startLine: ref.line, startCol: ref.column, endLine: ref.line, endCol: ref.column },
+				range: {
+					startLine: ref.line,
+					startCol: ref.column,
+					endLine: ref.line,
+					endCol: ref.column,
+				},
 				newText: newName,
 			});
 		}

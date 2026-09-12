@@ -209,3 +209,23 @@ void test("continued activations are identified as continued", () => {
 		"continuing from the previous turn",
 	);
 });
+
+void test("does not activate on skill name appearing only in URL path", () => {
+	const adhd = skill("adhd", "Parallel divergent ideation for coding agents.", {
+		triggers: ["brainstorm", "divergent ideation"],
+	});
+	const result = selectSkillsForPrompt([adhd], "skill://i-have-adhd");
+	assert.equal(result.length, 0);
+});
+
+void test("still activates when name appears in URL AND as standalone word", () => {
+	const adhd = skill("adhd", "Parallel divergent ideation for coding agents.", {
+		triggers: ["brainstorm", "divergent ideation"],
+	});
+	const result = selectSkillsForPrompt(
+		[adhd],
+		"skill://i-have-adhd brainstorm",
+	);
+	assert.equal(result.length, 1);
+	assert.equal(result[0].skill.name, "adhd");
+});

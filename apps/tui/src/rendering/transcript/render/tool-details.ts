@@ -308,7 +308,9 @@ export function renderLspDetails(
 	}
 
 	if (args.line) {
-		lines.push(`${DIM}line ${args.line}${args.column ? `:${args.column}` : ""}${RESET}`);
+		lines.push(
+			`${DIM}line ${args.line}${args.column ? `:${args.column}` : ""}${RESET}`,
+		);
 	}
 
 	// Parse result text and format based on action type
@@ -318,7 +320,9 @@ export function renderLspDetails(
 
 		// Check for error prefix
 		if (resultText.startsWith("LSP Error:")) {
-			lines.push(helpers.detailSection(tool.isError ? "lsp error" : "lsp result"));
+			lines.push(
+				helpers.detailSection(tool.isError ? "lsp error" : "lsp result"),
+			);
 			lines.push(...helpers.previewBlock(ctx, resultText, width));
 			return lines;
 		}
@@ -338,7 +342,9 @@ export function renderLspDetails(
 				lines.push(...helpers.previewBlock(ctx, resultText, width));
 			}
 		} else if (action === "status") {
-			lines.push(...resultText.split("\n").map(line => `${DIM}${line}${RESET}`));
+			lines.push(
+				...resultText.split("\n").map(line => `${DIM}${line}${RESET}`),
+			);
 		} else if (action === "capabilities") {
 			lines.push(helpers.detailSection("capabilities"));
 			lines.push(...helpers.previewBlock(ctx, resultText, width));
@@ -350,7 +356,9 @@ export function renderLspDetails(
 			lines.push(...helpers.previewBlock(ctx, resultText, width));
 		} else {
 			// Generic: go-to-definition, references, rename, type-definition, implementation
-			const hasLocations = resultText.includes(":") && resultText.split("\n").some(l => /^\s+\S+:\d+:\d+/.test(l));
+			const hasLocations =
+				resultText.includes(":") &&
+				resultText.split("\n").some(l => /^\s+\S+:\d+:\d+/.test(l));
 			if (hasLocations) {
 				lines.push(helpers.detailSection("locations"));
 				lines.push(...helpers.previewBlock(ctx, resultText, width));

@@ -25,7 +25,9 @@ const EXACT_LONG_MAX_UNIT = 1024;
  * Detect exact suffix cycles using Z-algorithm on reversed text.
  * Returns [unit, count] when a cycle is found, null otherwise.
  */
-function detectExactSuffixCycle(text: string): [unit: string, count: number] | null {
+function detectExactSuffixCycle(
+	text: string,
+): [unit: string, count: number] | null {
 	if (text.length < EXACT_SHORT_MIN_REPEATED_CHARS) return null;
 
 	const reversed = text.split("").reverse().join("");
@@ -34,18 +36,25 @@ function detectExactSuffixCycle(text: string): [unit: string, count: number] | n
 	let right = 0;
 	for (let i = 1; i < reversed.length; i++) {
 		if (i <= right) z[i] = Math.min(right - i + 1, z[i - left]);
-		while (i + z[i] < reversed.length && reversed[z[i]] === reversed[i + z[i]]) z[i]++;
+		while (i + z[i] < reversed.length && reversed[z[i]] === reversed[i + z[i]])
+			z[i]++;
 		if (i + z[i] - 1 > right) {
 			left = i;
 			right = i + z[i] - 1;
 		}
 	}
 
-	const maxUnit = Math.min(EXACT_LONG_MAX_UNIT, Math.floor(reversed.length / 3));
+	const maxUnit = Math.min(
+		EXACT_LONG_MAX_UNIT,
+		Math.floor(reversed.length / 3),
+	);
 	for (let len = 2; len <= maxUnit; len++) {
 		const count = 1 + Math.floor(z[len] / len);
 		const minCount = len <= EXACT_SHORT_MAX_UNIT ? 4 : 3;
-		const minChars = len <= EXACT_SHORT_MAX_UNIT ? EXACT_SHORT_MIN_REPEATED_CHARS : EXACT_LONG_MIN_REPEATED_CHARS;
+		const minChars =
+			len <= EXACT_SHORT_MAX_UNIT
+				? EXACT_SHORT_MIN_REPEATED_CHARS
+				: EXACT_LONG_MIN_REPEATED_CHARS;
 		if (count < minCount || len * count < minChars) continue;
 		const unit = text.slice(-len);
 		// Must contain actual content (not just whitespace/punctuation)
@@ -73,7 +82,8 @@ function normalizeText(text: string): string {
 /** Word-trigram shingle set. */
 function trigramShingles(text: string): Set<string> {
 	const words = text.split(" ").filter(Boolean);
-	if (words.length < 3) return new Set(words.length > 0 ? [words.join(" ")] : new Set());
+	if (words.length < 3)
+		return new Set(words.length > 0 ? [words.join(" ")] : new Set());
 	const shingles = new Set<string>();
 	for (let i = 0; i + 3 <= words.length; i++) {
 		shingles.add(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
@@ -270,7 +280,10 @@ function splitSegments(text: string): string[] {
 		// If block is too long, split into chunks
 		let remaining = trimmed;
 		while (remaining.length > 0) {
-			const chunk = remaining.length > CHARS_PER_SEGMENT ? remaining.slice(0, CHARS_PER_SEGMENT) : remaining;
+			const chunk =
+				remaining.length > CHARS_PER_SEGMENT
+					? remaining.slice(0, CHARS_PER_SEGMENT)
+					: remaining;
 			remaining = remaining.slice(chunk.length).trim();
 			if (chunk.length >= SEGMENT_MIN_CHARS) {
 				segments.push(chunk);

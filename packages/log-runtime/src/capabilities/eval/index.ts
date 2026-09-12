@@ -1,6 +1,10 @@
 // ── Eval capability ──────────────────────────────────────────────────────────
 // Persistent eval kernel with Python and JS support, workpool batching.
 
+export {
+	type CompletionToolDeps,
+	createCompletionTool,
+} from "./completion-tool.ts";
 export { createEvalTool, type EvalToolDeps } from "./eval-tool.ts";
 export {
 	createKernelManager,
@@ -10,19 +14,12 @@ export {
 	type KernelManagerConfig,
 	type KernelState,
 } from "./kernel-manager.ts";
-
+export {
+	createWaitTool,
+	type WaitToolDeps,
+} from "./wait-tool.ts";
 export {
 	createWorkpoolTool,
 	type WorkpoolDeps,
 	type WorkpoolItem,
 } from "./workpool-tool.ts";
-
-export {
-	createCompletionTool,
-	type CompletionToolDeps,
-} from "./completion-tool.ts";
-
-export {
-	createWaitTool,
-	type WaitToolDeps,
-} from "./wait-tool.ts";

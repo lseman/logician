@@ -9,8 +9,14 @@
 //
 // Pagination via offset/limit is handled by the read tool.
 
-import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
 import { ArtifactRegistry } from "./artifact-manager";
+import type {
+	InternalResource,
+	InternalUrl,
+	ProtocolHandler,
+	ResolveContext,
+	UrlCompletion,
+} from "./types";
 
 const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024; // 8 MiB
 
@@ -28,7 +34,9 @@ function parseArtifactId(url: InternalUrl): string {
 
 /** Check if a selector string looks like a pagination selector. */
 function isSelector(value: string): boolean {
-	return /^(raw|conflicts|-?\d+(?:[-+]\d+)?(?:,\d+(?:[-+]\d+)?)*)$/i.test(value);
+	return /^(raw|conflicts|-?\d+(?:[-+]\d+)?(?:,\d+(?:[-+]\d+)?)*)$/i.test(
+		value,
+	);
 }
 
 /** Extract a selector from the pathname (e.g. /3:50 → 50). */
@@ -40,7 +48,9 @@ function extractSelector(pathname: string): string | null {
 }
 
 /** Extract a range from a selector string. Returns null for non-range selectors. */
-function parseRange(selector: string): { offset?: number; limit?: number } | null {
+function parseRange(
+	selector: string,
+): { offset?: number; limit?: number } | null {
 	if (selector === "raw") return null;
 	if (selector.includes(",")) {
 		const parts = selector.split(",").map(p => parseInt(p, 10));
@@ -68,28 +78,35 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 	readonly scheme = "artifact";
 	readonly immutable = true;
 
-	async resolve(url: InternalUrl, _context?: ResolveContext): Promise<InternalResource> {
+	async resolve(
+		url: InternalUrl,
+		_context?: ResolveContext,
+	): Promise<InternalResource> {
 		const registry = ArtifactRegistry.instance();
-
-		return this.#resolveWithRegistry(registry, url);
-
 
 		return this.#resolveWithRegistry(registry, url);
 	}
 
-	async complete(_query: string, _context?: ResolveContext): Promise<UrlCompletion[]> {
+	async complete(
+		_query: string,
+		_context?: ResolveContext,
+	): Promise<UrlCompletion[]> {
 		const registry = ArtifactRegistry.instance();
 		const ids = await registry.listIds();
 		return ids.map(id => ({ value: id, description: `Artifact ${id}` }));
 	}
 
-	async #resolveWithRegistry(registry: ArtifactRegistry, url: InternalUrl): Promise<InternalResource> {
+	async #resolveWithRegistry(
+		registry: ArtifactRegistry,
+		url: InternalUrl,
+	): Promise<InternalResource> {
 		// Bare artifact:// — list available IDs
 		if (!(url.rawHost || url.hostname)) {
 			const ids = await registry.listIds();
-			const content = ids.length > 0
-				? `# Artifacts\n\n${ids.map((id: string) => `  - ${id}`).join("\n")}`
-				: "# Artifacts\n\nNo artifacts have been saved yet.";
+			const content =
+				ids.length > 0
+					? `# Artifacts\n\n${ids.map((id: string) => `  - ${id}`).join("\n")}`
+					: "# Artifacts\n\nNo artifacts have been saved yet.";
 			return {
 				url: url.href,
 				content,
@@ -109,11 +126,18 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 		return this.#resolveFull(registry, id, url);
 	}
 
-	async #resolveFull(registry: ArtifactRegistry, id: string, url: InternalUrl): Promise<InternalResource> {
+	async #resolveFull(
+		registry: ArtifactRegistry,
+		id: string,
+		url: InternalUrl,
+	): Promise<InternalResource> {
 		const content = await registry.read(id);
 		if (content === null) {
 			const available = await registry.listIds();
-			const hint = available.length > 0 ? `\nAvailable: ${available.join(", ")}` : "\nNo artifacts have been saved yet.";
+			const hint =
+				available.length > 0
+					? `\nAvailable: ${available.join(", ")}`
+					: "\nNo artifacts have been saved yet.";
 			throw new Error(`Unknown artifact: ${id}${hint}`);
 		}
 
@@ -131,7 +155,12 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 		};
 	}
 
-	async #resolveWithSelector(registry: ArtifactRegistry, id: string, url: InternalUrl, selector: string): Promise<InternalResource> {
+	async #resolveWithSelector(
+		registry: ArtifactRegistry,
+		id: string,
+		url: InternalUrl,
+		selector: string,
+	): Promise<InternalResource> {
 		const content = await registry.read(id);
 		if (content === null) {
 			throw new Error(`Unknown artifact: ${id}`);
@@ -142,9 +171,21 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 			// Apply pagination
 			const offset = range.offset ?? 0;
 			const limit = range.limit ?? content.length;
-			const bytesPerLine = Math.max(1, Math.floor(Buffer.byteLength(content, "utf-8") / Math.max(1, content.split("\n").length)));
-			const byteOffset = Math.min(offset * bytesPerLine, Buffer.byteLength(content, "utf-8"));
-			const byteLimit = Math.min(limit * bytesPerLine, Buffer.byteLength(content, "utf-8") - byteOffset);
+			const bytesPerLine = Math.max(
+				1,
+				Math.floor(
+					Buffer.byteLength(content, "utf-8") /
+						Math.max(1, content.split("\n").length),
+				),
+			);
+			const byteOffset = Math.min(
+				offset * bytesPerLine,
+				Buffer.byteLength(content, "utf-8"),
+			);
+			const byteLimit = Math.min(
+				limit * bytesPerLine,
+				Buffer.byteLength(content, "utf-8") - byteOffset,
+			);
 			const slice = content.substring(byteOffset, byteOffset + byteLimit);
 			return {
 				url: url.href,
@@ -168,5 +209,3 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 		return this.#resolveFull(registry, id, url);
 	}
 }
-
-

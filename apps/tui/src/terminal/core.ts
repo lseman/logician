@@ -370,7 +370,9 @@ export class TUI extends Container {
 		// Build an OSC 99 notification (Kitty / modern terminals).
 		// Format: \x1b]99;title<body>\x07
 		// On terminals that don't support OSC 99, this is harmlessly ignored.
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 		const escapedTitle = title.replace(/[\x00-\x1f\x7f-\x9f]/gu, "");
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: Terminal rendering intentionally recognizes ANSI control bytes.
 		const escapedBody = body.replace(/[\x00-\x1f\x7f-\x9f]/gu, "");
 		const notification = `\x1b]99;${escapedTitle};${escapedBody}\x07`;
 		try {

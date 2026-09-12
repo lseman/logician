@@ -6,18 +6,44 @@ import path from "node:path";
 import { grade } from "../graders.ts";
 import { runProcess } from "../process.ts";
 import { buildReport } from "../report.ts";
-import { fixtureDigest, prepareTrialWorkspace, replayTrial, runTrial } from "../runner.ts";
+import {
+	fixtureDigest,
+	prepareTrialWorkspace,
+	replayTrial,
+	runTrial,
+} from "../runner.ts";
 import { validateCorpus } from "../schema.ts";
 
 describe("agent eval", () => {
 	test("bundled baseline fixtures provision at their pinned revisions and contain failing task tests", async () => {
 		const root = path.resolve(import.meta.dirname, "../../../..");
-		const corpus = validateCorpus(JSON.parse(readFileSync(path.join(root, "packages/log-eval/corpus/baseline.json"), "utf8")));
-		const workRoot = mkdtempSync(path.join(tmpdir(), "logician-baseline-fixtures-"));
+		const corpus = validateCorpus(
+			JSON.parse(
+				readFileSync(
+					path.join(root, "packages/log-eval/corpus/baseline.json"),
+					"utf8",
+				),
+			),
+		);
+		const workRoot = mkdtempSync(
+			path.join(tmpdir(), "logician-baseline-fixtures-"),
+		);
 		try {
 			for (const task of corpus.tasks) {
-				const workspace = prepareTrialWorkspace({ ...task, fixture: { ...task.fixture, repository: path.resolve(root, task.fixture.repository) } }, workRoot, "probe");
-				expect(`sha256:${fixtureDigest(workspace)}`).toBe(task.fixture.revision);
+				const workspace = prepareTrialWorkspace(
+					{
+						...task,
+						fixture: {
+							...task.fixture,
+							repository: path.resolve(root, task.fixture.repository),
+						},
+					},
+					workRoot,
+					"probe",
+				);
+				expect(`sha256:${fixtureDigest(workspace)}`).toBe(
+					task.fixture.revision,
+				);
 				const tests = task.graders.find(grader => grader.id === "tests");
 				if (!tests) throw new Error(`Missing tests grader for ${task.id}`);
 				const result = await grade(tests, workspace);

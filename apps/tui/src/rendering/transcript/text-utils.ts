@@ -53,7 +53,6 @@ export function stripThinkingToolMarkup(text: string): string {
 		.trimEnd();
 }
 
-
 export function stripInternalHookGuidance(
 	text: string | undefined,
 ): string | undefined {

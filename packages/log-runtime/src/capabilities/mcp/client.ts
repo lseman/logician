@@ -146,7 +146,8 @@ class StdioMcpClient implements McpClient {
 		const params: Record<string, unknown> = cursor ? { cursor } : {};
 		const result = await this.rpc("resources/list", params);
 		const resources = Array.isArray(result.resources) ? result.resources : [];
-		const nextCursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+		const nextCursor =
+			typeof result.nextCursor === "string" ? result.nextCursor : undefined;
 		return { resources, nextCursor };
 	}
 
@@ -317,7 +318,8 @@ class HttpMcpClient implements McpClient {
 		const params: Record<string, unknown> = cursor ? { cursor } : {};
 		const result = await this.rpc("resources/list", params);
 		const resources = Array.isArray(result.resources) ? result.resources : [];
-		const nextCursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+		const nextCursor =
+			typeof result.nextCursor === "string" ? result.nextCursor : undefined;
 		return { resources, nextCursor };
 	}
 

@@ -51,7 +51,7 @@ export function createReadSkillTool(skills: Skill[]): Tool | null {
 			const skill = byName.get(name) ?? findSkillByName(skills, name);
 			if (!skill) {
 				const available = skills.map(s => s.name).join(", ") || "(none)";
-				return `Error: Unknown skill "${name}". Available: ${available}`;
+				return `Error: Unknown skill "${name}". The skill name must be an exact match from the available list. Do not guess or infer alternative names. Available: ${available}`;
 			}
 			return formatSkillInvocation(skill);
 		},

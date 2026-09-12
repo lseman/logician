@@ -4,11 +4,11 @@
 //   conflict://<file>:<index>  — get conflict block <index> from <file>
 //   conflict://<file>          — list conflict blocks in <file>
 
-import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 import {
 	getConflictBlock,
 	getConflictBlocks,
 } from "../../../../capabilities/tools/support/conflict-resolution.js";
+import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
 export class ConflictProtocolHandler implements ProtocolHandler {
 	readonly scheme = "conflict";
@@ -18,7 +18,9 @@ export class ConflictProtocolHandler implements ProtocolHandler {
 		const pathname = url.pathname;
 
 		if (!hostname) {
-			throw new Error("conflict:// URL requires a file path: conflict://<file>");
+			throw new Error(
+				"conflict:// URL requires a file path: conflict://<file>",
+			);
 		}
 
 		const filePath = hostname;
@@ -34,8 +36,8 @@ export class ConflictProtocolHandler implements ProtocolHandler {
 
 		// conflict://<file> — list all conflicts
 		if (!pathname || pathname === "/" || pathname === "/0") {
-			const lines = blocks.map((b, i) =>
-				`- Block ${i}: ${b.index} at offset ${b.offset}`,
+			const lines = blocks.map(
+				(b, i) => `- Block ${i}: ${b.index} at offset ${b.offset}`,
 			);
 			return {
 				url: url.href,
@@ -48,7 +50,9 @@ export class ConflictProtocolHandler implements ProtocolHandler {
 		const indexStr = pathname.slice(1);
 		const index = Number(indexStr);
 		if (Number.isNaN(index)) {
-			throw new Error(`conflict://<file>/<index> requires a numeric index, got: ${indexStr}`);
+			throw new Error(
+				`conflict://<file>/<index> requires a numeric index, got: ${indexStr}`,
+			);
 		}
 
 		const block = getConflictBlock(filePath, index);

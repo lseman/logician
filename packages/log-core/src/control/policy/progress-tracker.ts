@@ -98,7 +98,10 @@ export class ProgressTracker {
 			}
 		}
 
-		return this.checks > this.minimumChecks && this.consecutiveStalls >= this.stalledChecks;
+		return (
+			this.checks > this.minimumChecks &&
+			this.consecutiveStalls >= this.stalledChecks
+		);
 	}
 
 	#computeOverlap(a: Set<string>, b: Set<string>): number {

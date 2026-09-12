@@ -2,8 +2,8 @@
 // Manages Chromium tabs via Puppeteer with tab lifecycle, navigation, and
 // interaction helpers. Models OMP's browser automation pattern.
 
-import puppeteer, { type KeyInput } from "puppeteer";
 import type { Browser, Page } from "puppeteer";
+import puppeteer, { type KeyInput } from "puppeteer";
 
 export interface BrowserTab {
 	/** Stable name for the tab, scoped to this manager instance. */
@@ -55,15 +55,17 @@ export class BrowserManager {
 
 	private async ensureBrowser(): Promise<Browser> {
 		if (this.browser) return this.browser;
-		if (this.openPromise) {
-			await this.openPromise;
-			if (!this.browser) throw new Error("Browser failed to open");
-			return this.browser;
+		if (!this.openPromise) {
+			this.openPromise = this._openBrowser()
+				.then(browser => {
+					this.browser = browser;
+					return browser;
+				})
+				.finally(() => {
+					this.openPromise = null;
+				});
 		}
-		this.openPromise = this._openBrowser();
-		this.browser = await this.openPromise;
-		this.openPromise = null;
-		return this.browser!;
+		return this.openPromise;
 	}
 
 	private async _openBrowser(): Promise<Browser> {
@@ -99,7 +101,7 @@ export class BrowserManager {
 
 		page.on("framenavigated", () => {
 			tab.url = page.url();
-			page.title().then((t) => (tab.title = t));
+			page.title().then(t => (tab.title = t));
 		});
 
 		this.tabs.set(name, { tab });

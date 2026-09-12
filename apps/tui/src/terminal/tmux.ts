@@ -9,6 +9,9 @@ export function wrapTmuxPassthrough(payload: string): string {
 }
 
 /** Pass a control sequence through tmux, leaving direct-terminal output unchanged. */
-export function wrapTmuxPassthroughIfNeeded(payload: string, env: NodeJS.ProcessEnv = Bun.env): string {
+export function wrapTmuxPassthroughIfNeeded(
+	payload: string,
+	env: NodeJS.ProcessEnv = Bun.env,
+): string {
 	return isInsideTmux(env) ? wrapTmuxPassthrough(payload) : payload;
 }

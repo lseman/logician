@@ -20,8 +20,15 @@ import {
 	type Tool,
 	type ToolResult,
 } from "@logician/log-core";
-import { AgentOutputRegistry } from "../../runtime/bridge/support/internal-urls/agent-registry.js";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
+import { AgentOutputRegistry } from "../../runtime/bridge/support/internal-urls/agent-registry.js";
+import { createHubMessageBus, type HubMessageBus } from "./hub.ts";
+import {
+	hubInboxTool,
+	hubJobsTool,
+	hubSendTool,
+	hubWaitTool,
+} from "./hub-tools.ts";
 import {
 	budgetFromArgs,
 	contractFromArgs,
@@ -29,8 +36,6 @@ import {
 	runDelegatedAgent,
 	type SpawnAgentsTask,
 } from "./runtime.ts";
-import { createHubMessageBus, type HubMessageBus } from "./hub.ts";
-import { hubSendTool, hubWaitTool, hubJobsTool, hubInboxTool } from "./hub-tools.ts";
 
 // ── Agent definitions ────────────────────────────────────────────────────────
 
@@ -321,11 +326,11 @@ async function _runSpawn(
 	// Child tools: resolve allowlist, then add hub coordination tools.
 	const childTools = deps.hub
 		? resolveChildTools(def, parent.tools ?? []).concat([
-			hubSendTool({ hub: deps.hub, agentId }),
-			hubWaitTool({ hub: deps.hub, agentId }),
-			hubJobsTool({ hub: deps.hub, agentId }),
-			hubInboxTool({ hub: deps.hub, agentId }),
-		])
+				hubSendTool({ hub: deps.hub, agentId }),
+				hubWaitTool({ hub: deps.hub, agentId }),
+				hubJobsTool({ hub: deps.hub, agentId }),
+				hubInboxTool({ hub: deps.hub, agentId }),
+			])
 		: resolveChildTools(def, parent.tools ?? []);
 
 	// Accumulates text_delta chunks below into the full output so far — every

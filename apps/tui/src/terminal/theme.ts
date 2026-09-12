@@ -3,7 +3,7 @@
 // Supports hex (#rrggbb), 256-color (0-255), variable references, and default ("").
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // ── Color token names ─────────────────────────────────────────────────────────
 
@@ -360,8 +360,13 @@ function getThemesDir(): string {
 
 // Themes bundled with the package, used when a theme isn't found under the
 // user's ~/.logician/themes (fresh installs, CI, sandboxed HOME dirs).
-// Use process.cwd() for reliable resolution in compiled/sandboxed environments.
-const BUNDLED_THEMES_DIR = join(process.cwd(), "apps", "tui", "themes");
+// In the compiled binary, import.meta.dirname resolves to the embedded FS root.
+// Use process.execPath (which resolves symlinks) to find the real binary
+// directory on the host filesystem, then look for themes alongside it.
+const sourceThemesDir = join(import.meta.dirname, "../../themes");
+const BUNDLED_THEMES_DIR = existsSync(sourceThemesDir)
+	? sourceThemesDir
+	: join(dirname(process.execPath), "themes");
 
 function loadThemeJson(_name: string, path: string): ThemeJson {
 	const content = readFileSync(path, "utf-8");
