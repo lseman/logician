@@ -41,7 +41,7 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		context?: ResolveContext,
 	): Promise<InternalResource> {
 		const gateway = context?.memory as MemoryGateway | undefined;
-		const hostname = url.rawHost || url.hostname;
+		const hostname = url.host;
 		const pathname = url.pathname;
 
 		// memory:// — list sessions

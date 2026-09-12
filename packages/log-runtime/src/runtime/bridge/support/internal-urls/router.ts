@@ -2,9 +2,9 @@
 // Process-global router with one handler per scheme.
 // Access via InternalUrlRouter.instance().
 
+import { extractInternalUrlScheme, parseInternalUrl } from "./parse";
 import type {
 	InternalResource,
-	InternalUrl,
 	ProtocolHandler,
 	ResolveContext,
 } from "./types";
@@ -38,7 +38,7 @@ export class InternalUrlRouter {
 	}
 
 	canResolve(input: string): boolean {
-		const handler = this.#handlers.get(extractUriScheme(input) ?? "");
+		const handler = this.#handlers.get(extractInternalUrlScheme(input) ?? "");
 		return handler !== undefined;
 	}
 
@@ -46,40 +46,12 @@ export class InternalUrlRouter {
 		input: string,
 		context?: ResolveContext,
 	): Promise<InternalResource> {
-		const scheme = extractUriScheme(input);
+		const scheme = extractInternalUrlScheme(input);
 		if (!scheme) throw new Error(`Unknown scheme in: ${input}`);
 		const handler = this.#handlers.get(scheme);
-		if (!handler) throw new Error(`No handler for scheme: ${scheme}`);
+		if (!handler)
+			throw new Error(`Unsupported internal URL scheme: ${scheme}://`);
 		const url = parseInternalUrl(input);
 		return handler.resolve(url, context);
 	}
-}
-
-function extractUriScheme(input: string): string | undefined {
-	const m = input.match(/^([a-z][a-z0-9+.-]*):\/\//i);
-	return m?.[1]?.toLowerCase();
-}
-
-function parseInternalUrl(input: string): InternalUrl {
-	const m = input.match(/^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/i);
-	if (!m) throw new Error(`Invalid internal URL: ${input}`);
-	const [, scheme, host] = m;
-	const rest = input.slice(m[0].length);
-	const pathname = rest.startsWith("/") ? rest : "/";
-	return {
-		scheme,
-		host,
-		rawHost: host,
-		pathname,
-		href: `${scheme}://${host}${pathname}`,
-		search: "",
-		hash: "",
-		protocol: `${scheme}:`,
-		port: "",
-		username: "",
-		password: "",
-		origin: `${scheme}://${host}`,
-		searchParams: new URLSearchParams(),
-		hostname: host,
-	};
 }

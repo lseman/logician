@@ -14,7 +14,7 @@ export class AgentProtocolHandler implements ProtocolHandler {
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const registry = AgentOutputRegistry.instance();
-		const agentId = url.rawHost || url.hostname;
+		const agentId = url.host;
 		const pathname = url.pathname;
 
 		if (!agentId) {

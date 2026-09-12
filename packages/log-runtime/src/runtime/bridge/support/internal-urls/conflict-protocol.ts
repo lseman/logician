@@ -14,7 +14,7 @@ export class ConflictProtocolHandler implements ProtocolHandler {
 	readonly scheme = "conflict";
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
-		const hostname = url.rawHost || url.hostname;
+		const hostname = url.host;
 		const pathname = url.pathname;
 
 		if (!hostname) {

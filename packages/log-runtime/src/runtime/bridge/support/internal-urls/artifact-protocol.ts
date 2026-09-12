@@ -22,7 +22,7 @@ const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024; // 8 MiB
 
 /** Parse a numeric artifact ID from the URL host. */
 function parseArtifactId(url: InternalUrl): string {
-	const id = url.rawHost || url.hostname;
+	const id = url.host;
 	if (!id) {
 		throw new Error("artifact:// URL requires a numeric ID: artifact://<id>");
 	}
@@ -101,7 +101,7 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 		url: InternalUrl,
 	): Promise<InternalResource> {
 		// Bare artifact:// — list available IDs
-		if (!(url.rawHost || url.hostname)) {
+		if (!url.host) {
 			const ids = await registry.listIds();
 			const content =
 				ids.length > 0

@@ -150,7 +150,9 @@ function buildSshArgs(target: SshTarget, command: string): string[] {
 	if (username) sshArgs.push("-l", username);
 	if (port) sshArgs.push("-p", String(port));
 	if (keyPath) sshArgs.push("-i", keyPath);
-	sshArgs.push(host, command);
+	const destination =
+		host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+	sshArgs.push(destination, command);
 	return sshArgs;
 }
 
@@ -162,52 +164,52 @@ function remotePathFromUrl(url: InternalUrl): string {
 	return pathPart;
 }
 
-/** Resolve URL authority to an SSH target. */
-async function resolveTarget(
-	url: InternalUrl,
-	_cwd?: string,
-): Promise<SshTarget> {
-	const bareHost = url.hostname;
-	const rawAuthority = url.rawHost || bareHost;
-	const username = url.username || undefined;
-	const port = url.port ? Number(url.port) : undefined;
-
-	if (!bareHost && !rawAuthority) {
-		throw new Error("ssh:// requires a host: ssh://<host>/<path>");
+/** SSH alone interprets user, host and port in a resource-link authority. */
+function parseSshAuthority(authority: string): SshTarget {
+	const match = authority.match(
+		/^(?:([^@\s]+)@)?(\[[^\]]+\]|[^:\s@[\]]+)(?::(\d+))?$/,
+	);
+	if (!match) {
+		throw new Error(
+			"Invalid SSH authority: expected [user@]host[:port], with IPv6 hosts in brackets",
+		);
 	}
-
-	if (url.password) {
+	const [, username, host, portText] = match;
+	if (username?.includes(":")) {
 		throw new Error(
 			"ssh://: password authentication is not supported — use key/agent auth",
 		);
 	}
+	const port = portText === undefined ? undefined : Number(portText);
+	if (
+		port !== undefined &&
+		(!Number.isInteger(port) || port < 1 || port > 65535)
+	) {
+		throw new Error("ssh:// port must be an integer from 1 to 65535");
+	}
+	return { name: authority, host, username, port };
+}
 
-	// Parse user@host:port or bare host
-	const isIpv6Literal = bareHost?.startsWith("[") && bareHost?.endsWith("]");
-	const sshHost = isIpv6Literal ? bareHost?.slice(1, -1) : bareHost;
+/** Resolve the parsed destination against configured hosts. */
+async function resolveTarget(url: InternalUrl): Promise<SshTarget> {
+	const target = parseSshAuthority(url.host);
 
 	// Try configured hosts first
 	const configured = await loadConfiguredHosts();
 	const match =
-		configured.find(h => h.name === (url.rawHost || url.hostname)) ??
-		configured.find(h => h.name === bareHost);
+		configured.find(h => h.name === url.host) ??
+		configured.find(h => h.name === target.host);
 	if (match) {
 		return {
 			name: match.name,
 			host: match.host,
-			username: username || match.username,
-			port: port || match.port,
+			username: target.username ?? match.username,
+			port: target.port ?? match.port,
 			keyPath: match.keyPath,
 		};
 	}
 
-	// Opaque OpenSSH destination
-	return {
-		name: rawAuthority,
-		host: isIpv6Literal ? (sshHost ?? rawAuthority) : rawAuthority,
-		username,
-		port,
-	};
+	return target;
 }
 
 /** Format a remote directory listing. */
@@ -256,10 +258,10 @@ export class SshProtocolHandler implements ProtocolHandler {
 
 	async resolve(
 		url: InternalUrl,
-		context?: ResolveContext,
+		_context?: ResolveContext,
 	): Promise<InternalResource> {
 		// Bare ssh:// with no host — list configured hosts
-		if (!(url.rawHost || url.hostname)) {
+		if (!url.host) {
 			const rawPath = url.pathname;
 			if (rawPath && rawPath !== "/") {
 				throw new Error(`ssh:// requires a host: ssh://<host>${rawPath}`);
@@ -274,7 +276,7 @@ export class SshProtocolHandler implements ProtocolHandler {
 			};
 		}
 
-		const target = await resolveTarget(url, context?.cwd);
+		const target = await resolveTarget(url);
 		const remotePath = remotePathFromUrl(url);
 		const isDirectory = remotePath.endsWith("/");
 

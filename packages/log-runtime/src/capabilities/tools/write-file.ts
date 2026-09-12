@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Tool, ToolResult } from "@logician/log-core";
+import { extractInternalUrlScheme } from "../../runtime/bridge/support/internal-urls/parse.ts";
 import { createMutationSession } from "./mutation/session.js";
 import { createEditStore } from "./support/edit-store.js";
 import { withFileMutationQueue } from "./support/mutation-queue.ts";
@@ -78,10 +79,9 @@ export const write_file: Tool = {
 		const filePath = String(args.path);
 		const content = String(args.content ?? "");
 		const append = Boolean(args.append);
-		const resolved = resolvePath(ctx.cwd, filePath);
-		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
+		const scheme = extractInternalUrlScheme(filePath);
 		// xd:// virtual device dispatch.
-		if (filePath.toLowerCase().startsWith("xd://")) {
+		if (scheme === "xd") {
 			const deviceName = filePath.slice("xd://".length);
 			const deviceDocs = readXdDeviceDocs(deviceName);
 			if (deviceDocs !== null) {
@@ -101,6 +101,12 @@ export const write_file: Tool = {
 			const result = await dispatchXdDevice(deviceName, parsedArgs);
 			return result;
 		}
+
+		if (scheme) {
+			return `Error: write_file does not support ${scheme}:// links. Use ./ before the path if a literal file is intended.`;
+		}
+		const resolved = resolvePath(ctx.cwd, filePath);
+		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 
 		const store = createEditStore();
 		const mutation = createMutationSession(store, ctx.cwd || process.cwd(), {

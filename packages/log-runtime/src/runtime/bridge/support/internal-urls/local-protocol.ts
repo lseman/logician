@@ -30,7 +30,7 @@ export class LocalProtocolHandler implements ProtocolHandler {
 		const cwd = context?.cwd ?? process.cwd();
 		const artifactDir = path.join(cwd, ".logician", "artifacts");
 
-		const hostname = url.rawHost || url.hostname;
+		const hostname = url.host;
 		const pathname = url.pathname;
 
 		// local:// — list available artifacts

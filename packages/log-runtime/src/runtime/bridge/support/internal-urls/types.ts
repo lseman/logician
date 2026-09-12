@@ -1,7 +1,7 @@
 // ── Internal URL types ───────────────────────────────────────────────────────
 // Lightweight types for the internal URL routing system.
-// Internal URLs (skill://, rule://, memory://, local://, conflict://, xd://)
-// are resolved by tools like read_file, providing access to agent resources
+// Registered internal URLs are resolved by tools like read_file,
+// providing access to agent resources
 // without exposing filesystem paths.
 
 /** Resource payload returned by protocol handlers. */
@@ -15,23 +15,13 @@ export interface InternalResource {
 	isDirectory?: boolean;
 }
 
-/** Parsed internal URL with preserved host casing. */
+/** Parsed resource link. Only the scheme is normalized; the target is opaque. */
 export interface InternalUrl {
-	scheme: string;
-	host: string;
-	rawHost: string;
-	pathname: string;
-	href: string;
-	search: string;
-	hash: string;
-	protocol: string;
-	port: string;
-	username: string;
-	password: string;
-	origin: string;
-	toString?: () => string;
-	searchParams: URLSearchParams;
-	hostname: string;
+	readonly scheme: string;
+	readonly target: string;
+	readonly host: string;
+	readonly pathname: string;
+	readonly href: string;
 }
 
 /** Autocomplete candidate for URL completion. */

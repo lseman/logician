@@ -7,7 +7,10 @@ export { LocalProtocolHandler } from "./local-protocol";
 export { LogProtocolHandler } from "./log-protocol";
 export { McpProtocolHandler } from "./mcp-protocol";
 export { MemoryProtocolHandler } from "./memory-protocol";
-export { extractUriScheme, parseInternalUrl } from "./parse";
+export {
+	extractInternalUrlScheme,
+	parseInternalUrl,
+} from "./parse";
 export { InternalUrlRouter } from "./router";
 export { RuleProtocolHandler } from "./rule-protocol";
 export { SkillProtocolHandler } from "./skill-protocol";

@@ -65,7 +65,7 @@ export class LogProtocolHandler implements ProtocolHandler {
 	): Promise<InternalResource> {
 		const cwd = context?.cwd ?? process.cwd();
 		const docsDir = resolveDocsDir(cwd);
-		const hostname = url.rawHost || url.hostname;
+		const hostname = url.host;
 		const pathname = url.pathname;
 
 		// Bare log:// — show root index

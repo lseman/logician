@@ -1,9 +1,8 @@
 // ── mcp:// protocol handler ───────────────────────────────────────────────────
 // Resolves MCP server resources.
 // URL forms:
-//   mcp://                          — list all available MCP resources
+//   mcp://                          — list configured MCP servers
 //   mcp://<server>/<resource-uri>   — read a resource from a specific server
-//   mcp://<resource-uri>            — auto-discover the server that owns the resource
 
 import { getMcpRegistryInstance } from "../../../../capabilities/mcp/mcp-server-registry.ts";
 import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
@@ -14,6 +13,9 @@ export class McpProtocolHandler implements ProtocolHandler {
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const registry = getMcpRegistryInstance();
 		if (!registry) {
+			if (url.target && url.target !== "/") {
+				throw new Error("MCP server registry is not available");
+			}
 			return {
 				url: url.href,
 				content: "# MCP Resources\n\nMCP server registry is not available.",
@@ -21,11 +23,10 @@ export class McpProtocolHandler implements ProtocolHandler {
 			};
 		}
 
-		const host = url.rawHost || url.hostname;
-		const pathname = url.pathname;
+		const host = url.host;
 
 		// No host — list all servers and their resource status
-		if (!host) {
+		if (!url.target || url.target === "/") {
 			const servers = registry.servers;
 			if (!servers || servers.length === 0) {
 				return {
@@ -51,38 +52,26 @@ export class McpProtocolHandler implements ProtocolHandler {
 			};
 		}
 
-		// Extract resource URI
-		const rawPathname = pathname || "/";
-		const hasServerPath = rawPathname !== "/" && !rawPathname.startsWith("/0");
-		const resourceUri = hasServerPath ? `${host}${rawPathname}` : host;
-
-		// Find a client that supports resource reads
-		const client = registry.clients.find(
-			c => typeof c.readResource === "function",
-		);
-		if (!client) {
-			return {
-				url: url.href,
-				content: "# MCP Resources\n\nNo MCP servers support resource reads.",
-				contentType: "text/markdown",
-			};
+		// Require a server and preserve its resource URI verbatim. Never select
+		// a server based on connection order or fall back after a failed lookup.
+		const resourceUri = url.target.slice(host.length + 1);
+		if (!host || !url.target.startsWith(`${host}/`) || !resourceUri) {
+			throw new Error(
+				"MCP links require mcp://<server>/<resource-uri>. Read mcp:// to list servers.",
+			);
 		}
 
 		// Attempt to read the resource
 		try {
-			if (!client.readResource)
-				throw new Error("No MCP server supports resource reads");
-			const result = await client.readResource(resourceUri);
-			const textParts = result.contents
-				.filter(
-					(c: { text?: string }) => c.text !== undefined && c.text !== null,
-				)
-				.map(c => c.text as string);
+			const result = await registry.readResource(host, resourceUri);
+			const textParts = result.contents.flatMap(c =>
+				typeof c.text === "string" ? [c.text] : [],
+			);
 
 			if (textParts.length === 0) {
 				return {
 					url: url.href,
-					content: `# MCP Resource: ${resourceUri}\n\n[Binary content: ${(result as { mimeType?: string }).mimeType ?? "unknown"}]`,
+					content: `# MCP Resource: ${resourceUri}\n\n[Binary content: ${result.mimeType ?? "unknown"}]`,
 					contentType: "text/plain",
 				};
 			}
@@ -91,7 +80,7 @@ export class McpProtocolHandler implements ProtocolHandler {
 				url: url.href,
 				content: textParts.join("\n---\n"),
 				contentType:
-					(result as { mimeType?: string }).mimeType === "application/json"
+					result.mimeType === "application/json"
 						? "application/json"
 						: "text/plain",
 			};

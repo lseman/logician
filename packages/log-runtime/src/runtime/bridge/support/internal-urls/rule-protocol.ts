@@ -18,10 +18,16 @@ export class RuleProtocolHandler implements ProtocolHandler {
 		context?: ResolveContext,
 	): Promise<InternalResource> {
 		const rules = context?.rules;
-		const ruleName = url.rawHost || url.hostname;
+		const ruleName = url.host;
 
 		if (!ruleName) {
 			throw new Error(`rule:// URL requires a rule name: rule://<name>`);
+		}
+
+		if (url.target !== url.host && url.target !== `${url.host}/`) {
+			throw new Error(
+				"rule:// supports an exact name only; paths, queries and fragments are not supported.",
+			);
 		}
 
 		const rule = rules?.find(r => r.name === ruleName);

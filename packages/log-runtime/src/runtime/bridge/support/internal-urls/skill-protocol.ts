@@ -2,7 +2,6 @@
 // Resolves skill names to their SKILL.md content.
 // URL forms:
 //   skill://<name> — Reads SKILL.md
-//   skill://<name>/<path> — Reads relative path within skill's baseDir
 
 import type {
 	InternalResource,
@@ -20,12 +19,18 @@ export class SkillProtocolHandler implements ProtocolHandler {
 		context?: ResolveContext,
 	): Promise<InternalResource> {
 		const skills = context?.skills;
-		const skillName = url.rawHost || url.hostname;
+		const skillName = url.host;
 
 		if (!skillName) {
 			const names = skills?.map(s => s.name) ?? [];
 			throw new Error(
 				`skill:// URL requires a skill name: skill://<name>\nAvailable: ${names.join(", ") || "none"}`,
+			);
+		}
+
+		if (url.target !== url.host && url.target !== `${url.host}/`) {
+			throw new Error(
+				"skill:// supports an exact name only; paths, queries and fragments are not supported.",
 			);
 		}
 

@@ -2,13 +2,15 @@
 // Read file contents with line-based pagination, two-axis truncation, and
 // hashline anchors for edit targeting. Output includes a [path#4hex] header
 // followed by numbered lines (1:content).
-// Also resolves internal URL schemes: skill://, rule://, memory://, local://,
-// conflict://, and xd://.
+// Also resolves registered internal URLs and xd:// virtual devices.
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import type { Tool, ToolContext } from "@logician/log-core";
-import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/index.js";
+import {
+	extractInternalUrlScheme,
+	InternalUrlRouter,
+} from "../../runtime/bridge/support/internal-urls/index.js";
 import type { ResolveContext } from "../../runtime/bridge/support/internal-urls/types.js";
 import { parseConflictBlocks } from "./support/conflict-resolution.js";
 import {
@@ -52,7 +54,10 @@ export const read_file: Tool = {
 	parameters: {
 		type: "object",
 		properties: {
-			path: { type: "string", description: "File path to read" },
+			path: {
+				type: "string",
+				description: "File path or internal resource URL to read",
+			},
 			offset: {
 				type: "number",
 				description: "1-based line number to start reading from",
@@ -75,8 +80,9 @@ export const read_file: Tool = {
 	},
 	execute: async (args, ctx): Promise<string> => {
 		const filePath = String(args.path);
+		const scheme = extractInternalUrlScheme(filePath);
 		// xd:// virtual device listing / docs.
-		if (filePath.toLowerCase() === "xd://") {
+		if (scheme === "xd" && filePath.length === "xd://".length) {
 			const devices = listXdDevices();
 			if (devices.size === 0) {
 				return "No xd:// devices are mounted in this session. Check your configuration.";
@@ -86,14 +92,14 @@ export const read_file: Tool = {
 			);
 			return `# Available xd:// devices\n\nVirtual tool devices mounted behind write_file dispatch:\n\n${lines.join("\n")}`;
 		}
-		if (filePath.toLowerCase().startsWith("xd://")) {
+		if (scheme === "xd") {
 			const deviceName = filePath.slice("xd://".length);
 			const docs = readXdDeviceDocs(deviceName);
 			if (docs !== null) return docs;
 			return `Unknown xd:// device: ${deviceName}. Run read_file with path="xd://" to list available devices.`;
 		}
-		// Internal URL schemes (skill://, rule://, memory://, local://, conflict://).
-		if (isInternalUrl(filePath)) {
+		// Recognized links must never fall through to filesystem reads.
+		if (scheme) {
 			return resolveInternalUrl(filePath, ctx);
 		}
 		const resolved = resolveReadPath(filePath, ctx.cwd || process.cwd());
@@ -213,23 +219,6 @@ function formatConflictNotice(
 	lines.push("[Use :conflicts selector to view full conflict blocks]");
 	return "\n" + lines.join("\n");
 }
-const INTERNAL_SCHEMES: Record<string, true> = {
-	skill: true,
-	rule: true,
-	memory: true,
-	local: true,
-	history: true,
-	mcp: true,
-	log: true,
-	ssh: true,
-	artifact: true,
-};
-/** Check if a path is an internal URL scheme. */
-function isInternalUrl(path: string): boolean {
-	const m = path.match(/^([a-z][a-z0-9+.-]*):\/\//i);
-	return m !== null && m[1].toLowerCase() in INTERNAL_SCHEMES;
-}
-
 /** Resolve an internal URL to its content. */
 async function resolveInternalUrl(
 	input: string,
