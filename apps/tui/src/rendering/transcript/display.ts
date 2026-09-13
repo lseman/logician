@@ -566,7 +566,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		// every 150ms, so skipping the cut here meant every one of those frames
 		// carried the full, unbounded transcript back through the render/diff
 		// pipeline for as long as a turn was in flight.
-		const { visibleBuffer, visibleStart } = this.truncateToRenderedLines(
+		const { visibleBuffer } = this.truncateToRenderedLines(
 			renderedLines,
 			turnStartLines,
 			padToWidth,

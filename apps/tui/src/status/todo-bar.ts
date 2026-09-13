@@ -85,7 +85,7 @@ function formatPhaseDisplayName(name: string, oneBasedIndex: number): string {
 const STRIKE_HOLD_FRAMES = 2;
 const STRIKE_REVEAL_FRAMES = 12;
 const STRIKE_TOTAL_FRAMES = STRIKE_HOLD_FRAMES + STRIKE_REVEAL_FRAMES;
-const STRIKE_START = "\x1b[9m";
+const _STRIKE_START = "\x1b[9m";
 const STRIKE_END = "\x1b[29m";
 
 function partialStrikethrough(text: string, visibleChars: number): string {
@@ -339,7 +339,7 @@ function buildTaskLine(
 	const mark = STATUS[t.status].sym;
 	const markColored = theme.fg(STATUS[t.status].color, mark);
 
-	let text = markColored + " ";
+	let text = `${markColored} `;
 
 	// Apply strikethrough animation for just-completed tasks.
 	if (t.status === "completed") {

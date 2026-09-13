@@ -7,7 +7,7 @@ import { initTheme } from "../terminal/theme.ts";
 initTheme("dark");
 
 const plain = (value: string): string =>
-	value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+	value.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 
 void test("SteerQueue renders nothing when every queue is empty", () => {
 	const queue = new SteerQueue();

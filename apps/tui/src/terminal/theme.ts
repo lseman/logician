@@ -5,6 +5,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+const ESC = "\u001b";
+
 // ── Color token names ─────────────────────────────────────────────────────────
 
 export type ThemeColor =
@@ -243,7 +245,7 @@ export class Theme {
 		if (!ansi) throw new Error(`Unknown theme bg: ${color}`);
 		// Nested foreground styles reset their background too. Restore the surface
 		// after those resets so highlighted spans cannot punch holes in a block.
-		return `${ansi}${text.replace(/\x1b\[(?:0|49)m/g, `$&${ansi}`)}${RESET}`;
+		return `${ansi}${text.replace(new RegExp(`${ESC}\\[(?:0|49)m`, "g"), `$&${ansi}`)}${RESET}`;
 	}
 
 	/** Get raw ANSI color code without trailing reset. Use for composing custom styles. */

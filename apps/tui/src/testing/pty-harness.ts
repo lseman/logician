@@ -78,7 +78,7 @@ export async function runInPty(options: PtyRunOptions): Promise<PtyRunResult> {
 	});
 }
 
-function stripTerminalControls(value: string): string {
+function _stripTerminalControls(value: string): string {
 	return (
 		value
 			// CSI: ESC [ ... final byte

@@ -4,14 +4,32 @@ import type { RuntimeEvent } from "@logician/log-core/events";
 import type { HarnessPromptOptions } from "@logician/log-core/session";
 import { AgentRuntime } from "../../runtime/bridge/agent-bridge.ts";
 
-function bypassStartup(internal: Record<string, unknown>): void {
+interface InternalState {
+	sessions: { replace: (s: Record<string, unknown>) => void };
+	emit: (event: RuntimeEvent) => void;
+	toolRouter: {
+		isMcpLoaded: () => boolean;
+		loadMcpToolsOnce: () => Promise<void>;
+		mcpRegistry?: unknown;
+		skillsContext?: unknown;
+		getSkillsContext?: () => unknown;
+		loadedSkills?: unknown;
+	};
+	config: { systemPrompt: string };
+	currentTaskState?: unknown;
+	harness?: unknown;
+	plugins?: Record<string, unknown>;
+	loadMcpToolsOnce: () => Promise<void>;
+}
+
+function bypassStartup(internal: InternalState): void {
 	const plugins = internal.plugins as Record<string, unknown> | undefined;
 	if (plugins) plugins.ensureStarted = async () => {};
 }
 
 function installSession(
-	internal: Record<string, any>,
-	session: Record<string, any>,
+	internal: InternalState,
+	session: Record<string, unknown>,
 ): void {
 	internal.sessions.replace(session);
 }
@@ -54,7 +72,7 @@ void test("bridge scopes correlation to one run and preserves the conversation i
 		runtimeHooksEnabled: false,
 	});
 	bridge.useConversationSession("session-correlation");
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	installSession(internal, {
@@ -111,7 +129,7 @@ void test("setThinkingLevel propagates to the live harness", () => {
 		runtimeHooksEnabled: false,
 	});
 	const harnessLevels: string[] = [];
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	installSession(internal, {
 		models: {
 			setThinkingLevel: (level: string) => harnessLevels.push(level),
@@ -130,9 +148,9 @@ void test("setSteeringInterrupt propagates to the live harness", () => {
 		runtimeHooksEnabled: false,
 	});
 	const harnessValues: boolean[] = [];
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	installSession(internal, {
-		configure: (patch: any) => {
+		configure: (patch: Record<string, unknown>) => {
 			if (patch.steeringInterrupt !== undefined) {
 				harnessValues.push(patch.steeringInterrupt);
 			}
@@ -210,7 +228,7 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 		runtimeHooksEnabled: false,
 		autoStartMcp: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	// Mock isMcpLoaded to return false (MCP still loading)
 	internal.toolRouter.isMcpLoaded = () => false;
@@ -248,7 +266,7 @@ void test("MCP discovery never blocks the first turn — it loads in the backgro
 		runtimeHooksEnabled: false,
 		autoStartMcp: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	let resolveLoad!: () => void;
 	internal.toolRouter.isMcpLoaded = () => false;
@@ -283,7 +301,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		runtimeHooksEnabled: false,
 		autoStartMcp: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	internal.toolRouter.mcpRegistry = {
 		load: async () => ({
 			tools: [],
@@ -312,7 +330,7 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		runtimeHooksEnabled: false,
 		autoStartMcp: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	internal.toolRouter.skillsContext =
 		"<available-skills>skill catalog</available-skills>";
 	internal.toolRouter.mcpRegistry = {
@@ -369,7 +387,7 @@ void test("malformed startup hook messages do not prevent initialization", () =>
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 
 	internal.plugins.applyContext({
 		additional_contexts: ["valid additional context"],
@@ -394,7 +412,7 @@ void test("/context preserves complete long messages and tool results", () => {
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	const longUserMessage = `user-start\n${"u".repeat(2500)}\nuser-end`;
 	const longToolResult = `tool-start\n${"t".repeat(2500)}\ntool-end`;
 	installSession(internal, {
@@ -422,7 +440,7 @@ void test("/context omits an empty orient task state", () => {
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	internal.currentTaskState = {
 		objective: "hi",
 		phase: "orient",
@@ -444,7 +462,7 @@ void test("/context omits terminal handoff state", () => {
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	internal.currentTaskState = {
 		objective: "hi",
 		phase: "handoff",
@@ -475,7 +493,7 @@ void test("loaded skills are exposed as a persistent discovery catalog", async (
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	// Inject skills context via the toolRouter
 	internal.toolRouter.getSkillsContext = () =>
@@ -499,7 +517,7 @@ void test("strongly relevant skills are activated as request-scoped context", as
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	internal.toolRouter.loadedSkills = [
@@ -558,7 +576,7 @@ void test("a preformatted explicit skill invocation is not injected twice", asyn
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	internal.toolRouter.loadedSkills = [
@@ -597,7 +615,7 @@ void test("automatic continuation reuses the current system prompt", async () =>
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	const originalSystemPrompt = internal.config.systemPrompt;
 	internal.config.systemPrompt =
@@ -634,7 +652,7 @@ void test("sendMessage rejects when the turn fails", async () => {
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	// Mock session to simulate provider failure
@@ -656,7 +674,7 @@ void test("cancel resolves only after abort settlement and returns recoverable q
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	let settled = false;
 	installSession(internal, {
 		abort: async () => {
@@ -686,7 +704,7 @@ void test("core iterations reconcile output without completing the UI turn early
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 
@@ -699,11 +717,11 @@ void test("core iterations reconcile output without completing the UI turn early
 			internal.config.onEvent({
 				type: "message_update",
 				message: { role: "assistant", content: "First iteration" },
-			} as any);
+			} as InternalState);
 			internal.config.onEvent({
 				type: "message_update",
 				message: { role: "assistant", content: "Final response" },
-			} as any);
+			} as InternalState);
 		},
 		getQueues: () => ({ nextTurn: [] }),
 	});
@@ -735,7 +753,7 @@ void test("queued replacement turn reaches READY only after its stream ends", as
 		model: "test",
 		runtimeHooksEnabled: false,
 	});
-	const internal = bridge as unknown as Record<string, any>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 	internal.toolRouter.isMcpLoaded = () => true;
 	let queued = ["change direction"];

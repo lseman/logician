@@ -39,7 +39,7 @@ function mountInScrollView(
 initTheme("dark");
 
 const plain = (value: string): string =>
-	value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+	value.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 
 void test("transcript renders clear speaker hierarchy and compact tool activity", () => {
 	const display = new TranscriptDisplay();
@@ -167,7 +167,7 @@ void test("tool output cannot inject terminal control sequences", () => {
 	]);
 
 	const rendered = display.render(100).join("\n");
-	assert.doesNotMatch(rendered, /\x1b\[2J|\x1b\]0;/);
+	assert.doesNotMatch(rendered, new RegExp("\u001b\\[2J|\\u001b\\]0;", "g"));
 	assert.match(plain(rendered), /safe text visible/);
 });
 
@@ -832,7 +832,7 @@ void test("skill activations render as a compact dedicated status line", () => {
 		/✦ NOTICE Skills {2}TypeScript Debugging · matched “TypeScript error”/,
 	);
 	assert.doesNotMatch(output, /Skills:/);
-	assert.match(rendered, /\x1b\[/);
+	assert.match(rendered, new RegExp("\u001b\\["));
 });
 
 void test("a steered continuation-nudge chunk renders as NOTICE, not YOU", () => {
@@ -1355,7 +1355,7 @@ void test("expanded subagent streams render fenced code with syntax highlighting
 
 	assert.match(plain(rendered), /Found this/);
 	assert.match(plain(rendered), /const answer = 42/);
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
 });
 
 void test("expanded agent progress is never character-truncated", () => {
@@ -1484,7 +1484,7 @@ void test("expanded completed subagent keeps its streaming transcript", () => {
 	assert.match(output, /Inspecting files/);
 	assert.match(output, /const ok = true/);
 	assert.match(output, /Audit complete/);
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
 });
 
 void test("expanded completed subagent does not repeat its final report", () => {
@@ -1568,8 +1568,8 @@ void test("collapsed completed subagent formats its final report as markdown", (
 	const renderedExpanded = display.render(100).join("\n");
 	const outputExpanded = plain(renderedExpanded);
 	assert.match(outputExpanded, /Approved.*zero errors/);
-	assert.match(renderedExpanded, /\x1b\[1mApproved/);
-	assert.match(renderedExpanded, /\x1b\[38;5;\d+mconst/);
+	assert.match(renderedExpanded, new RegExp("\u001b\\[1mApproved"));
+	assert.match(renderedExpanded, new RegExp("\u001b\\[38;5;\\d+mconst"));
 });
 
 void test("post-edit diagnostics render as a dedicated formatted block", () => {
@@ -2685,7 +2685,7 @@ void test("expanded spawn_agents keeps concurrent text streams attributed", () =
 
 	assert.match(output, /1\. explorer.*Inspect API[\s\S]*API stream/);
 	assert.match(output, /2\. reviewer.*Inspect tests[\s\S]*Test stream/);
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
 });
 
 void test("spawn_agents shows partial failures and expanded reports", () => {
@@ -2783,7 +2783,7 @@ void test("edited TypeScript previews are syntax highlighted", () => {
 	]);
 	const rendered = display.render(100).join("\n");
 
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
 	assert.match(plain(rendered), /const answer = "yes";/);
 });
 

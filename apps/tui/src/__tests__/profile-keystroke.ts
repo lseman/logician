@@ -71,7 +71,7 @@ function genTurn(turnIdx: number, chunkSize: number): Turn {
 	chunks.push({
 		seq: chunks.length,
 		type: "tool",
-		tool: toolResult as any,
+		tool: toolResult as import("@logician/log-runtime/sessions").ToolExecution,
 		isComplete: true,
 	});
 	return {

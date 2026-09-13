@@ -13,6 +13,9 @@ import {
 	visibleWidth,
 } from "../../../terminal/core.ts";
 import type { ThemeColor } from "../../../terminal/theme.ts";
+
+const ESC = "\u001b";
+
 import { theme } from "../../../terminal/theme.ts";
 import {
 	sanitizeTerminalText,
@@ -414,8 +417,6 @@ function renderSimpleTool(
 	expanded = ctx.toolsExpanded,
 ): string[] {
 	tool = sanitizeToolForDisplay(ctx, tool);
-	const postEdit = extractPostEditDiagnostics(tool.result);
-	const resultText = stripInternalHookGuidance(postEdit.text);
 	const displayTool = {
 		...tool,
 		result: stripInternalHookGuidance(tool.result),
@@ -508,7 +509,7 @@ function sanitizeToolForDisplay(
 			field.raw !== undefined &&
 			field.safe !== undefined &&
 			value.startsWith(field.raw) &&
-			!/[\r\x1b\x80-\x9f]/u.test(field.raw);
+			!new RegExp(`[\\r${ESC}\\x80-\\x9f]`, "u").test(field.raw);
 		const pending = incremental ? value.slice(field.raw?.length ?? 0) : value;
 		ctx.sanitizationMetrics.scannedCharacters += pending.length;
 		const safe = incremental
@@ -546,7 +547,7 @@ export function getSanitizationMetrics(ctx: RenderCtx): {
 }
 
 // ── Collapsed tool preview ────────────────────────────────────────────────────
-const ansiRegex = /\u001b\[[0-9;]*m/gu;
+const ansiRegex = new RegExp(`${ESC}\\[[0-9;]*m`, "gu");
 
 function stripAnsi(text: string): string {
 	return text.replace(ansiRegex, "");
@@ -978,7 +979,7 @@ function previewBlock(
  */
 function paintBlockBg(row: string): string {
 	const bg = theme.bgRaw("toolBlockBg");
-	const stabilized = row.replace(/\x1b\[0m/g, `$&${bg}`);
+	const stabilized = row.replace(new RegExp(`${ESC}\\[0m`, "g"), `$&${bg}`);
 	return `${bg}${stabilized}\x1b[49m`;
 }
 

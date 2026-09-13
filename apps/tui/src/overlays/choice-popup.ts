@@ -22,15 +22,6 @@ export interface ChoiceItem {
 	description?: string;
 }
 
-interface ChoicePopupOptions {
-	/** The question id (unique identifier for the agent to track). */
-	questionId?: string;
-	/** The question being asked. */
-	question: string;
-	/** List of selectable options. */
-	choices: ChoiceItem[];
-}
-
 export interface ChoiceQuestion {
 	id: string;
 	header?: string;

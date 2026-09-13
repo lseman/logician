@@ -18,7 +18,7 @@ void test("wrapText preserves color across every wrapped line, not just the firs
 	for (const line of lines) {
 		assert.match(
 			line,
-			/^\x1b\[38;5;8m/,
+			new RegExp("^\\u001b\\[38;5;8m"),
 			`every wrapped line should reopen the color: ${JSON.stringify(line)}`,
 		);
 	}
@@ -43,7 +43,7 @@ void test("wrapText never splits a word mid-character when it fits on its own li
 void test("wrapText does not duplicate color codes when hard-wrapping a single long word", () => {
 	const lines = wrapText(`${COLOR}${"x".repeat(60)}${RESET}`, 20);
 	for (const line of lines) {
-		const opens = line.match(/\x1b\[38;5;8m/g) ?? [];
+		const opens = line.match(new RegExp("\u001b\\[38;5;8m", "g")) ?? [];
 		assert.equal(
 			opens.length,
 			1,
@@ -60,7 +60,7 @@ void test("wrapText carries color from a hard-wrapped word into the words that f
 	for (const line of lines) {
 		assert.match(
 			line,
-			/^\x1b\[38;5;8m/,
+			new RegExp("^\\u001b\\[38;5;8m"),
 			`line should still be colored: ${JSON.stringify(line)}`,
 		);
 	}
@@ -81,7 +81,7 @@ void test("wrapText carries color across explicit newlines", () => {
 		30,
 	);
 	for (const line of lines) {
-		assert.match(line, /^\x1b\[38;5;8m/);
+		assert.match(line, new RegExp("^\\u001b\\[38;5;8m"));
 	}
 });
 
@@ -91,8 +91,8 @@ void test("wrapText combines multiple active codes (bold + color) without duplic
 		35,
 	);
 	for (const line of lines) {
-		const boldOpens = line.match(/\x1b\[1m/g) ?? [];
-		const colorOpens = line.match(/\x1b\[38;5;8m/g) ?? [];
+		const boldOpens = line.match(new RegExp("\u001b\\[1m", "g")) ?? [];
+		const colorOpens = line.match(new RegExp("\u001b\\[38;5;8m", "g")) ?? [];
 		assert.equal(
 			boldOpens.length,
 			1,

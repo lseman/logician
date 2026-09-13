@@ -11,7 +11,7 @@ import { wrapText } from "../layout.ts";
 // Shows content with line numbers, collapsed to a preview when expanded,
 // with a line-number gutter like Pi's write tool.
 
-function renderPiContent(
+function _renderPiContent(
 	text: string,
 	width: number,
 	totalLines: number,

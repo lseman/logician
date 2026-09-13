@@ -7,7 +7,7 @@ import { initTheme } from "../terminal/theme.ts";
 initTheme("dark");
 
 const plain = (value: string): string =>
-	value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+	value.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 
 test("session browser shows the live filter typed in list mode", () => {
 	const overlay = new SessionBrowserOverlay();

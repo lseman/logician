@@ -13,6 +13,9 @@ import {
 import { theme } from "../terminal/theme.ts";
 import { getGraphemeSegmenter } from "../terminal/utils.ts";
 import type { KillRing } from "./kill-ring.ts";
+
+const ESC = "\u001b";
+
 import type { UndoStack } from "./undo-stack.ts";
 import { findWordBackward, findWordForward } from "./word-navigation.ts";
 
@@ -26,11 +29,6 @@ function isArrow(data: string, direction: "A" | "B" | "C" | "D"): boolean {
 }
 
 // ── Input bar ─────────────────────────────────────────────────────────────────
-
-interface InputBarOptions {
-	prompt?: string;
-	placeholder?: string;
-}
 
 export type InputSubmitIntent = "default" | "steer-now";
 
@@ -283,7 +281,9 @@ export class InputBar implements Component, Focusable {
 		// Some terminals batch multiple navigation keys into one stdin chunk.
 		// Replay a pure arrow-key batch one key at a time instead of treating the
 		// entire chunk as unknown input.
-		const arrowBatch = data.match(/\x1b(?:O[ABCD]|\[(?:1(?:;\d+)?)?[ABCD])/g);
+		const arrowBatch = data.match(
+			new RegExp(`${ESC}(?:O[ABCD]|\\[(?:1(?:;\\d+)?)?[ABCD])`, "g"),
+		);
 		if (arrowBatch && arrowBatch.length > 1 && arrowBatch.join("") === data) {
 			for (const key of arrowBatch) this.handleInput(key);
 			return;

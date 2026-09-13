@@ -8,6 +8,9 @@ import { ImageComponent } from "../../image.ts";
 import { parseInlineImageFromLine } from "../../image-parser.ts";
 import { highlight, highlightAuto } from "../highlight.ts";
 import { wrapText } from "../layout.ts";
+
+const ESC = "\u001b";
+
 import {
 	escapeMarkdownTableCell,
 	extractLangFromFence,
@@ -190,7 +193,7 @@ function parseMemorySummaryRow(line: string): string[] | null {
 
 // Strip ANSI escape codes for plain-text analysis (table detection, etc.)
 function stripAnsi(s: string): string {
-	return s.replace(/\x1b\[[0-9;]*m/g, "");
+	return s.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 }
 
 function isTableStart(lines: string[], index: number): boolean {

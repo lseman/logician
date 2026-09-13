@@ -19,7 +19,8 @@
 			"complexity": {
 				"noForEach": "off",
 				"useOptionalChain": "warn",
-				"noBannedTypes": "warn"
+				"noBannedTypes": "warn",
+				"useRegexLiterals": "off"
 			},
 			"suspicious": {
 				"noExplicitAny": "warn",

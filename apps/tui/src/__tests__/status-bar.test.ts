@@ -57,7 +57,9 @@ void describe("StatusBar", () => {
 			runtimeRepair: "acceptance",
 			activeSubagents: 2,
 		});
-		const line = bar.render(220)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const line = bar
+			.render(220)[0]
+			.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 		assert.doesNotMatch(line, /verify/);
 		assert.match(line, /repair acceptance/);
 		assert.match(line, /agents 2/);
@@ -67,7 +69,9 @@ void describe("StatusBar", () => {
 		setupTheme();
 		const bar = new StatusBar(createDefaultConfig());
 		bar.update({ runPhase: "turn" });
-		const line = bar.render(120)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const line = bar
+			.render(120)[0]
+			.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 		assert.doesNotMatch(line, /◈ turn/);
 	});
 
@@ -78,7 +82,9 @@ void describe("StatusBar", () => {
 			virtualEnv: "/workspace/logician/.venv",
 			virtualEnvPythonVersion: "3.12.4",
 		});
-		const plain = bar.render(160)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = bar
+			.render(160)[0]
+			.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 		assert.ok(plain.includes("venv: .venv · py3.12.4"));
 
 		bar.update({ virtualEnv: undefined });
@@ -122,7 +128,9 @@ void describe("StatusBar", () => {
 			contextMaxTokens: 100000,
 			executionProfile: "minimal",
 		});
-		const plain = bar.render(160)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = bar
+			.render(160)[0]
+			.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 		assert.ok(plain.includes("exec: minimal"));
 	});
 
@@ -137,7 +145,9 @@ void describe("StatusBar", () => {
 			workflowMode: "act",
 		});
 		const plain = () =>
-			bar.render(160)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+			bar
+				.render(160)[0]
+				.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 		assert.match(plain(), /\bact\b/);
 		bar.update({ workflowMode: "plan" });
 		assert.match(plain(), /\bplan\b/);
@@ -222,7 +232,10 @@ void describe("StatusBar", () => {
 			inferenceMode: "thinking-general",
 		});
 		const lines = bar.render(120);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = lines[0].replace(
+			new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"),
+			"",
+		);
 		assert.ok(plain.includes("THINK GEN") || plain.includes("mode:"));
 	});
 
@@ -251,7 +264,10 @@ void describe("StatusBar", () => {
 		});
 		const lines = bar.render(300);
 		// Debug: log the rendered line
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = lines[0].replace(
+			new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"),
+			"",
+		);
 		assert.ok(
 			lines[0].includes("reasoner:"),
 			`Expected line to include "reasoner:", got: ${plain}`,
@@ -415,7 +431,10 @@ void describe("StatusBar", () => {
 			completionTokens: 200,
 		});
 		const lines = bar.render(160);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = lines[0].replace(
+			new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"),
+			"",
+		);
 		assert.ok(plain.includes("↑"));
 		assert.ok(plain.includes("↓"));
 		assert.ok(plain.includes("4.8k"));
@@ -433,7 +452,10 @@ void describe("StatusBar", () => {
 			promptTokens: 4800,
 		});
 		const lines = bar.render(160);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = lines[0].replace(
+			new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"),
+			"",
+		);
 		assert.ok(plain.includes("↑"));
 		assert.ok(plain.includes("–"));
 	});
@@ -448,7 +470,10 @@ void describe("StatusBar", () => {
 			contextMaxTokens: 150000,
 		});
 		const lines = bar.render(120);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = lines[0].replace(
+			new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"),
+			"",
+		);
 		assert.ok(!plain.includes("↑"));
 		assert.ok(!plain.includes("↓"));
 	});
@@ -569,7 +594,9 @@ void describe("configurable footer widgets", () => {
 			text: "RIGHT",
 			layout: { row: 0, align: "right" },
 		});
-		const line = bar.render(50)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const line = bar
+			.render(50)[0]
+			.replace(new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"), "");
 		assert.ok(line.startsWith("LEFT"));
 		assert.ok(line.indexOf("MIDDLE") >= 20 && line.indexOf("MIDDLE") <= 24);
 		assert.ok(line.endsWith("RIGHT"));
@@ -592,7 +619,10 @@ void describe("configurable footer widgets", () => {
 			layout: { row: 0, align: "right" },
 		});
 		const line = bar.render(40)[0];
-		const plain = line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		const plain = line.replace(
+			new RegExp("\u001b\\[[0-?]*[ -/]*[@-~]", "g"),
+			"",
+		);
 		assert.ok(plain.startsWith("! build"));
 		assert.ok(plain.endsWith("END"));
 		assert.strictEqual(visibleWidth(line), 40);

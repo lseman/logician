@@ -64,19 +64,28 @@ void describe("config validator", () => {
 	});
 
 	void it("rejects invalid thinkingLevel", () => {
-		const config = { ...validConfig, thinkingLevel: "ultra" as any };
+		const config = {
+			...validConfig,
+			thinkingLevel: "ultra" as "thinkingLevel",
+		};
 		const errors = validateConfig(config);
 		expect(errors.some(e => e.field === "thinkingLevel")).toBeTrue();
 	});
 
 	void it("rejects invalid inferenceMode", () => {
-		const config = { ...validConfig, inferenceMode: "bonkers" as any };
+		const config = {
+			...validConfig,
+			inferenceMode: "bonkers" as "inferenceMode",
+		};
 		const errors = validateConfig(config);
 		expect(errors.some(e => e.field === "inferenceMode")).toBeTrue();
 	});
 
 	void it("rejects invalid queue mode", () => {
-		const config = { ...validConfig, steeringQueueMode: "invalid" as any };
+		const config = {
+			...validConfig,
+			steeringQueueMode: "invalid" as "steeringQueueMode",
+		};
 		const errors = validateConfig(config);
 		expect(errors.some(e => e.field === "steeringQueueMode")).toBeTrue();
 	});

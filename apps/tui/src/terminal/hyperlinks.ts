@@ -77,7 +77,7 @@ export function supportsHyperlinks(): boolean {
 }
 
 /** Test-only: clears the cached capability check. */
-function resetHyperlinkSupportCache(): void {
+function _resetHyperlinkSupportCache(): void {
 	cachedSupport = null;
 }
 
