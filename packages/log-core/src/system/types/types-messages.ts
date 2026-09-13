@@ -37,6 +37,8 @@ export type CompactableMessage = {
 	usage?: Record<string, number>;
 	/** UUID for tree-based entry tracking. */
 	entryId?: string;
+	/** Snapcompact frame archive data, persisted for re-rendering on next compaction. */
+	snapcompact?: Record<string, unknown>;
 };
 
 // ── AgentMessage Abstraction ─────────────────────────────────────────────
@@ -55,6 +57,8 @@ export interface CompactionSummaryMessage {
 	readFiles?: string[];
 	/** Files modified in the compacted history. */
 	modifiedFiles?: string[];
+	/** Snapcompact frame archive data, persisted for re-rendering on next compaction. */
+	snapcompact?: Record<string, unknown>;
 }
 
 /** Branch summary text — emitted after branch recovery. */

@@ -11,6 +11,7 @@ import {
 	OpenAIChatCompletionsAdapter,
 	type ProviderAdapter,
 } from "./provider-adapter.ts";
+import type { RemoteCompactionResult } from "../../runtime/compaction/engine.ts";
 
 // ── Typed backend errors ───────────────────────────────────────────────────
 // The backend classifies provider/network failures at the boundary so the loop
@@ -318,6 +319,23 @@ export interface LLMBackend {
 	withModel(model: string): LLMBackend;
 	/** Clone the backend with both model and provider endpoint when supported. */
 	withEndpoint?(model: string, baseUrl: string): LLMBackend;
+
+	/**
+	 * Remote (server-side) compaction: delegates history condensing to the
+	 * provider's native compact endpoint (/responses/compact, Anthropic compact
+	 * beta, or a custom remoteEndpoint). Returns the provider's compacted
+	 * summary plus any preserve data (replacement history, compaction items).
+	 */
+	remote(
+		messages: Record<string, unknown>[],
+		options?: {
+			endpoint?: string;
+			model?: string;
+			maxTokens?: number;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
+	): Promise<RemoteCompactionResult>;
 
 	/** The model this backend currently targets. */
 	readonly model: string;
@@ -652,5 +670,100 @@ export class OpenAIBackend implements LLMBackend {
 			refusal,
 			usage,
 		};
+	}
+	/** Remote (server-side) compaction implementation — OpenAI /responses/compact. */
+	async remote(
+		messages: Record<string, unknown>[],
+		options: {
+			endpoint?: string;
+			model?: string;
+			maxTokens?: number;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		} = {},
+	): Promise<RemoteCompactionResult> {
+		const {
+			endpoint: customEndpoint,
+			model: compactionModel,
+			maxTokens = 2048,
+			timeoutMs = 30000,
+			signal,
+		} = options;
+
+		const endpoint =
+			customEndpoint ??
+			(this.baseUrl.endsWith("/v1")
+				? `${this.baseUrl}/responses/compact`
+				: `${this.baseUrl}/v1/responses/compact`);
+
+		const model = compactionModel ?? this.model;
+
+		const timeoutSignal = AbortSignal.timeout(timeoutMs);
+		const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
+		const body = {
+			model,
+			history: messages,
+			max_input_tokens: (this.model as unknown as number) || 128000,
+			max_output_tokens: maxTokens,
+		};
+
+		const response = await fetch(endpoint, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+			signal: requestSignal,
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Remote compaction failed: ${response.status} ${errorText}`);
+		}
+
+		const result = (await response.json()) as {
+			compaction?: {
+				type: string;
+				encrypted_content?: string;
+				summary?: string;
+			};
+			compaction_summary?: {
+				type: string;
+				summary: string;
+			};
+			usage?: {
+				input_tokens?: number;
+				output_tokens?: number;
+				total_tokens?: number;
+			};
+		};
+
+		// Extract summary from the compaction response
+		const summary =
+			result.compaction_summary?.summary ??
+			result.compaction?.summary ??
+			"Conversation history compacted by provider.";
+
+		// Collect preserve data from the compaction item
+		const preserveData: Record<string, unknown> = {};
+		if (result.compaction) {
+			preserveData.compaction = result.compaction;
+		}
+
+		// Parse token usage
+		const usage: RemoteCompactionResult["usage"] = result.usage
+			? ([
+					["promptTokens", result.usage.input_tokens],
+					["completionTokens", result.usage.output_tokens],
+					["totalTokens", result.usage.total_tokens],
+				] as [string, number | undefined][]).filter((entry): entry is [string, number] => entry[1] !== undefined)
+				.reduce<Record<string, number>>((acc, [key, val]) => {
+					acc[key] = val;
+					return acc;
+				}, {})
+			: undefined;
+
+		return { summary, ...(Object.keys(preserveData).length > 0 ? { preserveData } : {}), usage };
 	}
 }

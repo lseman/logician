@@ -122,3 +122,22 @@ export type {
 	ToolContext,
 	ToolResult,
 } from "./system/types/types-messages.ts";
+// ── Context compaction ──────────────────────────────────────────────────────
+export {
+	compactToFit,
+	microCompactCompactableMessages,
+	pruneHistoricalToolOutputs,
+	shakeCompaction,
+	type CompactionMode,
+	type CompactionSettings,
+	type CompactToFitResult,
+	type CompactionSummarizer,
+} from "./runtime/compaction/engine.ts";
+export {
+	compact as snapcompact,
+	type Archive,
+	type CompactResult,
+	type Frame,
+	type SerializeOptions,
+	PRESERVE_KEY,
+} from "./runtime/compaction/snapcompact.ts";

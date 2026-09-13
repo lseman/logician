@@ -12,6 +12,9 @@ class FakeBackend implements LLMBackend {
 		toolCalls: [],
 		stopReason: "stop" as const,
 	});
+	async remote(): Promise<import("../../runtime/compaction/engine.ts").RemoteCompactionResult> {
+		return { summary: "remote", preserveData: {} };
+	}
 	withModel(_model: string): LLMBackend {
 		return new FakeBackend();
 	}

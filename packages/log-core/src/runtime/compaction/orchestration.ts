@@ -41,7 +41,7 @@ export async function runCompaction(
 	tokensBefore: number,
 	options: {
 		reason: "auto" | "manual";
-		mode?: "llm" | "shake" | "auto" | undefined;
+		mode?: "llm" | "shake" | "auto" | "remote" | undefined;
 		presetSummary?: string | undefined;
 		temperature?: number | undefined;
 		maxTokens?: number | undefined;
@@ -83,6 +83,29 @@ export async function runCompaction(
 			messages: shakeResult.messages,
 			tokensBefore,
 			tokensAfter: shakeTokens,
+		};
+	}
+
+	// Remote mode: use provider's native compaction endpoint
+	if (mode === "remote") {
+		const remoteSummarizer = async (older: CompactableMessage[]) => {
+			const result = await backend.remote(older as unknown as Record<string, unknown>[], {
+				maxTokens: options.maxTokens ?? 2048,
+			});
+			return result.summary;
+		};
+
+		const remoteResult = await compactToFit(shakeResult.messages, {
+			triggerTokens: 0,
+			remoteSummarizer,
+			settings: { mode: "remote" },
+		});
+
+		return {
+			changed: remoteResult.changed,
+			messages: remoteResult.messages,
+			tokensBefore,
+			tokensAfter: remoteResult.tokensAfter,
 		};
 	}
 

@@ -7,6 +7,7 @@ import type {
 	LLMBackend,
 	LLMResponse,
 } from "../capabilities/provider/backend.ts";
+import type { RemoteCompactionResult } from "../runtime/compaction/engine.ts";
 
 export type Responder = (
 	messages: Record<string, unknown>[],
@@ -38,5 +39,15 @@ export class FakeBackend implements LLMBackend {
 		const responder = this.responders.shift();
 		if (!responder) return textResponse("(out of scripted responses)");
 		return responder(messages, options);
+	}
+
+	async remote(_messages: Record<string, unknown>[], _options?: {
+		endpoint?: string;
+		model?: string;
+		maxTokens?: number;
+		timeoutMs?: number;
+		signal?: AbortSignal;
+	}): Promise<RemoteCompactionResult> {
+		return { summary: "[remote compaction not configured]", preserveData: {} };
 	}
 }

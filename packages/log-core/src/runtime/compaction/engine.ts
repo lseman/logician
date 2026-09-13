@@ -12,6 +12,7 @@
 // - Usage metrics: tokensBefore / tokensAfter on compaction results
 
 import { randomUUID } from "node:crypto";
+import { compact as snapcompact, type Frame, type FrameConfig, computeFrameTokenOverhead } from "./snapcompact.ts";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AgentMessage,
@@ -23,6 +24,31 @@ import { serializeConversation } from "./serialization.ts";
 // ============================================================================
 // Types
 // ============================================================================
+// ============================================================================
+export interface RemoteCompactionOptions {
+	/** Provider-specific compaction endpoint. When unset, uses the provider's native endpoint (e.g. /responses/compact for OpenAI). */
+	endpoint?: string;
+	/** Model to use for compaction. Falls back to the current model. */
+	model?: string;
+	/** Maximum tokens for the compaction response. */
+	maxTokens?: number;
+	/** Timeout in milliseconds for the remote compaction request. Defaults to 30 seconds. */
+	timeoutMs?: number;
+}
+
+/** Result from a remote (server-side) compaction call. */
+export interface RemoteCompactionResult {
+	/** The compacted summary text returned by the provider. */
+	summary: string;
+	/** Optional preserve data returned by the provider (e.g. replacement history, compaction items). */
+	preserveData?: Record<string, unknown>;
+	/** Token usage reported by the provider, when available. */
+	usage?: {
+		promptTokens?: number | undefined;
+		completionTokens?: number | undefined;
+		totalTokens?: number | undefined;
+	} | undefined;
+}
 
 /** Compaction thresholds and retention settings. */
 export interface CompactionSettings {
@@ -34,10 +60,17 @@ export interface CompactionSettings {
 	protectedMessageCount?: number | undefined;
 	/** Whether to force compaction regardless of current token usage. */
 	force?: boolean | undefined;
+	/** Compaction strategy: "auto" (micro + LLM or inline summary), "snapcompact" (local bitmap frames), "remote" (provider-native server compaction), or "shake" (drop recoverable content). */
+	mode?: "auto" | "snapcompact" | "remote" | "shake";
+	/** Provider-aware frame sizing for snapcompact PNG rendering. */
+	frameOptions?: FrameConfig;
+	/** Remote (server-side) compaction configuration. */
+	remoteCompaction?: RemoteCompactionOptions;
 }
 
 const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
+	mode: "snapcompact",
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
 	contextWindow: 128000,
@@ -100,8 +133,12 @@ function estimateCompressableTokens(
 	} else if (role === "custom") {
 		chars += textContent.length;
 	} else if (role === "branchSummary" || role === "compactionSummary") {
-		const branchMsg = msg as { summary?: string };
+		const branchMsg = msg as { summary?: string; snapcompact?: Record<string, unknown> };
 		chars += branchMsg.summary?.length ?? 0;
+		// Add token overhead for PNG frames stored in snapcompact archive.
+		const archive = branchMsg.snapcompact as { snapcompact?: { frames?: Array<{ data: string }> } } | undefined;
+		const frames = archive?.snapcompact?.frames ?? [];
+		chars += computeFrameTokenOverhead(frames as Frame[]) * 4; // rough char-equiv: 4 chars ≈ 1 token
 	} else {
 		chars += textContent.length;
 	}
@@ -432,9 +469,11 @@ export async function compactToFit(
 		keepRecentMessages?: number | undefined;
 		settings?: Partial<CompactionSettings> | undefined;
 		summarize?: CompactionSummarizer | undefined;
+		/** Remote (server-side) compaction summary function. */
+		remoteSummarizer?: (messages: CompactableMessage[]) => Promise<string>;
 	},
 ): Promise<CompactToFitResult> {
-	const { triggerTokens, keepRecentMessages, settings, summarize } = opts;
+	const { triggerTokens, keepRecentMessages, settings, summarize, remoteSummarizer } = opts;
 	const force = triggerTokens <= 0;
 
 	// Estimate current tokens
@@ -473,6 +512,7 @@ export async function compactToFit(
 		micro.messages,
 		effectiveSettings,
 		summarize,
+		remoteSummarizer,
 	);
 	if (
 		opts.targetTokens === undefined ||
@@ -494,6 +534,7 @@ export async function compactToFit(
 			micro.messages,
 			{ ...effectiveSettings, keepRecentTokens },
 			summarize,
+			remoteSummarizer,
 		);
 		if (attempt.tokensAfter < best.tokensAfter) best = attempt;
 		if (attempt.tokensAfter <= opts.targetTokens) return attempt;
@@ -642,6 +683,7 @@ async function compactToFitFull(
 	messages: CompactableMessage[],
 	settings: CompactionSettings,
 	summarize: CompactionSummarizer | undefined,
+	remoteSummarizer: ((messages: CompactableMessage[]) => Promise<string>) | undefined,
 ): Promise<CompactToFitResult> {
 	// Find the cut point using turn-boundary-aware logic
 	const cutPoint = findCutPoint(
@@ -666,24 +708,84 @@ async function compactToFitFull(
 	const messagesToKeep = messages.slice(cutPoint.firstKeptIndex);
 	const messagesToSummarize = messages.slice(0, cutPoint.firstKeptIndex);
 
-	// Prefer the caller-supplied (typically LLM-based) summarizer; fall back
-	// to the local structured-text summary when omitted or it fails.
-	const summary =
-		(await summarize?.(messagesToSummarize)) ??
-		generateInlineSummary(messagesToSummarize, settings);
+	// Build compacted message list.
+	let compacted: CompactableMessage[];
+	let tokensAfter: number;
+	if (settings.mode === "remote") {
+		// Remote (server-side) compaction: delegate to provider's native endpoint.
+		const summary = await remoteSummarizer?.(messagesToSummarize);
+		const fallbackSummary =
+			summary ??
+			generateInlineSummary(messagesToSummarize, settings);
 
-	// Build compacted message list
-	const compacted: CompactableMessage[] = [
-		{ role: "compactionSummary", content: summary },
-		...messagesToKeep,
-	];
+		compacted = [
+			{ role: "compactionSummary" as const, content: fallbackSummary },
+			...messagesToKeep,
+		];
+		tokensAfter = estimateContextTokens(compacted).tokens;
+	} else if (settings.mode === "snapcompact") {
+		// Snapcompact: local, deterministic bitmap frame rendering with provider-aware sizing.
+		const firstKeptId = messagesToSummarize[messagesToSummarize.length - 1]?.entryId;
+		const frameConfig = settings.frameOptions;
+		const compactOpts: {
+			maxFrames?: number;
+			firstKeptEntryId?: string;
+			shape?: { cols?: number; rows?: number; lineRepeat?: number };
+			serializeOptions?: { provider?: string; render?: boolean };
+			render?: boolean;
+		} = { maxFrames: frameConfig?.maxFrames ?? 40 };
+		if (firstKeptId) compactOpts.firstKeptEntryId = firstKeptId;
+		if (frameConfig) {
+			if (frameConfig.cols || frameConfig.rows) {
+				const shape: { cols?: number; rows?: number } = {};
+				if (frameConfig.cols) shape.cols = frameConfig.cols;
+				if (frameConfig.rows) shape.rows = frameConfig.rows;
+				compactOpts.shape = shape;
+			}
+			if (frameConfig.provider || frameConfig.render !== undefined) {
+				const opts: { provider?: string; render?: boolean } = {};
+				if (frameConfig.provider) opts.provider = frameConfig.provider;
+				if (frameConfig.render !== undefined) opts.render = frameConfig.render;
+				compactOpts.serializeOptions = opts;
+			}
+		}
+		const result = await snapcompact(messagesToSummarize, compactOpts);
+
+		compacted = [
+			{
+				role: "compactionSummary" as const,
+				content: result.summary,
+				timestamp: Date.now(),
+				readFiles: [],
+				modifiedFiles: [],
+				snapcompact: result.preserveData,
+			} as CompactableMessage,
+			...messagesToKeep,
+		];
+		// Account for PNG frame overhead when frames carry base64 image data.
+		const frameOverhead = computeFrameTokenOverhead(result.frames ?? []);
+		tokensAfter = estimateContextTokens(compacted).tokens + frameOverhead;
+	} else {
+		// Prefer the caller-supplied (typically LLM-based) summarizer; fall back
+		// to the local structured-text summary when omitted or it fails.
+		const summary =
+			(await summarize?.(messagesToSummarize)) ??
+			generateInlineSummary(messagesToSummarize, settings);
+
+		compacted = [
+			{ role: "compactionSummary" as const, content: summary },
+			...messagesToKeep,
+		];
+		tokensAfter = estimateContextTokens(compacted).tokens;
+	}
 
 	return {
 		messages: compacted,
 		tokensBefore: estimateContextTokens(messages).tokens,
-		tokensAfter: estimateContextTokens(compacted).tokens,
+		tokensAfter,
 		changed: true,
 	};
+
 }
 
 function extractTouchedFiles(messages: CompactableMessage[]): string[] {

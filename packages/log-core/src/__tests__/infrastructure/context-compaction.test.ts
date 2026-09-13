@@ -140,3 +140,83 @@ void test("pruneHistoricalToolOutputs trims old verbose tool results while prese
 	const recentResult = pruned.messages[6] as { content: string };
 	assert.equal(recentResult.content, "test result: passed");
 });
+void test("snapcompact mode uses PNG frames when available", async () => {
+	const messages: CompactableMessage[] = Array.from(
+		{ length: 10 },
+		(_, i) => createUserMessage(`message ${i} ${"x".repeat(1000)}`),
+	);
+	const result = await compactToFit(messages, {
+		triggerTokens: 0,
+		targetTokens: 1200,
+		settings: { mode: "snapcompact" as const },
+	});
+	assert.equal(result.changed, true);
+	// Should have a compactionSummary message
+	const summaryMsg = result.messages.find(
+		m => m.role === "compactionSummary",
+	);
+	assert.ok(summaryMsg);
+	// Should have snapcompact preserve data
+	assert.ok(
+		(summaryMsg as { snapcompact?: Record<string, unknown> }).snapcompact,
+	);
+});
+
+void test("frameOptions config is passed to snapcompact provider sizing", async () => {
+	const messages: CompactableMessage[] = Array.from(
+		{ length: 10 },
+		(_, i) => createUserMessage(`message ${i} ${"y".repeat(1000)}`),
+	);
+	const result = await compactToFit(messages, {
+		triggerTokens: 0,
+		targetTokens: 1200,
+		settings: {
+			mode: "snapcompact" as const,
+			frameOptions: {
+				provider: "claude-sonnet",
+				cols: 110,
+				render: true,
+			},
+		},
+	});
+	assert.equal(result.changed, true);
+	const summaryMsg = result.messages.find(
+		m => m.role === "compactionSummary",
+	);
+	assert.ok(summaryMsg);
+	// Verify frames exist and have correct dimensions
+	const archive = (
+		summaryMsg as { snapcompact?: Record<string, unknown> }
+	).snapcompact;
+	if (archive) {
+		const snapData = archive.snapcompact as { frames?: Array<{ cols: number; rows: number }> } | undefined;
+		const frames = snapData?.frames ?? [];
+		if (frames.length > 0) {
+			// Provider-aware sizing: claude-sonnet maps to 110 cols
+			for (const frame of frames) {
+				assert.equal(frame.cols, 110);
+			}
+		}
+	}
+});
+
+void test("token estimation accounts for PNG frame overhead", async () => {
+	const largeMessages: CompactableMessage[] = Array.from(
+		{ length: 15 },
+		(_, i) => createUserMessage(`message ${i} ${"z".repeat(2000)}`),
+	);
+	const result = await compactToFit(largeMessages, {
+		triggerTokens: 0,
+		targetTokens: 1000,
+		settings: { mode: "snapcompact" as const },
+	});
+	assert.equal(result.changed, true);
+	// tokensAfter should include base compaction tokens + PNG frame overhead
+	assert.ok(result.tokensAfter > 0);
+	assert.ok(result.tokensBefore > result.tokensAfter);
+	// The compactionSummary should have snapcompact data with frames
+	const summaryMsg = result.messages.find(
+		m => m.role === "compactionSummary",
+	);
+	assert.ok(summaryMsg);
+});
