@@ -110,7 +110,7 @@ test("code surfaces survive nested resets and syntax follows theme switches", ()
 	const bg = theme.bgRaw("mdCodeBlockBg");
 	const nested = theme.bg(
 		"mdCodeBlockBg",
-		theme.fg("text", "first") + " second",
+		`${theme.fg("text", "first")} second`,
 	);
 	expect(nested).toContain(`\x1b[0m${bg} second`);
 	const file = renderFileContent("hello", 80, 1, undefined, true)[0];

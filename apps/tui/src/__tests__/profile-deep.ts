@@ -68,7 +68,7 @@ function genTurn(turnIdx: number, chunkSize: number): Turn {
 	chunks.push({
 		seq: chunks.length,
 		type: "tool",
-		tool: toolResult as any,
+		tool: toolResult,
 		isComplete: true,
 	});
 	return {

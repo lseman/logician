@@ -14,13 +14,14 @@ import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 function formatValue(value: unknown): string {
 	if (value === null || value === undefined) return "[null]";
 	if (typeof value === "string") return value;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	if (typeof value === "number" || typeof value === "boolean")
+		return String(value);
 	if (Array.isArray(value)) {
 		if (value.length === 0) return "[]";
 		if (value.length <= 5) {
 			return JSON.stringify(value, null, 2);
 		}
-		return JSON.stringify(value.slice(0, 5), null, 2) + `\n  ... (${value.length - 5} more items)`;
+		return `${JSON.stringify(value.slice(0, 5), null, 2)}\n  ... (${value.length - 5} more items)`;
 	}
 	if (typeof value === "object") {
 		return JSON.stringify(value, null, 2);
@@ -51,9 +52,12 @@ function parseIssuePath(url: InternalUrl): IssuePathParts | null {
 	if (number && !Number.isFinite(number)) return null;
 
 	const actionStr = rest.length > 1 ? rest[1] : undefined;
-	const action = actionStr === "comments" ? "comments"
-		: actionStr === "sub-issues" ? "sub-issues"
-		: undefined;
+	const action =
+		actionStr === "comments"
+			? "comments"
+			: actionStr === "sub-issues"
+				? "sub-issues"
+				: undefined;
 
 	return { owner, repo, number, action };
 }
@@ -66,7 +70,8 @@ export class IssueProtocolHandler implements ProtocolHandler {
 		if (!parts) {
 			return {
 				url: url.href,
-				content: "# Issues\n\nUse `issue://owner/repo` to list issues or `issue://owner/repo/<number>` to read a specific issue.",
+				content:
+					"# Issues\n\nUse `issue://owner/repo` to list issues or `issue://owner/repo/<number>` to read a specific issue.",
 				contentType: "text/markdown",
 			};
 		}
@@ -75,9 +80,12 @@ export class IssueProtocolHandler implements ProtocolHandler {
 		if (!client) {
 			return {
 				url: url.href,
-				content: "# Issues\n\nGitHub MCP server is not available. Configure the GitHub MCP server to access issues.",
+				content:
+					"# Issues\n\nGitHub MCP server is not available. Configure the GitHub MCP server to access issues.",
 				contentType: "text/markdown",
-				notes: ["Ensure a GitHub MCP server is configured in your MCP configuration."],
+				notes: [
+					"Ensure a GitHub MCP server is configured in your MCP configuration.",
+				],
 			};
 		}
 
@@ -92,15 +100,18 @@ export class IssueProtocolHandler implements ProtocolHandler {
 					direction: "desc",
 					per_page: 30,
 				});
-				const issues = (result as { issues?: Array<Record<string, unknown>> })?.issues
-					?? (result as { items?: Array<Record<string, unknown>> })?.items
-					?? [];
+				const issues =
+					(result as { issues?: Array<Record<string, unknown>> })?.issues ??
+					(result as { items?: Array<Record<string, unknown>> })?.items ??
+					[];
 
-				const lines = (Array.isArray(issues) ? issues : []).map((issue: Record<string, unknown>) => {
-					const num = issue.number ?? issue.issue_number ?? "?";
-					const title = issue.title ?? "Untitled";
-					return `- #${num}: ${title}`;
-				});
+				const lines = (Array.isArray(issues) ? issues : []).map(
+					(issue: Record<string, unknown>) => {
+						const num = issue.number ?? issue.issue_number ?? "?";
+						const title = issue.title ?? "Untitled";
+						return `- #${num}: ${title}`;
+					},
+				);
 				return {
 					url: url.href,
 					content: `# Issues: ${parts.owner}/${parts.repo}\n\n${lines.join("\n") || "No open issues."}`,

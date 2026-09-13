@@ -893,10 +893,12 @@ async function main() {
 				`    avg: ${m.avgMs.toFixed(2)}ms  p50: ${m.p50Ms.toFixed(2)}ms  p95: ${m.p95Ms.toFixed(2)}ms  p99: ${m.p99Ms.toFixed(2)}ms  min: ${m.minMs.toFixed(2)}ms  max: ${m.maxMs.toFixed(2)}ms`,
 			);
 			if (r.details) {
-				const d = r.details as any;
-				if (d.stdDevMs !== undefined) {
+				const d = r.details as Record<string, unknown>;
+				const stdDev = d.stdDevMs as number | undefined;
+				const maxJitter = d.maxJitter as number | undefined;
+				if (stdDev !== undefined) {
 					console.log(
-						`    stdDev: ${d.stdDevMs.toFixed(2)}ms  maxJitter: ${d.maxJitter.toFixed(2)}ms`,
+						`    stdDev: ${stdDev.toFixed(2)}ms  maxJitter: ${maxJitter?.toFixed(2) ?? "n/a"}ms`,
 					);
 				}
 			}
@@ -912,7 +914,9 @@ async function main() {
 		const fullMs =
 			results.find(r => r.scenario === "full_frame")?.metrics.avgMs ?? 0;
 		const consistency = results.find(r => r.scenario === "frame_consistency");
-		const consistencyDetails = consistency?.details as any;
+		const consistencyDetails = consistency?.details as Record<string, unknown>;
+		const maxJitter = consistencyDetails?.maxJitter as number | undefined;
+		const stdDev = consistencyDetails?.stdDevMs as number | undefined;
 
 		console.log(
 			`  Hot render (cache hit):       ${hotMs.toFixed(2)}ms — target: <1ms`,
@@ -923,12 +927,14 @@ async function main() {
 		console.log(
 			`  Full frame (layout+diff):     ${fullMs.toFixed(2)}ms — target: <16ms (60fps)`,
 		);
-		if (consistencyDetails) {
+		if (maxJitter !== undefined) {
 			console.log(
-				`  Frame jitter (p99-p50):       ${consistencyDetails.maxJitter.toFixed(2)}ms — target: <2ms`,
+				`  Frame jitter (p99-p50):       ${maxJitter.toFixed(2)}ms — target: <2ms`,
 			);
+		}
+		if (stdDev !== undefined) {
 			console.log(
-				`  Frame stdDev:                 ${consistencyDetails.stdDevMs.toFixed(2)}ms — target: <1ms`,
+				`  Frame stdDev:                 ${stdDev.toFixed(2)}ms — target: <1ms`,
 			);
 		}
 		console.log();

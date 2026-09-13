@@ -10,7 +10,7 @@ import { getMcpRegistryInstance } from "../../../../capabilities/mcp/mcp-server-
 export function findGithubClient() {
 	const registry = getMcpRegistryInstance();
 	if (!registry) return null;
-	return registry.clients.find(c =>
-		c.name.toLowerCase().includes("github"),
-	) ?? null;
+	return (
+		registry.clients.find(c => c.name.toLowerCase().includes("github")) ?? null
+	);
 }

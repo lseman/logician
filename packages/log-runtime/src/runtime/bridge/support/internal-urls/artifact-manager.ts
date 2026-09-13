@@ -29,7 +29,7 @@ async function writeArtifact(
 	filePath: string,
 	content: string,
 ): Promise<number> {
-	const tmpFile = filePath + `.tmp.${process.pid}.${Date.now()}`;
+	const tmpFile = `${filePath}.tmp.${process.pid}.${Date.now()}`;
 	const contentBytes = Buffer.byteLength(content, "utf-8");
 	await fs.writeFile(tmpFile, content, "utf-8");
 	const stat = await fs.stat(tmpFile);
