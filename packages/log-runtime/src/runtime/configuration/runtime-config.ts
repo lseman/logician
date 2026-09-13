@@ -160,6 +160,7 @@ export function resolveRuntimeConfig(
 			fffgrepEnabled: configBool(config.fffgrepEnabled, true),
 			autoRetryEnabled: configBool(config.autoRetryEnabled, true),
 			xdevEnabled: configBool(config.tools?.xdev, true),
+			todoEnabled: configBool(config.todoEnabled, false),
 			maxRetries: configNumber(config.maxRetries),
 			retryBaseDelayMs: configNumber(config.retryBaseDelayMs),
 			turnTimeoutMs: configNumber(config.turnTimeoutMs),

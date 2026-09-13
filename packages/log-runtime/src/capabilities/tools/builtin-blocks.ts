@@ -17,6 +17,10 @@ import {
 import { rag_tools } from "../rag/index.ts";
 import { todo_tool } from "../tasks/todo.ts";
 
+interface BuiltinToolsOptions {
+	todoEnabled?: boolean;
+}
+
 export interface SubagentToolDeps {
 	config: () => AgentConfig;
 	backend: LLMBackend;
@@ -28,8 +32,11 @@ export interface SubagentToolDeps {
 }
 
 /** Get all built-in tools as an array. */
-export function getBuiltInTools(): Tool[] {
-	return [todo_tool, ask_user, ...rag_tools];
+export function getBuiltInTools(opts: BuiltinToolsOptions = {}): Tool[] {
+	const tools: Tool[] = [];
+	if (opts.todoEnabled !== false) tools.push(todo_tool);
+	tools.push(ask_user, ...rag_tools);
+	return tools;
 }
 
 /** Get subagent tools with dependencies. */

@@ -130,6 +130,7 @@ export interface AgentBridgeOptions {
 	graphicianEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	xdevEnabled?: boolean;
+	todoEnabled?: boolean;
 	autoRetryEnabled?: boolean;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;

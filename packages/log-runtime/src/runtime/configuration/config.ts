@@ -73,6 +73,7 @@ const KNOWN_KEYS = new Set([
 	"maxParallelAgents",
 	"cwd",
 	"truncation",
+	"todoEnabled",
 	"transcriptMaxTurns",
 	"transcriptMaxRenderedLines",
 	"memoriam",
@@ -349,6 +350,7 @@ export function validateConfig(
 		rtkProxyEnabled: undefined,
 		graphicianEnabled: true,
 		fffgrepEnabled: true,
+		todoEnabled: false,
 	});
 
 	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
@@ -990,6 +992,8 @@ export interface LogicianTuiConfig {
 	simpleTools?: string[];
 	/** Enable discoverable tools behind `xd://` URLs (default: true). */
 	tools?: { xdev?: boolean };
+	/** Enable the `todo` tool (default: true). */
+	todoEnabled?: boolean;
 }
 
 export function configString(

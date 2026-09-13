@@ -39,6 +39,23 @@ trailing slash. Extra paths, queries and fragments are rejected. They do not rea
 relative files. Pass user-provided skill URLs unchanged to `read_file`;
 `read_skill` remains the tool for formatted skill invocation from the catalog.
 
+`pr://owner/repo/1428` reads a GitHub pull request via the GitHub MCP server.
+Supported paths: `pr://owner/repo` (list open PRs),
+`pr://owner/repo/<number>` (PR details),
+`pr://owner/repo/<number>/files` (changed files),
+`pr://owner/repo/<number>/comments` (comments),
+`pr://owner/repo/<number>/reviews` (reviews),
+`pr://owner/repo/<number>/commits` (commits).
+
+`issue://owner/repo/42` reads a GitHub issue via the GitHub MCP server.
+Supported paths: `issue://owner/repo` (list open issues),
+`issue://owner/repo/<number>` (issue details),
+`issue://owner/repo/<number>/comments` (comments),
+`issue://owner/repo/<number>/sub-issues` (sub-issues).
+
+Both require a configured GitHub MCP server; they return a diagnostic message
+when unavailable.
+
 The prompt source is `runtime/context/system-prompt.md`. After editing it,
 regenerate its embedded TypeScript export with `node scripts/embed-md.mjs` as
 shown in `apps/tui/Makefile`.

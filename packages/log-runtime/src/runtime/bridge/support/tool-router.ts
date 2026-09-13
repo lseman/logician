@@ -48,10 +48,12 @@ import {
 	ConflictProtocolHandler,
 	HistoryProtocolHandler,
 	InternalUrlRouter,
+	IssueProtocolHandler,
 	LocalProtocolHandler,
 	LogProtocolHandler,
 	McpProtocolHandler,
 	MemoryProtocolHandler,
+	PrProtocolHandler,
 	RuleProtocolHandler,
 	SkillProtocolHandler,
 	SshProtocolHandler,
@@ -91,6 +93,8 @@ export interface ToolRouterDeps {
 	lspPool?: LspClientPool;
 	/** Whether xd:// device mounting is enabled (default: true). */
 	xdevEnabled?: boolean;
+	/** Whether the `todo` tool is included (default: true). */
+	todoEnabled?: boolean;
 }
 
 /** Snapshot of MCP/skill state as reported by getState()/init(). */
@@ -190,6 +194,7 @@ export class ToolRouter {
 					webSearch,
 					graphicianEnabled: deps.graphicianEnabled,
 					kernelManager: deps.kernelManager,
+					todoEnabled: deps.todoEnabled,
 				});
 		if (deps.extraTools?.length) {
 			this.defaultTools = [
@@ -224,6 +229,8 @@ export class ToolRouter {
 			router.register(new HistoryProtocolHandler());
 			router.register(new ArtifactProtocolHandler());
 			router.register(new ConflictProtocolHandler());
+			router.register(new PrProtocolHandler());
+			router.register(new IssueProtocolHandler());
 		}
 		this.mcpProvider = this.createMcpProvider();
 

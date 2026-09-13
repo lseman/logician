@@ -39,6 +39,8 @@ export interface DefaultToolsOptions {
 	browserManager?: BrowserManager;
 	// Pre-constructed LSP client pool for language server queries.
 	lspPool?: LspClientPool;
+	// Whether to include the `todo` tool (default: true).
+	todoEnabled?: boolean;
 }
 
 // ── Core tools (top-level, always advertised to the provider) ────────────────

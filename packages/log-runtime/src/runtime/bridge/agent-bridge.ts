@@ -310,6 +310,7 @@ export class AgentRuntime {
 			kernelManager: this.kernelManager,
 			emit: event => this.emit(event),
 			xdevEnabled: opts.xdevEnabled,
+			todoEnabled: opts.todoEnabled,
 			onToolAdded: _tool => {
 				if (!this.config) return;
 				this.config.tools = this.toolRouter.getDefaultTools();
