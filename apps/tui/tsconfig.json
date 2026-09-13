@@ -24,7 +24,9 @@
 				"../../packages/log-core/src/system/types/types-protocol.ts"
 			]
 		},
-		"types": ["node", "bun-types"]
+		"types": ["node", "bun-types"],
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true
 	},
 	"include": ["src/**/*", "../../packages/log-core/src/**/*"],
 	"exclude": ["node_modules", "dist"]

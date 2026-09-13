@@ -18,7 +18,9 @@
 		"composite": true,
 		"noEmit": true,
 		"types": ["node", "bun-types"],
-		"paths": {}
+		"paths": {},
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist"]

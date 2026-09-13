@@ -579,7 +579,7 @@ async function runAgentLoopInternal(
 						},
 					);
 					if (compacted.changed) {
-						messages = compacted.messages as unknown as Message[];
+						messages = toMessages(compacted.messages);
 						contextWasCompacted = true;
 						config.onContextCompacted?.(messages);
 						await emit({

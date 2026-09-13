@@ -20,7 +20,8 @@ import {
 
 export interface CompactionOutcome {
 	changed: boolean;
-	messages: Message[];
+	/** Compacted message history — always Message[] compatible. */
+	messages: CompactableMessage[];
 	tokensBefore: number;
 	tokensAfter: number;
 }
@@ -65,7 +66,7 @@ export async function runCompaction(
 	if (mode === "shake") {
 		return {
 			changed: true,
-			messages: shakeResult.messages as unknown as Message[],
+			messages: shakeResult.messages,
 			tokensBefore,
 			tokensAfter: shakeResult.tokensAfter,
 		};
@@ -79,7 +80,7 @@ export async function runCompaction(
 	if (mode === "auto" && shakeSaved >= 8000) {
 		return {
 			changed: true,
-			messages: shakeResult.messages as unknown as Message[],
+			messages: shakeResult.messages,
 			tokensBefore,
 			tokensAfter: shakeTokens,
 		};
@@ -88,29 +89,21 @@ export async function runCompaction(
 	// LLM or auto-needs-LLM: summarize with LLM (on shake-processed history)
 	const summarize = async (older: CompactableMessage[]) => {
 		if (options.presetSummary) return options.presetSummary;
-		return generateCompactionSummary(
-			backend,
-			older as unknown as Message[],
-			[],
-			{
-				temperature: options.temperature,
-				maxTokens: options.maxTokens,
-				thinkingLevel: options.thinkingLevel,
-			},
-		);
+		return generateCompactionSummary(backend, older as Message[], [], {
+			temperature: options.temperature,
+			maxTokens: options.maxTokens,
+			thinkingLevel: options.thinkingLevel,
+		});
 	};
 
-	const llmResult = await compactToFit(
-		shakeResult.messages as CompactableMessage[],
-		{
-			triggerTokens: 0,
-			summarize,
-		},
-	);
+	const llmResult = await compactToFit(shakeResult.messages, {
+		triggerTokens: 0,
+		summarize,
+	});
 
 	return {
 		changed: llmResult.changed,
-		messages: llmResult.messages as unknown as Message[],
+		messages: llmResult.messages,
 		tokensBefore,
 		tokensAfter: llmResult.tokensAfter,
 	};

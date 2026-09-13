@@ -7,7 +7,9 @@
 		"strict": true,
 		"noEmit": true,
 		"skipLibCheck": true,
-		"types": ["node", "bun-types"]
+		"types": ["node", "bun-types"],
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true
 	},
 	"include": ["src/**/*.ts"]
 }

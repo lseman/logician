@@ -1,10 +1,14 @@
 import type {
 	AgentMessage,
 	BashExecutionMessage,
-	BranchSummaryMessage,
-	CompactionSummaryMessage,
-	CustomMessage,
 	Message,
+} from "../../system/types/types-messages.ts";
+import {
+	isBashExecution,
+	isBranchSummary,
+	isCompactionSummary,
+	isCustomMessage,
+	isLlmMessage,
 } from "../../system/types/types-messages.ts";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
@@ -49,53 +53,46 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 	return messages
 		.map((m): Message | undefined => {
 			if (!m) return undefined;
-			const role = m.role as string;
-			switch (role) {
-				case "compactionSummary": {
-					const msg = m as unknown as CompactionSummaryMessage;
-					return {
-						role: "user",
-						content:
-							COMPACTION_SUMMARY_PREFIX +
-							msg.summary +
-							COMPACTION_SUMMARY_SUFFIX,
-						timestamp: msg.timestamp,
-					};
-				}
-				case "branchSummary": {
-					const msg = m as unknown as BranchSummaryMessage;
-					return {
-						role: "user",
-						content:
-							BRANCH_SUMMARY_PREFIX + msg.summary + BRANCH_SUMMARY_SUFFIX,
-						timestamp: msg.timestamp,
-					};
-				}
-				case "bashExecution": {
-					const msg = m as unknown as BashExecutionMessage;
-					if (msg.excludeFromContext) return undefined;
-					return {
-						role: "user",
-						content: bashExecutionToText(msg),
-						timestamp: msg.timestamp,
-					};
-				}
-				case "custom": {
-					const msg = m as unknown as CustomMessage;
-					return {
-						role: "user",
-						content: msg.content,
-						timestamp: msg.timestamp,
-					};
-				}
-				case "system":
-				case "user":
-				case "assistant":
-				case "tool":
-					return m as Message;
-				default:
-					return undefined;
+
+			// Standard LLM messages pass through unchanged
+			if (isLlmMessage(m)) return m;
+
+			// Custom message types get converted to user messages
+			if (isCompactionSummary(m)) {
+				return {
+					role: "user",
+					content:
+						COMPACTION_SUMMARY_PREFIX + m.summary + COMPACTION_SUMMARY_SUFFIX,
+					timestamp: m.timestamp,
+				};
 			}
+
+			if (isBranchSummary(m)) {
+				return {
+					role: "user",
+					content: BRANCH_SUMMARY_PREFIX + m.summary + BRANCH_SUMMARY_SUFFIX,
+					timestamp: m.timestamp,
+				};
+			}
+
+			if (isBashExecution(m)) {
+				if (m.excludeFromContext) return undefined;
+				return {
+					role: "user",
+					content: bashExecutionToText(m),
+					timestamp: m.timestamp,
+				};
+			}
+
+			if (isCustomMessage(m)) {
+				return {
+					role: "user",
+					content: m.content,
+					timestamp: m.timestamp,
+				};
+			}
+
+			return undefined;
 		})
 		.filter((m): m is Message => m !== undefined);
 }
@@ -178,7 +175,7 @@ export function convertToChatFormat(
 		.filter((m): m is Message => m != null)
 		.map(m => {
 			const obj: Record<string, unknown> = { role: m.role };
-			if (m.content !== null && m.content !== undefined) {
+			if (m.content != null) {
 				obj.content = m.content;
 			}
 			if (m.tool_call_id) obj.tool_call_id = m.tool_call_id;

@@ -408,6 +408,11 @@ export interface CompactToFitResult {
 	changed: boolean;
 }
 
+/** Convert compacted messages back to Message[]. Safe because compaction preserves structure. */
+export function toMessages(msgs: CompactableMessage[]): Message[] {
+	return msgs as Message[];
+}
+
 /** Produces the replacement summary text for the older (compacted-away) block. */
 export type CompactionSummarizer = (
 	messages: CompactableMessage[],

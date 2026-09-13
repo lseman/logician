@@ -315,7 +315,7 @@ export async function requestAssistantTurn(
 						},
 					};
 				}
-				messages = compacted.messages as unknown as Message[];
+				messages = toMessages(compacted.messages);
 				// Stale now — it was rendered from the pre-compaction canonical
 				// array. The retry must send the compacted canonical messages.
 				presentationMessages = undefined;

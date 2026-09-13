@@ -111,6 +111,47 @@ export type AgentMessage =
 	| Message
 	| CustomAgentMessageMap[keyof CustomAgentMessageMap & string];
 
+// ── Type guards for AgentMessage narrowing ────────────────────────────────
+
+/** Narrow an AgentMessage to a standard LLM message (system/user/assistant/tool). */
+export function isLlmMessage(msg: AgentMessage): msg is Message {
+	return (
+		msg.role === "system" ||
+		msg.role === "user" ||
+		msg.role === "assistant" ||
+		msg.role === "tool"
+	);
+}
+
+/** Narrow an AgentMessage to a custom message variant. */
+export function isCustomAgentMessage(
+	msg: AgentMessage,
+): msg is CustomAgentMessageMap[keyof CustomAgentMessageMap & string] {
+	return !isLlmMessage(msg);
+}
+
+export function isCompactionSummary(
+	msg: AgentMessage,
+): msg is CompactionSummaryMessage {
+	return msg.role === "compactionSummary";
+}
+
+export function isBranchSummary(
+	msg: AgentMessage,
+): msg is BranchSummaryMessage {
+	return msg.role === "branchSummary";
+}
+
+export function isBashExecution(
+	msg: AgentMessage,
+): msg is BashExecutionMessage {
+	return msg.role === "bashExecution";
+}
+
+export function isCustomMessage(msg: AgentMessage): msg is CustomMessage {
+	return msg.role === "custom";
+}
+
 /** Why the model (or loop) ended its turn. */
 export type StopReason =
 	| "stop"
