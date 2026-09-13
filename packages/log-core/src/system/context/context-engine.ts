@@ -2,9 +2,9 @@ import type { Message } from "../types/types-messages.ts";
 
 export interface ContextContribution {
 	source: string;
-	messages?: readonly Message[];
-	systemPrompt?: string;
-	priority?: number;
+	messages?: readonly Message[] | undefined;
+	systemPrompt?: string | undefined;
+	priority?: number | undefined;
 }
 
 export interface ContextSourceUsage {
@@ -15,16 +15,16 @@ export interface ContextSourceUsage {
 }
 
 export interface ContextSnapshot {
-	systemPrompt?: string;
+	systemPrompt?: string | undefined;
 	messages: Message[];
 	sources: readonly ContextSourceUsage[];
 }
 
 export interface ContextAssemblyRequest {
 	history: readonly Message[];
-	baseSystemPrompt?: string;
-	contributions?: readonly ContextContribution[];
-	maxInjectedTokens?: number;
+	baseSystemPrompt?: string | undefined;
+	contributions?: readonly ContextContribution[] | undefined;
+	maxInjectedTokens?: number | undefined;
 }
 
 function fingerprint(message: Message): string {

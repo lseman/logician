@@ -1,6 +1,11 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { AgentConfig } from "@logician/log-core";
+import type {
+	AgentConfig,
+	InferenceMode,
+	QueueMode,
+	ThinkingLevel,
+} from "@logician/log-core";
 import {
 	throwOnAgentConfigErrors as throwOnValidationErrors,
 	validateAgentConfig as validateConfig,
@@ -66,7 +71,7 @@ void describe("config validator", () => {
 	void it("rejects invalid thinkingLevel", () => {
 		const config = {
 			...validConfig,
-			thinkingLevel: "ultra" as "thinkingLevel",
+			thinkingLevel: "ultra" as ThinkingLevel,
 		};
 		const errors = validateConfig(config);
 		expect(errors.some(e => e.field === "thinkingLevel")).toBeTrue();
@@ -75,7 +80,7 @@ void describe("config validator", () => {
 	void it("rejects invalid inferenceMode", () => {
 		const config = {
 			...validConfig,
-			inferenceMode: "bonkers" as "inferenceMode",
+			inferenceMode: "bonkers" as InferenceMode,
 		};
 		const errors = validateConfig(config);
 		expect(errors.some(e => e.field === "inferenceMode")).toBeTrue();
@@ -84,7 +89,7 @@ void describe("config validator", () => {
 	void it("rejects invalid queue mode", () => {
 		const config = {
 			...validConfig,
-			steeringQueueMode: "invalid" as "steeringQueueMode",
+			steeringQueueMode: "invalid" as QueueMode,
 		};
 		const errors = validateConfig(config);
 		expect(errors.some(e => e.field === "steeringQueueMode")).toBeTrue();

@@ -6,7 +6,7 @@ export interface AutonomousTask {
 
 export interface AutonomousContinuationInput {
 	assistantText: string;
-	stopReason?: string;
+	stopReason?: string | undefined;
 	tasks: readonly AutonomousTask[];
 }
 
@@ -45,6 +45,7 @@ export function decideAutonomousContinuation(
 
 	const next =
 		remaining.find(task => task.status === "in_progress") ?? remaining[0];
+	if (!next) return undefined;
 	return {
 		reason: "unfinished_todos",
 		message:

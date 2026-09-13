@@ -57,11 +57,11 @@ export type TtsrMatchSource = "text" | "thinking" | "tool";
 export interface TtsrMatchContext {
 	source: TtsrMatchSource;
 	/** Tool name for tool argument deltas (e.g. "bash", "write"). */
-	toolName?: string;
+	toolName?: string | undefined;
 	/** Candidate file paths associated with the current stream chunk. */
-	filePaths?: string[];
+	filePaths?: string[] | undefined;
 	/** Stable key to isolate buffering (e.g. a tool call ID). */
-	streamKey?: string;
+	streamKey?: string | undefined;
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

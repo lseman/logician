@@ -49,7 +49,7 @@ function parseLenientFrontmatter(source: string): Record<string, unknown> {
 		if (!rawLine.trim() || rawLine.trim().startsWith("#")) continue;
 		const topLevel = /^([A-Za-z0-9_-]+):(?:\s*(.*))?$/.exec(rawLine);
 		if (topLevel && !rawLine.startsWith(" ")) {
-			currentKey = topLevel[1];
+			currentKey = topLevel[1] ?? "";
 			const rawValue = topLevel[2] ?? "";
 			if (rawValue.trim()) {
 				result[currentKey] = unquoteScalar(rawValue.trim());
@@ -67,7 +67,7 @@ function parseLenientFrontmatter(source: string): Record<string, unknown> {
 				currentList = [];
 				result[currentKey] = currentList;
 			}
-			currentList.push(unquoteScalar(listItem[1].trim()));
+			currentList.push(unquoteScalar((listItem[1] ?? "").trim()));
 			continue;
 		}
 

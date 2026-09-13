@@ -34,7 +34,7 @@ function makeHarness(
 }
 
 void test("setTemperature takes effect on the next turn", async () => {
-	const responses: Array<{ temp?: number }> = [];
+	const responses: Array<{ temp?: number | undefined }> = [];
 	const backend = new FakeBackend([
 		(_msgs, opts) => {
 			responses.push({ temp: opts.temperature });
@@ -47,11 +47,11 @@ void test("setTemperature takes effect on the next turn", async () => {
 	]);
 	const harness = makeHarness(backend);
 	await harness.prompt("q1");
-	assert.equal(responses[0].temp, 0.7);
+	assert.equal(responses[0]?.temp, 0.7);
 
 	harness.configure({ temperature: 1.2 });
 	await harness.prompt("q2");
-	assert.equal(responses[1].temp, 1.2);
+	assert.equal(responses[1]?.temp, 1.2);
 });
 
 void test("setSystemPrompt takes effect on the next turn", async () => {
@@ -70,11 +70,11 @@ void test("setSystemPrompt takes effect on the next turn", async () => {
 	]);
 	const harness = makeHarness(backend);
 	await harness.prompt("q1");
-	assert.ok(systemPrompts[0].includes("test"));
+	assert.ok(systemPrompts[0]?.includes("test"));
 
 	harness.configure({ systemPrompt: "new system prompt" });
 	await harness.prompt("q2");
-	assert.ok(systemPrompts[1].includes("new system prompt"));
+	assert.ok(systemPrompts[1]?.includes("new system prompt"));
 });
 
 void test("runtime config changes take effect at the next save point", async () => {
@@ -142,7 +142,7 @@ void test("fork creates a branch that can be discarded", async () => {
 	assert.ok(branchId.length > 0);
 	const branches = harness.listBranches();
 	assert.equal(branches.length, 1);
-	assert.equal(branches[0].id, branchId);
+	assert.equal(branches[0]?.id, branchId);
 	// Don't setHistory (it clears branches). Just discard immediately.
 	const discardOk = harness.discardBranch();
 	assert.equal(discardOk, true);

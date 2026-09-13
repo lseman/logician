@@ -48,6 +48,6 @@ describe("ContextEngine", () => {
 		});
 		expect(snapshot.systemPrompt).toBe("high");
 		expect(snapshot.messages).toEqual([{ role: "user", content: "high" }]);
-		expect(snapshot.sources[1].included).toBe(false);
+		expect(snapshot.sources[1]?.included).toBe(false);
 	});
 });

@@ -10,6 +10,7 @@ import type {
 	CompactionMode,
 	CompactionSettings,
 } from "../../compaction/engine.ts";
+import { toMessages } from "../../compaction/engine.ts";
 import {
 	runCompaction,
 	shouldAutoCompact,
@@ -36,8 +37,8 @@ export interface SessionCompactorDependencies {
 	emit: (event: {
 		type: "compaction";
 		reason: CompactionReason;
-		tokensBefore?: number;
-		tokensAfter?: number;
+		tokensBefore?: number | undefined;
+		tokensAfter?: number | undefined;
 	}) => void;
 }
 
@@ -160,12 +161,12 @@ export class SessionCompactor {
 			if (
 				!result.changed ||
 				result.tokensAfter >= before ||
-				!this.dependencies.commitHistory(messages, result.messages)
+				!this.dependencies.commitHistory(messages, toMessages(result.messages))
 			) {
 				return await finishUnchanged(before);
 			}
 
-			this.recordCompaction(result.messages, before);
+			this.recordCompaction(toMessages(result.messages), before);
 			await emitPostCompact();
 			await this.dependencies.extensionRunner()?.emit({
 				type: "session_compact",

@@ -73,21 +73,21 @@ function describeToolError(error: Error): string {
 export interface PreparedToolCall {
 	call: ToolCall;
 	args: Record<string, unknown>;
-	error?: string;
+	error?: string | undefined;
 }
 
 export interface ToolRegistryOptions {
-	cwd?: string;
-	allowedPaths?: string[];
-	allowAllPaths?: boolean;
-	signal?: AbortSignal;
-	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
+	cwd?: string | undefined;
+	allowedPaths?: string[] | undefined;
+	allowAllPaths?: boolean | undefined;
+	signal?: AbortSignal | undefined;
+	onQuestionRequest?: ((ctx: AskUserContext) => Promise<string>) | undefined;
 	/** Cache for tool results (P0-1). Pass null to disable caching. */
-	cache?: ToolResultCache | null;
+	cache?: ToolResultCache | null | undefined;
 	/** Loaded skills for skill:// URL resolution. */
-	skills?: Array<{ name: string; content: string; path: string }>;
+	skills?: Array<{ name: string; content: string; path: string }> | undefined;
 	/** Loaded rules for rule:// URL resolution. */
-	rules?: Array<{ name: string; content: string; path: string }>;
+	rules?: Array<{ name: string; content: string; path: string }> | undefined;
 	/** Memoriam gateway for memory:// URL resolution. */
 	memory?: {
 		listObservations: (
@@ -98,13 +98,13 @@ export interface ToolRegistryOptions {
 			query?: Record<string, unknown>,
 		) => Promise<Array<{ id: string; content: string }>>;
 	};
-	cacheSize?: number;
+	cacheSize?: number | undefined;
 	/** TTL in milliseconds for the default cache. */
-	cacheTtlMs?: number;
+	cacheTtlMs?: number | undefined;
 	/** Per-tool execution timeout (default 10 min). 0 disables. Tools override via timeoutMs. */
-	defaultToolTimeoutMs?: number;
+	defaultToolTimeoutMs?: number | undefined;
 	/** Cap on result content appended to context (default 100k chars). 0 disables. */
-	maxResultChars?: number;
+	maxResultChars?: number | undefined;
 }
 
 export class ToolRegistry {

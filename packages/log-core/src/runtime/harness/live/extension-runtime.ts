@@ -79,7 +79,10 @@ export async function runExtensionBeforeAgentStart(
 	promptText: string,
 	systemPrompt: string,
 	history: Message[],
-): Promise<{ messages?: Message[]; systemPrompt?: string } | undefined> {
+): Promise<
+	| { messages?: Message[] | undefined; systemPrompt?: string | undefined }
+	| undefined
+> {
 	const runner = deps.getExtensionRunner();
 	if (!runner) return undefined;
 
@@ -102,7 +105,10 @@ export async function runExtensionBeforeAgentStart(
 		});
 		// Native extensions return { messages, systemPrompt } directly
 		if (result && typeof result === "object") {
-			const value = result as { messages?: Message[]; systemPrompt?: string };
+			const value = result as {
+				messages?: Message[] | undefined;
+				systemPrompt?: string | undefined;
+			};
 			nativeMessages = Array.isArray(value.messages)
 				? value.messages
 				: undefined;

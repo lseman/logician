@@ -41,7 +41,7 @@ export interface ProcessResponseResult {
 	stopReason: StopReason;
 	assistant: Message;
 	performedToolWork: boolean;
-	errorMessage?: string;
+	errorMessage?: string | undefined;
 }
 
 export interface ProcessResponseContext {

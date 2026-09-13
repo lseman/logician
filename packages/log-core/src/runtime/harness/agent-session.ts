@@ -139,8 +139,8 @@ type TurnRequest = { kind: "prompt"; text: string } | { kind: "continue" };
 export class AgentSession {
 	private readonly configuration: ConfigurationStore<AgentConfig>;
 	readonly models: HarnessModelController;
-	private cwd?: string;
-	private maxIterations?: number;
+	private cwd?: string | undefined;
+	private maxIterations?: number | undefined;
 
 	private _phase: HarnessPhase = "idle";
 	private runtime: AgentRuntimeState = createRuntimeState();
@@ -150,7 +150,7 @@ export class AgentSession {
 	private readonly session: SessionState;
 	private readonly compactor: SessionCompactor;
 	private readonly contextController: AdaptiveContextController;
-	private activeContextPlanId?: string;
+	private activeContextPlanId?: string | undefined;
 	private loopDetector: LoopDetector;
 	// Durable intervention history spans turns; run policy is reset per prompt.
 	private interventions: HarnessInterventionController =
@@ -167,22 +167,26 @@ export class AgentSession {
 		tokens: 0,
 		startedAt: undefined as number | undefined,
 	};
-	private _extensionRunner?: ExtensionRunner;
-	private readonly pluginHookFactory?: HarnessPluginHookFactory;
-	private readonly pluginLifecycle?: HarnessPluginLifecycle;
-	private _beforeAgentStart?: (
-		promptText: string,
-	) =>
-		| Promise<{ messages?: Message[]; systemPrompt?: string } | undefined>
-		| { messages?: Message[]; systemPrompt?: string }
+	private _extensionRunner?: ExtensionRunner | undefined;
+	private readonly pluginHookFactory?: HarnessPluginHookFactory | undefined;
+	private readonly pluginLifecycle?: HarnessPluginLifecycle | undefined;
+	private _beforeAgentStart?: (promptText: string) =>
+		| Promise<
+				| {
+						messages?: Message[] | undefined;
+						systemPrompt?: string | undefined;
+				  }
+				| undefined
+		  >
+		| { messages?: Message[] | undefined; systemPrompt?: string | undefined }
 		| undefined;
 
 	// ── UI event callback  ─────────────────────
-	private onEvent?: (event: AgentSessionEvent) => void;
+	private onEvent?: ((event: AgentSessionEvent) => void) | undefined;
 
 	constructor(
 		options: AgentSessionOptions & {
-			onEvent?: (event: AgentSessionEvent) => void;
+			onEvent?: ((event: AgentSessionEvent) => void) | undefined;
 		},
 	) {
 		this.onEvent = options.onEvent;
@@ -361,11 +365,15 @@ export class AgentSession {
 	}
 
 	setBeforeAgentStart(
-		cb: (
-			promptText: string,
-		) =>
-			| Promise<{ messages?: Message[]; systemPrompt?: string } | undefined>
-			| { messages?: Message[]; systemPrompt?: string }
+		cb: (promptText: string) =>
+			| Promise<
+					| {
+							messages?: Message[] | undefined;
+							systemPrompt?: string | undefined;
+					  }
+					| undefined
+			  >
+			| { messages?: Message[] | undefined; systemPrompt?: string | undefined }
 			| undefined,
 	): void {
 		this._beforeAgentStart = cb;
@@ -483,9 +491,9 @@ export class AgentSession {
 	private async runTurn(
 		request: TurnRequest,
 		options?: {
-			continuationContext?: string;
-			repositoryQuery?: string;
-			contextContributions?: readonly ContextContribution[];
+			continuationContext?: string | undefined;
+			repositoryQuery?: string | undefined;
+			contextContributions?: readonly ContextContribution[] | undefined;
 		},
 	): Promise<Message[]> {
 		return this.turn.run(
@@ -524,8 +532,8 @@ export class AgentSession {
 		snapshot: HarnessTurnSnapshot,
 		onContextCompacted: (messages: Message[]) => void,
 		_options?: {
-			continuationContext?: string;
-			repositoryQuery?: string;
+			continuationContext?: string | undefined;
+			repositoryQuery?: string | undefined;
 		},
 	): Promise<Message[]> {
 		this.loopConfig = snapshot.config;
@@ -603,9 +611,9 @@ export class AgentSession {
 		request: TurnRequest,
 		signal: AbortSignal,
 		options?: {
-			continuationContext?: string;
-			repositoryQuery?: string;
-			contextContributions?: readonly ContextContribution[];
+			continuationContext?: string | undefined;
+			repositoryQuery?: string | undefined;
+			contextContributions?: readonly ContextContribution[] | undefined;
 		},
 	): Promise<HarnessTurnSnapshot> {
 		let initialMessages: Message[] = [...this.session.conversation.history];
@@ -714,7 +722,10 @@ export class AgentSession {
 
 	private async runExtensionBeforeAgentStart(
 		promptText: string,
-	): Promise<{ messages?: Message[]; systemPrompt?: string } | undefined> {
+	): Promise<
+		| { messages?: Message[] | undefined; systemPrompt?: string | undefined }
+		| undefined
+	> {
 		return runExtensionBeforeAgentStartHelper(
 			this.extensionRuntimeDeps,
 			promptText,
@@ -1063,7 +1074,7 @@ export class AgentSession {
 	 * @returns The full structured summary, or null if branch was empty.
 	 */
 	async branchSummary(options?: {
-		customInstructions?: string;
+		customInstructions?: string | undefined;
 	}): Promise<string | null> {
 		this.assertIdle("branchSummary");
 		const branch = this.session.conversation.activeBranch();

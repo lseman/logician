@@ -173,6 +173,7 @@ export function recordBashMutations(before: WorkspaceSnapshot | null): void {
 		for (let i = 0; i + 1 < parts.length; i += 2) {
 			const status = parts[i];
 			const relPath = parts[i + 1];
+			if (!relPath) continue;
 			const absolute = resolve(before.root, relPath);
 			if (frame.files.has(absolute)) continue;
 			if (status === "A") {

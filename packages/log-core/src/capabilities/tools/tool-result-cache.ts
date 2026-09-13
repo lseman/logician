@@ -38,9 +38,9 @@ export interface CacheEntry {
 	result: string;
 	isError: boolean;
 	/** Epoch ms when this entry expires. undefined = no expiry. */
-	expiresAt?: number;
+	expiresAt?: number | undefined;
 	/** Mtime sentinel for file-based invalidation. undefined = no mtime key. */
-	mtimeKey?: string;
+	mtimeKey?: string | undefined;
 }
 
 export interface CacheStats {

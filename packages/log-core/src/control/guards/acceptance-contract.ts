@@ -16,7 +16,7 @@ export interface ResolvedAcceptance {
 	explicit: boolean;
 	criteria: AcceptanceCriterion[];
 	verify: AcceptanceVerification[];
-	stopRules?: string[];
+	stopRules?: string[] | undefined;
 }
 
 export interface AcceptanceLedger {
@@ -24,14 +24,14 @@ export interface AcceptanceLedger {
 	verification?: Array<{
 		command: string;
 		result: "passed" | "failed";
-		summary?: string;
+		summary?: string | undefined;
 	}>;
 }
 
 export interface AcceptanceVerificationResult {
 	command: string;
 	result: "passed" | "failed";
-	summary?: string;
+	summary?: string | undefined;
 }
 
 export function formatVerificationRepair(
@@ -49,7 +49,7 @@ export function formatVerificationRepair(
 }
 
 export function resolveEffectiveAcceptance(params: {
-	explicit?: AcceptanceConfig;
+	explicit?: AcceptanceConfig | undefined;
 }): ResolvedAcceptance {
 	const explicit = params.explicit;
 	if (!explicit) {
@@ -84,6 +84,7 @@ function normalizeCriteria(
 	const result: AcceptanceCriterion[] = [];
 	for (let i = 0; i < input.length; i++) {
 		const item = input[i];
+		if (item === undefined) continue;
 		if (typeof item === "string") {
 			result.push({
 				id: `criterion-${i + 1}`,
@@ -109,7 +110,7 @@ export function shouldRunAcceptanceFinalization(
 
 export async function verifyAcceptanceCommands(
 	resolved: ResolvedAcceptance,
-	options: { cwd?: string; signal?: AbortSignal } = {},
+	options: { cwd?: string | undefined; signal?: AbortSignal | undefined } = {},
 ): Promise<AcceptanceVerificationResult[]> {
 	if (!resolved.verify.length) return [];
 	const { execFile } = await import("node:child_process");
@@ -180,6 +181,7 @@ export function validateAcceptanceInput(config: AcceptanceConfig): string[] {
 		const items = config.criteria;
 		for (let i = 0; i < items.length; i++) {
 			const item = items[i];
+			if (item === undefined) continue;
 			if (typeof item === "string") {
 				if (!item.trim()) errors.push(`criteria[${i}] is empty`);
 			} else {

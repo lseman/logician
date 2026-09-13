@@ -42,24 +42,26 @@ import { markPathIgnoredByCloudSync } from "./cloud-sync.ts";
 export interface SessionMessage {
 	role: string;
 	content: string | null;
-	tool_call_id?: string;
-	tool_calls?: Array<{
-		id: string;
-		name: string;
-		arguments: string;
-	}>;
-	name?: string;
+	tool_call_id?: string | undefined;
+	tool_calls?:
+		| Array<{
+				id: string;
+				name: string;
+				arguments: string;
+		  }>
+		| undefined;
+	name?: string | undefined;
 	timestamp: number;
 	/** UUID for this message entry (tree-based tracking). */
-	entryId?: string;
+	entryId?: string | undefined;
 	/** UUID of the parent entry (enables tree traversal). */
-	parentId?: string;
+	parentId?: string | undefined;
 }
 
 export interface MessageSessionEntry {
 	type: "message";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	message: SessionMessage;
 }
@@ -67,7 +69,7 @@ export interface MessageSessionEntry {
 export interface ModelChangeSessionEntry {
 	type: "model_change";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	model: string;
 }
@@ -75,7 +77,7 @@ export interface ModelChangeSessionEntry {
 export interface ThinkingLevelSessionEntry {
 	type: "thinking_level_changed";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	thinkingLevel: string;
 }
@@ -83,7 +85,7 @@ export interface ThinkingLevelSessionEntry {
 export interface ActiveToolsSessionEntry {
 	type: "active_tools_change";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	activeToolNames: string[];
 }
@@ -91,39 +93,39 @@ export interface ActiveToolsSessionEntry {
 export interface SettingsChangeSessionEntry {
 	type: "settings_change";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	key: string;
 	value: string | null;
-	previousValue?: string | null;
+	previousValue?: string | null | undefined;
 }
 
 export interface CompactionSessionEntry {
 	type: "compaction";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	summary: string;
-	firstKeptEntryId?: string;
+	firstKeptEntryId?: string | undefined;
 	tokensBefore: number;
 }
 
 export interface BranchSummarySessionEntry {
 	type: "branch_summary";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
-	fromId?: string;
+	fromId?: string | undefined;
 	summary: string;
 }
 
 export interface LabelSessionEntry {
 	type: "label";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	targetId: string;
-	label?: string;
+	label?: string | undefined;
 }
 
 /**
@@ -134,7 +136,7 @@ export interface LabelSessionEntry {
 export interface CustomSessionEntry<T = unknown> {
 	type: "custom";
 	id: string;
-	parentId?: string;
+	parentId?: string | undefined;
 	timestamp: number;
 	customType: string;
 	data: T;
@@ -166,13 +168,13 @@ export interface SessionMeta {
 	createdAt: number;
 	messageCount: number;
 	lastActivity: number;
-	name?: string;
+	name?: string | undefined;
 	/** Working directory the session was started in — scopes browser listing to a project. */
-	cwd?: string;
+	cwd?: string | undefined;
 	/** UUID of the parent session (for forked sessions). */
-	parentId?: string;
+	parentId?: string | undefined;
 	/** Selected entry leaf for durable branch checkout. */
-	activeLeafId?: string;
+	activeLeafId?: string | undefined;
 	/** Session format version (for migration). */
 	version?: number;
 }
@@ -188,7 +190,7 @@ export interface SessionConfig {
 	/** Working directory the session was started in — scopes browser listing to a project. */
 	cwd?: string;
 	/** UUID of the parent session (for forked sessions). */
-	parentId?: string;
+	parentId?: string | undefined;
 	/** Session format version (auto-upgraded on load). */
 	version?: number;
 }
@@ -309,10 +311,10 @@ export class SessionStore {
 	private messageCount = 0;
 	private readonly createdAt: number;
 	private lastActivity: number;
-	private name?: string;
-	private cwd?: string;
-	private parentId?: string;
-	private activeLeafId?: string;
+	private name?: string | undefined;
+	private cwd?: string | undefined;
+	private parentId?: string | undefined;
+	private activeLeafId?: string | undefined;
 	private version = 3;
 
 	constructor(
@@ -510,7 +512,7 @@ export class SessionStore {
 		const entries: SessionEntry[] = [];
 		for (let index = 0; index < lines.length; index++) {
 			const line = lines[index];
-			if (!line.trim()) continue;
+			if (!line?.trim()) continue;
 			try {
 				entries.push(this.parseEntryLine(line));
 			} catch (error) {
@@ -652,8 +654,7 @@ export class SessionStore {
 		}
 
 		const path: SessionEntry[] = [];
-		let currentId: string | undefined =
-			this.activeLeafId ?? entries[entries.length - 1].id;
+		let currentId: string | undefined = this.activeLeafId ?? entries.at(-1)?.id;
 		const seen = new Set<string>();
 
 		while (currentId && !seen.has(currentId)) {

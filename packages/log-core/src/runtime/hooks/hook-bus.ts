@@ -49,10 +49,10 @@ export type HookEventName = keyof AgentHooks;
 
 export interface HookRegistration {
 	/** Stable identity used for diagnostics and duplicate detection. */
-	id?: string;
-	source?: string;
+	id?: string | undefined;
+	source?: string | undefined;
 	/** Optional deadline for this handler. Timed-out handlers are skipped. */
-	timeoutMs?: number;
+	timeoutMs?: number | undefined;
 }
 
 export type PolicyModuleKind = "deterministic" | "prompt" | "agent";
@@ -67,8 +67,8 @@ export interface PolicyModule {
 	description: string;
 	kind: PolicyModuleKind;
 	hooks: AgentHooks;
-	timeoutMs?: number;
-	enabled?: boolean;
+	timeoutMs?: number | undefined;
+	enabled?: boolean | undefined;
 }
 
 export interface PolicyEvaluation {
@@ -80,16 +80,18 @@ export interface PolicyEvaluation {
 }
 
 export interface HookBusOptions {
-	onError?: (error: Error, event: HookEventName, source?: string) => void;
-	onPolicyEvaluation?: (evaluation: PolicyEvaluation) => void;
+	onError?:
+		| ((error: Error, event: HookEventName, source?: string) => void)
+		| undefined;
+	onPolicyEvaluation?: ((evaluation: PolicyEvaluation) => void) | undefined;
 }
 
 interface Entry<H> {
 	handler: H;
 	id: string;
-	source?: string;
-	timeoutMs?: number;
-	policy?: Pick<PolicyModule, "id" | "kind">;
+	source?: string | undefined;
+	timeoutMs?: number | undefined;
+	policy?: Pick<PolicyModule, "id" | "kind"> | undefined;
 }
 
 type BeforeHandler = NonNullable<AgentHooks["beforeToolCall"]>;
@@ -120,8 +122,8 @@ export class HookBus {
 	private compact: Entry<CompactHandler>[] = [];
 	private nextAnonymousId = 0;
 
-	private onError?: HookBusOptions["onError"];
-	private onPolicyEvaluation?: HookBusOptions["onPolicyEvaluation"];
+	private onError?: HookBusOptions["onError"] | undefined;
+	private onPolicyEvaluation?: HookBusOptions["onPolicyEvaluation"] | undefined;
 
 	constructor(options: HookBusOptions = {}) {
 		this.onError = options.onError;

@@ -39,7 +39,7 @@ describe("SessionCompactor", () => {
 		const persisted: Array<{
 			summary: string;
 			tokensBefore: number;
-			firstKeptEntryId?: string;
+			firstKeptEntryId?: string | undefined;
 		}> = [];
 		const compactor = new SessionCompactor(
 			dependencies(() => [], {

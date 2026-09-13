@@ -263,7 +263,9 @@ export function getInferenceMode(
 
 export function cycleInferenceMode(current: InferenceMode): InferenceMode {
 	const index = INFERENCE_MODE_ORDER.indexOf(current);
-	return INFERENCE_MODE_ORDER[(index + 1) % INFERENCE_MODE_ORDER.length];
+	return (
+		INFERENCE_MODE_ORDER[(index + 1) % INFERENCE_MODE_ORDER.length] ?? current
+	);
 }
 
 export function isValidInferenceMode(value: string): value is InferenceMode {
@@ -298,64 +300,64 @@ export interface AgentModelConfig {
 export interface AgentConfig {
 	baseUrl: string;
 	model: string;
-	models?: AgentModelConfig[];
-	cwd?: string;
-	temperature?: number;
-	maxTokens?: number;
-	chatTemplate?: string;
-	stop?: string[];
-	maxIterations?: number;
+	models?: AgentModelConfig[] | undefined;
+	cwd?: string | undefined;
+	temperature?: number | undefined;
+	maxTokens?: number | undefined;
+	chatTemplate?: string | undefined;
+	stop?: string[] | undefined;
+	maxIterations?: number | undefined;
 	/**
 	 * `minimal` keeps the provider/tool/queue mechanism while disabling the
 	 * runner's built-in continuation, acceptance, and repair policies.
 	 */
-	executionProfile?: ExecutionProfile;
+	executionProfile?: ExecutionProfile | undefined;
 	/** Policies evaluated externally when the agent loop naturally becomes idle. */
-	stopPolicies?: StopPolicy[];
+	stopPolicies?: StopPolicy[] | undefined;
 	/** Require post-edit verification evidence before an autonomous run settles. */
-	verifiedStopEnabled?: boolean;
+	verifiedStopEnabled?: boolean | undefined;
 	/** Optional task capability observed by autonomous policy. */
-	taskLedger?: TaskLedger;
-	loopDetectionWindow?: number;
-	degenerateLoopThreshold?: number;
-	stagnationThreshold?: number;
-	contextWindowTokens?: number;
-	systemPrompt?: string;
-	tools?: Tool[];
-	onEvent?: EventHandler;
-	onHookEvent?: (event: string, ctx: unknown) => void;
-	runtimeHooksEnabled?: boolean;
-	hookSessionId?: string;
-	hookTranscriptPath?: string;
-	hooks?: AgentHooks;
+	taskLedger?: TaskLedger | undefined;
+	loopDetectionWindow?: number | undefined;
+	degenerateLoopThreshold?: number | undefined;
+	stagnationThreshold?: number | undefined;
+	contextWindowTokens?: number | undefined;
+	systemPrompt?: string | undefined;
+	tools?: Tool[] | undefined;
+	onEvent?: EventHandler | undefined;
+	onHookEvent?: ((event: string, ctx: unknown) => void) | undefined;
+	runtimeHooksEnabled?: boolean | undefined;
+	hookSessionId?: string | undefined;
+	hookTranscriptPath?: string | undefined;
+	hooks?: AgentHooks | undefined;
 	convertToLlm?: (
 		messages: import("./types-messages.ts").AgentMessage[],
 	) => import("./types-messages.ts").Message[];
-	turnEndCallback?: (turnId: string) => void;
-	guardsEnabled?: boolean;
-	duplicateGuardEnabled?: boolean;
-	failureGuardEnabled?: boolean;
-	duplicateToolThreshold?: number;
-	toolFailureLoopThreshold?: number;
+	turnEndCallback?: ((turnId: string) => void) | undefined;
+	guardsEnabled?: boolean | undefined;
+	duplicateGuardEnabled?: boolean | undefined;
+	failureGuardEnabled?: boolean | undefined;
+	duplicateToolThreshold?: number | undefined;
+	toolFailureLoopThreshold?: number | undefined;
 	/** Enable evidence-based no-progress stopping. */
-	progressStopEnabled?: boolean;
-	proactiveCompactionEnabled?: boolean;
-	proactiveCompactionFraction?: number;
-	graphicianEnabled?: boolean;
-	fffgrepEnabled?: boolean;
-	continuationEnabled?: boolean;
-	toolExecution?: "sequential" | "parallel";
-	steeringQueueMode?: QueueMode;
-	followUpQueueMode?: QueueMode;
-	thinkingLevel?: ThinkingLevel;
-	autoRetryEnabled?: boolean;
-	maxRetries?: number;
-	retryBaseDelayMs?: number;
-	turnTimeoutMs?: number;
-	webSearch?: WebSearchConfig;
-	cacheSize?: number;
-	cacheTtlMs?: number;
-	permissions?: PermissionPolicy;
+	progressStopEnabled?: boolean | undefined;
+	proactiveCompactionEnabled?: boolean | undefined;
+	proactiveCompactionFraction?: number | undefined;
+	graphicianEnabled?: boolean | undefined;
+	fffgrepEnabled?: boolean | undefined;
+	continuationEnabled?: boolean | undefined;
+	toolExecution?: "sequential" | "parallel" | undefined;
+	steeringQueueMode?: QueueMode | undefined;
+	followUpQueueMode?: QueueMode | undefined;
+	thinkingLevel?: ThinkingLevel | undefined;
+	autoRetryEnabled?: boolean | undefined;
+	maxRetries?: number | undefined;
+	retryBaseDelayMs?: number | undefined;
+	turnTimeoutMs?: number | undefined;
+	webSearch?: WebSearchConfig | undefined;
+	cacheSize?: number | undefined;
+	cacheTtlMs?: number | undefined;
+	permissions?: PermissionPolicy | undefined;
 	onPermissionRequest?: (ctx: {
 		toolName: string;
 		toolCallId: string;
@@ -364,98 +366,29 @@ export interface AgentConfig {
 	onQuestionRequest?: (
 		ctx: import("./types-messages.ts").AskUserContext,
 	) => Promise<string>;
-	maxTotalTokens?: number;
+	maxTotalTokens?: number | undefined;
 	/** Hierarchical hard limits for one agent run. */
-	runBudget?: RunBudgetLimits;
+	runBudget?: RunBudgetLimits | undefined;
 	// Per-turn stream options managed by the harness.
-	streamOptions?: AgentHarnessStreamOptions;
-	eventLogPath?: string;
-	steeringInterrupt?: boolean;
-	acceptance?: AcceptanceConfig;
+	streamOptions?: AgentHarnessStreamOptions | undefined;
+	eventLogPath?: string | undefined;
+	steeringInterrupt?: boolean | undefined;
+	acceptance?: AcceptanceConfig | undefined;
 	// Inference mode (Ctrl+M)
-	inferenceMode?: InferenceMode;
+	inferenceMode?: InferenceMode | undefined;
 	/** Absolute paths allowed in addition to CWD for file tools. */
-	allowedPaths?: string[];
+	allowedPaths?: string[] | undefined;
 	/** When true, skip CWD/allowedPaths enforcement for all file tools. */
-	allowAllPaths?: boolean;
+	allowAllPaths?: boolean | undefined;
 	/** Universal output/result truncation limits. Unset fields fall back to DEFAULT_TRUNCATION. */
-	truncation?: TruncationConfig;
+	truncation?: TruncationConfig | undefined;
 	/** When true, prefix all bash commands with `rtk` for token savings. */
-	rtkProxyEnabled?: boolean;
+	rtkProxyEnabled?: boolean | undefined;
 }
 
 export interface WebSearchConfig {
 	baseUrl: string;
 	maxResults?: number;
-}
-
-// ── Error types ───────────────────────────────────────────────────────────
-
-export enum AgentErrorType {
-	TURN_TIMEOUT = "turn_timeout",
-	CONTEXT_FULL = "context_full",
-	PROVIDER_ERROR = "provider_error",
-	ABORTED = "aborted",
-	TOOL_EXECUTION_FAILED = "tool_execution_failed",
-	TOOL_ARGUMENT_ERROR = "tool_argument_error",
-	TOOL_DUPLICATE_CALL = "tool_duplicate_call",
-	TOOL_FAILURE_LOOP = "tool_failure_loop",
-	HOOK_FAILED = "hook_failed",
-	INVALID_CONFIG = "invalid_config",
-}
-
-export interface AgentErrorOptions {
-	type: AgentErrorType;
-	message: string;
-	cause?: unknown;
-	turnId?: string;
-	toolName?: string;
-	retryable?: boolean;
-}
-
-export class AgentError extends Error {
-	readonly type: AgentErrorType;
-	readonly cause?: unknown;
-	readonly turnId?: string;
-	readonly toolName?: string;
-	readonly retryable: boolean;
-
-	constructor(options: AgentErrorOptions) {
-		super(options.message);
-		if (options.cause) {
-			Object.defineProperty(this, "cause", {
-				value: options.cause,
-				writable: true,
-				enumerable: false,
-			});
-		}
-		this.name = "AgentError";
-		this.type = options.type;
-		this.cause = options.cause;
-		this.turnId = options.turnId;
-		this.toolName = options.toolName;
-		this.retryable = options.retryable ?? this.isDefaultRetryable(options.type);
-	}
-
-	private isDefaultRetryable(type: AgentErrorType): boolean {
-		return (
-			type === AgentErrorType.PROVIDER_ERROR ||
-			type === AgentErrorType.CONTEXT_FULL
-		);
-	}
-}
-
-export function wrapError(
-	type: AgentErrorType,
-	original: Error,
-	extra?: Partial<AgentErrorOptions>,
-): AgentError {
-	return new AgentError({
-		type,
-		message: original.message,
-		cause: original,
-		...extra,
-	});
 }
 
 // ── Truncation config ────────────────────────────────────────────────────
@@ -504,18 +437,3 @@ export const DEFAULT_TRUNCATION: Required<
 	},
 	transcriptMessageMaxChars: 4000,
 };
-
-/** Merge a partial override on top of the defaults, one level deep. */
-export function resolveTruncationConfig(
-	overrides?: TruncationConfig,
-): typeof DEFAULT_TRUNCATION {
-	if (!overrides) return DEFAULT_TRUNCATION;
-	return {
-		...DEFAULT_TRUNCATION,
-		...overrides,
-		microCompactMaxChars: {
-			...DEFAULT_TRUNCATION.microCompactMaxChars,
-			...overrides.microCompactMaxChars,
-		},
-	};
-}

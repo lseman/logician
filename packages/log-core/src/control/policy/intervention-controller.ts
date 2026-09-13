@@ -16,11 +16,11 @@ export interface InterventionInput {
 	detector: string;
 	message: string;
 	iteration: number;
-	signals?: readonly string[];
-	counters?: Readonly<Record<string, number>>;
-	limits?: Readonly<Record<string, number>>;
-	action?: HarnessInterventionAction;
-	nextAction?: string;
+	signals?: readonly string[] | undefined;
+	counters?: Readonly<Record<string, number>> | undefined;
+	limits?: Readonly<Record<string, number>> | undefined;
+	action?: HarnessInterventionAction | undefined;
+	nextAction?: string | undefined;
 }
 
 /**

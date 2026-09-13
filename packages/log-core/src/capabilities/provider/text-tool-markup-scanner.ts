@@ -29,7 +29,9 @@ function parseFunctionArguments(body: string): string {
 	const parameterRegex =
 		/<parameter\s*=\s*["']?([a-zA-Z_][\w.-]*)["']?\s*>([\s\S]*?)<\/parameter\s*>/gi;
 	for (const parameter of body.matchAll(parameterRegex)) {
-		args[parameter[1]] = parseParameterValue(parameter[2]);
+		const name = parameter[1];
+		if (!name) continue;
+		args[name] = parseParameterValue(parameter[2] ?? "");
 	}
 	if (Object.keys(args).length > 0) return JSON.stringify(args);
 
@@ -213,7 +215,7 @@ export function scanTextToolMarkup(
 		candidates.push({
 			index: match.index,
 			name: match[1],
-			arguments: parseFunctionArguments(match[2]),
+			arguments: parseFunctionArguments(match[2] ?? ""),
 		});
 		ranges.push({ start: match.index, end: match.index + match[0].length });
 	}
@@ -263,6 +265,7 @@ export function scanTextToolMarkup(
 	for (const match of content.matchAll(functionRegex)) {
 		if (match.index === undefined || inRanges(match.index, ranges)) continue;
 		const name = match[1];
+		if (!name) continue;
 		if (isKnownTool && !isKnownTool(name)) continue;
 		const openingParen = match.index + match[0].lastIndexOf("(");
 		const closingParen = matchingDelimiter(content, openingParen, "(", ")");

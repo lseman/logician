@@ -13,8 +13,9 @@ export function parseToolInput(raw: string): Record<string, unknown> {
 	const lines = (raw || "").split("\n");
 	for (const line of lines) {
 		const match = line.match(/^\s*([\w.-]+)\s*:\s*(.+)\s*$/);
-		if (match) {
-			args[match[1]] = stripQuotes(match[2].trim());
+		const key = match?.[1];
+		if (match && key) {
+			args[key] = stripQuotes((match[2] ?? "").trim());
 		}
 	}
 	return args;

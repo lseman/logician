@@ -219,6 +219,7 @@ export function collectMessagesForBranchSummary(
 	// Walk from newest to oldest with token budget
 	for (let i = branchMessages.length - 1; i >= 0; i--) {
 		const msg = branchMessages[i];
+		if (!msg) continue;
 		const tokens = estimateMessageTokens(msg);
 
 		if (
@@ -243,7 +244,10 @@ export function collectMessagesForBranchSummary(
 }
 
 /** Check if two messages are semantically equal (for common ancestor detection). */
-function messageEquals(a: Message, b: Message): boolean {
+function messageEquals(
+	a: Message | undefined,
+	b: Message | undefined,
+): boolean {
 	if (!a || !b) return false;
 	if (a.role !== b.role) return false;
 	if (typeof a.content !== typeof b.content) return false;
@@ -275,7 +279,7 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 	// Goal
 	const goalMatch = text.match(/## Goal\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/);
 	if (goalMatch) {
-		result.goal = goalMatch[1].trim().split("\n")[0].trim();
+		result.goal = (goalMatch[1] ?? "").trim().split("\n")[0]?.trim() ?? "";
 	}
 
 	// Constraints
@@ -283,14 +287,14 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 		/## Constraints & Preferences\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
 	);
 	if (constraintsMatch) {
-		const items = parseListItems(constraintsMatch[1]);
+		const items = parseListItems(constraintsMatch[1] ?? "");
 		result.constraints = items.filter(
 			item =>
 				!item.match(/^(none|\(none\))$/i) || item.match(/^\(none\) if none/),
 		);
 		if (
 			result.constraints.length === 1 &&
-			/^(none|\(none\))$/i.test(result.constraints[0])
+			/^(none|\(none\))$/i.test(result.constraints[0] ?? "")
 		) {
 			result.constraints = [];
 		}
@@ -301,7 +305,7 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 		/## Progress\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
 	);
 	if (progressMatch) {
-		const progText = progressMatch[1];
+		const progText = progressMatch[1] ?? "";
 		const doneMatch = progText.match(
 			/### Done\s*\n([\s\S]*?)(?=\n###(?!\d|#)|$)/,
 		);
@@ -313,9 +317,9 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 		);
 
 		result.progress = {
-			done: doneMatch ? parseListItems(doneMatch[1]) : [],
-			inProgress: inProgMatch ? parseListItems(inProgMatch[1]) : [],
-			blocked: blockedMatch ? parseListItems(blockedMatch[1]) : [],
+			done: doneMatch ? parseListItems(doneMatch[1] ?? "") : [],
+			inProgress: inProgMatch ? parseListItems(inProgMatch[1] ?? "") : [],
+			blocked: blockedMatch ? parseListItems(blockedMatch[1] ?? "") : [],
 		};
 	}
 
@@ -324,7 +328,7 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 		/## Key Decisions\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
 	);
 	if (decisionsMatch) {
-		const items = parseListItems(decisionsMatch[1]);
+		const items = parseListItems(decisionsMatch[1] ?? "");
 		result.keyDecisions = items.map(item => {
 			const colonIdx = item.indexOf(":");
 			if (colonIdx > 0) {
@@ -346,7 +350,7 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 		/## Next Steps\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
 	);
 	if (stepsMatch) {
-		result.nextSteps = parseListItems(stepsMatch[1]);
+		result.nextSteps = parseListItems(stepsMatch[1] ?? "");
 	}
 
 	return result;

@@ -46,7 +46,7 @@ import type {
 	Tool,
 	ToolCall,
 } from "../../system/types/types-messages.ts";
-import { compactToFit } from "../compaction/engine.ts";
+import { compactToFit, toMessages } from "../compaction/engine.ts";
 import { executeToolBatch } from "../execution/tool-batch-controller.ts";
 import {
 	isToolFailureResult,
@@ -91,10 +91,10 @@ function isSteeringInterrupt(signal: AbortSignal | undefined): boolean {
 }
 
 export interface RunAgentLoopContext {
-	systemPrompt?: string;
+	systemPrompt?: string | undefined;
 	messages: Message[];
-	tools?: Tool[];
-	cwd?: string;
+	tools?: Tool[] | undefined;
+	cwd?: string | undefined;
 }
 
 export type RunAgentLoopConfig = AgentLoopConfig;
@@ -120,7 +120,7 @@ async function runAgentLoopInternal(
 	const newMessages: Message[] = [...prompts];
 	const finish = async (outcome: {
 		status: RunOutcomeStatus;
-		summary?: string;
+		summary?: string | undefined;
 		source: "structured" | "heuristic" | "runtime";
 	}): Promise<Message[]> => {
 		await emit({

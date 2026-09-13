@@ -4,7 +4,7 @@ import type {
 } from "../../system/types/types-config.ts";
 import type { ExecutionProfile } from "../policy/execution-policy.ts";
 
-export const DEFAULT_MAX_ITERATIONS = 30;
+const DEFAULT_MAX_ITERATIONS = 30;
 
 export interface AgentSettings {
 	executionProfile: ExecutionProfile;
@@ -15,11 +15,11 @@ export interface AgentSettings {
 }
 
 export interface AgentSettingsInput {
-	executionProfile?: ExecutionProfile;
-	inferenceMode?: InferenceMode;
-	maxIterations?: number;
-	thinkingLevel?: ThinkingLevel;
-	toolExecution?: "parallel" | "sequential";
+	executionProfile?: ExecutionProfile | undefined;
+	inferenceMode?: InferenceMode | undefined;
+	maxIterations?: number | undefined;
+	thinkingLevel?: ThinkingLevel | undefined;
+	toolExecution?: "parallel" | "sequential" | undefined;
 }
 
 export function resolveAgentSettings(

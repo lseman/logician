@@ -38,17 +38,17 @@ export type BackendErrorCategory =
 
 export class BackendError extends Error {
 	readonly category: BackendErrorCategory;
-	readonly status?: number;
+	readonly status?: number | undefined;
 	/** Whether retrying the same request could succeed (rate_limit / transient). */
 	readonly retryable: boolean;
 	/** Provider-requested retry delay (Retry-After header), when present. */
-	readonly retryAfterMs?: number;
+	readonly retryAfterMs?: number | undefined;
 
 	constructor(opts: {
 		category: BackendErrorCategory;
 		message: string;
-		status?: number;
-		retryAfterMs?: number;
+		status?: number | undefined;
+		retryAfterMs?: number | undefined;
 	}) {
 		super(opts.message);
 		this.name = "BackendError";
@@ -164,18 +164,20 @@ export interface LLMResponse {
 	content: string | null;
 	toolCalls: ToolCall[];
 	stopReason: "stop" | "length" | "error";
-	errorMessage?: string;
+	errorMessage?: string | undefined;
 	/** Non-null when the model refused to answer (safety/content-policy refusal). */
-	refusal?: string;
+	refusal?: string | undefined;
 	/** Provider-reported token usage from the final stream chunk, when available.
 	 * Lets the loop report real context size instead of a local char/4 estimate. */
-	usage?: {
-		promptTokens?: number;
-		completionTokens?: number;
-		totalTokens?: number;
-		/** Prompt tokens served from the provider's cache, when reported. */
-		cachedTokens?: number;
-	};
+	usage?:
+		| {
+				promptTokens?: number | undefined;
+				completionTokens?: number | undefined;
+				totalTokens?: number | undefined;
+				/** Prompt tokens served from the provider's cache, when reported. */
+				cachedTokens?: number | undefined;
+		  }
+		| undefined;
 }
 
 interface ProviderUsage {
@@ -192,6 +194,19 @@ function tokenCount(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0
 		? Math.floor(value)
 		: undefined;
+}
+
+/** Get the in-progress accumulator for a streamed tool call, creating it on first sight. */
+function ensureToolCallAccumulator(
+	toolCalls: ToolCall[],
+	index: number,
+): ToolCall {
+	let acc = toolCalls[index];
+	if (!acc) {
+		acc = { id: "", name: "", arguments: "" };
+		toolCalls[index] = acc;
+	}
+	return acc;
 }
 
 /** Normalize OpenAI-compatible (including llama.cpp) usage telemetry. */
@@ -265,32 +280,32 @@ export interface GenerateCallbacks {
 
 /** Options for a generate() call. */
 export interface GenerateOptions {
-	tools?: Record<string, unknown>[];
-	temperature?: number;
-	maxTokens?: number;
+	tools?: Record<string, unknown>[] | undefined;
+	temperature?: number | undefined;
+	maxTokens?: number | undefined;
 	// Additional sampling params (populated when an inference mode is active).
-	topP?: number;
-	topK?: number;
-	minP?: number;
-	presencePenalty?: number;
-	repetitionPenalty?: number;
-	signal?: AbortSignal;
-	thinkingLevel?: ThinkingLevel;
-	callbacks?: GenerateCallbacks;
+	topP?: number | undefined;
+	topK?: number | undefined;
+	minP?: number | undefined;
+	presencePenalty?: number | undefined;
+	repetitionPenalty?: number | undefined;
+	signal?: AbortSignal | undefined;
+	thinkingLevel?: ThinkingLevel | undefined;
+	callbacks?: GenerateCallbacks | undefined;
 	// Per-request extras supplied by the loop's provider-boundary hooks
 	// (beforeProviderRequest / beforeProviderPayload).
-	headers?: Record<string, string>;
+	headers?: Record<string, string> | undefined;
 	/** Per-request deadline. Combined with the caller's cancellation signal. */
-	timeoutMs?: number;
+	timeoutMs?: number | undefined;
 	transformPayload?: (
 		payload: Record<string, unknown>,
 	) => Promise<Record<string, unknown>> | Record<string, unknown>;
 	// Max retry attempts for this request (overrides config default).
-	maxRetries?: number;
+	maxRetries?: number | undefined;
 	// Cache retention hint forwarded to providers supporting it.
-	cacheRetention?: string;
+	cacheRetention?: string | undefined;
 	// Provider metadata forwarded with requests.
-	metadata?: Record<string, unknown>;
+	metadata?: Record<string, unknown> | undefined;
 }
 
 export interface LLMBackend {
@@ -324,20 +339,20 @@ export function createLLMBackend(options: {
 export class OpenAIBackend implements LLMBackend {
 	readonly baseUrl: string;
 	readonly model: string;
-	private chatTemplate?: string;
-	private stop?: string[];
+	private chatTemplate?: string | undefined;
+	private stop?: string[] | undefined;
 	private defaultThinkingLevel: ThinkingLevel = "off";
-	private thinkingFormat?: ThinkingFormat;
+	private thinkingFormat?: ThinkingFormat | undefined;
 	private readonly providerAdapter: ProviderAdapter;
 
 	constructor(options: {
 		baseUrl: string;
 		model: string;
-		chatTemplate?: string;
-		stop?: string[];
-		thinkingLevel?: ThinkingLevel;
-		thinkingFormat?: ThinkingFormat;
-		providerAdapter?: ProviderAdapter;
+		chatTemplate?: string | undefined;
+		stop?: string[] | undefined;
+		thinkingLevel?: ThinkingLevel | undefined;
+		thinkingFormat?: ThinkingFormat | undefined;
+		providerAdapter?: ProviderAdapter | undefined;
 	}) {
 		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.model = options.model;
@@ -449,7 +464,7 @@ export class OpenAIBackend implements LLMBackend {
 					...extraHeaders,
 				},
 				body: JSON.stringify(finalBody),
-				signal: requestSignal,
+				signal: requestSignal ?? null,
 			});
 		} catch (e) {
 			const error = e as Error;
@@ -519,11 +534,11 @@ export class OpenAIBackend implements LLMBackend {
 						};
 					}
 					const delta = chunk.choices?.[0]?.delta;
+					if (!delta) continue;
 					// Detect provider safety/content-policy refusals (OpenAI returns delta.refusal).
 					if (delta.refusal) {
 						refusal = (refusal || "") + delta.refusal;
 					}
-					if (!delta) continue;
 
 					// Emit text_start on first text content
 					if (delta.content && !hasText) {
@@ -553,31 +568,23 @@ export class OpenAIBackend implements LLMBackend {
 						changed = true;
 						for (const tc of delta.tool_calls) {
 							// Accumulate tool call across chunks.
-							if (!toolCalls[tc.index]) {
-								toolCalls[tc.index] = {
-									id: "",
-									name: "",
-									arguments: "",
-								};
-							}
+							const acc = ensureToolCallAccumulator(toolCalls, tc.index);
 							if (tc.id) {
-								const previousId = toolCalls[tc.index].id;
+								const previousId = acc.id;
 								if (!previousId && startedToolIndexes.has(tc.index)) {
 									onToolCallIdUpdate?.(`tool_${tc.index}`, tc.id);
 								}
-								toolCalls[tc.index].id = tc.id;
+								acc.id = tc.id;
 							}
-							if (tc.function?.name)
-								toolCalls[tc.index].name = tc.function.name;
+							if (tc.function?.name) acc.name = tc.function.name;
 							if (tc.function?.arguments) {
-								toolCalls[tc.index].arguments += tc.function.arguments;
+								acc.arguments += tc.function.arguments;
 							}
 
 							// Emit the early start once, the moment the name is known.
 							// Skipping empty-name chunks lets the UI reuse this chunk
 							// (by id/name) when the loop emits the authoritative start
 							// before execution — no duplicate card.
-							const acc = toolCalls[tc.index];
 							if (acc.name && !startedToolIndexes.has(tc.index)) {
 								startedToolIndexes.add(tc.index);
 								onToolCallStart?.(

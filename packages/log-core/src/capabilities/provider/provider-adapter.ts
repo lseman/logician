@@ -6,17 +6,17 @@ import type {
 export interface ProviderRequestContext {
 	model: string;
 	messages: Record<string, unknown>[];
-	tools?: Record<string, unknown>[];
+	tools?: Record<string, unknown>[] | undefined;
 	temperature: number;
 	maxTokens: number;
-	topP?: number;
-	topK?: number;
-	minP?: number;
-	presencePenalty?: number;
-	repetitionPenalty?: number;
-	stop?: string[];
+	topP?: number | undefined;
+	topK?: number | undefined;
+	minP?: number | undefined;
+	presencePenalty?: number | undefined;
+	repetitionPenalty?: number | undefined;
+	stop?: string[] | undefined;
 	thinkingLevel: ThinkingLevel;
-	thinkingFormat?: ThinkingFormat;
+	thinkingFormat?: ThinkingFormat | undefined;
 }
 
 /**

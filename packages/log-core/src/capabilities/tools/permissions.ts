@@ -22,14 +22,14 @@ import type { Tool, ToolCall } from "../../system/types/types-messages.ts";
 export type PermissionMode = "acceptAll" | "acceptEdits" | "ask" | "plan";
 
 export interface PermissionRules {
-	allow?: string[];
-	deny?: string[];
+	allow?: string[] | undefined;
+	deny?: string[] | undefined;
 }
 
 export interface PermissionVerdict {
 	decision: "allow" | "deny" | "ask";
 	source: "rule" | "mode";
-	reason?: string;
+	reason?: string | undefined;
 }
 
 // Tools auto-approved in acceptEdits mode on top of read-only ones.
@@ -37,7 +37,7 @@ const EDIT_TOOLS = new Set(["edit_file", "write_file"]);
 
 interface ParsedRule {
 	tool: string;
-	pattern?: RegExp;
+	pattern?: RegExp | undefined;
 	raw: string;
 }
 
@@ -45,6 +45,7 @@ function parseRule(raw: string): ParsedRule | null {
 	const match = /^\s*([A-Za-z0-9_-]+)\s*(?:\((.*)\))?\s*$/.exec(raw);
 	if (!match) return null;
 	const [, tool, glob] = match;
+	if (!tool) return null;
 	return {
 		tool,
 		pattern: glob !== undefined ? globToRegExp(glob) : undefined,

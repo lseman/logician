@@ -185,18 +185,18 @@ void test("micro-compaction spares recent messages and user prompts", () => {
 	const result = microCompactCompactableMessages(messages);
 
 	// Old tool result trimmed, both head and tail preserved.
-	const trimmedTool = String(result.messages[1].content);
+	const trimmedTool = String(result.messages[1]?.content);
 	assert.ok(trimmedTool.length < 10_000);
 	assert.match(trimmedTool, /compacted/);
 	assert.ok(trimmedTool.startsWith("T"));
 	assert.ok(trimmedTool.endsWith("T"));
 
 	// Old user prompt under its 14k cap — untouched.
-	assert.equal(String(result.messages[0].content).length, 10_000);
+	assert.equal(String(result.messages[0]?.content).length, 10_000);
 
 	// Recent messages untouched even when oversized.
 	for (let i = 2; i < result.messages.length; i++) {
-		assert.equal(String(result.messages[i].content).length, 10_002);
+		assert.equal(String(result.messages[i]?.content).length, 10_002);
 	}
 });
 

@@ -13,22 +13,24 @@ export interface EventJournalEntry<E extends JournalEvent> {
 
 export interface EventJournalQuery<E extends JournalEvent> {
 	/** Return entries strictly newer than this journal cursor. */
-	afterId?: number;
-	types?: Iterable<E["type"]>;
+	afterId?: number | undefined;
+	types?: Iterable<E["type"]> | undefined;
 	/** Return only the newest matching entries. */
-	limit?: number;
+	limit?: number | undefined;
 }
 
 export interface EventJournalSubscriptionOptions<E extends JournalEvent> {
 	/** Replay retained entries before receiving new ones. */
-	replay?: boolean | EventJournalQuery<E>;
+	replay?: boolean | EventJournalQuery<E> | undefined;
 }
 
 export interface EventJournalOptions<E extends JournalEvent> {
 	/** Maximum retained entries. Zero keeps live subscriptions but no history. */
-	capacity?: number;
-	now?: () => number;
-	onSubscriberError?: (error: Error, entry: EventJournalEntry<E>) => void;
+	capacity?: number | undefined;
+	now?: (() => number) | undefined;
+	onSubscriberError?:
+		| ((error: Error, entry: EventJournalEntry<E>) => void)
+		| undefined;
 }
 
 type Subscriber<E extends JournalEvent> = (entry: EventJournalEntry<E>) => void;
@@ -43,7 +45,9 @@ const DEFAULT_CAPACITY = 1_000;
 export class EventJournal<E extends JournalEvent = JournalEvent> {
 	private readonly capacity: number;
 	private readonly now: () => number;
-	private readonly onSubscriberError?: EventJournalOptions<E>["onSubscriberError"];
+	private readonly onSubscriberError?:
+		| EventJournalOptions<E>["onSubscriberError"]
+		| undefined;
 	private entries: Array<EventJournalEntry<E> | undefined>;
 	private start = 0;
 	private count = 0;
@@ -136,7 +140,8 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 		this.subscribers.add(subscriber);
 		for (const entry of history) this.invoke(handler, entry);
 		for (let index = 0; index < buffered.length; index++) {
-			this.invoke(handler, buffered[index]);
+			const entry = buffered[index];
+			if (entry) this.invoke(handler, entry);
 		}
 		buffered.length = 0;
 		replaying = false;
@@ -156,6 +161,7 @@ export class EventJournal<E extends JournalEvent = JournalEvent> {
 		try {
 			for (let index = 0; index < this.pending.length; index++) {
 				const delivery = this.pending[index];
+				if (!delivery) continue;
 				for (const subscriber of delivery.subscribers) {
 					if (this.subscribers.has(subscriber))
 						this.invoke(subscriber, delivery.entry);

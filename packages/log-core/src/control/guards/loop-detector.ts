@@ -12,9 +12,9 @@ export interface LoopGuardDecision {
 
 export interface LoopDetectorOptions {
 	/** Duplicate call threshold — block when same tool+args called N times (default 3). */
-	duplicateThreshold?: number;
+	duplicateThreshold?: number | undefined;
 	/** Failure loop threshold — block when same tool/path/category failed N times (default 3). */
-	failureThreshold?: number;
+	failureThreshold?: number | undefined;
 }
 
 const DEFAULT_DUPLICATE_THRESHOLD = 3;

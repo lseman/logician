@@ -207,7 +207,7 @@ export interface ExtensionAPI {
 	info: { name: string; path: string };
 
 	/** Optional cleanup when extension is unloaded. */
-	unload?: () => void;
+	unload?: (() => void) | undefined;
 }
 
 // ============================================================================

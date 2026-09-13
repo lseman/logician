@@ -25,7 +25,7 @@ export interface ProviderOptionsContext {
 	requestCacheRetention: string | undefined;
 	requestMetadata: Record<string, unknown> | undefined;
 	modeDef: InferenceModeDef | undefined;
-	signal?: AbortSignal;
+	signal?: AbortSignal | undefined;
 	payloadHook: AgentHooks["beforeProviderPayload"] | undefined;
 }
 

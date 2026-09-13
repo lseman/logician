@@ -10,7 +10,10 @@ export class HarnessQueueController {
 	private readonly queue: MessageQueue;
 
 	constructor(
-		options: { steeringMode?: QueueMode; followUpMode?: QueueMode },
+		options: {
+			steeringMode?: QueueMode | undefined;
+			followUpMode?: QueueMode | undefined;
+		},
 		private readonly changed: (queues: HarnessQueues) => void,
 	) {
 		this.queue = new MessageQueue({

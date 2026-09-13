@@ -3,8 +3,8 @@ import { CancellationScope } from "../../../system/lifecycle/cancellation-scope.
 /** Owns abort signaling and settlement for one active harness turn. */
 export class HarnessTurnController {
 	private scope: CancellationScope | null = null;
-	private settledPromise?: Promise<void>;
-	private resolveSettled?: () => void;
+	private settledPromise?: Promise<void> | undefined;
+	private resolveSettled?: (() => void) | undefined;
 
 	async run<T>(
 		execute: (signal: AbortSignal) => Promise<T>,

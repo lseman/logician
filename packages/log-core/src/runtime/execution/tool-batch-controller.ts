@@ -19,12 +19,12 @@ export interface ToolBatchControllerOptions {
 	registry: ToolRegistry;
 	toolCalls: ToolCall[];
 	rawStopReason: "stop" | "length" | "error";
-	toolExecution?: "parallel" | "sequential";
+	toolExecution?: "parallel" | "sequential" | undefined;
 	iteration: number;
-	signal?: AbortSignal;
-	hooks?: AgentHooks;
-	permissions?: PermissionPolicy;
-	onPermissionRequest?: OnPermissionRequest;
+	signal?: AbortSignal | undefined;
+	hooks?: AgentHooks | undefined;
+	permissions?: PermissionPolicy | undefined;
+	onPermissionRequest?: OnPermissionRequest | undefined;
 	emit: Emit;
 }
 
@@ -168,7 +168,7 @@ export async function executeToolBatch(
 	type Plan = {
 		prepared: ReturnType<ToolRegistry["prepare"]>;
 		args: Record<string, unknown>;
-		immediateContent?: string;
+		immediateContent?: string | undefined;
 		immediateError: boolean;
 		permissionDenied: boolean;
 	};
@@ -311,6 +311,7 @@ export async function executeToolBatch(
 	if (options.toolExecution !== "parallel") {
 		for (let index = 0; index < plans.length; index++) {
 			const plan = plans[index];
+			if (!plan) continue;
 			if (signal?.aborted && plan.immediateContent === undefined) {
 				plan.immediateContent = CANCELLED_TOOL_RESULT;
 				plan.immediateError = true;
@@ -329,7 +330,8 @@ export async function executeToolBatch(
 		};
 		for (let index = 0; index < plans.length; index++) {
 			const plan = plans[index];
-			const mode = registry.get(toolCalls[index].name)?.executionMode;
+			if (!plan) continue;
+			const mode = registry.get(toolCalls[index]?.name ?? "")?.executionMode;
 			if (mode !== "sequential") {
 				parallelStage.push(plan);
 				continue;

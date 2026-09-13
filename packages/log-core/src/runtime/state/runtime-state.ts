@@ -6,21 +6,25 @@ export type HarnessPhase = "idle" | "turn" | "compaction" | "branch_summary";
 export interface AgentRuntimeState {
 	phase: HarnessPhase;
 	isStreaming: boolean;
-	turnId?: string;
-	streamingMessage?: Message;
+	turnId?: string | undefined;
+	streamingMessage?: Message | undefined;
 	pendingToolCalls: readonly string[];
-	retry?: { attempt: number; maxRetries: number; delayMs?: number };
+	retry?:
+		| { attempt: number; maxRetries: number; delayMs?: number | undefined }
+		| undefined;
 	abortRequested: boolean;
-	lastError?: string;
-	lastEventSeq?: number;
-	startedAt?: number;
-	turnStartedAt?: number;
-	lastTurnDurationMs?: number;
-	lastRunDurationMs?: number;
-	outcome?: {
-		status: RunOutcomeStatus;
-		summary?: string;
-	};
+	lastError?: string | undefined;
+	lastEventSeq?: number | undefined;
+	startedAt?: number | undefined;
+	turnStartedAt?: number | undefined;
+	lastTurnDurationMs?: number | undefined;
+	lastRunDurationMs?: number | undefined;
+	outcome?:
+		| {
+				status: RunOutcomeStatus;
+				summary?: string | undefined;
+		  }
+		| undefined;
 }
 
 export function createRuntimeState(

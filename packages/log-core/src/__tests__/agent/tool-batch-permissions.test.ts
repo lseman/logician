@@ -30,6 +30,14 @@ function callFor(command: string): ToolCall {
 	return { id: "c1", name: "bash", arguments: JSON.stringify({ command }) };
 }
 
+function firstMessage<T extends { messages: unknown[] }>(
+	batch: T,
+): T["messages"][number] {
+	const message = batch.messages[0];
+	assert.ok(message, "expected at least one message");
+	return message;
+}
+
 async function run(
 	registry: ToolRegistry,
 	call: ToolCall,
@@ -71,7 +79,7 @@ void test("permissions evaluate rewritten tool arguments", async () => {
 			}),
 		},
 	);
-	assert.match(String(batch.messages[0].content), /Tool call denied/);
+	assert.match(String(firstMessage(batch).content), /Tool call denied/);
 	const start = batch.events.find(
 		event => event.type === "tool_execution_start",
 	);
@@ -89,7 +97,7 @@ void test("denied tool call short-circuits without executing", async () => {
 	});
 	const batch = await run(registry, callFor("rm -rf /tmp/x"), permissions);
 	assert.equal(batch.messages.length, 1);
-	const content = batch.messages[0].content as string;
+	const content = firstMessage(batch).content as string;
 	assert.match(content, /Tool call denied/);
 	assert.match(content, /denied by rule/);
 	assert.equal(batch.permissionDenials, 1);
@@ -99,7 +107,7 @@ void test("plan mode denies write tools with the plan-mode reason", async () => 
 	const registry = registryWithBash();
 	const permissions = new PermissionPolicy({ mode: "plan" });
 	const batch = await run(registry, callFor("make build"), permissions);
-	const content = batch.messages[0].content as string;
+	const content = firstMessage(batch).content as string;
 	assert.match(content, /Tool call denied/);
 	assert.match(content, /plan mode/i);
 });
@@ -108,7 +116,7 @@ void test("ask verdict with no handler fails closed (denied, not silently execut
 	const registry = registryWithBash();
 	const permissions = new PermissionPolicy({ mode: "ask" });
 	const batch = await run(registry, callFor("make build"), permissions);
-	const content = batch.messages[0].content as string;
+	const content = firstMessage(batch).content as string;
 	assert.match(content, /Tool call denied/);
 	assert.match(content, /no interactive handler/);
 });
@@ -122,7 +130,7 @@ void test("ask verdict resolved 'allow' by the handler executes the tool", async
 		permissions,
 		async () => "allow",
 	);
-	const content = batch.messages[0].content as string;
+	const content = firstMessage(batch).content as string;
 	assert.equal(content, "ran: make build");
 	assert.equal(batch.permissionDenials, 0);
 });
@@ -136,7 +144,7 @@ void test("ask verdict resolved 'deny' by the handler blocks the tool", async ()
 		permissions,
 		async () => "deny",
 	);
-	const content = batch.messages[0].content as string;
+	const content = firstMessage(batch).content as string;
 	assert.match(content, /Tool call denied/);
 	assert.match(content, /user denied/);
 });
@@ -155,7 +163,7 @@ void test("ask verdict resolved 'always' persists a session allow for later call
 		permissions,
 		onPermissionRequest,
 	);
-	assert.equal(first.messages[0].content, "ran: make build");
+	assert.equal(firstMessage(first).content, "ran: make build");
 	assert.equal(asked, 1);
 
 	// The same call should be auto-allowed by the scoped session rule.
@@ -165,7 +173,7 @@ void test("ask verdict resolved 'always' persists a session allow for later call
 		permissions,
 		onPermissionRequest,
 	);
-	assert.equal(second.messages[0].content, "ran: make build");
+	assert.equal(firstMessage(second).content, "ran: make build");
 	assert.equal(asked, 1);
 
 	const different = await run(
@@ -174,7 +182,7 @@ void test("ask verdict resolved 'always' persists a session allow for later call
 		permissions,
 		onPermissionRequest,
 	);
-	assert.equal(different.messages[0].content, "ran: make clean");
+	assert.equal(firstMessage(different).content, "ran: make clean");
 	assert.equal(asked, 2);
 });
 
@@ -192,7 +200,7 @@ void test("acceptAll mode never invokes the permission handler", async () => {
 		},
 	);
 	assert.equal(asked, false);
-	assert.equal(batch.messages[0].content, "ran: make build");
+	assert.equal(firstMessage(batch).content, "ran: make build");
 });
 
 void test("permission decisions are attributed before execution", async () => {

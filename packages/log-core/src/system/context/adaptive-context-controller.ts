@@ -8,7 +8,7 @@ import type {
 
 export interface AdaptiveContextRequest extends ContextAssemblyRequest {
 	/** Current user objective, used only for deterministic lexical relevance. */
-	objective?: string;
+	objective?: string | undefined;
 }
 
 export interface AdaptiveContextPlan extends ContextSnapshot {
@@ -22,18 +22,18 @@ export interface AdaptiveContextPlan extends ContextSnapshot {
 export interface ContextOutcome {
 	success: boolean;
 	/** When known, credit only sources supported by independent evidence. */
-	usefulSources?: readonly string[];
+	usefulSources?: readonly string[] | undefined;
 }
 
 export interface AdaptiveContextControllerOptions {
 	/** Weight of prior outcomes relative to declared priority and relevance. */
-	learningWeight?: number;
+	learningWeight?: number | undefined;
 	/** EWMA update rate. Higher values adapt faster to recent outcomes. */
-	learningRate?: number;
+	learningRate?: number | undefined;
 	/** Previously persisted learning state. Invalid entries are ignored. */
-	initialState?: AdaptiveContextLearningState;
+	initialState?: AdaptiveContextLearningState | undefined;
 	/** Called after a new outcome changes source utility. */
-	onStateChange?: (state: AdaptiveContextLearningState) => void;
+	onStateChange?: ((state: AdaptiveContextLearningState) => void) | undefined;
 }
 
 export interface AdaptiveContextLearningState {
@@ -107,7 +107,9 @@ export class AdaptiveContextController {
 	private nextPlan = 1;
 	private readonly learningWeight: number;
 	private readonly learningRate: number;
-	private readonly onStateChange?: AdaptiveContextControllerOptions["onStateChange"];
+	private readonly onStateChange?:
+		| AdaptiveContextControllerOptions["onStateChange"]
+		| undefined;
 
 	constructor(
 		private readonly estimateTokens: (messages: readonly Message[]) => number,

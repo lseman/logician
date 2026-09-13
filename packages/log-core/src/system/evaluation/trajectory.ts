@@ -1,7 +1,13 @@
 import type { AgentEvent } from "../types/types-messages.ts";
 
 export interface TrajectorySummary {
-	status?: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
+	status?:
+		| "completed"
+		| "needs_input"
+		| "blocked"
+		| "failed"
+		| "cancelled"
+		| undefined;
 	turns: number;
 	toolCalls: number;
 	toolErrors: number;
@@ -9,16 +15,16 @@ export interface TrajectorySummary {
 	continuations: number;
 	interventions: number;
 	compactions: number;
-	verificationPassed?: boolean;
+	verificationPassed?: boolean | undefined;
 }
 
 export interface TrajectoryExpectation {
-	status?: TrajectorySummary["status"];
-	verificationPassed?: boolean;
-	maxTurns?: number;
-	maxToolErrors?: number;
-	maxPermissionDenials?: number;
-	maxContinuations?: number;
+	status?: TrajectorySummary["status"] | undefined;
+	verificationPassed?: boolean | undefined;
+	maxTurns?: number | undefined;
+	maxToolErrors?: number | undefined;
+	maxPermissionDenials?: number | undefined;
+	maxContinuations?: number | undefined;
 }
 
 export interface TrajectoryGrade {

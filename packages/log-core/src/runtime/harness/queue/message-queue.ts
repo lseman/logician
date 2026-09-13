@@ -12,8 +12,8 @@ export type MessageType = "steering" | "followUp" | "nextTurn";
 export type DeliveryMode = "one-at-a-time" | "all";
 
 export interface MessageQueueOptions {
-	steeringMode?: DeliveryMode;
-	followUpMode?: DeliveryMode;
+	steeringMode?: DeliveryMode | undefined;
+	followUpMode?: DeliveryMode | undefined;
 }
 
 export interface QueuedMessage {

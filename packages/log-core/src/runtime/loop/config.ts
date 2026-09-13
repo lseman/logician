@@ -58,7 +58,7 @@ export interface AgentLoopConfig extends AgentLoopOptions {
 		providerCalls: number;
 		toolCalls: number;
 		tokens: number;
-		startedAt?: number;
+		startedAt?: number | undefined;
 	};
 	onBudgetConsumed?: (
 		resource: "provider_call" | "tool_call" | "token",

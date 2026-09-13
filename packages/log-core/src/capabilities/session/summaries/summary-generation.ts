@@ -22,9 +22,9 @@ export async function generateCompactionSummary(
 	messages: Message[],
 	systemMessages: Message[],
 	options: {
-		temperature?: number;
-		maxTokens?: number;
-		thinkingLevel?: ThinkingLevel;
+		temperature?: number | undefined;
+		maxTokens?: number | undefined;
+		thinkingLevel?: ThinkingLevel | undefined;
 	},
 ): Promise<string | null> {
 	try {
@@ -61,10 +61,10 @@ export async function generateBranchSummaryText(
 	backend: LLMBackend,
 	messages: Message[],
 	options: {
-		customInstructions?: string;
-		fileOps?: FileOperations;
-		maxTokens?: number;
-		thinkingLevel?: ThinkingLevel;
+		customInstructions?: string | undefined;
+		fileOps?: FileOperations | undefined;
+		maxTokens?: number | undefined;
+		thinkingLevel?: ThinkingLevel | undefined;
 	} = {},
 ): Promise<BranchSummaryData | null> {
 	if (messages.length === 0) return null;

@@ -24,7 +24,7 @@ import type {
 	CompactableMessage,
 	Message,
 } from "../../system/types/types-messages.ts";
-import { compactToFit } from "../compaction/engine.ts";
+import { compactToFit, toMessages } from "../compaction/engine.ts";
 import { selectAdaptiveMode } from "./adaptive-mode.ts";
 import { applyHeaderPatch } from "./callbacks.ts";
 import type { AgentLoopConfig } from "./config.ts";
@@ -42,7 +42,7 @@ export function createProviderTurnState(): ProviderTurnState {
 
 export interface ProviderTurnOutcome {
 	status: Extract<RunOutcomeStatus, "cancelled" | "failed">;
-	summary?: string;
+	summary?: string | undefined;
 	source: "runtime";
 }
 
@@ -71,7 +71,7 @@ export interface RequestAssistantTurnInput {
 	 * only to build this one outgoing payload — never persisted, never
 	 * compacted. Falls back to `messages` when absent.
 	 */
-	presentationMessages?: Message[];
+	presentationMessages?: Message[] | undefined;
 	config: ProviderTurnConfig;
 	settings: AgentSettings;
 	registry: { toToolDefinitions(): Record<string, unknown>[] };

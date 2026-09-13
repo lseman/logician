@@ -40,7 +40,7 @@ describe("TtsrManager", () => {
 		mgr.addRule(makeRule({ conditions: ["secret"] }));
 		const matches = mgr.checkDelta("hello secret world", textCtx());
 		assert.equal(matches.length, 1);
-		assert.equal(matches[0].name, "test-rule");
+		assert.equal(matches[0]?.name, "test-rule");
 	});
 
 	it("does not match when pattern absent", () => {

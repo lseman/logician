@@ -80,8 +80,10 @@ export class ExtensionRunner {
 	private handlers = new Map<ExtensionEventType, HandlerEntry[]>();
 	private tools: Array<{ tool: RegisteredTool; source: string }> = [];
 	private commands: Array<{ command: RegisteredCommand; source: string }> = [];
-	private extensions: Array<{ def: ExtensionDefinition; unload?: () => void }> =
-		[];
+	private extensions: Array<{
+		def: ExtensionDefinition;
+		unload?: (() => void) | undefined;
+	}> = [];
 	private eventBus: EventBus;
 	/** Shared context for extension event handlers */
 	private extContext: ReturnType<typeof createExtensionContext>;
@@ -134,7 +136,7 @@ export class ExtensionRunner {
 
 	private createAPI(
 		def: ExtensionDefinition,
-	): ExtensionAPI & { unload?: () => void } {
+	): ExtensionAPI & { unload?: (() => void) | undefined } {
 		const ownedHandlers: HandlerEntry[] = [];
 		const state = createStateWrapper(def.name);
 		const ctx: ExtensionContext = {
@@ -301,11 +303,11 @@ export class ExtensionRunner {
 			const result = await this.emit(event);
 			if (result && typeof result === "object") {
 				const hookResult = result as {
-					block?: boolean;
-					reason?: string;
-					args?: Record<string, unknown>;
-					content?: string;
-					isError?: boolean;
+					block?: boolean | undefined;
+					reason?: string | undefined;
+					args?: Record<string, unknown> | undefined;
+					content?: string | undefined;
+					isError?: boolean | undefined;
 				};
 				if (hookResult.block) {
 					return {
@@ -342,9 +344,9 @@ export class ExtensionRunner {
 			const emitted = await this.emit(event);
 			if (emitted && typeof emitted === "object") {
 				const hookResult = emitted as {
-					content?: string;
-					isError?: boolean;
-					terminate?: boolean;
+					content?: string | undefined;
+					isError?: boolean | undefined;
+					terminate?: boolean | undefined;
 				};
 				if (
 					hookResult.content !== undefined ||

@@ -1040,8 +1040,8 @@ void test("cancelled sequential batches produce a result for every tool call", a
 	const results = messages.filter(message => message.role === "tool");
 	assert.equal(results.length, 3);
 	assert.deepEqual(calls, ["one"]);
-	assert.match(String(results[1].content), /cancelled/);
-	assert.match(String(results[2].content), /cancelled/);
+	assert.match(String(results[1]?.content), /cancelled/);
+	assert.match(String(results[2]?.content), /cancelled/);
 });
 
 void test("parallel tool batches complete deterministic preflight before execution", async () => {

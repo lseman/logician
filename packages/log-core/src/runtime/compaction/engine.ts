@@ -16,6 +16,7 @@ import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AgentMessage,
 	CompactableMessage,
+	Message,
 } from "../../system/types/types-messages.ts";
 import { serializeConversation } from "./serialization.ts";
 
@@ -28,11 +29,11 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
-	contextWindow?: number;
+	contextWindow?: number | undefined;
 	/** Number of recent messages to always preserve (regardless of token budget). */
-	protectedMessageCount?: number;
+	protectedMessageCount?: number | undefined;
 	/** Whether to force compaction regardless of current token usage. */
-	force?: boolean;
+	force?: boolean | undefined;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -187,7 +188,7 @@ export function estimateContextTokens(
 
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i] as AgentMessage & {
-			usage?: Record<string, number>;
+			usage?: Record<string, number> | undefined;
 		};
 		if (msg.role === "assistant" && msg.usage) {
 			usageTokens =
@@ -205,7 +206,8 @@ export function estimateContextTokens(
 		// Usage-based: provider gave us exact token count up to this message
 		let trailingTokens = 0;
 		for (let i = lastUsageIndex + 1; i < messages.length; i++) {
-			trailingTokens += estimateCompressableTokens(messages[i]);
+			const message = messages[i];
+			if (message) trailingTokens += estimateCompressableTokens(message);
 		}
 		return {
 			tokens: usageTokens + trailingTokens,
@@ -257,8 +259,9 @@ function findValidCutPoints(
 ): number[] {
 	const cutPoints: number[] = [];
 	for (let i = startIndex; i < endIndex; i++) {
-		if (!messages[i]) continue;
-		const role = messages[i].role;
+		const message = messages[i];
+		if (!message) continue;
+		const role = message.role;
 		if (
 			role === "user" ||
 			role === "custom" ||
@@ -279,8 +282,9 @@ function findTurnStartIndex(
 	startIndex: number,
 ): number {
 	for (let i = entryIndex; i >= startIndex; i--) {
-		if (!messages[i]) continue;
-		const role = messages[i].role;
+		const message = messages[i];
+		if (!message) continue;
+		const role = message.role;
 		if (
 			role === "custom" ||
 			role === "branchSummary" ||
@@ -299,7 +303,7 @@ function findTurnStartIndex(
 export interface CutPointResult {
 	firstKeptIndex: number;
 	/** UUID of the first kept entry (set when messages carry entryId). */
-	firstKeptEntryId?: string;
+	firstKeptEntryId?: string | undefined;
 	turnStartIndex: number; // -1 if cut is clean (at user message)
 	isSplitTurn: boolean;
 	/** Index of the first protected message (system prompt boundary). */
@@ -341,13 +345,14 @@ function findCutPoint(
 
 	// Walk backwards accumulating tokens
 	for (let i = endIndex - 1; i >= startIndex; i--) {
-		const msgTokens = estimateCompressableTokens(messages[i]);
-		accumulatedTokens += msgTokens;
+		const message = messages[i];
+		if (!message) continue;
+		accumulatedTokens += estimateCompressableTokens(message);
 
 		if (accumulatedTokens >= keepRecentTokens) {
 			crossedBudget = true;
 			// Find the nearest valid cut point >= this position
-			cutIndex = cutPoints[0];
+			cutIndex = cutPoints[0] ?? endIndex;
 			for (const cp of cutPoints) {
 				if (cp >= i) {
 					cutIndex = cp;
@@ -371,7 +376,7 @@ function findCutPoint(
 
 	// Walk backward past non-message entries (metadata, labels, etc.)
 	while (cutIndex > startIndex) {
-		const role = messages[cutIndex - 1].role;
+		const role = messages[cutIndex - 1]?.role;
 		if (role === "compactionSummary" || role === "branchSummary") {
 			break;
 		}
@@ -381,7 +386,7 @@ function findCutPoint(
 		cutIndex--;
 	}
 
-	const isUserMessage = messages[cutIndex].role === "user";
+	const isUserMessage = messages[cutIndex]?.role === "user";
 	const turnStartIndex = isUserMessage
 		? -1
 		: findTurnStartIndex(messages, cutIndex, startIndex);
@@ -434,10 +439,10 @@ export async function compactToFit(
 	messages: CompactableMessage[],
 	opts: {
 		triggerTokens: number;
-		targetTokens?: number;
-		keepRecentMessages?: number;
-		settings?: Partial<CompactionSettings>;
-		summarize?: CompactionSummarizer;
+		targetTokens?: number | undefined;
+		keepRecentMessages?: number | undefined;
+		settings?: Partial<CompactionSettings> | undefined;
+		summarize?: CompactionSummarizer | undefined;
 	},
 ): Promise<CompactToFitResult> {
 	const { triggerTokens, keepRecentMessages, settings, summarize } = opts;
@@ -528,13 +533,13 @@ export function truncateMiddle(text: string, maxChars: number): string {
 
 export interface PruneHistoricalToolOutputsOptions {
 	/** Number of recent turns (user-assistant cycles) to keep untouched. Default: 2. */
-	keepRecentTurns?: number;
+	keepRecentTurns?: number | undefined;
 	/** Maximum character length before a historical tool output is trimmed. Default: 600. */
-	maxHistoricalChars?: number;
+	maxHistoricalChars?: number | undefined;
 	/** Number of head lines to keep when trimming. Default: 5. */
-	headLines?: number;
+	headLines?: number | undefined;
 	/** Number of tail lines to keep when trimming. Default: 5. */
-	tailLines?: number;
+	tailLines?: number | undefined;
 }
 
 export interface PrunedToolOutputsResult {
@@ -779,13 +784,13 @@ ${filesList}
 
 export interface ShakeCompactionOptions {
 	/** Number of recent turns to keep fully intact. Default: 2. */
-	keepRecentTurns?: number;
+	keepRecentTurns?: number | undefined;
 	/** Max chars for a historical tool result before dropping it entirely. Default: 2000. */
-	historicalToolResultThreshold?: number;
+	historicalToolResultThreshold?: number | undefined;
 	/** Max chars for a historical assistant message content. Default: 500. */
-	historicalAssistantThreshold?: number;
+	historicalAssistantThreshold?: number | undefined;
 	/** Max chars for a historical user message content. Default: 500. */
-	historicalUserThreshold?: number;
+	historicalUserThreshold?: number | undefined;
 }
 
 const DEFAULT_SHAKE_OPTIONS: ShakeCompactionOptions = {

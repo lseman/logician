@@ -20,8 +20,8 @@ export class CancellationError extends Error {
 
 export interface CancellationScopeOptions {
 	operation: string;
-	parent?: AbortSignal;
-	timeoutMs?: number;
+	parent?: AbortSignal | undefined;
+	timeoutMs?: number | undefined;
 }
 
 export type CancellationCleanup = () => void | Promise<void>;

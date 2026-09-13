@@ -14,13 +14,13 @@ export interface ProgressTask {
 
 export interface ProgressTrackerOptions {
 	/** Minimum autonomous checks before considering stall. */
-	minimumChecks?: number;
+	minimumChecks?: number | undefined;
 	/** Consecutive turns with no progress before flagging. */
-	stalledChecks?: number;
+	stalledChecks?: number | undefined;
 	/** Size of sliding window for evidence overlap comparison. */
-	windowSize?: number;
+	windowSize?: number | undefined;
 	/** Evidence overlap threshold (0-1) that counts as a stall. */
-	overlapThreshold?: number;
+	overlapThreshold?: number | undefined;
 }
 
 /** Simple string hash for evidence fingerprinting. */
@@ -92,9 +92,11 @@ export class ProgressTracker {
 		if (this.turnHistory.length >= 3) {
 			const recent = this.turnHistory[this.turnHistory.length - 1];
 			const prior = this.turnHistory[this.turnHistory.length - 2];
-			const overlap = this.#computeOverlap(recent, prior);
-			if (overlap >= this.overlapThreshold) {
-				this.consecutiveStalls++;
+			if (recent && prior) {
+				const overlap = this.#computeOverlap(recent, prior);
+				if (overlap >= this.overlapThreshold) {
+					this.consecutiveStalls++;
+				}
 			}
 		}
 

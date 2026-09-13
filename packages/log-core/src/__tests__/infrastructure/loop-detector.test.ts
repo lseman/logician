@@ -67,7 +67,7 @@ void test("guard blocks on repeated failures same path", () => {
 	}
 	// Same path failed 3 times → guard blocks on next call to that path.
 	assert.equal(
-		d.checkToolCall("read_file", paths[0]).block,
+		d.checkToolCall("read_file", paths[0] ?? "").block,
 		true,
 		"3 path failures should trigger guard block",
 	);
@@ -85,7 +85,7 @@ void test("guard blocks on repeated failures same category", () => {
 	];
 	const paths = ['{"path":"a.txt"}', '{"path":"b.txt"}', '{"path":"c.txt"}'];
 	for (let i = 0; i < 3; i++) {
-		d.recordFailure("read_file", paths[i], results[i]);
+		d.recordFailure("read_file", paths[i] ?? "", results[i] ?? "");
 	}
 	// Same category (file not found) failed 3 times → guard blocks.
 	assert.equal(

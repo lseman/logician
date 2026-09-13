@@ -20,7 +20,7 @@ export interface Branch {
 	forkedAt: number;
 	summary: BranchSummaryData | null;
 	/** Durable session entry selected at the fork point. */
-	sessionLeafId?: string;
+	sessionLeafId?: string | undefined;
 }
 
 /** Fork the current history into a new branch. Mutates `branches` in place, returns the new branch id. */
@@ -58,10 +58,10 @@ export async function summarizeAndMergeBranch(
 	branch: Branch,
 	currentHistory: Message[],
 	options: {
-		customInstructions?: string;
-		contextWindowTokens?: number;
-		maxTokens?: number;
-		thinkingLevel?: ThinkingLevel;
+		customInstructions?: string | undefined;
+		contextWindowTokens?: number | undefined;
+		maxTokens?: number | undefined;
+		thinkingLevel?: ThinkingLevel | undefined;
 	} = {},
 ): Promise<BranchSummaryOutcome> {
 	const diverged = currentHistory.slice(branch.forkedAt);

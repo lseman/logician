@@ -35,12 +35,18 @@ function detectExactSuffixCycle(
 	let left = 0;
 	let right = 0;
 	for (let i = 1; i < reversed.length; i++) {
-		if (i <= right) z[i] = Math.min(right - i + 1, z[i - left]);
-		while (i + z[i] < reversed.length && reversed[z[i]] === reversed[i + z[i]])
-			z[i]++;
-		if (i + z[i] - 1 > right) {
+		if (i <= right) z[i] = Math.min(right - i + 1, z[i - left] ?? 0);
+		let count = z[i] ?? 0;
+		while (
+			i + count < reversed.length &&
+			reversed[count] === reversed[i + count]
+		) {
+			count++;
+		}
+		z[i] = count;
+		if (i + count - 1 > right) {
 			left = i;
-			right = i + z[i] - 1;
+			right = i + count - 1;
 		}
 	}
 
@@ -49,7 +55,7 @@ function detectExactSuffixCycle(
 		Math.floor(reversed.length / 3),
 	);
 	for (let len = 2; len <= maxUnit; len++) {
-		const count = 1 + Math.floor(z[len] / len);
+		const count = 1 + Math.floor((z[len] ?? 0) / len);
 		const minCount = len <= EXACT_SHORT_MAX_UNIT ? 4 : 3;
 		const minChars =
 			len <= EXACT_SHORT_MAX_UNIT
@@ -129,7 +135,7 @@ const STALL_THRESHOLD = 6;
 
 export interface TextLoopDetectorOptions {
 	/** Disable semantic heuristics (only check exact cycles). */
-	disableSemanticHeuristics?: boolean;
+	disableSemanticHeuristics?: boolean | undefined;
 }
 
 export class TextLoopDetector {

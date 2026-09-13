@@ -16,8 +16,8 @@ export type HarnessInterventionAction =
 
 export interface HarnessInterventionEvidence {
 	summary: string;
-	signals?: readonly string[];
-	counters?: Readonly<Record<string, number>>;
+	signals?: readonly string[] | undefined;
+	counters?: Readonly<Record<string, number>> | undefined;
 }
 
 export interface HarnessIntervention {
@@ -29,7 +29,7 @@ export interface HarnessIntervention {
 	detector: string;
 	attempt: number;
 	evidence: HarnessInterventionEvidence;
-	limits?: Readonly<Record<string, number>>;
-	nextAction?: string;
+	limits?: Readonly<Record<string, number>> | undefined;
+	nextAction?: string | undefined;
 	iteration: number;
 }

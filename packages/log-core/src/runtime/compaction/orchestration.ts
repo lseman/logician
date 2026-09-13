@@ -41,11 +41,11 @@ export async function runCompaction(
 	tokensBefore: number,
 	options: {
 		reason: "auto" | "manual";
-		mode?: "llm" | "shake" | "auto";
-		presetSummary?: string;
-		temperature?: number;
-		maxTokens?: number;
-		thinkingLevel?: ThinkingLevel;
+		mode?: "llm" | "shake" | "auto" | undefined;
+		presetSummary?: string | undefined;
+		temperature?: number | undefined;
+		maxTokens?: number | undefined;
+		thinkingLevel?: ThinkingLevel | undefined;
 	},
 ): Promise<CompactionOutcome> {
 	const { mode = "auto" } = options;

@@ -239,7 +239,8 @@ export class AppendOnlyContextManager {
 
 		// Append the diverged tail (or the full delta on a normal turn).
 		for (let i = this.#lastSyncCount; i < normalizedMessages.length; i++) {
-			this.log.append(normalizedMessages[i]);
+			const message = normalizedMessages[i];
+			if (message) this.log.append(message);
 		}
 		this.#lastSyncCount = normalizedMessages.length;
 	}

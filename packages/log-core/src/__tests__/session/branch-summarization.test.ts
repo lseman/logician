@@ -185,8 +185,8 @@ describe("collectMessagesForBranchSummary", () => {
 		];
 		const result = collectMessagesForBranchSummary(current, parent, 2);
 		assert.strictEqual(result.messages.length, 2);
-		assert.strictEqual(result.messages[0].content, "branch question");
-		assert.strictEqual(result.messages[1].content, "branch answer");
+		assert.strictEqual(result.messages[0]?.content, "branch question");
+		assert.strictEqual(result.messages[1]?.content, "branch answer");
 	});
 
 	it("finds common ancestor", () => {
@@ -279,9 +279,9 @@ describe("parseBranchSummary", () => {
 - **TypeScript only**: No JavaScript mixed`;
 		const result = parseBranchSummary(text);
 		assert.strictEqual(result.keyDecisions?.length, 2);
-		assert.strictEqual(result.keyDecisions?.[0].decision, "Use SQLite");
+		assert.strictEqual(result.keyDecisions?.[0]?.decision, "Use SQLite");
 		assert.strictEqual(
-			result.keyDecisions?.[0].rationale,
+			result.keyDecisions?.[0]?.rationale,
 			"Faster queries than JSON files",
 		);
 	});

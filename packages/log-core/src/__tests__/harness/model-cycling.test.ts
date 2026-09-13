@@ -36,7 +36,7 @@ function makeHarness(overrides?: Record<string, unknown>) {
 		...overrides,
 	} as Record<string, unknown>;
 	return new AgentSession({
-		config: config as import("@logician/log-core").AgentConfig,
+		config: config as unknown as import("@logician/log-core").AgentConfig,
 		backend: fakeBackend,
 		maxIterations: 5,
 	});

@@ -24,9 +24,9 @@ async function sourceFiles(root: string): Promise<string[]> {
 }
 
 function relativeImports(source: string): string[] {
-	return [...source.matchAll(/(?:from\s+|import\s*)["'](\.[^"']+)["']/g)].map(
-		match => match[1],
-	);
+	return [...source.matchAll(/(?:from\s+|import\s*)["'](\.[^"']+)["']/g)]
+		.map(match => match[1])
+		.filter((path): path is string => path !== undefined);
 }
 
 async function scannedImports(source: string): Promise<string[]> {
@@ -67,7 +67,8 @@ describe("core architecture boundaries", () => {
 		const violations: string[] = [];
 		for (const file of await sourceFiles(sourceRoot)) {
 			if (file.includes(`${path.sep}__tests__${path.sep}`)) continue;
-			const sourceModule = path.relative(sourceRoot, file).split(path.sep)[0];
+			const sourceModule =
+				path.relative(sourceRoot, file).split(path.sep)[0] ?? "";
 			const sourceDepth = MODULE_DEPTH.get(sourceModule);
 			if (sourceDepth === undefined) continue;
 
@@ -76,9 +77,8 @@ describe("core architecture boundaries", () => {
 			)) {
 				if (!specifier.startsWith(".")) continue;
 				const target = path.resolve(path.dirname(file), specifier);
-				const targetModule = path
-					.relative(sourceRoot, target)
-					.split(path.sep)[0];
+				const targetModule =
+					path.relative(sourceRoot, target).split(path.sep)[0] ?? "";
 				const targetDepth = MODULE_DEPTH.get(targetModule);
 				if (targetDepth === undefined || targetDepth <= sourceDepth) continue;
 				violations.push(

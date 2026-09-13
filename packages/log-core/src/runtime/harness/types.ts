@@ -62,15 +62,15 @@ export function defineHarnessModule(module: HarnessModule): HarnessModule {
 export interface AgentSessionOptions {
 	config: AgentConfig;
 	backend: LLMBackend;
-	cwd?: string;
-	maxIterations?: number;
-	extensionRunner?: ExtensionRunner;
-	modules?: HarnessModule[];
-	pluginHookFactory?: HarnessPluginHookFactory;
-	pluginLifecycle?: HarnessPluginLifecycle;
+	cwd?: string | undefined;
+	maxIterations?: number | undefined;
+	extensionRunner?: ExtensionRunner | undefined;
+	modules?: HarnessModule[] | undefined;
+	pluginHookFactory?: HarnessPluginHookFactory | undefined;
+	pluginLifecycle?: HarnessPluginLifecycle | undefined;
 	contextLearning?: {
-		initialState?: AdaptiveContextLearningState;
-		onStateChange?: (state: AdaptiveContextLearningState) => void;
+		initialState?: AdaptiveContextLearningState | undefined;
+		onStateChange?: ((state: AdaptiveContextLearningState) => void) | undefined;
 	};
 }
 

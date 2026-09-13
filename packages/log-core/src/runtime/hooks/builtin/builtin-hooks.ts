@@ -76,26 +76,28 @@ export interface BuiltinHookDeps {
 	// Tool definitions for accurate payload token estimates.
 	toolDefs: () => Record<string, unknown>[];
 	// LoopDetector instance powering the duplicate/failure-loop tool-call guards.
-	loopDetector?: LoopDetector;
+	loopDetector?: LoopDetector | undefined;
 	// Sink for structured events this module raises (optional). Distinct from
 	// extensions/event-bus.ts's cross-extension pub/sub — this is a single
 	// emit callback, forwarded by the harness to its own AgentEvent stream.
-	emitEvent?: (event: { type: string; [key: string]: unknown }) => void;
+	emitEvent?:
+		| ((event: { type: string; [key: string]: unknown }) => void)
+		| undefined;
 	// Escalation state for guard/continuation/budget interventions. Callers
 	// that rebuild hooks mid-run (e.g. a config refresh between loop
 	// iterations) MUST pass the same instance across rebuilds — escalation
 	// (attempt counts) and `recordProgress()`'s incident-clearing only work
 	// across repeated detections if this outlives a single hook build.
-	interventions?: HarnessInterventionController;
+	interventions?: HarnessInterventionController | undefined;
 	// Evidence-based progress tracker. Shared because autonomous hooks are
 	// rebuilt between turns while progress belongs to the whole run.
-	progress?: ProgressTracker;
+	progress?: ProgressTracker | undefined;
 	// Proactive-compaction cooldown, in loop iterations since the last
 	// compaction. Boxed in an object (not a bare number) so callers that
 	// rebuild hooks mid-run can share and mutate it across rebuilds.
 	compactionCooldown?: {
 		lastTurn: number;
-		consecutiveCompactions?: number;
+		consecutiveCompactions?: number | undefined;
 	};
 }
 

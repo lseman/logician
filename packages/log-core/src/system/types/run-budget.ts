@@ -1,8 +1,8 @@
 export interface RunBudgetLimits {
-	maxProviderCalls?: number;
-	maxToolCalls?: number;
-	maxTokens?: number;
-	maxElapsedMs?: number;
+	maxProviderCalls?: number | undefined;
+	maxToolCalls?: number | undefined;
+	maxTokens?: number | undefined;
+	maxElapsedMs?: number | undefined;
 }
 
 export interface RunBudgetSnapshot {
@@ -10,9 +10,9 @@ export interface RunBudgetSnapshot {
 	toolCalls: number;
 	tokens: number;
 	elapsedMs: number;
-	remainingProviderCalls?: number;
-	remainingToolCalls?: number;
-	remainingTokens?: number;
+	remainingProviderCalls?: number | undefined;
+	remainingToolCalls?: number | undefined;
+	remainingTokens?: number | undefined;
 }
 
 export interface RunBudgetDecision {
@@ -22,10 +22,10 @@ export interface RunBudgetDecision {
 }
 
 export interface RunBudgetInitialState {
-	providerCalls?: number;
-	toolCalls?: number;
-	tokens?: number;
-	startedAt?: number;
+	providerCalls?: number | undefined;
+	toolCalls?: number | undefined;
+	tokens?: number | undefined;
+	startedAt?: number | undefined;
 }
 
 export type RunBudgetConsumption =

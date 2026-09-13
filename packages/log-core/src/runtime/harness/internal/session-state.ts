@@ -12,20 +12,20 @@ import type { AbortResult, HarnessQueues } from "../types.ts";
 import { HarnessQueueController } from "./queue-controller.ts";
 
 interface SessionStateOptions {
-	steeringMode?: QueueMode;
-	followUpMode?: QueueMode;
+	steeringMode?: QueueMode | undefined;
+	followUpMode?: QueueMode | undefined;
 	onQueueChange: (queues: HarnessQueues) => void;
 }
 
 export class SessionState {
 	readonly conversation = new ConversationState();
 	readonly queue: HarnessQueueController;
-	store?: SessionStore;
-	id?: string;
-	transcriptPath?: string;
+	store?: SessionStore | undefined;
+	id?: string | undefined;
+	transcriptPath?: string | undefined;
 	hasStarted = false;
 	pendingContinuation = false;
-	repositoryQuery?: string;
+	repositoryQuery?: string | undefined;
 
 	constructor(options: SessionStateOptions) {
 		this.queue = new HarnessQueueController(

@@ -7,7 +7,7 @@ export interface StopPolicyContext {
 	/** Messages produced during the current run. */
 	newMessages: readonly Message[];
 	iteration: number;
-	signal?: AbortSignal;
+	signal?: AbortSignal | undefined;
 }
 
 export type StopPolicyDecision =
