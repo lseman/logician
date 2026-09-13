@@ -28,7 +28,7 @@ export interface HarnessModule {
 	observers?: HarnessObserver[];
 }
 
-export interface HarnessPluginHookContext {
+interface HarnessPluginHookContext {
 	enabled: boolean;
 	sessionId: string;
 	transcriptPath: string;

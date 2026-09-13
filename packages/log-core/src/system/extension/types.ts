@@ -67,7 +67,7 @@ export type ExtensionEventHandler = (
 // Tool Registration
 // ============================================================================
 
-export interface ToolParameterSchema {
+interface ToolParameterSchema {
 	type: string;
 	description?: string;
 	required?: boolean;
@@ -87,13 +87,13 @@ export interface RegisteredTool {
 	) => Promise<ExtensionToolResult>;
 }
 
-export interface ToolExecutionContext {
+interface ToolExecutionContext {
 	toolCall: ToolCall;
 	cwd: string;
 	sessionId: string;
 }
 
-export interface ExtensionToolResult {
+interface ExtensionToolResult {
 	content: string;
 	isError?: boolean;
 	details?: Record<string, unknown>;
@@ -111,7 +111,7 @@ export interface RegisteredCommand {
 	handler: (args: string, ctx: CommandContext) => Promise<string> | string;
 }
 
-export interface CommandContext {
+interface CommandContext {
 	sessionId: string;
 	cwd: string;
 	ui: ExtensionUI;
@@ -121,7 +121,7 @@ export interface CommandContext {
 // UI Primitives
 // ============================================================================
 
-export interface ExtensionUI {
+interface ExtensionUI {
 	/** Show a notification to the user. */
 	notify(message: string, type?: "info" | "warning" | "error"): void;
 

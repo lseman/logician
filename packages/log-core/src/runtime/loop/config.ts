@@ -7,7 +7,7 @@ import type { AgentConfig } from "../../system/types/types-config.ts";
 import type { Message } from "../../system/types/types-messages.ts";
 
 /** Configuration understood by the agent execution mechanism. */
-export type AgentLoopOptions = Pick<
+type AgentLoopOptions = Pick<
 	AgentConfig,
 	| "acceptance"
 	| "allowAllPaths"

@@ -11,22 +11,22 @@ import {
 	isLlmMessage,
 } from "../../system/types/types-messages.ts";
 
-export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
+const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
 <summary>
 `;
 
-export const COMPACTION_SUMMARY_SUFFIX = `
+const COMPACTION_SUMMARY_SUFFIX = `
 </summary>`;
 
-export const BRANCH_SUMMARY_PREFIX = `The following is a summary of a branch that this conversation came back from:
+const BRANCH_SUMMARY_PREFIX = `The following is a summary of a branch that this conversation came back from:
 
 <summary>
 `;
 
-export const BRANCH_SUMMARY_SUFFIX = "</summary>";
+const BRANCH_SUMMARY_SUFFIX = "</summary>";
 
-export function bashExecutionToText(msg: BashExecutionMessage): string {
+function bashExecutionToText(msg: BashExecutionMessage): string {
 	let text = `Ran \`${msg.command}\`\n`;
 	if (msg.output) {
 		text += `\`\`\`\n${msg.output}\n\`\`\``;
@@ -326,10 +326,6 @@ function estimateNaturalLanguageTokens(text: string): number {
 
 // All token estimates use the same basis (serialized chat payload) so that
 // budgets and compaction before/after deltas are directly comparable.
-export function estimateMessageTokens(messages: Message[]): number {
-	return estimateChatPayloadTokens(messages);
-}
-
 export function estimateChatPayloadTokens(
 	messages: Message[],
 	tools?: Record<string, unknown>[],

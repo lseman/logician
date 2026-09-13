@@ -36,7 +36,7 @@ export interface CompactionSettings {
 	force?: boolean | undefined;
 }
 
-export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
+const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
@@ -55,7 +55,7 @@ export const COMPACTION_TARGET_FRACTION = 0.65;
 const ESTIMATED_IMAGE_CHARS = 4800;
 
 /** Estimate tokens for one message using character heuristic. Conservative (overestimates). */
-export function estimateCompressableTokens(
+function estimateCompressableTokens(
 	message: AgentMessage | CompactableMessage,
 ): number {
 	if (!message) return 0;
@@ -171,7 +171,7 @@ estimateCompressableTokens.getRatio = (type: string): number => {
 };
 
 /** Estimated context-token usage for a message list. */
-export interface ContextUsageEstimate {
+interface ContextUsageEstimate {
 	tokens: number;
 	usageTokens: number;
 	trailingTokens: number;
@@ -179,7 +179,7 @@ export interface ContextUsageEstimate {
 }
 
 /** Estimate context tokens using provider usage (when available) + estimation. */
-export function estimateContextTokens(
+function estimateContextTokens(
 	messages: CompactableMessage[],
 ): ContextUsageEstimate {
 	// Try to find provider-reported usage from the last assistant message
@@ -236,17 +236,6 @@ export function estimateContextTokens(
 // Compaction trigger
 // ============================================================================
 
-/** Check if compaction should trigger. */
-export function shouldCompact(
-	messages: CompactableMessage[],
-	settings: CompactionSettings,
-): boolean {
-	if (!settings.enabled) return false;
-	const contextTokens = estimateContextTokens(messages).tokens;
-	const threshold = (settings.contextWindow ?? 128000) - settings.reserveTokens;
-	return contextTokens > threshold;
-}
-
 // ============================================================================
 // Cut point detection — turn-boundary-aware (never cuts mid-turn)
 // ============================================================================
@@ -300,7 +289,7 @@ function findTurnStartIndex(
 }
 
 /** Cut point result for compaction. */
-export interface CutPointResult {
+interface CutPointResult {
 	firstKeptIndex: number;
 	/** UUID of the first kept entry (set when messages carry entryId). */
 	firstKeptEntryId?: string | undefined;
@@ -516,7 +505,7 @@ export async function compactToFit(
 // usually still acting on them.
 const MICRO_COMPACT_KEEP_RECENT = 6;
 
-export function microCompactMaxChars(role: string): number {
+function microCompactMaxChars(role: string): number {
 	// Tool results tolerate the most trimming; user prompts the least — losing
 	// part of the task statement is worse than a long context.
 	const limits = DEFAULT_TRUNCATION.microCompactMaxChars;
@@ -525,7 +514,7 @@ export function microCompactMaxChars(role: string): number {
 	return limits.default;
 }
 
-export function truncateMiddle(text: string, maxChars: number): string {
+function truncateMiddle(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text;
 	const half = Math.max(1, Math.floor((maxChars - 32) / 2));
 	return `${text.slice(0, half)}\n...[compacted ${text.length - half * 2} chars]...\n${text.slice(-half)}`;

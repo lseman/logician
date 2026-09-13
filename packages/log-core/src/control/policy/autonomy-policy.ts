@@ -1,4 +1,4 @@
-export interface AutonomousTask {
+interface AutonomousTask {
 	id: string | number;
 	subject: string;
 	status: string;

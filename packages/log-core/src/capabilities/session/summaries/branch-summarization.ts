@@ -25,7 +25,7 @@ export interface BranchSummary {
 }
 
 /** Progress sub-section. */
-export interface BranchProgressRaw {
+interface BranchProgressRaw {
 	done: string[];
 	inProgress: string[];
 	blocked: string[];

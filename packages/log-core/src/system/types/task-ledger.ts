@@ -1,4 +1,4 @@
-export interface TaskLedgerEntry {
+interface TaskLedgerEntry {
 	id: string | number;
 	subject: string;
 	status: string;

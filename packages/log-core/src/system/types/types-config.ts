@@ -60,7 +60,7 @@ export type InferenceMode =
 	| "creative"
 	| "analytical";
 
-export interface SamplingParams {
+interface SamplingParams {
 	temperature: number;
 	top_p: number;
 	top_k: number;

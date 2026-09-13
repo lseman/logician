@@ -99,7 +99,7 @@ function discoverFiles(
 	return results;
 }
 
-export function loadExtensionsFromDir(
+function loadExtensionsFromDir(
 	dir: string,
 	source: "user" | "project" | "path" = "path",
 ): LoadExtensionsResult {

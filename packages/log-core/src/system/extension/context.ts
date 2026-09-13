@@ -5,7 +5,7 @@
 //
 // The context is isolated per harness instance — no cross-session leakage.
 
-export interface ExtensionContextState {
+interface ExtensionContextState {
 	/** Extension-managed counters, tracked across events */
 	counters: Record<string, number>;
 	/** Feature flags set by extensions */
@@ -22,7 +22,7 @@ export interface ExtensionContextState {
 	}>;
 }
 
-export interface ExtensionContextActions {
+interface ExtensionContextActions {
 	/** Increment an extension counter */
 	incrementCounter: (name: string) => number;
 	/** Set a feature flag */

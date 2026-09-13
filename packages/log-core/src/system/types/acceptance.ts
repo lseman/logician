@@ -1,4 +1,4 @@
-export type CriterionSeverity = "required" | "recommended";
+type CriterionSeverity = "required" | "recommended";
 
 export interface AcceptanceCriterion {
 	id: string;

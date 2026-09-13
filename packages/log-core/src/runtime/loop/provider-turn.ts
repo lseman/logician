@@ -40,7 +40,7 @@ export function createProviderTurnState(): ProviderTurnState {
 	return { lastAdaptiveSelection: "" };
 }
 
-export interface ProviderTurnOutcome {
+interface ProviderTurnOutcome {
 	status: Extract<RunOutcomeStatus, "cancelled" | "failed">;
 	summary?: string | undefined;
 	source: "runtime";
@@ -60,7 +60,7 @@ export type ProviderTurnResult =
  * (rather than importing RunAgentLoopConfig from core/agent-loop-runner.ts)
  * to avoid a core <-> loop import cycle, since the runner imports this module.
  */
-export type ProviderTurnConfig = AgentLoopConfig;
+type ProviderTurnConfig = AgentLoopConfig;
 
 export interface RequestAssistantTurnInput {
 	state: ProviderTurnState;

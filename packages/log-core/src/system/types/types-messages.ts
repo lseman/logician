@@ -4,7 +4,7 @@ import type { RunOutcomeStatus } from "./execution-policy.ts";
 
 // ── Message types ─────────────────────────────────────────────────────────
 
-export type MessageRole = "system" | "user" | "assistant" | "tool";
+type MessageRole = "system" | "user" | "assistant" | "tool";
 
 export interface Message {
 	role: MessageRole;
@@ -42,9 +42,6 @@ export type CompactableMessage = {
 // ── AgentMessage Abstraction ─────────────────────────────────────────────
 // Union of standard LLM messages + custom app messages (notifications,
 // status updates, UI-only artifacts). Apps extend via declaration merging.
-
-/** Standard LLM-compatible roles only. */
-export type LlmRole = MessageRole;
 
 // ── Custom message types ──────────────────────────────────────────────────
 
@@ -92,7 +89,7 @@ export interface CustomMessage {
 }
 
 /** Custom agent message types — extend via declaration merging. */
-export interface CustomAgentMessages {
+interface CustomAgentMessages {
 	compactionSummary?: CompactionSummaryMessage;
 	branchSummary?: BranchSummaryMessage;
 	bashExecution?: BashExecutionMessage;
@@ -100,7 +97,7 @@ export interface CustomAgentMessages {
 }
 
 /** Helper: map custom keys to message shapes. */
-export type CustomAgentMessageMap = {
+type CustomAgentMessageMap = {
 	[K in keyof CustomAgentMessages]-?: NonNullable<CustomAgentMessages[K]> & {
 		role: K extends string ? K : never;
 	};
@@ -121,13 +118,6 @@ export function isLlmMessage(msg: AgentMessage): msg is Message {
 		msg.role === "assistant" ||
 		msg.role === "tool"
 	);
-}
-
-/** Narrow an AgentMessage to a custom message variant. */
-export function isCustomAgentMessage(
-	msg: AgentMessage,
-): msg is CustomAgentMessageMap[keyof CustomAgentMessageMap & string] {
-	return !isLlmMessage(msg);
 }
 
 export function isCompactionSummary(
@@ -177,7 +167,7 @@ export interface ToolResult {
 	terminate?: boolean | undefined;
 }
 
-export type ToolExecutionMode = "sequential" | "parallel";
+type ToolExecutionMode = "sequential" | "parallel";
 
 export interface Tool {
 	name: string;
@@ -256,12 +246,12 @@ import type { AgentConfig, AgentHarnessStreamOptions } from "./types-config.ts";
  * Envelope metadata stamped onto every event at the emit boundary: a
  * monotonic per-loop sequence number and a wall-clock timestamp.
  */
-export interface AgentEventEnvelope {
+interface AgentEventEnvelope {
 	seq?: number;
 	ts?: number;
 }
 
-export type AgentEventBody =
+type AgentEventBody =
 	| { type: "agent_start" }
 	| ({ type: "harness_intervention" } & HarnessIntervention)
 	| {

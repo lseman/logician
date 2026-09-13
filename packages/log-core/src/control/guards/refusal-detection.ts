@@ -33,7 +33,7 @@ export function isProviderRefusal(
  * processing by the loop layer). Messages with `details.refusal === true`
  * are provider refusals.
  */
-export function isProviderRefusalMessage(message: Message): boolean {
+function isProviderRefusalMessage(message: Message): boolean {
 	if (message.role !== "assistant") return false;
 	const details = message.details as Record<string, unknown> | undefined;
 	return details?.refusal === true;

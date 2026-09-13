@@ -14,7 +14,7 @@ export type HarnessInterventionAction =
 	| "pause"
 	| "stop";
 
-export interface HarnessInterventionEvidence {
+interface HarnessInterventionEvidence {
 	summary: string;
 	signals?: readonly string[] | undefined;
 	counters?: Readonly<Record<string, number>> | undefined;

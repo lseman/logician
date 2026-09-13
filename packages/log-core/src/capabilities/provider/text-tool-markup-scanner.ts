@@ -1,4 +1,4 @@
-export interface TextToolCandidate {
+interface TextToolCandidate {
 	index: number;
 	name: string;
 	arguments: string;

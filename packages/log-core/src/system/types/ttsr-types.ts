@@ -31,15 +31,6 @@ export interface TtsrRule {
 
 export type TtsrScope = "text" | "thinking" | "tool" | `tool:${string}`;
 
-export const TTSR_SCOPES: readonly TtsrScope[] = [
-	"text",
-	"thinking",
-	"tool",
-	"tool:bash",
-	"tool:eval",
-	"tool:bun",
-];
-
 /** Validate that a scope string is a recognized TTSR scope. */
 export function isTtsrScope(value: string): value is TtsrScope {
 	return (

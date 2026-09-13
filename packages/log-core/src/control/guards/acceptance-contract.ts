@@ -9,7 +9,7 @@ import type {
 	AcceptanceVerification,
 } from "../../system/types/acceptance.ts";
 
-export type AcceptanceLevel = "none" | "verified";
+type AcceptanceLevel = "none" | "verified";
 
 export interface ResolvedAcceptance {
 	level: AcceptanceLevel;

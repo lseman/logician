@@ -8,7 +8,7 @@
 //
 // Escape aborts and restores queued messages to the editor.
 
-export type MessageType = "steering" | "followUp" | "nextTurn";
+type MessageType = "steering" | "followUp" | "nextTurn";
 export type DeliveryMode = "one-at-a-time" | "all";
 
 export interface MessageQueueOptions {

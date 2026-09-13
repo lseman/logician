@@ -25,7 +25,7 @@ export type StopPolicyDecision =
  * Optional policy evaluated when the mechanism has no pending tool calls,
  * steering messages, or follow-up messages.
  */
-export type AgentStopPolicy = (
+type AgentStopPolicy = (
 	context: StopPolicyContext,
 ) => Promise<StopPolicyDecision | undefined> | StopPolicyDecision | undefined;
 

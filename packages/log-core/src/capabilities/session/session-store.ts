@@ -58,7 +58,7 @@ export interface SessionMessage {
 	parentId?: string | undefined;
 }
 
-export interface MessageSessionEntry {
+interface MessageSessionEntry {
 	type: "message";
 	id: string;
 	parentId?: string | undefined;
@@ -66,7 +66,7 @@ export interface MessageSessionEntry {
 	message: SessionMessage;
 }
 
-export interface ModelChangeSessionEntry {
+interface ModelChangeSessionEntry {
 	type: "model_change";
 	id: string;
 	parentId?: string | undefined;
@@ -74,7 +74,7 @@ export interface ModelChangeSessionEntry {
 	model: string;
 }
 
-export interface ThinkingLevelSessionEntry {
+interface ThinkingLevelSessionEntry {
 	type: "thinking_level_changed";
 	id: string;
 	parentId?: string | undefined;
@@ -82,7 +82,7 @@ export interface ThinkingLevelSessionEntry {
 	thinkingLevel: string;
 }
 
-export interface ActiveToolsSessionEntry {
+interface ActiveToolsSessionEntry {
 	type: "active_tools_change";
 	id: string;
 	parentId?: string | undefined;
@@ -90,7 +90,7 @@ export interface ActiveToolsSessionEntry {
 	activeToolNames: string[];
 }
 
-export interface SettingsChangeSessionEntry {
+interface SettingsChangeSessionEntry {
 	type: "settings_change";
 	id: string;
 	parentId?: string | undefined;
@@ -100,7 +100,7 @@ export interface SettingsChangeSessionEntry {
 	previousValue?: string | null | undefined;
 }
 
-export interface CompactionSessionEntry {
+interface CompactionSessionEntry {
 	type: "compaction";
 	id: string;
 	parentId?: string | undefined;
@@ -110,7 +110,7 @@ export interface CompactionSessionEntry {
 	tokensBefore: number;
 }
 
-export interface BranchSummarySessionEntry {
+interface BranchSummarySessionEntry {
 	type: "branch_summary";
 	id: string;
 	parentId?: string | undefined;
@@ -119,7 +119,7 @@ export interface BranchSummarySessionEntry {
 	summary: string;
 }
 
-export interface LabelSessionEntry {
+interface LabelSessionEntry {
 	type: "label";
 	id: string;
 	parentId?: string | undefined;

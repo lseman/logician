@@ -9,7 +9,7 @@ export type RuntimeEvent = AgentEvent;
  * Runtime-only details (for example token deltas and internal tool-call
  * bookkeeping) deliberately stay out of this protocol boundary.
  */
-export const EXTENSION_LIFECYCLE_EVENT_TYPES = [
+const EXTENSION_LIFECYCLE_EVENT_TYPES = [
 	"agent_start",
 	"agent_end",
 	"turn_start",
@@ -28,7 +28,7 @@ export const EXTENSION_LIFECYCLE_EVENT_TYPES = [
 	"model_select",
 ] as const;
 
-export type ExtensionLifecycleEventType =
+type ExtensionLifecycleEventType =
 	(typeof EXTENSION_LIFECYCLE_EVENT_TYPES)[number];
 
 export type ExtensionLifecycleEvent = Extract<
