@@ -184,8 +184,8 @@ export function encodeITerm2(
 	if (options.name) params += options.name;
 	params += ";create=";
 	if (options.preserveAspectRatio ?? true) params += "=:aspectRatio:";
-	params += ";width=" + (options.width ?? "");
-	params += ";height=" + (options.height ?? "auto");
+	params += `;width=${options.width ?? ""}`;
+	params += `;height=${options.height ?? "auto"}`;
 	return `\x1b]1337;${params}\x07${base64Data}\x07`;
 }
 
@@ -216,9 +216,9 @@ export function encodeSixel(
 					bits |= 1 << p;
 				}
 			}
-			row += String.fromCharCode(33 + bits);
+			row += `${String.fromCharCode(33 + bits)}`;
 		}
-		sixelData += row + "!";
+		sixelData += `${row}!`;
 	}
-	return header + sixelData + "\x1b\\";
+	return `${header}${sixelData}\x1b\\`;
 }

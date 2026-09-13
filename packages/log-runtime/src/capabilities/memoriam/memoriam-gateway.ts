@@ -8,6 +8,7 @@ context retrieval).
 import type { AgentConfig } from "@logician/log-core";
 import type {
 	CompressedObservation,
+	ExportData,
 	MemoriamSdkConfig,
 	Memory,
 	Session,
@@ -261,9 +262,9 @@ export class MemoriamGateway {
 		return this.worker.exportData();
 	}
 
-	async importData(data: unknown, onConflict: string): Promise<unknown> {
+	async importData(data: ExportData, onConflict: string): Promise<unknown> {
 		this.assertEnabled();
-		return this.worker.importData(data as any, onConflict);
+		return this.worker.importData(data, onConflict);
 	}
 
 	// ── Temporal reasoning ────────────────────────────────────────────────

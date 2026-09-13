@@ -63,10 +63,11 @@ export function selectDiverseHits(
 			let redundancy = 0;
 			let repeatsDocument = false;
 			for (const chosen of selected) {
-				redundancy = Math.max(
-					redundancy,
-					jaccard(sets.get(candidate.chunk.id)!, sets.get(chosen.chunk.id)!),
-				);
+				const candidateSet = sets.get(candidate.chunk.id);
+				const chosenSet = sets.get(chosen.chunk.id);
+				if (candidateSet && chosenSet) {
+					redundancy = Math.max(redundancy, jaccard(candidateSet, chosenSet));
+				}
 				repeatsDocument ||= Boolean(
 					candidate.chunk.documentId &&
 						candidate.chunk.documentId === chosen.chunk.documentId,

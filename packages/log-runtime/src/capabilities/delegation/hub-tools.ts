@@ -118,7 +118,7 @@ export function hubWaitTool(deps: HubToolDeps): Tool {
 					`[${m.from}] ${m.body}${m.meta ? ` (meta: ${JSON.stringify(m.meta)})` : ""}`,
 			);
 			return {
-				content: `Received ${messages.length} message(s):\n` + lines.join("\n"),
+				content: `Received ${messages.length} message(s):\n${lines.join("\n")}`,
 			};
 		},
 	};
@@ -146,7 +146,7 @@ export function hubJobsTool(deps: HubToolDeps): Tool {
 					`  ${j.id} (${j.agent}) [${j.status}] task=${j.task}${j.taskIndex !== undefined ? ` index=${j.taskIndex}` : ""}`,
 			);
 			return {
-				content: `Active subagents (${jobs.length}):\n` + lines.join("\n"),
+				content: `Active subagents (${jobs.length}):\n${lines.join("\n")}`,
 			};
 		},
 	};
@@ -174,7 +174,7 @@ export function hubInboxTool(deps: HubToolDeps): Tool {
 					`[${m.from}] ${m.body}${m.meta ? ` (meta: ${JSON.stringify(m.meta)})` : ""}`,
 			);
 			return {
-				content: `Inbox (${messages.length} message(s)):\n` + lines.join("\n"),
+				content: `Inbox (${messages.length} message(s)):\n${lines.join("\n")}`,
 			};
 		},
 	};

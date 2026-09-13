@@ -53,7 +53,8 @@ export function assembleContext(
 			// Use parent context if available (better than truncating)
 			const parentId = hit.chunk.parentId;
 			if (parentId && parents?.has(parentId)) {
-				const parent = parents.get(parentId)!;
+				const parent = parents.get(parentId);
+				if (!parent) continue;
 				const parentTokens = estimateTokens(parent.text);
 				if (totalTokens + parentTokens <= maxTokens) {
 					contextParts.push(formatChunk(hit.chunk, parent.text));
@@ -69,7 +70,8 @@ export function assembleContext(
 		// Use parent context if this is a small chunk and parent is available
 		const parentId = hit.chunk.parentId;
 		if (parentId && parents?.has(parentId)) {
-			const parent = parents.get(parentId)!;
+			const parent = parents.get(parentId);
+			if (!parent) continue;
 			const parentTokens = estimateTokens(parent.text);
 			if (totalTokens + parentTokens <= maxTokens) {
 				contextParts.push(formatChunk(hit.chunk, parent.text));

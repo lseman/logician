@@ -113,7 +113,7 @@ function fileMcpConfigPaths(cwd: string): string[] {
 /** Recursively expand ${CLAUDE_PLUGIN_ROOT} in a plugin's server config. */
 function expandPluginRoot<T>(value: T, root: string): T {
 	if (typeof value === "string") {
-		return value.replaceAll("${CLAUDE_PLUGIN_ROOT}", root) as T;
+		return value.replaceAll(/\$\{CLAUDE_PLUGIN_ROOT\}/g, root) as T;
 	}
 	if (Array.isArray(value)) {
 		return value.map(item => expandPluginRoot(item, root)) as T;

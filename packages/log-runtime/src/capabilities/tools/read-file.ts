@@ -217,7 +217,7 @@ function formatConflictNotice(
 	lines.push("");
 	lines.push("[Use conflict://N?q=ours|theirs|ours+theirs|base to resolve]");
 	lines.push("[Use :conflicts selector to view full conflict blocks]");
-	return "\n" + lines.join("\n");
+	return `\n${lines.join("\n")}`;
 }
 /** Resolve an internal URL to its content. */
 async function resolveInternalUrl(

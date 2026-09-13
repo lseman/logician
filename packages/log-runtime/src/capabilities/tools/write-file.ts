@@ -41,12 +41,12 @@ export const write_file: Tool = {
 	label: "Write File",
 	hookAliases: ["Write"],
 	description:
-		"Create or overwrite a complete file. Creates parent directories. " +
-		"Overwriting an existing file requires reading it with read_file first. " +
-		"Output is truncated to ${DEFAULT_MAX_LINES} lines or " +
+		`Create or overwrite a complete file. Creates parent directories. ` +
+		`Overwriting an existing file requires reading it with read_file first. ` +
+		`Output is truncated to \${DEFAULT_MAX_LINES} lines or ` +
 		`${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first). ` +
-		"With append: true, appends content to the end of the file instead of " +
-		"overwriting. Useful for streaming large files across multiple tool calls.",
+		`With append: true, appends content to the end of the file instead of ` +
+		`overwriting. Useful for streaming large files across multiple tool calls.`,
 	promptSnippet:
 		"Create or overwrite files; automatically create parent directories; use append: true to append",
 	promptGuidelines: [

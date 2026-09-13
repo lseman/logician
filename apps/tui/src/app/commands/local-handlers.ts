@@ -34,7 +34,10 @@ function compactObservationLine(
 
 export function createLocalHandlers(
 	ctx: SlashCommandsCtx,
-): Record<string, (...args: unknown[]) => unknown> {
+): Record<
+	string,
+	(args: string) => string | undefined | Promise<string | undefined>
+> {
 	const setStatusPhase = (phase: string) => {
 		ctx.statusPanel.update({ phase });
 	};
@@ -361,7 +364,7 @@ export function createLocalHandlers(
 			ctx.bridge.updateSettings({ rtkProxyEnabled: next });
 			saveConfigField("rtkProxyEnabled", next);
 			ctx.statusPanel.update({ rtkProxyEnabled: next });
-			return next;
+			return next ? "RTK proxy enabled" : "RTK proxy disabled";
 		},
 		toggleLegroom: () => {
 			const current = ctx.bridge.getConfig()?.legroomEnabled ?? false;
@@ -369,7 +372,7 @@ export function createLocalHandlers(
 			ctx.bridge.updateSettings({ legroomEnabled: next });
 			saveConfigNestedField("legroom", "mode", next ? "sdk" : "off");
 			ctx.statusPanel.update({ legroomEnabled: next });
-			return next;
+			return next ? "Legroom enabled" : "Legroom disabled";
 		},
 		toggleMemoriam: () => {
 			const current = ctx.bridge.getConfig()?.memoriamEnabled ?? false;
@@ -377,7 +380,7 @@ export function createLocalHandlers(
 			ctx.bridge.updateSettings({ memoriamEnabled: next });
 			saveConfigNestedField("memoriam", "mode", next ? "sdk" : "off");
 			ctx.statusPanel.update({ memoriamEnabled: next });
-			return next;
+			return next ? "Memoriam enabled" : "Memoriam disabled";
 		},
 		openModelSelector: () => {
 			ctx.openModelSelector();
@@ -410,10 +413,10 @@ export function createLocalHandlers(
 			const task = raw || "Investigate the codebase and report findings";
 			ctx.bridge.spawnAgentDirectly(task);
 		},
-		memory: async (raw: unknown) => {
+		memory: async (raw: string) => {
 			if (!ctx.bridge.getConfig()?.memoriamEnabled)
 				return 'Memoriam is not enabled. Set "memoriam": { "mode": "sdk" } in settings.';
-			const args = typeof raw === "string" ? raw : String(raw ?? "");
+			const args = raw ?? "";
 			const trimmed = args.trim();
 			const sessionId =
 				ctx.currentSessionId || ctx.sessionService.getCurrentSessionId();
@@ -545,10 +548,10 @@ export function createLocalHandlers(
 				return `Memoriam error: ${(error as Error).message}`;
 			}
 		},
-		obs: async (raw: unknown) => {
+		obs: async (raw: string) => {
 			if (!ctx.bridge.getConfig()?.memoriamEnabled)
 				return 'Memoriam is not enabled. Set "memoriam": { "mode": "sdk" } in settings.';
-			const args = typeof raw === "string" ? raw : String(raw ?? "");
+			const args = raw ?? "";
 			const trimmed = args.trim();
 			const sessionId =
 				ctx.currentSessionId || ctx.sessionService.getCurrentSessionId();

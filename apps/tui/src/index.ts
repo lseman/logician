@@ -99,7 +99,10 @@ async function showTrustOverlay(
 					if (action) break;
 				}
 			}
-			if (!action) return render();
+			if (!action) {
+				render();
+				return;
+			}
 			cleanup();
 			resolve(action.choice);
 		};

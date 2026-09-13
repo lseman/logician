@@ -114,7 +114,7 @@ export function resolveConflictBlock(
 		case "theirs":
 			return block.theirs;
 		case "ours+theirs":
-			return block.ours + "\n" + block.theirs;
+			return `${block.ours}\n${block.theirs}`;
 		case "base":
 			return baseContent ?? block.ours;
 		default:

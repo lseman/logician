@@ -115,14 +115,23 @@ export class SessionTreeOverlay implements Component {
 	}
 
 	handleInput(data: string): void {
-		if (data === "\x03") return this.close();
+		if (data === "\x03") {
+			this.close();
+			return;
+		}
 		if (data === "\x1b") {
-			if (this.mode === "tree") return this.close();
+			if (this.mode === "tree") {
+				this.close();
+				return;
+			}
 			this.mode = this.mode === "custom" ? "summary" : "tree";
 			this.invalidate();
 			return;
 		}
-		if (this.mode === "custom") return this.handleCustomInput(data);
+		if (this.mode === "custom") {
+			this.handleCustomInput(data);
+			return;
+		}
 		const controller =
 			this.mode === "tree" ? this.selection : this.summarySelection;
 		const count = this.mode === "tree" ? this.nodes.length : 3;
@@ -140,7 +149,10 @@ export class SessionTreeOverlay implements Component {
 		if (this.mode === "tree") {
 			const node = this.nodes[this.selection.index];
 			if (!node) return;
-			if (node.isCurrent) return this.close();
+			if (node.isCurrent) {
+				this.close();
+				return;
+			}
 			this.selectedEntryId = node.id;
 			this.mode = "summary";
 			this.invalidate();
@@ -222,7 +234,7 @@ export class SessionTreeOverlay implements Component {
 				const indicatorLen = branchIndicator.length;
 				const label =
 					node.label.length > labelWidth - indicatorLen
-						? node.label.slice(0, labelWidth - indicatorLen - 1) + "…"
+						? `${node.label.slice(0, labelWidth - indicatorLen - 1)}…`
 						: node.label;
 
 				const line = `${isSelected ? theme.fg("selected", "> ") : "  "}${label}${branchIndicator}${node.isCurrent ? " ●" : ""}`;

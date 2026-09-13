@@ -125,7 +125,7 @@ export function parseHashlineEdit(line: string): HashlineEdit | null {
 	}
 
 	// MV — move/rename file
-	if (trimmed.startsWith(HL_MOVE_KEYWORD + " ")) {
+	if (trimmed.startsWith(`${HL_MOVE_KEYWORD} `)) {
 		const dest = trimmed.slice(HL_MOVE_KEYWORD.length + 1).trim();
 		return { operation: "MV", path: "", dest };
 	}

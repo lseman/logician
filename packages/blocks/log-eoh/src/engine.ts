@@ -248,10 +248,18 @@ export class EohEngine {
 		problem: EohProblem,
 		evalTimeoutMs: number,
 	): Promise<Heuristic | null> {
+		if (!this.state.config.model || !this.state.config.baseUrl) {
+			this.emit({
+				type: "heuristic_failed",
+				reason: "LLM model and baseUrl are required",
+				operator: parents[0]?.createdBy ?? "init",
+			});
+			return null;
+		}
 		try {
 			const raw = await callLLM({
-				baseUrl: this.state.config.baseUrl!,
-				model: this.state.config.model!,
+				baseUrl: this.state.config.baseUrl,
+				model: this.state.config.model,
 				messages,
 				temperature: 0.8,
 				maxTokens: 2048,

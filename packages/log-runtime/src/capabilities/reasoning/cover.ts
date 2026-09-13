@@ -9,13 +9,16 @@
 
 import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
+interface VerificationStep {
+	step?: string;
+}
+
 interface CoVeConfig {
 	maxVerificationSteps?: number;
 	temperature?: number;
 	maxTokens?: number;
 	[key: string]: unknown;
 }
-
 export class CoVeReasoner extends BaseReasoner {
 	config: CoVeConfig;
 
@@ -76,11 +79,11 @@ export class CoVeReasoner extends BaseReasoner {
 				.trim();
 			const data = JSON.parse(cleaned);
 			if (Array.isArray(data)) {
-				verificationSteps = data.map(
-					(item: any) => item.step || JSON.stringify(item),
+				verificationSteps = (data as VerificationStep[]).map(
+					item => item.step || JSON.stringify(item),
 				);
 			}
-		} catch (_e: unknown) {
+		} catch {
 			// Fallback to default verification steps if parsing fails
 			verificationSteps = [
 				"Verify factual accuracy of claims",

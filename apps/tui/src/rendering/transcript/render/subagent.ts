@@ -96,9 +96,8 @@ function renderSubagentFlow(
 	showFrame = true,
 ): string[] {
 	const lines: string[] = [];
-	const hitRegions = parentKey
-		? (ctx._taskHitRegions = ctx._taskHitRegions ?? [])
-		: undefined;
+	if (parentKey && !ctx._taskHitRegions) ctx._taskHitRegions = [];
+	const hitRegions = ctx._taskHitRegions;
 	if (showFrame) {
 		const agentIds = [
 			...new Set(chunks.map(chunk => chunk.agentId).filter(Boolean)),
@@ -450,7 +449,8 @@ export function renderSubagentBatchCollapsed(
 	expanded = false,
 ): string[] {
 	const lines: string[] = [];
-	const hitRegions = (ctx._taskHitRegions = ctx._taskHitRegions ?? []);
+	ctx._taskHitRegions ??= [];
+	const hitRegions = ctx._taskHitRegions;
 	const toolCallId = tool.tool_call_id ?? "";
 
 	const tasks = Array.isArray(tool.args?.tasks)

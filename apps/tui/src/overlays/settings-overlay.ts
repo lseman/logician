@@ -605,7 +605,7 @@ export class SettingsSelectorOverlay implements Component {
 					: "";
 			lines.push(
 				clampLineToWidth(
-					`${selected ? getHeader() + "❯" : " "}${RESET} ${color}${option.label}${RESET}${mark}${option.current ? `${getSuccess()} ✓` : ""}${RESET}`,
+					`${selected ? `${getHeader()}❯` : " "}${RESET} ${color}${option.label}${RESET}${mark}${option.current ? `${getSuccess()} ✓` : ""}${RESET}`,
 					width,
 				),
 			);

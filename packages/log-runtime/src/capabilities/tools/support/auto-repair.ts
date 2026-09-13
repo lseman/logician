@@ -265,11 +265,11 @@ export function generateRepairSuggestion(
 			suggestions.push("### Offending edit:");
 			const origPreview =
 				edit.original.length > 100
-					? edit.original.slice(0, 100) + "..."
+					? `${edit.original.slice(0, 100)}...`
 					: edit.original;
 			const replPreview =
 				edit.replacement.length > 100
-					? edit.replacement.slice(0, 100) + "..."
+					? `${edit.replacement.slice(0, 100)}...`
 					: edit.replacement;
 			suggestions.push(`**Original:** \`${origPreview}\``);
 			suggestions.push(`**Replacement:** \`${replPreview}\``);

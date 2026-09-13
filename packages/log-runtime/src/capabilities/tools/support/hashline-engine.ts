@@ -187,7 +187,7 @@ export async function executeHashlineEdit(
 			}
 			filesAffected++;
 			linesChanged += plan.linesChanged;
-			diff += result.diff + "\n";
+			diff += `${result.diff}\n`;
 		}
 		return {
 			applied: true,
@@ -268,8 +268,7 @@ export async function previewHashlineEdit(
 			});
 			filesAffected++;
 			linesChanged += plan.linesChanged;
-			diff +=
-				generateEditDiffs(plan.path, plan.original, plan.content).diff + "\n";
+			diff += `${generateEditDiffs(plan.path, plan.original, plan.content).diff}\n`;
 		}
 		return {
 			applied: false,

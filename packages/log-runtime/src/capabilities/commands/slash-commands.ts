@@ -47,7 +47,7 @@ export interface SlashCommandDef {
 	subcommands?: string[];
 	/** Source attribution (builtin / extension / skill). */
 	source?: SlashCommandSource;
-	handler?: (args: string) => string | undefined;
+	handler?: (args: string) => string | undefined | Promise<string | undefined>;
 	bridgeHandler?: (args: string) => void;
 }
 
@@ -59,7 +59,7 @@ function cmd(
 	dispatch: SlashDispatch = "bridge",
 	acceptsArgs = false,
 	extra?: Partial<SlashCommandDef>,
-	handler?: (args: string) => string | undefined,
+	handler?: (args: string) => string | undefined | Promise<string | undefined>,
 	bridgeHandler?: (args: string) => void,
 ): SlashCommandDef {
 	return {
@@ -84,7 +84,10 @@ export function createSlashCommands(
 		cancel: () => void;
 		reset: () => void;
 	},
-	localHandlers: Record<string, (...args: unknown[]) => unknown>,
+	localHandlers: Record<
+		string,
+		(args: string) => string | undefined | Promise<string | undefined>
+	>,
 ): SlashCommandDef[] {
 	const commands: SlashCommandDef[] = [
 		// ── Help & info ──────────────────────────────────────────────────────
@@ -248,7 +251,7 @@ export function createSlashCommands(
 					"retention",
 				],
 			},
-			args => String(localHandlers.memory?.(args as any) ?? ""),
+			args => localHandlers.memory?.(args),
 		),
 		cmd(
 			"/obs",
@@ -277,7 +280,7 @@ export function createSlashCommands(
 					"clean",
 				],
 			},
-			args => String(localHandlers.obs?.(args as any) ?? ""),
+			args => localHandlers.obs?.(args),
 		),
 		cmd(
 			"/compact",
