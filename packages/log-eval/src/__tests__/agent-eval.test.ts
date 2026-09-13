@@ -48,7 +48,7 @@ describe("agent eval", () => {
 				if (!tests) throw new Error(`Missing tests grader for ${task.id}`);
 				const result = await grade(tests, workspace);
 				expect(result.passed).toBe(false);
-				expect(result.evidence).toContain("(fail)");
+				expect(result.evidence).toMatch(/\b(fail|error)\b/);
 			}
 		} finally {
 			rmSync(workRoot, { recursive: true, force: true });

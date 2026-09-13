@@ -157,6 +157,7 @@ void test("validateConfig accepts the act/plan workflow mode", () => {
 		autoRetryEnabled: true,
 		graphicianEnabled: true,
 		fffgrepEnabled: true,
+		todoEnabled: false,
 	});
 	assert.deepEqual(warnings, []);
 });
@@ -232,6 +233,7 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 		duplicateGuardEnabled: true,
 		fffgrepEnabled: true,
 		postEditDiagnostics: true,
+		todoEnabled: false,
 	});
 	assert.equal(w.length, 0);
 });
