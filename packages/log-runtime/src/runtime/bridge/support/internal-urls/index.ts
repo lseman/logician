@@ -3,7 +3,6 @@ export { ArtifactRegistry } from "./artifact-manager";
 export { ArtifactProtocolHandler } from "./artifact-protocol";
 export { ConflictProtocolHandler } from "./conflict-protocol";
 export { findGithubClient } from "./github-client";
-export { HistoryProtocolHandler } from "./history-protocol";
 export { IssueProtocolHandler } from "./issue-protocol";
 export { LocalProtocolHandler } from "./local-protocol";
 export { LogProtocolHandler } from "./log-protocol";

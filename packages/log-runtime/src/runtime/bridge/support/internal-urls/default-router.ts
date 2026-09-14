@@ -1,7 +1,6 @@
 import { AgentProtocolHandler } from "./agent-protocol.ts";
 import { ArtifactProtocolHandler } from "./artifact-protocol.ts";
 import { ConflictProtocolHandler } from "./conflict-protocol.ts";
-import { HistoryProtocolHandler } from "./history-protocol.ts";
 import { IssueProtocolHandler } from "./issue-protocol.ts";
 import { LocalProtocolHandler } from "./local-protocol.ts";
 import { LogProtocolHandler } from "./log-protocol.ts";
@@ -24,7 +23,6 @@ export function createInternalUrlRouter(): InternalUrlRouter {
 		new AgentProtocolHandler(),
 		new LogProtocolHandler(),
 		new SshProtocolHandler(),
-		new HistoryProtocolHandler(),
 		new ArtifactProtocolHandler(),
 		new ConflictProtocolHandler(),
 		new IssueProtocolHandler(),

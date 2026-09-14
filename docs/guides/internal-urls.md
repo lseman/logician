@@ -76,16 +76,17 @@ Reads files under `.logician/artifacts/`. Supports writes.
 `write conflict://<file>` with `content` set to `ours`, `theirs`,
 `ours+theirs`, or `base` resolves that block (or every block for the bare form).
 
-## Subagents — `agent://` and `history://`
+## Subagents — `agent://`
+
+Lists and reads completed subagent results. Use `agent://` to list, `agent://<id>` for the full result, and dot-notation for field access.
 
 | URL | Action |
 |---|---|
-| `agent://<id>` | Read a subagent's result |
-| `agent://` | List completed agents |
-| `agent://<id>/content` | Agent content field |
-| `agent://<id>/details.metrics.turns` | Agent metrics |
-| `history://` | List all completed subagents |
-| `history://<id>` | Same as `agent://<id>` |
+| `read agent://` | List completed agent IDs |
+| `read agent://<id>` | Full result as JSON |
+| `read agent://<id>/content` | Final output text only |
+| `read agent://<id>/status` | Completion status |
+| `read agent://<id>/details.metrics.turns` | Agent metrics |
 
 ## Documentation — `log://`
 
