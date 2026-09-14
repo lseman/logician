@@ -140,36 +140,6 @@ export class MutationSession {
 	}
 
 	/**
-	 * Preview a mutation without writing to disk. Returns a result with
-	 * changed = true/false, but applied is always false.
-	 */
-	async preview(proposal: MutationProposal): Promise<MutationResult> {
-		const beforeHash = this.#hash(proposal.before);
-		const afterHash = this.#hash(proposal.after);
-		const changed = beforeHash !== afterHash;
-		const linesChanged = changed
-			? Math.max(
-					proposal.after.split("\n").length,
-					proposal.before.split("\n").length,
-				)
-			: 0;
-		const diff = changed
-			? generateEditDiffs(proposal.path, proposal.before, proposal.after).diff
-			: "";
-
-		return {
-			applied: false,
-			changed,
-			path: proposal.path,
-			beforeHash,
-			afterHash,
-			linesChanged,
-			filesAffected: 1,
-			diff,
-		};
-	}
-
-	/**
 	 * Apply a mutation proposal. Validates path policy, stale detection,
 	 * and writes atomically. Returns the result with applied/changed status.
 	 */
@@ -265,9 +235,10 @@ export class MutationSession {
 			this.#store.clearSnapshot(resolved);
 
 			// Update the mutation version for this path.
+			const normalizedPath = this.#normalizePath(resolved);
 			this.#mutationVersions.set(
-				this.#normalizePath(resolved),
-				(this.#mutationVersions.get(this.#normalizePath(resolved)) ?? 0) + 1,
+				normalizedPath,
+				(this.#mutationVersions.get(normalizedPath) ?? 0) + 1,
 			);
 
 			const diff = generateEditDiffs(
