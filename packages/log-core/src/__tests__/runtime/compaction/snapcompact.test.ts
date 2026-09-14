@@ -145,6 +145,21 @@ describe("snapcompact", () => {
 			expect(result).toContain("-");
 			expect(result).toContain("|");
 		});
+
+		it("folds Latin-1 accented characters to their ASCII base instead of a font-unrenderable char", () => {
+			// FONT_DATA only covers ASCII 32-126: é/ñ/ü must decompose to their
+			// base letter (NFKD strips the combining accent), not pass through
+			// raw — the raw code point renders as a blank cell (silent data loss).
+			const result = normalizeText("café niño über");
+			expect(result).toBe("cafe nino uber");
+		});
+
+		it("folds unrenderable Latin-1 symbols with no ASCII decomposition to a visible placeholder", () => {
+			// ± and ° have no NFKD decomposition and are outside ASCII 32-126;
+			// they must become a visible "?" rather than silently vanishing.
+			const result = normalizeText("± 5% at 20°");
+			expect(result).toBe("? 5% at 20?");
+		});
 	});
 
 	describe("elideDataUrls", () => {

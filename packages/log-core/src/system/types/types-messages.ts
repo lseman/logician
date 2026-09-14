@@ -14,6 +14,9 @@ export interface Message {
 	details?: Record<string, unknown> | undefined;
 	name?: string | undefined;
 	timestamp?: number | undefined;
+	/** Images to send alongside `content` (e.g. snapcompact frames). Only the
+	 * wire-serialization boundary (convertToChatFormat) interprets this. */
+	images?: Array<{ data: string; mimeType: string }> | undefined;
 }
 
 export interface MutationReceipt {
@@ -46,6 +49,12 @@ export type CompactableMessage = {
 // status updates, UI-only artifacts). Apps extend via declaration merging.
 
 // ── Custom message types ──────────────────────────────────────────────────
+
+/** Key under `CompactionSummaryMessage.snapcompact` holding the frame archive.
+ * Lives here (not in runtime/compaction/snapcompact.ts) so both the
+ * compaction engine (runtime layer) and the LLM message conversion boundary
+ * (capabilities layer) can share it without capabilities depending on runtime. */
+export const SNAPCOMPACT_PRESERVE_KEY = "snapcompact";
 
 /** Compaction summary text — emitted after context compaction. */
 export interface CompactionSummaryMessage {

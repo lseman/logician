@@ -9,7 +9,15 @@ import {
 	isCompactionSummary,
 	isCustomMessage,
 	isLlmMessage,
+	SNAPCOMPACT_PRESERVE_KEY,
 } from "../../system/types/types-messages.ts";
+
+/** Minimal shape this module needs from a snapcompact `Frame` (see
+ * runtime/compaction/snapcompact.ts) — duck-typed to avoid a capabilities ->
+ * runtime dependency across layers. */
+interface SnapcompactFrame {
+	data: string;
+}
 
 const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -18,6 +26,15 @@ const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point wa
 
 const COMPACTION_SUMMARY_SUFFIX = `
 </summary>`;
+
+/** Appended after the summary only when snapcompact frames are attached. */
+const COMPACTION_FRAMES_NOTE = `
+
+The images attached to this message are the archived conversation history,
+rendered as monospace text on a bitmap (one frame per image), in order. Read
+them as literal text, not as photos or diagrams — this is a deliberate
+context-saving technique, not a rendering error. Do not re-run tool calls
+whose output appears in a frame; treat the frame content as already known.`;
 
 const BRANCH_SUMMARY_PREFIX = `The following is a summary of a branch that this conversation came back from:
 
@@ -48,6 +65,17 @@ function bashExecutionToText(msg: BashExecutionMessage): string {
 	return text;
 }
 
+/** Extract renderable snapcompact frames (non-empty `data`) from a
+ * CompactionSummaryMessage's `snapcompact` preserve-data bag. */
+function extractSnapcompactFrames(
+	snapcompact: Record<string, unknown> | undefined,
+): SnapcompactFrame[] {
+	const archive = snapcompact?.[SNAPCOMPACT_PRESERVE_KEY] as
+		| { frames?: SnapcompactFrame[] }
+		| undefined;
+	return (archive?.frames ?? []).filter(frame => frame.data.length > 0);
+}
+
 /** Convert AgentMessage[] to LLM-compatible Message[]. Handles custom message types. */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
 	return messages
@@ -59,11 +87,23 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 
 			// Custom message types get converted to user messages
 			if (isCompactionSummary(m)) {
+				const frames = extractSnapcompactFrames(m.snapcompact);
 				return {
 					role: "user",
 					content:
-						COMPACTION_SUMMARY_PREFIX + m.summary + COMPACTION_SUMMARY_SUFFIX,
+						COMPACTION_SUMMARY_PREFIX +
+						m.summary +
+						COMPACTION_SUMMARY_SUFFIX +
+						(frames.length ? COMPACTION_FRAMES_NOTE : ""),
 					timestamp: m.timestamp,
+					...(frames.length
+						? {
+								images: frames.map(frame => ({
+									data: frame.data,
+									mimeType: "image/png",
+								})),
+							}
+						: {}),
 				};
 			}
 
@@ -175,7 +215,21 @@ export function convertToChatFormat(
 		.filter((m): m is Message => m != null)
 		.map(m => {
 			const obj: Record<string, unknown> = { role: m.role };
-			if (m.content != null) {
+			if (m.images?.length) {
+				// OpenAI chat-completions multimodal content: an array of parts
+				// instead of a plain string. Text first (if any), then each image.
+				const parts: Record<string, unknown>[] = [];
+				if (typeof m.content === "string" && m.content) {
+					parts.push({ type: "text", text: m.content });
+				}
+				for (const image of m.images) {
+					parts.push({
+						type: "image_url",
+						image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+					});
+				}
+				obj.content = parts;
+			} else if (m.content != null) {
 				obj.content = m.content;
 			}
 			if (m.tool_call_id) obj.tool_call_id = m.tool_call_id;

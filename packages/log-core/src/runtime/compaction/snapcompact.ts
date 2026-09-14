@@ -8,6 +8,8 @@
 // This replaces the LLM-based `generateCompactionSummary` path with a
 // zero-latency, zero-cost local compaction.
 
+import { SNAPCOMPACT_PRESERVE_KEY } from "../../system/types/types-messages.ts";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -111,7 +113,7 @@ export const DEFAULT_ROWS = 50;
 export const MAX_FRAMES_DEFAULT = 60;
 
 /** Key under `CompactionEntry.preserveData` holding the frame archive. */
-export const PRESERVE_KEY = "snapcompact";
+export const PRESERVE_KEY = SNAPCOMPACT_PRESERVE_KEY;
 
 /** Stopwords that readers can reconstruct from context. */
 const STOPWORDS = new Set((
@@ -264,7 +266,10 @@ export function normalizeText(text: string): string {
 		const folded = CHAR_FOLD[ch];
 		if (folded !== undefined) { out.push(folded); continue; }
 
-		if ((cp >= 0x20 && cp < 0x7f) || (cp >= 0xa0 && cp <= 0xff)) {
+		// FONT_DATA only covers ASCII 32-126; Latin-1 supplement (0xa0-0xff)
+		// is NOT directly renderable and must fall through to NFKD folding
+		// below, or every accented character silently renders as a blank cell.
+		if (cp >= 0x20 && cp < 0x7f) {
 			out.push(ch);
 			continue;
 		}
@@ -289,14 +294,14 @@ export function normalizeText(text: string): string {
 			if (folded !== undefined) out.push(folded);
 			else {
 				const code = decomposed.codePointAt(0);
-				if (code !== undefined && (code >= 0x20 && code < 0x7f || code >= 0xa0 && code <= 0xff)) out.push(decomposed);
+				if (code !== undefined && code >= 0x20 && code < 0x7f) out.push(decomposed);
 				else if (UNRENDERABLE.test(ch)) continue;
 				else out.push("?");
 			}
 		} else if (decomposed.length > 1) {
 			const first = decomposed.charAt(0);
 			const firstCp = first.codePointAt(0);
-			if (firstCp !== undefined && (firstCp >= 0x20 && firstCp < 0x7f || firstCp >= 0xa0 && firstCp <= 0xff)) out.push(first);
+			if (firstCp !== undefined && firstCp >= 0x20 && firstCp < 0x7f) out.push(first);
 			else out.push(CHAR_FOLD[ch] ?? "?");
 		} else {
 			out.push(CHAR_FOLD[ch] ?? "?");
