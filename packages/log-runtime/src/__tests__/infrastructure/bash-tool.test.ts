@@ -30,6 +30,7 @@ void test("bash executes a structured sequential batch and returns ordered detai
 	);
 	assert.equal(typeof result, "object");
 	if (typeof result === "string") return;
+	assert.equal(result.isError, true);
 	const commands = result.details?.commands as Array<Record<string, unknown>>;
 	assert.deepEqual(
 		commands.map(entry => entry.id),
@@ -159,7 +160,9 @@ void test("bash rejects empty, invalid and unrelated arguments as errors", async
 		{ terminalId: "default" },
 		{ description: "printf should-not-run" },
 	]) {
-		const args = bash.prepareArguments!(input);
+		const prepare = bash.prepareArguments;
+		assert.ok(prepare);
+		const args = prepare(input);
 		const result = await bash.execute(args, { cwd: tmpdir() });
 		assert.equal(typeof result, "object");
 		if (typeof result === "string") continue;
@@ -169,7 +172,9 @@ void test("bash rejects empty, invalid and unrelated arguments as errors", async
 });
 
 void test("bash preserves documented alias support and reports execution failures", async () => {
-	const args = bash.prepareArguments!({ cmd: "printf alias-ok" });
+	const prepare = bash.prepareArguments;
+	assert.ok(prepare);
+	const args = prepare({ cmd: "printf alias-ok" });
 	const success = await bash.execute(args, { cwd: tmpdir() });
 	assert.equal(typeof success, "object");
 	if (typeof success === "string") return;

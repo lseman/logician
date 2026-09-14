@@ -30,3 +30,33 @@ the parsing or preparation path is responsible. A nonempty command returning
 The in-memory `getBashDebuggerReport()` API summarizes the latest 50 bash calls
 (default display: 10). It snapshots arguments so later mutations cannot rewrite
 earlier stages. Disable tracing by removing the environment variables on restart.
+
+## Confirmed provider-schema failure (2026-09-14)
+
+A controlled comparison against the configured local server reproduced empty
+arguments with the original bash schema. The same prompt produced
+`{"command":"printf hello"}` after removing the requirement-only `anyOf`.
+Expanding the branches did not resolve the failure. The normalizer now flattens
+requirement-only alternatives, preserves their common required fields, and
+describes the alternatives in the schema. Bash still validates that callers
+supply exactly one of a nonempty command or a valid batch.
+
+The original trace confirms that error feedback reached the provider on the next
+request; the client was not dropping arguments or feedback. Of the 18 exposed
+tools in that trace, bash alone used this top-level alternative pattern.
+
+Also corrected: invalid commands and unsuccessful command/batch execution now
+return error flags. Unrelated string fields (such as a terminal ID or description)
+are no longer guessed to be shell commands. Prompt instructions use the canonical
+JSON fields consistently; recognized command aliases remain accepted.
+
+Live verification with the original system prompt and all 18 tools:
+
+- A fresh request generated a nonempty command.
+- The real bash tool executed an allowlisted printf and returned its output.
+- A subsequent provider request received that tool result and reported the output.
+- Batch generation produced both requested command entries.
+
+Restart Logician and start a fresh conversation when retesting. Replaying the
+long failed history still produced an empty call in one probe even with the fixed
+schema; recovery of that existing conversation is not guaranteed.

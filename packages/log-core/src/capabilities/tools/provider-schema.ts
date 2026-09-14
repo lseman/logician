@@ -158,7 +158,7 @@ export function normalizeProviderToolSchema(
 				)
 					continue;
 				const alternatives = branches as { required: string[] }[];
-				const common = alternatives[0]!.required.filter(name =>
+				const common = (alternatives[0]?.required ?? []).filter(name =>
 					alternatives.every(branch => branch.required.includes(name)),
 				);
 				const required = [
