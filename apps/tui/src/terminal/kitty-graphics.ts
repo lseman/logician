@@ -12,7 +12,7 @@
 import { wrapTmuxPassthroughIfNeeded } from "./tmux";
 
 /** Kitty Unicode placeholder base character (U+10EEEE, Plane 16 PUA). */
-export const KITTY_PLACEHOLDER = "\u{10eeee}";
+const KITTY_PLACEHOLDER = "\u{10eeee}";
 
 /**
  * Row/column diacritics (Unicode combining class 230, no decomposition) used to
@@ -113,7 +113,7 @@ const ROWCOLUMN_DIACRITICS: readonly number[] = [
 ];
 
 /** Largest row/column index expressible with the diacritic table (one cell each). */
-export const KITTY_PLACEHOLDER_MAX_CELLS = ROWCOLUMN_DIACRITICS.length;
+const KITTY_PLACEHOLDER_MAX_CELLS = ROWCOLUMN_DIACRITICS.length;
 
 export interface KittyGraphicsFeatures {
 	/** Display images via Unicode placeholders instead of direct `a=p` placement. */
@@ -152,7 +152,7 @@ function diacritic(index: number): string {
  * carrying image id `i` should display the transmitted image, scaled to fit the
  * `c`×`r` cell box. Re-emitting with a stable `placementId` replaces in place.
  */
-export function encodeKittyVirtualPlacement(opts: {
+function encodeKittyVirtualPlacement(opts: {
 	imageId: number;
 	placementId?: number;
 	columns: number;
@@ -174,7 +174,7 @@ export function encodeKittyVirtualPlacement(opts: {
  * Build the placeholder cell grid as one string per row. The image id is carried
  * by diacritics on each placeholder cell.
  */
-export function encodeKittyPlaceholderGrid(opts: {
+function encodeKittyPlaceholderGrid(opts: {
 	imageId: number;
 	columns: number;
 	rows: number;
