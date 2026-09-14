@@ -111,35 +111,3 @@ export function createEvalTool(deps: EvalToolDeps): Tool {
 		},
 	};
 }
-
-export const evalTool = createEvalTool({
-	kernel: {
-		python: {
-			eval: () =>
-				Promise.resolve({
-					status: "error",
-					output: "",
-					error: "No kernel configured",
-				}),
-			state: { available: false, launched: false, requestCount: 0 },
-		} as never,
-		js: {
-			eval: () =>
-				Promise.resolve({
-					status: "error",
-					output: "",
-					error: "No kernel configured",
-				}),
-			state: { available: false, launched: false, requestCount: 0 },
-		} as never,
-		eval: () =>
-			Promise.resolve({
-				status: "error",
-				output: "",
-				error: "No kernel configured",
-			}),
-		pythonState: () => ({ available: false, launched: false, requestCount: 0 }),
-		jsState: () => ({ available: false, launched: false, requestCount: 0 }),
-		stop: () => Promise.resolve(),
-	},
-});

@@ -56,7 +56,7 @@ export function buildMcpProcessEnv(
 	return { ...env, ...expandEnvMap(configured, parent) };
 }
 
-export interface McpResource {
+interface McpResource {
 	uri: string;
 	name: string;
 	description?: string;
@@ -504,7 +504,7 @@ export function tryDecodeMcpMessage(
 
 // ── Utility functions ────────────────────────────────────────────────────
 
-export function parseMcpToolDefinition(raw: unknown): McpToolDefinition {
+function parseMcpToolDefinition(raw: unknown): McpToolDefinition {
 	const item =
 		raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
 	const inputSchema = item.inputSchema ||
