@@ -320,6 +320,22 @@ export class BackgroundTaskRegistry {
 			};
 		}
 
+		this.terminate(entry);
+
+		return {
+			success: true,
+			message: `Task "${id}" (PID: ${entry.pid ?? "unknown"}) terminated.`,
+		};
+	}
+
+	cleanupAll(): void {
+		for (const entry of this.tasks.values()) {
+			if (entry.status === "running") this.terminate(entry);
+		}
+	}
+
+	/** Kill a running task's process tree and close out its output/log. */
+	private terminate(entry: TaskEntry): void {
 		entry.status = "killed";
 		entry.endTime = Date.now();
 
@@ -334,30 +350,6 @@ export class BackgroundTaskRegistry {
 			entry.logStream.end();
 		}
 		entry.output.finish();
-
-		return {
-			success: true,
-			message: `Task "${id}" (PID: ${entry.pid ?? "unknown"}) terminated.`,
-		};
-	}
-
-	cleanupAll(): void {
-		for (const entry of this.tasks.values()) {
-			if (entry.status === "running") {
-				entry.status = "killed";
-				entry.endTime = Date.now();
-				if (entry.pid) {
-					killProcessTree(entry.pid);
-					untrackDetachedChildPid(entry.pid);
-				} else {
-					entry.child.kill("SIGKILL");
-				}
-				if (entry.logStream) {
-					entry.logStream.end();
-				}
-				entry.output.finish();
-			}
-		}
 	}
 }
 
