@@ -65,7 +65,7 @@ void test("context compaction progressively tightens until it meets the target",
 });
 
 void test("context compaction never leaves an orphaned tool result", async () => {
-	const call = { id: "call_1", name: "read_file", arguments: "{}" };
+	const call = { id: "call_1", name: "read", arguments: "{}" };
 	const messages: CompactableMessage[] = [
 		...Array.from({ length: 8 }, (_, index) =>
 			createUserMessage(`old ${index}`),
@@ -141,9 +141,8 @@ void test("pruneHistoricalToolOutputs trims old verbose tool results while prese
 	assert.equal(recentResult.content, "test result: passed");
 });
 void test("snapcompact mode uses PNG frames when available", async () => {
-	const messages: CompactableMessage[] = Array.from(
-		{ length: 10 },
-		(_, i) => createUserMessage(`message ${i} ${"x".repeat(1000)}`),
+	const messages: CompactableMessage[] = Array.from({ length: 10 }, (_, i) =>
+		createUserMessage(`message ${i} ${"x".repeat(1000)}`),
 	);
 	const result = await compactToFit(messages, {
 		triggerTokens: 0,
@@ -152,9 +151,7 @@ void test("snapcompact mode uses PNG frames when available", async () => {
 	});
 	assert.equal(result.changed, true);
 	// Should have a compactionSummary message
-	const summaryMsg = result.messages.find(
-		m => m.role === "compactionSummary",
-	);
+	const summaryMsg = result.messages.find(m => m.role === "compactionSummary");
 	assert.ok(summaryMsg);
 	// Should have snapcompact preserve data
 	assert.ok(
@@ -163,9 +160,8 @@ void test("snapcompact mode uses PNG frames when available", async () => {
 });
 
 void test("frameOptions config is passed to snapcompact provider sizing", async () => {
-	const messages: CompactableMessage[] = Array.from(
-		{ length: 10 },
-		(_, i) => createUserMessage(`message ${i} ${"y".repeat(1000)}`),
+	const messages: CompactableMessage[] = Array.from({ length: 10 }, (_, i) =>
+		createUserMessage(`message ${i} ${"y".repeat(1000)}`),
 	);
 	const result = await compactToFit(messages, {
 		triggerTokens: 0,
@@ -180,16 +176,15 @@ void test("frameOptions config is passed to snapcompact provider sizing", async 
 		},
 	});
 	assert.equal(result.changed, true);
-	const summaryMsg = result.messages.find(
-		m => m.role === "compactionSummary",
-	);
+	const summaryMsg = result.messages.find(m => m.role === "compactionSummary");
 	assert.ok(summaryMsg);
 	// Verify frames exist and have correct dimensions
-	const archive = (
-		summaryMsg as { snapcompact?: Record<string, unknown> }
-	).snapcompact;
+	const archive = (summaryMsg as { snapcompact?: Record<string, unknown> })
+		.snapcompact;
 	if (archive) {
-		const snapData = archive.snapcompact as { frames?: Array<{ cols: number; rows: number }> } | undefined;
+		const snapData = archive.snapcompact as
+			| { frames?: Array<{ cols: number; rows: number }> }
+			| undefined;
 		const frames = snapData?.frames ?? [];
 		if (frames.length > 0) {
 			// Provider-aware sizing: claude-sonnet maps to 110 cols
@@ -215,8 +210,6 @@ void test("token estimation accounts for PNG frame overhead", async () => {
 	assert.ok(result.tokensAfter > 0);
 	assert.ok(result.tokensBefore > result.tokensAfter);
 	// The compactionSummary should have snapcompact data with frames
-	const summaryMsg = result.messages.find(
-		m => m.role === "compactionSummary",
-	);
+	const summaryMsg = result.messages.find(m => m.role === "compactionSummary");
 	assert.ok(summaryMsg);
 });

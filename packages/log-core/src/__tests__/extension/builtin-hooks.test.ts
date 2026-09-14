@@ -86,7 +86,7 @@ void test("explicitly disabling guards bypasses the default duplicate guard", ()
 
 	for (let iteration = 1; iteration <= 4; iteration += 1) {
 		hooks.beforeToolCall?.({
-			toolCall: { id: String(iteration), name: "read_file", arguments: "{}" },
+			toolCall: { id: String(iteration), name: "read", arguments: "{}" },
 			args: { path: "README.md" },
 			iteration,
 		});
@@ -306,7 +306,7 @@ void test("intervention escalation persists across rebuilds when the controller 
 			interventions,
 		});
 
-	const call = { id: "1", name: "read_file", arguments: '{"path":"a.txt"}' };
+	const call = { id: "1", name: "read", arguments: '{"path":"a.txt"}' };
 	const args = { path: "a.txt" };
 
 	// Trip the duplicate guard twice across two rebuilds — same incident key

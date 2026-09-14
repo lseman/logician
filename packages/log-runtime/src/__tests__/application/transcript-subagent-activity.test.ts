@@ -29,13 +29,13 @@ void test("subagent tool notices become one integrated lifecycle entry", () => {
 		type: "notice",
 		level: "info",
 		label: "↳ explorer-1",
-		text: "▶ call-1 read_file path=src/index.ts",
+		text: "▶ call-1 read path=src/index.ts",
 	});
 	transcript.handleEvent({
 		type: "notice",
 		level: "success",
 		label: "↳ explorer-1",
-		text: "✓ call-1 read_file 120 lines",
+		text: "✓ call-1 read 120 lines",
 	});
 
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
@@ -52,7 +52,7 @@ void test("subagent tool notices become one integrated lifecycle entry", () => {
 		{
 			agentId: "explorer-1",
 			toolCallId: "call-1",
-			toolName: "read_file",
+			toolName: "read",
 			args: "path=src/index.ts",
 			status: "completed",
 			isError: false,
@@ -73,30 +73,30 @@ void test("concurrent same-name child tool calls resolve to the correct call by 
 	});
 	// Two concurrent calls to the same tool name, interleaved arrival: start A,
 	// start B, end B, end A — a name-only match would wrongly resolve "end B"
-	// against the first running "read_file" (call A) instead of call B.
+	// against the first running "read" (call A) instead of call B.
 	transcript.handleEvent({
 		type: "notice",
 		level: "info",
 		label: "↳ explorer-1",
-		text: "▶ call-A read_file path=a.ts",
+		text: "▶ call-A read path=a.ts",
 	});
 	transcript.handleEvent({
 		type: "notice",
 		level: "info",
 		label: "↳ explorer-1",
-		text: "▶ call-B read_file path=b.ts",
+		text: "▶ call-B read path=b.ts",
 	});
 	transcript.handleEvent({
 		type: "notice",
 		level: "success",
 		label: "↳ explorer-1",
-		text: "✓ call-B read_file 40 lines",
+		text: "✓ call-B read 40 lines",
 	});
 	transcript.handleEvent({
 		type: "notice",
 		level: "success",
 		label: "↳ explorer-1",
-		text: "✓ call-A read_file 120 lines",
+		text: "✓ call-A read 120 lines",
 	});
 
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
@@ -126,7 +126,7 @@ void test("multi-line child tool results do not break marker/id/name parsing", (
 		type: "notice",
 		level: "info",
 		label: "↳ explorer-1",
-		text: "▶ fU2Tm5kWJkVSygsPXRBBSvBAwPT5h25A list_files path=.",
+		text: "▶ fU2Tm5kWJkVSygsPXRBBSvBAwPT5h25A glob path=.",
 	});
 	// A real multi-line file listing result — previously the payload group
 	// used `.*` which cannot cross newlines, so the whole regex failed to
@@ -136,7 +136,7 @@ void test("multi-line child tool results do not break marker/id/name parsing", (
 		type: "notice",
 		level: "success",
 		label: "↳ explorer-1",
-		text: "✓ fU2Tm5kWJkVSygsPXRBBSvBAwPT5h25A list_files a.ts\nb.ts\nc.ts",
+		text: "✓ fU2Tm5kWJkVSygsPXRBBSvBAwPT5h25A glob a.ts\nb.ts\nc.ts",
 	});
 
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
@@ -146,7 +146,7 @@ void test("multi-line child tool results do not break marker/id/name parsing", (
 
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0].toolCallId, "fU2Tm5kWJkVSygsPXRBBSvBAwPT5h25A");
-	assert.equal(calls[0].toolName, "list_files");
+	assert.equal(calls[0].toolName, "glob");
 	assert.equal(calls[0].status, "completed");
 	assert.equal(calls[0].resultPreview, "a.ts\nb.ts\nc.ts");
 });
@@ -210,7 +210,7 @@ void test("final batch details preserve collected child tool activity", () => {
 		type: "notice",
 		level: "info",
 		label: "↳ agent-1",
-		text: "▶ read_file path=src/index.ts",
+		text: "▶ read path=src/index.ts",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
@@ -286,7 +286,7 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 		seq: 3,
 		kind: "tool_execution_start",
 		toolCallId: "read-1",
-		toolName: "read_file",
+		toolName: "read",
 		args: '{"path":"src/index.ts"}',
 	});
 	transcript.handleEvent({
@@ -295,7 +295,7 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 		seq: 4,
 		kind: "tool_execution_end",
 		toolCallId: "read-1",
-		toolName: "read_file",
+		toolName: "read",
 		result: "file contents",
 		isError: false,
 	});
@@ -318,7 +318,7 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 		["thinking", "content", "tool", "content"],
 	);
 	assert.equal(chunks[0].contentText, "I should inspect first.");
-	assert.equal(chunks[2].tool?.toolName, "read_file");
+	assert.equal(chunks[2].tool?.toolName, "read");
 	assert.equal(chunks[2].tool?.resultPreview, "file contents");
 	assert.equal(chunks[3].contentText, "Inspection complete.");
 });
@@ -343,7 +343,7 @@ void test("subagent mutations repair malformed restored detail collections", () 
 		type: "notice",
 		level: "info",
 		label: "↳ explorer-1",
-		text: "▶ read-1 read_file path=src/index.ts",
+		text: "▶ read-1 read path=src/index.ts",
 	});
 	transcript.handleEvent({
 		type: "subagent_chunk",

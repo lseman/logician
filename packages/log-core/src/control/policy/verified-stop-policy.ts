@@ -4,7 +4,7 @@ import type {
 	StopPolicyContext,
 } from "./execution-policy.ts";
 
-const MUTATION_TOOLS = new Set(["apply_patch", "edit_file", "write_file"]);
+const MUTATION_TOOLS = new Set(["apply_patch", "edit", "write"]);
 const VERIFICATION_TOOLS = new Set(["bash", "sandbox"]);
 const VERIFICATION_COMMAND =
 	/\b(?:bun\s+(?:test|run\s+(?:test|check|lint|build|typecheck))|npm\s+(?:test|run\s+(?:test|check|lint|build|typecheck))|pnpm\s+(?:test|run\s+(?:test|check|lint|build|typecheck))|yarn\s+(?:test|run\s+(?:test|check|lint|build|typecheck))|cargo\s+(?:test|check|build)|go\s+test|python\s+-m\s+pytest|pytest|make(?:\s+\w+)?|cmake\s+--build|tsc|biome\s+check|eslint)\b/i;

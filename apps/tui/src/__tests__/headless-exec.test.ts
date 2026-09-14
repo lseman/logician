@@ -161,13 +161,13 @@ void test("compaction, retries, and permission requests are counted and passed t
 	const bridge = new FakeBridge([
 		{
 			type: "tool_execution_start",
-			toolName: "read_file",
+			toolName: "read",
 			toolCallId: "tool-1",
 			args: {},
 		},
 		{
 			type: "tool_execution_end",
-			toolName: "read_file",
+			toolName: "read",
 			toolCallId: "tool-1",
 			result: "ok",
 		},

@@ -20,6 +20,8 @@ export interface ChoiceItem {
 	label: string;
 	/** Optional short description shown on the right. */
 	description?: string;
+	/** Selecting this choice opens free-text entry instead of submitting `value` directly. */
+	isFreeText?: boolean;
 }
 
 export interface ChoiceQuestion {
@@ -27,18 +29,41 @@ export interface ChoiceQuestion {
 	header?: string;
 	question: string;
 	choices: ChoiceItem[];
+	/** Allow selecting more than one choice. Answer is returned as a string array. */
+	multi?: boolean;
+	/** Value of the choice to pre-select and mark as recommended. No auto-timeout. */
+	recommended?: string;
 }
 
 export type ChoicePopupAction =
-	| { type: "submit"; answers: Record<string, string> }
+	| { type: "submit"; answers: Record<string, string | string[]> }
 	| { type: "close" };
+
+/** Render an answer (single value, multi-select array, or free text) for the submit summary. */
+function summarizeAnswer(
+	answer: string | string[] | undefined,
+	choices: ChoiceItem[],
+): string {
+	if (answer === undefined) return "Not answered";
+	const labelFor = (value: string) =>
+		choices.find(c => c.value === value)?.label ?? value;
+	if (Array.isArray(answer)) {
+		return answer.length ? answer.map(labelFor).join(", ") : "Not answered";
+	}
+	return labelFor(answer);
+}
 
 export class ChoicePopup implements Component {
 	private questionId = "";
 	private questions: ChoiceQuestion[] = [];
 	private currentTab = 0;
 	private selectedIndices: number[] = [];
-	private answers = new Map<string, string>();
+	/** Per-question toggled indices, for `multi` questions only. */
+	private multiSelections: Set<number>[] = [];
+	private answers = new Map<string, string | string[]>();
+	/** Index of the question currently in free-text entry mode, or null. */
+	private typingTab: number | null = null;
+	private typingBuffer = "";
 	public visible = false;
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
@@ -64,8 +89,15 @@ export class ChoicePopup implements Component {
 	setQuestions(questions: ChoiceQuestion[]): void {
 		this.questions = questions;
 		this.currentTab = 0;
-		this.selectedIndices = questions.map(() => 0);
+		this.selectedIndices = questions.map(q => {
+			if (q.recommended === undefined) return 0;
+			const idx = q.choices.findIndex(c => c.value === q.recommended);
+			return idx >= 0 ? idx : 0;
+		});
+		this.multiSelections = questions.map(() => new Set<number>());
 		this.answers.clear();
+		this.typingTab = null;
+		this.typingBuffer = "";
 		this.invalidate();
 	}
 
@@ -84,18 +116,21 @@ export class ChoicePopup implements Component {
 	getSelected(): ChoiceItem | null {
 		const question = this.questions[this.currentTab] ?? this.questions[0];
 		if (!question?.choices.length) return null;
-		return question.choices[this.selectedIndices[this.currentTab] ?? 0];
+		return question.choices[this.selectedIndices[this.currentTab] ?? 0] ?? null;
 	}
 
-	getAnswers(): Record<string, string> {
+	getAnswers(): Record<string, string | string[]> {
 		return Object.fromEntries(this.answers);
 	}
 
 	getResponseValue(): string {
 		const answers = this.getAnswers();
-		return this.questions.length === 1
-			? (answers[this.questions[0]?.id ?? "answer"] ?? "")
-			: JSON.stringify(answers);
+		const single = this.questions[0];
+		if (this.questions.length === 1 && single && !single.multi) {
+			const value = answers[single.id];
+			return typeof value === "string" ? value : "";
+		}
+		return JSON.stringify(answers);
 	}
 
 	isVisibleOverlay(): boolean {
@@ -135,6 +170,10 @@ export class ChoicePopup implements Component {
 	handleInput(data: string): ChoicePopupAction | null {
 		if (!this.visible) return null;
 
+		if (this.typingTab !== null) {
+			return this.handleTypingInput(data);
+		}
+
 		if (data === "\x1b" || data === "\x03") {
 			return { type: "close" };
 		}
@@ -146,9 +185,31 @@ export class ChoicePopup implements Component {
 					: null;
 			}
 			const question = this.questions[this.currentTab];
-			const item =
-				question?.choices[this.selectedIndices[this.currentTab] ?? 0];
-			if (!question || !item) return null;
+			if (!question) return null;
+
+			if (question.multi) {
+				const selected = this.multiSelections[this.currentTab];
+				if (!selected?.size) return null;
+				const values = [...selected]
+					.sort((a, b) => a - b)
+					.map(i => question.choices[i]?.value)
+					.filter((v): v is string => v !== undefined);
+				this.answers.set(question.id, values);
+				if (this.questions.length === 1) {
+					return { type: "submit", answers: this.getAnswers() };
+				}
+				this.moveTab(1);
+				return null;
+			}
+
+			const item = question.choices[this.selectedIndices[this.currentTab] ?? 0];
+			if (!item) return null;
+			if (item.isFreeText) {
+				this.typingTab = this.currentTab;
+				this.typingBuffer = "";
+				this.invalidate();
+				return null;
+			}
 			this.answers.set(question.id, item.value);
 			if (this.questions.length === 1) {
 				return { type: "submit", answers: this.getAnswers() };
@@ -186,6 +247,21 @@ export class ChoicePopup implements Component {
 			return null;
 		}
 
+		// Space — toggle the highlighted choice for `multi` questions.
+		if (data === " ") {
+			const question = this.questions[this.currentTab];
+			if (question?.multi) {
+				const index = this.selectedIndices[this.currentTab] ?? 0;
+				const selected = this.multiSelections[this.currentTab];
+				if (selected) {
+					if (selected.has(index)) selected.delete(index);
+					else selected.add(index);
+					this.invalidate();
+				}
+			}
+			return null;
+		}
+
 		// Number keys 1-9 — select that option directly
 		if (data.length === 1) {
 			const c = data.charCodeAt(0);
@@ -200,6 +276,51 @@ export class ChoicePopup implements Component {
 			}
 		}
 
+		return null;
+	}
+
+	/** Route keystrokes into the free-text buffer while `typingTab` is set. */
+	private handleTypingInput(data: string): ChoicePopupAction | null {
+		if (data === "\x1b") {
+			// Cancel free-text entry, return to the choice list.
+			this.typingTab = null;
+			this.typingBuffer = "";
+			this.invalidate();
+			return null;
+		}
+		if (data === "\x03") {
+			return { type: "close" };
+		}
+		if (data === "\r" || data === "\n") {
+			const tab = this.typingTab;
+			const question = tab === null ? undefined : this.questions[tab];
+			if (tab === null || !question) return null;
+			const value = this.typingBuffer.trim();
+			this.typingTab = null;
+			this.typingBuffer = "";
+			if (!value) {
+				this.invalidate();
+				return null;
+			}
+			this.answers.set(question.id, value);
+			if (this.questions.length === 1) {
+				return { type: "submit", answers: this.getAnswers() };
+			}
+			this.currentTab = tab;
+			this.moveTab(1);
+			return null;
+		}
+		if (data === "\x7f" || data === "\x08") {
+			this.typingBuffer = this.typingBuffer.slice(0, -1);
+			this.invalidate();
+			return null;
+		}
+		// Reject other control/escape sequences (arrow keys, etc.) — only
+		// accept plain printable input as free-text content.
+		if (data.length > 0 && data.charCodeAt(0) >= 0x20) {
+			this.typingBuffer += data;
+			this.invalidate();
+		}
 		return null;
 	}
 
@@ -266,10 +387,10 @@ export class ChoicePopup implements Component {
 			lines.push(line());
 			for (const question of this.questions) {
 				const answer = this.answers.get(question.id);
-				const choice = question.choices.find(item => item.value === answer);
+				const summary = summarizeAnswer(answer, question.choices);
 				lines.push(
 					line(
-						`${answer ? active : muted}${answer ? "✓" : "□"} ${question.header || question.question}: ${choice?.label ?? "Not answered"}${RESET}`,
+						`${answer !== undefined ? active : muted}${answer !== undefined ? "✓" : "□"} ${question.header || question.question}: ${summary}${RESET}`,
 					),
 				);
 			}
@@ -293,9 +414,26 @@ export class ChoicePopup implements Component {
 		}
 		lines.push(line());
 
+		// ── Free-text entry ──
+		if (this.typingTab === this.currentTab) {
+			lines.push(
+				line(`${selectedColor}❯ ${text}${this.typingBuffer}${selectedColor}▏${RESET}`),
+			);
+			lines.push(line());
+			lines.push(
+				line(
+					`${muted}${BOLD}enter${RESET}${muted} submit   ${BOLD}esc${RESET}${muted} back to choices${RESET}`,
+				),
+			);
+			lines.push(`${border}╰${"─".repeat(popupWidth - 2)}╯${RESET}`);
+			this.cachedLines = lines.map(value => clampLineToWidth(value, width));
+			return this.cachedLines;
+		}
+
 		// ── Choices ──
 		const choices = activeQuestion.choices;
 		const selectedIndex = this.selectedIndices[this.currentTab] ?? 0;
+		const toggled = this.multiSelections[this.currentTab];
 		if (choices.length > 0) {
 			const maxRows = 10;
 			const start = Math.max(
@@ -309,14 +447,27 @@ export class ChoicePopup implements Component {
 			if (start > 0) lines.push(line(`${muted}  ↑ ${start} more${RESET}`));
 			for (let i = start; i < end; i++) {
 				const ch = choices[i];
-				const selected = i === selectedIndex;
-				const labelColor = selected ? `${selectedColor}${BOLD}` : text;
-				const marker = selected
-					? `${selectedColor}●${RESET}`
-					: `${muted}○${RESET}`;
+				if (!ch) continue;
+				const cursor = i === selectedIndex;
+				const isRecommended = ch.value === activeQuestion.recommended;
+				const labelColor = cursor ? `${selectedColor}${BOLD}` : text;
+				let marker: string;
+				if (activeQuestion.multi) {
+					const on = toggled?.has(i) ?? false;
+					marker = on
+						? `${selectedColor}${BOLD}[x]${RESET}`
+						: `${cursor ? selectedColor : muted}[ ]${RESET}`;
+				} else {
+					marker = cursor
+						? `${selectedColor}●${RESET}`
+						: `${muted}○${RESET}`;
+				}
+				const recommendedTag = isRecommended
+					? ` ${muted}${DIM}(recommended)${RESET}`
+					: "";
 				lines.push(
 					line(
-						`${marker} ${labelColor}${ch.label}${RESET}${muted}  ${i + 1}${RESET}`,
+						`${marker} ${labelColor}${ch.label}${RESET}${recommendedTag}${muted}  ${i + 1}${RESET}`,
 					),
 				);
 				if (ch.description) {
@@ -326,7 +477,7 @@ export class ChoicePopup implements Component {
 					)) {
 						lines.push(
 							line(
-								`${selected ? active : muted}   ${DIM}${descriptionLine}${RESET}`,
+								`${cursor ? active : muted}   ${DIM}${descriptionLine}${RESET}`,
 							),
 						);
 					}
@@ -340,9 +491,12 @@ export class ChoicePopup implements Component {
 		}
 
 		lines.push(line());
+		const multiHint = activeQuestion.multi
+			? `${BOLD}space${RESET}${muted} toggle   `
+			: "";
 		lines.push(
 			line(
-				`${muted}${BOLD}↑↓${RESET}${muted} move   ${BOLD}enter${RESET}${muted} answer   ${this.questions.length > 1 ? `${BOLD}tab${RESET}${muted} questions   ` : ""}${BOLD}esc${RESET}${muted} dismiss${RESET}`,
+				`${muted}${BOLD}↑↓${RESET}${muted} move   ${multiHint}${BOLD}enter${RESET}${muted} answer   ${this.questions.length > 1 ? `${BOLD}tab${RESET}${muted} questions   ` : ""}${BOLD}esc${RESET}${muted} dismiss${RESET}`,
 			),
 		);
 		lines.push(`${border}╰${"─".repeat(popupWidth - 2)}╯${RESET}`);

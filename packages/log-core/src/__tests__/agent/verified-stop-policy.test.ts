@@ -11,7 +11,7 @@ test("verified-stop ignores a no-op mutation receipt", async () => {
 			{
 				role: "assistant",
 				content: null,
-				tool_calls: [{ id: "edit", name: "edit_file", arguments: "{}" }],
+				tool_calls: [{ id: "edit", name: "edit", arguments: "{}" }],
 			},
 			{
 				role: "tool",
@@ -42,7 +42,7 @@ test("verified-stop requests verification after an edit", async () => {
 				role: "assistant",
 				content: null,
 				tool_calls: [
-					{ id: "edit", name: "edit_file", arguments: '{"path":"a.ts"}' },
+					{ id: "edit", name: "edit", arguments: '{"path":"a.ts"}' },
 				],
 			},
 			{
@@ -76,7 +76,7 @@ test("verified-stop accepts successful verification after the final edit", async
 				role: "assistant",
 				content: null,
 				tool_calls: [
-					{ id: "edit", name: "edit_file", arguments: '{"path":"a.ts"}' },
+					{ id: "edit", name: "edit", arguments: '{"path":"a.ts"}' },
 				],
 			},
 			{
@@ -126,7 +126,7 @@ test("verified-stop rejects failed or stale verification", async () => {
 				role: "assistant",
 				content: null,
 				tool_calls: [
-					{ id: "edit", name: "write_file", arguments: '{"path":"a.ts"}' },
+					{ id: "edit", name: "write", arguments: '{"path":"a.ts"}' },
 				],
 			},
 			{

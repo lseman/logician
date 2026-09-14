@@ -190,6 +190,10 @@ export interface Tool {
 	promptGuidelines?: string[];
 	parameters: Record<string, unknown>;
 	prepareArguments?: (args: unknown) => Record<string, unknown>;
+	/** Resolve a transport call to a registered tool before hooks and permissions. */
+	resolveCall?: (
+		args: Record<string, unknown>,
+	) => { name: string; arguments: Record<string, unknown> } | undefined;
 	executionMode?: ToolExecutionMode;
 	/** Opt-in result caching. Only pure, side-effect-free tools should set this. */
 	cacheable?: boolean;
@@ -214,7 +218,17 @@ export interface AskUserContext {
 		id: string;
 		header?: string;
 		question: string;
-		choices: Array<{ value: string; label: string; description?: string }>;
+		/** Allow selecting more than one choice. Answer is returned as an array. */
+		multi?: boolean;
+		/** Value of the choice to pre-select and mark as recommended. No auto-timeout — purely a hint/default. */
+		recommended?: string;
+		choices: Array<{
+			value: string;
+			label: string;
+			description?: string;
+			/** Selecting this choice opens free-text entry instead of submitting `value` directly. */
+			isFreeText?: boolean;
+		}>;
 	}>;
 }
 

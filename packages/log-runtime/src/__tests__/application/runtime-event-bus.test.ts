@@ -88,7 +88,7 @@ describe("RuntimeEventBus replay", () => {
 		bus.beginRun({ sessionId: "session-1", runId: "run-1", turnId: "turn-1" });
 		bus.emit({
 			type: "tool_execution_start",
-			toolName: "read_file",
+			toolName: "read",
 			args: { path: "a.ts" },
 			toolCallId: "call-1",
 		});

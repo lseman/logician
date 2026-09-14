@@ -20,31 +20,36 @@ import type {
 
 const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024; // 8 MiB
 
-/** Parse a numeric artifact ID from the URL host. */
-function parseArtifactId(url: InternalUrl): string {
-	const id = url.host;
-	if (!id) {
+/**
+ * Check if a selector string looks like a pagination selector. Comma-separated
+ * multi-range lists (`1-20,30+5`) are intentionally NOT accepted — they were
+ * never documented (`:50`, `:raw`, `:5-200` only) and `parseRange` below only
+ * ever handled a single pair, silently mis-parsing anything else. A selector
+ * this doesn't match falls through to a full-content read instead.
+ */
+function isSelector(value: string): boolean {
+	return /^(raw|conflicts|-?\d+(?:[-+]\d+)?)$/i.test(value);
+}
+
+/**
+ * Parse `<id>` or `<id>:<selector>` from the URL. The shared parser only puts
+ * the first path segment into `url.host`; the rest lands in `url.pathname`
+ * (and never stops at `:` either) — reassemble the full address before
+ * splitting, the same pattern log-protocol.ts uses for `/`-separated paths.
+ */
+function parseIdAndSelector(url: InternalUrl): { id: string; selector: string | null } {
+	const full = url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
+	if (!full) {
 		throw new Error("artifact:// URL requires a numeric ID: artifact://<id>");
 	}
+	const colonIdx = full.indexOf(":");
+	const id = colonIdx < 0 ? full : full.slice(0, colonIdx);
 	if (!/^\d+$/.test(id)) {
 		throw new Error(`artifact:// ID must be numeric, got: ${id}`);
 	}
-	return id;
-}
-
-/** Check if a selector string looks like a pagination selector. */
-function isSelector(value: string): boolean {
-	return /^(raw|conflicts|-?\d+(?:[-+]\d+)?(?:,\d+(?:[-+]\d+)?)*)$/i.test(
-		value,
-	);
-}
-
-/** Extract a selector from the pathname (e.g. /3:50 → 50). */
-function extractSelector(pathname: string): string | null {
-	const colonIdx = pathname.lastIndexOf(":");
-	if (colonIdx < 0) return null;
-	const suffix = pathname.slice(colonIdx + 1);
-	return isSelector(suffix) ? suffix : null;
+	if (colonIdx < 0) return { id, selector: null };
+	const suffix = full.slice(colonIdx + 1);
+	return { id, selector: isSelector(suffix) ? suffix : null };
 }
 
 /** Extract a range from a selector string. Returns null for non-range selectors. */
@@ -52,11 +57,6 @@ function parseRange(
 	selector: string,
 ): { offset?: number; limit?: number } | null {
 	if (selector === "raw") return null;
-	if (selector.includes(",")) {
-		const parts = selector.split(",").map(p => parseInt(p, 10));
-		if (parts.some(Number.isNaN)) return null;
-		return { offset: parts[0], limit: parts[1] - parts[0] + 1 };
-	}
 	const plusMatch = selector.match(/^(\d+)\+(\d+)$/);
 	if (plusMatch) {
 		const [, offset, count] = plusMatch;
@@ -80,11 +80,11 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 
 	async resolve(
 		url: InternalUrl,
-		_context?: ResolveContext,
+		context?: ResolveContext,
 	): Promise<InternalResource> {
 		const registry = ArtifactRegistry.instance();
 
-		return this.#resolveWithRegistry(registry, url);
+		return this.#resolveWithRegistry(registry, url, context);
 	}
 
 	async complete(
@@ -99,6 +99,7 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 	async #resolveWithRegistry(
 		registry: ArtifactRegistry,
 		url: InternalUrl,
+		context?: ResolveContext,
 	): Promise<InternalResource> {
 		// Bare artifact:// — list available IDs
 		if (!url.host) {
@@ -114,23 +115,39 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 			};
 		}
 
-		const id = parseArtifactId(url);
-
-		// Check for line-range selector in pathname
-		const selector = extractSelector(url.pathname);
+		const { id, selector } = parseIdAndSelector(url);
 		if (selector) {
 			return this.#resolveWithSelector(registry, id, url, selector);
 		}
 
 		// No selector — return full content
-		return this.#resolveFull(registry, id, url);
+		return this.#resolveFull(registry, id, url, context);
 	}
 
 	async #resolveFull(
 		registry: ArtifactRegistry,
 		id: string,
 		url: InternalUrl,
+		context?: ResolveContext,
 	): Promise<InternalResource> {
+		if (context?.pathOnly) {
+			const sourcePath = await registry.getPath(id);
+			if (sourcePath === null) {
+				const available = await registry.listIds();
+				const hint =
+					available.length > 0
+						? `\nAvailable: ${available.join(", ")}`
+						: "\nNo artifacts have been saved yet.";
+				throw new Error(`Unknown artifact: ${id}${hint}`);
+			}
+			return {
+				url: url.href,
+				content: "",
+				contentType: "text/plain",
+				sourcePath,
+			};
+		}
+
 		const content = await registry.read(id);
 		if (content === null) {
 			const available = await registry.listIds();
@@ -168,25 +185,15 @@ export class ArtifactProtocolHandler implements ProtocolHandler {
 
 		const range = parseRange(selector);
 		if (range) {
-			// Apply pagination
+			// Slice by line directly — offset/limit are already line values
+			// from parseRange. (Previously approximated a byte range from an
+			// average bytes-per-line and sliced with substring(), which indexes
+			// by UTF-16 code unit: wrong for non-ASCII content and not actually
+			// a line boundary either way.)
+			const lines = content.split("\n");
 			const offset = range.offset ?? 0;
-			const limit = range.limit ?? content.length;
-			const bytesPerLine = Math.max(
-				1,
-				Math.floor(
-					Buffer.byteLength(content, "utf-8") /
-						Math.max(1, content.split("\n").length),
-				),
-			);
-			const byteOffset = Math.min(
-				offset * bytesPerLine,
-				Buffer.byteLength(content, "utf-8"),
-			);
-			const byteLimit = Math.min(
-				limit * bytesPerLine,
-				Buffer.byteLength(content, "utf-8") - byteOffset,
-			);
-			const slice = content.substring(byteOffset, byteOffset + byteLimit);
+			const limit = range.limit ?? lines.length;
+			const slice = lines.slice(offset, offset + limit).join("\n");
 			return {
 				url: url.href,
 				content: slice,

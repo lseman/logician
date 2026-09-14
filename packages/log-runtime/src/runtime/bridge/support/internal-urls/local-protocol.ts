@@ -5,12 +5,16 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { ensureInsideCwd } from "../../../../capabilities/tools/support/utils/path-utils.ts";
+import { atomicWriteFile } from "../../../../capabilities/tools/support/utils/atomic-write.ts";
+import { formatSize } from "../../../../capabilities/tools/support/utils/truncate.ts";
 
 import type {
 	InternalResource,
 	InternalUrl,
 	ProtocolHandler,
 	ResolveContext,
+	WriteContext,
 } from "./types";
 
 /** Path to a local session artifact. */
@@ -20,31 +24,47 @@ interface LocalEntry {
 	type: "file" | "directory";
 }
 
+const LOCAL_TEXT_SNIFF_BYTES = 8192;
+const LOCAL_TEXT_RESOURCE_MAX_BYTES = 1024 * 1024; // 1 MiB
+
 export class LocalProtocolHandler implements ProtocolHandler {
 	readonly scheme = "local";
+	readonly immutable = false;
+
+	/** Resolve `<cwd>/.logician/artifacts` plus the target path for a URL, enforcing the sandbox both hops. */
+	#resolveTargetPath(
+		url: InternalUrl,
+		cwd: string,
+		allowedPaths?: string[],
+		allowAllPaths?: boolean,
+	): { artifactDir: string; resolved: string | null } {
+		const artifactDir = path.join(cwd, ".logician", "artifacts");
+		ensureInsideCwd(cwd, artifactDir, allowedPaths, allowAllPaths);
+
+		const hostname = url.host;
+		if (!hostname) return { artifactDir, resolved: null };
+
+		const filePath = path.join(artifactDir, hostname, url.pathname.slice(1));
+		const resolved = path.resolve(filePath);
+		ensureInsideCwd(artifactDir, resolved);
+		return { artifactDir, resolved };
+	}
 
 	async resolve(
 		url: InternalUrl,
 		context?: ResolveContext,
 	): Promise<InternalResource> {
 		const cwd = context?.cwd ?? process.cwd();
-		const artifactDir = path.join(cwd, ".logician", "artifacts");
-
-		const hostname = url.host;
-		const pathname = url.pathname;
+		const { artifactDir, resolved } = this.#resolveTargetPath(
+			url,
+			cwd,
+			context?.allowedPaths,
+			context?.allowAllPaths,
+		);
 
 		// local:// — list available artifacts
-		if (!hostname || (hostname === "local" && pathname === "/")) {
+		if (!resolved || (url.host === "local" && url.pathname === "/")) {
 			return this.listArtifacts(artifactDir, url);
-		}
-
-		// local://<name> or local://<dir>/<path>
-		const filePath = path.join(artifactDir, hostname, pathname.slice(1));
-		const resolved = path.resolve(filePath);
-
-		// Security: must be within artifactDir
-		if (!resolved.startsWith(artifactDir)) {
-			throw new Error(`Path traversal blocked: local://${hostname}${pathname}`);
 		}
 
 		try {
@@ -53,10 +73,29 @@ export class LocalProtocolHandler implements ProtocolHandler {
 				return this.listDirectory(resolved, url);
 			}
 			if (stat.isFile()) {
-				const content = await fs.readFile(resolved, "utf-8");
+				if (context?.pathOnly) {
+					return {
+						url: url.href,
+						content: "",
+						contentType: detectContentType(resolved),
+						size: stat.size,
+						sourcePath: resolved,
+					};
+				}
+				if (stat.size > LOCAL_TEXT_RESOURCE_MAX_BYTES) {
+					throw new Error(
+						`${url.href} is ${formatSize(stat.size)}, exceeding the ${formatSize(LOCAL_TEXT_RESOURCE_MAX_BYTES)} limit for local:// text resources. Use bash tools to inspect it, or the backing path directly.`,
+					);
+				}
+				const buffer = await fs.readFile(resolved);
+				if (buffer.subarray(0, LOCAL_TEXT_SNIFF_BYTES).includes(0)) {
+					throw new Error(
+						`${url.href} appears to be a binary file (${formatSize(stat.size)}). Use bash tools (file, xxd, strings) to inspect it.`,
+					);
+				}
 				return {
 					url: url.href,
-					content,
+					content: buffer.toString("utf-8"),
 					contentType: detectContentType(resolved),
 					size: stat.size,
 					sourcePath: resolved,
@@ -74,6 +113,33 @@ export class LocalProtocolHandler implements ProtocolHandler {
 		}
 
 		throw new Error(`Unknown artifact type: ${resolved}`);
+	}
+
+	async write(
+		url: InternalUrl,
+		content: string,
+		context?: WriteContext,
+	): Promise<void> {
+		const cwd = context?.cwd ?? process.cwd();
+		const { resolved } = this.#resolveTargetPath(
+			url,
+			cwd,
+			context?.allowedPaths,
+			context?.allowAllPaths,
+		);
+		if (!resolved) {
+			throw new Error(
+				`local:// write requires a target: local://<name> (got ${url.href})`,
+			);
+		}
+
+		const stat = await fs.stat(resolved).catch(() => null);
+		if (stat?.isDirectory()) {
+			throw new Error(`Cannot write: ${url.href} is a directory`);
+		}
+
+		await fs.mkdir(path.dirname(resolved), { recursive: true });
+		await atomicWriteFile(resolved, content);
 	}
 
 	private async listArtifacts(

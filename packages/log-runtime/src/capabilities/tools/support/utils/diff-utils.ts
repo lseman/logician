@@ -1,5 +1,5 @@
 // ── Diff Utilities ─────────────────────────────────────────────────────────────
-// Line-level diff and unified-patch generation for the edit_file / write_file
+// Line-level diff and unified-patch generation for the edit / write
 // tools. Uses an LCS-based line diff so disjoint changes produce separate
 // hunks — a naive common-prefix/suffix diff renders everything between the
 // first and last change as removed+re-added, which reads as "the whole file
@@ -197,7 +197,7 @@ export interface EditDiffResult {
 /**
  * Generate the display diff and the unified patch from a single LCS pass.
  * Both formats are derived from the same before/after pair on every
- * edit_file call, so computing diffOps once and rendering it twice avoids
+ * edit call, so computing diffOps once and rendering it twice avoids
  * doubling the O(a*b) LCS cost for no benefit.
  */
 export function generateEditDiffs(

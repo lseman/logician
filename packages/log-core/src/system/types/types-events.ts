@@ -337,7 +337,17 @@ export interface QuestionRequestEvent {
 		id: string;
 		header?: string;
 		question: string;
-		choices: Array<{ value: string; label: string; description?: string }>;
+		/** Allow selecting more than one choice. Answer is returned as an array. */
+		multi?: boolean;
+		/** Value of the choice to pre-select as a hint. No auto-timeout. */
+		recommended?: string;
+		choices: Array<{
+			value: string;
+			label: string;
+			description?: string;
+			/** Selecting this choice opens free-text entry instead of a fixed value. */
+			isFreeText?: boolean;
+		}>;
 	}>;
 }
 /** A TTSR rule matched and was injected (aborted current turn). */

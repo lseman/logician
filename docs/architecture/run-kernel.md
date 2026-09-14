@@ -55,7 +55,7 @@ the conversation:
 - One frame is opened per prompt and popped on rewind; within a frame, only
   the **first** write to a path records its pre-state — that's what the
   frame restores to.
-- `write_file` / `edit_file` calls capture the path's content before the
+- `write` / `edit` calls capture the path's content before the
   write.
 - `bash` calls snapshot the working tree to a git tree object (via a
   temporary index; the real index and worktree are untouched) before and

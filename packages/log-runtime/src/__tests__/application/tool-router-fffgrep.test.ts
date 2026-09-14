@@ -151,7 +151,7 @@ void test("fffgrepEnabled: false in constructor does not affect non-fff tools", 
 	const names = router.getDefaultTools().map(t => t.name);
 	assert.ok(names.includes("grep"), "local grep should still be present");
 	assert.ok(names.includes("bash"), "bash should still be present");
-	assert.ok(names.includes("find"), "find should still be present");
+	assert.ok(names.includes("glob"), "glob should still be present");
 });
 
 void test("constructor hides FFF grep by origin even when its exposed name has a collision suffix", () => {

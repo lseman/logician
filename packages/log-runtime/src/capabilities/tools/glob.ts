@@ -1,7 +1,19 @@
-// ── find tool ─────────────────────────────────────────────────────────────────────
-// Find files by glob pattern using fd (falls back to rg --files).
-// fd: --glob, --hidden, --no-require-git, --full-path for path-containing patterns.
+// ── glob tool ─────────────────────────────────────────────────────────────────
+// Merges the former find (glob pattern search) and list_files (directory
+// listing) tools into one, matching oh-my-pi's glob: a single `path` that is
+// either a bare directory/file or a glob pattern.
+//
+// - Bare directory (no glob chars) → recursive "**/*" listing of that subtree.
+// - Bare file (no glob chars) → short-circuits to that one path.
+// - Path containing glob chars (*, ?, [, ], {, }) → split into the longest
+//   glob-char-free prefix as the search root and the remainder as the
+//   fd pattern, e.g. "src/**/*.ts" → root "src", pattern "**/*.ts".
+//
+// Uses fd (falls back to rg --files, same as the former find tool) —
+// directories are suffixed with "/" in fd's own default output, so no
+// separate per-entry stat pass is needed the way list_files used to do.
 
+import { existsSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -15,59 +27,105 @@ import {
 } from "./support/utils/truncate.ts";
 
 const DEFAULT_LIMIT = 1000;
+const GLOB_CHARS_RE = /[*?[\]{}]/;
 
 function toPosixPath(p: string): string {
 	return p.split(path.sep).join("/");
 }
 
-export const find: Tool = {
+/**
+ * Split a `path` argument into a glob-char-free search root and the fd
+ * pattern to run from it. Returns `pattern: null` when the input has no
+ * glob characters at all — the caller decides between a bare-file
+ * short-circuit and a recursive (all-files, all-subdirectories) listing
+ * based on what that root is.
+ */
+function splitBaseAndPattern(inputPath: string): {
+	base: string;
+	pattern: string | null;
+} {
+	if (!GLOB_CHARS_RE.test(inputPath)) {
+		return { base: inputPath || ".", pattern: null };
+	}
+	const segments = inputPath.split("/");
+	const baseSegments: string[] = [];
+	let i = 0;
+	for (; i < segments.length; i++) {
+		const segment = segments[i] ?? "";
+		if (GLOB_CHARS_RE.test(segment)) break;
+		baseSegments.push(segment);
+	}
+	const base = baseSegments.length > 0 ? baseSegments.join("/") : ".";
+	const pattern = segments.slice(i).join("/") || "*";
+	return { base, pattern };
+}
+
+export const glob: Tool = {
 	readOnly: true,
-	name: "find",
-	label: "Find Files",
+	cacheable: true,
+	name: "glob",
+	label: "Glob",
+	hookAliases: ["Glob"],
 	executionMode: "parallel",
 	description:
-		"Find files by glob pattern, e.g. '*.ts', '**/*.json', 'src/**/*.test.ts'. " +
-		"Respects .gitignore. Includes hidden files. Returns paths relative to the search directory. " +
+		"List a directory or match files by glob pattern, e.g. '.', 'src', '*.ts', '**/*.json', 'src/**/*.test.ts'. " +
+		"A bare directory lists its whole subtree recursively; a bare file path returns just that file. " +
+		"Respects .gitignore. Includes hidden files. Directories are suffixed with '/'. " +
 		`Truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB.`,
 	promptSnippet:
-		"Find files by name pattern (supports glob, includes hidden files)",
+		"List a directory (recursively) or find files by glob pattern",
 	promptGuidelines: [
-		"Use find to search by name pattern; use grep for content search",
+		"Use glob to browse structure or find files by name; use grep for content search",
 	],
 	parameters: {
 		type: "object",
 		properties: {
-			pattern: {
-				type: "string",
-				description:
-					"Glob pattern to match files, e.g. '*.ts', '**/*.json', 'src/**/*.spec.ts'",
-			},
 			path: {
 				type: "string",
-				description: "Directory to search (default: cwd)",
+				description:
+					"Directory, file, or glob pattern, e.g. '.', 'src', '*.ts', 'src/**/*.test.ts' (default: '.')",
 			},
 			limit: {
 				type: "number",
 				description: "Max results (default: 1000)",
 			},
 		},
-		required: ["pattern"],
 	},
 	prepareArguments: (raw): Record<string, unknown> => {
-		if (typeof raw === "string") return { pattern: raw };
+		if (typeof raw === "string") return { path: raw };
 		if (!raw || typeof raw !== "object") return {};
 		const args = raw as Record<string, unknown>;
+		const pathArg = args.path ?? args.directory ?? args.dir;
+		const patternArg = args.pattern ?? args.glob ?? args.query;
+		const combined =
+			pathArg && patternArg
+				? `${String(pathArg).replace(/\/+$/, "")}/${patternArg}`
+				: (pathArg ?? patternArg);
 		return {
-			...args,
-			pattern: args.pattern ?? args.glob ?? args.query,
-			path: args.path ?? args.directory ?? args.dir,
+			path: combined,
+			limit: args.limit ?? args.max_results ?? args.max_files,
 		};
 	},
 	execute: async (args, ctx): Promise<string> => {
-		const pattern = String(args.pattern);
-		const searchPath = resolvePath(ctx.cwd, String(args.path || "."));
-		ensureInsideCwd(ctx.cwd, searchPath, ctx.allowedPaths, ctx.allowAllPaths);
+		const inputPath = String(args.path ?? "") || ".";
 		const limit = Math.max(1, Number(args.limit) || DEFAULT_LIMIT);
+
+		const { base, pattern: splitPattern } = splitBaseAndPattern(inputPath);
+		const searchPath = resolvePath(ctx.cwd, base);
+		ensureInsideCwd(ctx.cwd, searchPath, ctx.allowedPaths, ctx.allowAllPaths);
+
+		let pattern = splitPattern;
+		if (pattern === null) {
+			if (!existsSync(searchPath)) {
+				return `Error: Path not found: ${searchPath}`;
+			}
+			if (statSync(searchPath).isFile()) {
+				const cwd = ctx.cwd || process.cwd();
+				const rel = path.relative(cwd, searchPath);
+				return toPosixPath(rel && !rel.startsWith("..") ? rel : searchPath);
+			}
+			pattern = "**/*";
+		}
 
 		// Resolve fd path before entering the Promise so errors surface cleanly.
 		const fdPath = await ensureTool("fd");
@@ -82,7 +140,7 @@ export const find: Tool = {
 			}
 
 			// Build fd args. --no-require-git applies .gitignore semantics outside git repos.
-			// --full-path needed for path-containing patterns like 'src/**/*.ts'.
+			// --full-path needed for path-containing patterns like 'src/**/*.ts' or '**/*'.
 			const fdArgs: string[] = [
 				"--glob",
 				"--color=never",
@@ -92,7 +150,6 @@ export const find: Tool = {
 				String(limit),
 			];
 
-			// Patterns containing '/' need --full-path so fd matches against the full path.
 			let effectivePattern = pattern;
 			if (pattern.includes("/")) {
 				fdArgs.push("--full-path");
@@ -150,7 +207,6 @@ export const find: Tool = {
 				if (lines.length === 0) {
 					if (!killedDueToLimit && code !== 0 && code !== 1) {
 						const msg = stderr.trim() || `fd exited with code ${code}`;
-						// Might mean fd not found at this path — fall back to rg
 						resolve(`Error: ${msg}`);
 					} else {
 						resolve("No files found matching pattern.");

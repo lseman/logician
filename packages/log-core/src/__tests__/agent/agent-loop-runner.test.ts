@@ -1327,7 +1327,7 @@ void test("a tool call with unparseable JSON arguments is sanitized before it re
 			toolCalls: [
 				{
 					id: "call1",
-					name: "write_file",
+					name: "write",
 					// Truncated mid-argument, as happens when stopReason is "length".
 					arguments:
 						'{"path":"big.txt","content":"start of a huge file that got cut off',

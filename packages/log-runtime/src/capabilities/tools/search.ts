@@ -8,6 +8,8 @@ import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Tool, ToolResult } from "@logician/log-core";
+import { extractInternalUrlScheme } from "../../runtime/bridge/support/internal-urls/parse.ts";
+import type { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
 import { ensureTool } from "./external-tools.ts";
 import { ensureInsideCwd, resolvePath } from "./support/utils/path-utils.ts";
 import {
@@ -96,24 +98,104 @@ const defaultOps: SearchOperations = {
 	readFile: p => fsReadFile(p, "utf-8"),
 };
 
-export const grep: Tool = {
+/**
+ * Regex-search already-resolved text content line by line (no rg subprocess,
+ * no multiline support — matches rg's own default non-multiline behavior).
+ * Used for internal resources with no backing file on disk (memory://,
+ * artifact://, mcp:// results, ...); resources that DO have a `sourcePath`
+ * are rebased onto it and grepped through the normal rg pipeline instead,
+ * for full feature parity and to avoid a second search implementation.
+ */
+function searchInMemoryContent(
+	content: string,
+	displayLabel: string,
+	opts: {
+		pattern: string;
+		ignoreCase?: boolean | undefined;
+		literal?: boolean | undefined;
+		context?: number | undefined;
+		limit?: number | undefined;
+	},
+): string {
+	const { pattern, ignoreCase, literal, context, limit } = opts;
+	let re: RegExp;
+	try {
+		const source = literal
+			? pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+			: pattern;
+		re = new RegExp(source, ignoreCase ? "i" : "");
+	} catch (error) {
+		return `Error: Invalid pattern: ${error instanceof Error ? error.message : String(error)}`;
+	}
+
+	const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+	const contextValue = context && context > 0 ? context : 0;
+	const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
+
+	const matchedLineNumbers: number[] = [];
+	for (let i = 0; i < lines.length && matchedLineNumbers.length < effectiveLimit; i++) {
+		if (re.test(lines[i] ?? "")) matchedLineNumbers.push(i + 1);
+	}
+	if (matchedLineNumbers.length === 0) return "No matches found.";
+
+	const outputLines: string[] = [];
+	let linesTruncated = false;
+	for (const lineNumber of matchedLineNumbers) {
+		if (contextValue === 0) {
+			const { text, wasTruncated } = truncateLine(lines[lineNumber - 1] ?? "");
+			if (wasTruncated) linesTruncated = true;
+			outputLines.push(`${displayLabel}:${lineNumber}: ${text}`);
+			continue;
+		}
+		const start = Math.max(1, lineNumber - contextValue);
+		const end = Math.min(lines.length, lineNumber + contextValue);
+		for (let current = start; current <= end; current++) {
+			const { text, wasTruncated } = truncateLine(lines[current - 1] ?? "");
+			if (wasTruncated) linesTruncated = true;
+			if (current === lineNumber) {
+				outputLines.push(`${displayLabel}:${current}: ${text}`);
+			} else {
+				outputLines.push(`${displayLabel}-${current}- ${text}`);
+			}
+		}
+	}
+
+	const rawOutput = outputLines.join("\n");
+	const truncation = truncateHead(rawOutput);
+	let output = truncation.content;
+	const notices: string[] = [];
+	if (matchedLineNumbers.length >= effectiveLimit) {
+		notices.push(
+			`${effectiveLimit} matches limit reached. Use limit=${effectiveLimit * 2} for more`,
+		);
+	}
+	if (truncation.truncated) notices.push(`${formatSize(truncation.maxBytes)} limit`);
+	if (linesTruncated) notices.push("some lines truncated");
+	if (notices.length > 0) output += `\n\n[${notices.join(". ")}]`;
+	return output;
+}
+
+export function createGrepTool(router?: InternalUrlRouter): Tool {
+	return {
 	readOnly: true,
 	executionMode: "parallel",
 	name: "grep",
 	label: "Search Files",
 	hookAliases: ["Grep"],
 	description:
-		"Search file contents for a pattern. Returns matching lines with file paths and line numbers. Output is truncated to 100 matches or 50KB (whichever is hit first). Long lines are truncated to 500 chars.",
+		"Search file contents for a pattern. Returns matching lines with file paths and line numbers. Output is truncated to 100 matches or 50KB (whichever is hit first). Long lines are truncated to 500 chars. " +
+		"path also accepts internal resource URLs (e.g. skill://name, memory://list) — resources backed by a real file are searched with full rg feature parity; others are searched in-process. A directory-shaped resource with no backing file is rejected.",
 	promptSnippet: "Search file contents with pattern matching and line numbers",
 	promptGuidelines: [
 		"Use grep to search file contents; use find to search by name",
+		"grep also accepts internal resource URLs (skill://, memory://, artifact://, ...) as path",
 	],
 	parameters: grepSchema,
 	prepareArguments,
 	execute: async (args, ctx): Promise<string | ToolResult> => {
 		const {
 			pattern,
-			path: searchDir,
+			path: searchDirArg,
 			glob,
 			ignoreCase,
 			literal,
@@ -123,13 +205,50 @@ export const grep: Tool = {
 
 		if (!pattern) return "Error: pattern is required.";
 
+		let searchDir = searchDirArg;
+		let displayLabelOverride: string | undefined;
+		let skipContainmentCheck = false;
+
+		if (searchDir && router && extractInternalUrlScheme(searchDir)) {
+			try {
+				const pathOnly = await router.resolve(searchDir, {
+					...ctx,
+					pathOnly: true,
+				});
+				if (pathOnly.isDirectory && !pathOnly.sourcePath) {
+					return `Error: grep cannot recurse the listing at ${searchDir}; grep a specific resource under it, or read ${searchDir} to list its entries.`;
+				}
+				if (pathOnly.sourcePath) {
+					displayLabelOverride = searchDir;
+					searchDir = pathOnly.sourcePath;
+					skipContainmentCheck = true;
+				} else {
+					const full = await router.resolve(searchDir, ctx);
+					if (full.isDirectory) {
+						return `Error: grep cannot recurse the listing at ${searchDir}; grep a specific resource under it, or read ${searchDir} to list its entries.`;
+					}
+					return searchInMemoryContent(full.content, searchDir, {
+						pattern,
+						ignoreCase,
+						literal,
+						context,
+						limit,
+					});
+				}
+			} catch (error) {
+				return `Error: ${error instanceof Error ? error.message : String(error)}`;
+			}
+		}
+
 		const rgPath = await ensureTool("rg");
 		if (!rgPath) return "Error: ripgrep (rg) is not installed.";
 
 		const searchPath = searchDir
 			? resolvePath(ctx.cwd, searchDir)
 			: ctx.cwd || ".";
-		ensureInsideCwd(ctx.cwd, searchPath, ctx.allowedPaths, ctx.allowAllPaths);
+		if (!skipContainmentCheck) {
+			ensureInsideCwd(ctx.cwd, searchPath, ctx.allowedPaths, ctx.allowAllPaths);
+		}
 		const ops = defaultOps;
 		let isDirectory: boolean;
 		try {
@@ -141,6 +260,7 @@ export const grep: Tool = {
 		const contextValue = context && context > 0 ? context : 0;
 		const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
 		const formatPath = (filePath: string): string => {
+			if (displayLabelOverride) return displayLabelOverride;
 			if (isDirectory) {
 				const relative = path.relative(searchPath, filePath);
 				if (relative && !relative.startsWith("..")) {
@@ -364,4 +484,7 @@ export const grep: Tool = {
 			});
 		});
 	},
-};
+	};
+}
+
+export const grep = createGrepTool();

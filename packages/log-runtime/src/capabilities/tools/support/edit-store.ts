@@ -1,7 +1,7 @@
 // ── Edit store ────────────────────────────────────────────────────────────────
 // Per-session store for edit state: file snapshots (byte-identical), hashline
 // tags, clipboard registers, and the no-op loop guard. One store instance per
-// edit session; every edit_file call that reads a file shares it.
+// edit session; every edit call that reads a file shares it.
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";

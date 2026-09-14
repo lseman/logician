@@ -32,32 +32,27 @@ import {
 	type Skill,
 } from "../../../capabilities/skills/loader.ts";
 import { createReadSkillTool } from "../../../capabilities/skills/read-skill-tool.ts";
-import { createDefaultTools } from "../../../capabilities/tools/default-tools.ts";
+import {
+	createDefaultTools,
+	isDiscoverableTool,
+} from "../../../capabilities/tools/default-tools.ts";
 import { graphician } from "../../../capabilities/tools/graphician.ts";
+import { createReadTool, read } from "../../../capabilities/tools/read-file.ts";
+import { createGrepTool, grep } from "../../../capabilities/tools/search.ts";
 import { isFffGrepTool } from "../../../capabilities/tools/registry.ts";
 import {
 	getDefaultSandboxProfile,
 	type SandboxProfile,
 	setDefaultSandboxProfile,
 } from "../../../capabilities/tools/sandbox.ts";
-import { resolveWebSearchConfig } from "../environment.ts";
+import { XdDeviceRegistry } from "../../../capabilities/tools/support/xd-device-registry.ts";
 import {
-	AgentProtocolHandler,
-	ArtifactProtocolHandler,
-	ArtifactRegistry,
-	ConflictProtocolHandler,
-	HistoryProtocolHandler,
-	InternalUrlRouter,
-	IssueProtocolHandler,
-	LocalProtocolHandler,
-	LogProtocolHandler,
-	McpProtocolHandler,
-	MemoryProtocolHandler,
-	PrProtocolHandler,
-	RuleProtocolHandler,
-	SkillProtocolHandler,
-	SshProtocolHandler,
-} from "./internal-urls/index.ts";
+	createWriteTool,
+	write,
+} from "../../../capabilities/tools/write-file.ts";
+import { resolveWebSearchConfig } from "../environment.ts";
+import { ArtifactRegistry } from "./internal-urls/artifact-manager.ts";
+import { createInternalUrlRouter } from "./internal-urls/default-router.ts";
 import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,
@@ -150,6 +145,9 @@ export class ToolRouter {
 	private readonly onContextChanged: () => void;
 
 	private defaultTools: Tool[];
+	private readonly resourceRouter = createInternalUrlRouter();
+	private readonly devices = new XdDeviceRegistry();
+	private readonly xdevEnabled: boolean;
 	private readonly mcpRegistry = new McpServerRegistry();
 	private readonly mcpProvider: ToolProvider;
 	private mcpLoaded = false;
@@ -175,6 +173,7 @@ export class ToolRouter {
 	];
 
 	constructor(deps: ToolRouterDeps) {
+		this.xdevEnabled = deps.xdevEnabled !== false;
 		this.cwd = deps.cwd;
 		this.sessionId = deps.sessionId;
 		setMcpRegistryInstance(this.mcpRegistry);
@@ -193,6 +192,9 @@ export class ToolRouter {
 			: createDefaultTools({
 					webSearch,
 					graphicianEnabled: deps.graphicianEnabled,
+					resourceRouter: this.resourceRouter,
+					devices: this.devices,
+					xdevEnabled: this.xdevEnabled,
 					kernelManager: deps.kernelManager,
 					todoEnabled: deps.todoEnabled,
 				});
@@ -211,27 +213,22 @@ export class ToolRouter {
 				tool => !isFffGrepTool(tool),
 			);
 		}
-		// ── Internal URL router ────────────────────────────────────────────
-		{
-			const router = InternalUrlRouter.instance();
-			router.register(new SkillProtocolHandler());
-			router.register(new RuleProtocolHandler());
-			router.register(new MemoryProtocolHandler());
-			router.register(new LocalProtocolHandler());
-			router.register(new McpProtocolHandler());
-			router.register(new AgentProtocolHandler());
-			router.register(new LogProtocolHandler());
-			router.register(new SshProtocolHandler());
-			ArtifactRegistry.instance().init({
-				cwd: this.cwd,
-				sessionId: this.sessionId,
-			});
-			router.register(new HistoryProtocolHandler());
-			router.register(new ArtifactProtocolHandler());
-			router.register(new ConflictProtocolHandler());
-			router.register(new PrProtocolHandler());
-			router.register(new IssueProtocolHandler());
-		}
+		this.resourceRouter.register(this.devices);
+		ArtifactRegistry.instance().init({
+			cwd: this.cwd,
+			sessionId: this.sessionId,
+		});
+		// Bind only our built-ins; preserve explicitly supplied custom read/write/grep tools.
+		this.defaultTools = this.defaultTools.map(tool =>
+			tool === read
+				? createReadTool(this.resourceRouter)
+				: tool === write
+					? createWriteTool(this.devices, this.resourceRouter)
+					: tool === grep
+						? createGrepTool(this.resourceRouter)
+						: tool,
+		);
+		this.syncDevices();
 		this.mcpProvider = this.createMcpProvider();
 
 		// Fire-and-forget: start MCP connections as soon as Logician opens,
@@ -246,6 +243,14 @@ export class ToolRouter {
 		return this.defaultTools;
 	}
 
+	private syncDevices(): void {
+		this.devices.clear();
+		if (!this.xdevEnabled) return;
+		for (const tool of this.defaultTools) {
+			if (isDiscoverableTool(tool)) this.devices.mount(tool);
+		}
+	}
+
 	setGraphicianEnabled(enabled: boolean): void {
 		const hasGraphician = this.defaultTools.some(
 			tool => tool.name === graphician.name,
@@ -254,6 +259,7 @@ export class ToolRouter {
 		this.defaultTools = enabled
 			? [graphician, ...this.defaultTools]
 			: this.defaultTools.filter(tool => tool.name !== graphician.name);
+		this.syncDevices();
 		this.onContextChanged();
 	}
 
@@ -272,6 +278,7 @@ export class ToolRouter {
 				tool => !fffTools.some(fff => fff.name === tool.name),
 			);
 		}
+		this.syncDevices();
 		this.onContextChanged();
 	}
 
@@ -283,6 +290,7 @@ export class ToolRouter {
 			return;
 		}
 		this.defaultTools = [...this.defaultTools, tool];
+		this.syncDevices();
 		this.onToolAdded(tool);
 	}
 

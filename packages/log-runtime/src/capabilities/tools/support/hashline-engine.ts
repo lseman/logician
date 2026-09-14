@@ -40,7 +40,7 @@ function parseDocument(
 		if (header) {
 			const resolved = path.resolve(cwd, header[1]);
 			if (targetPath && resolved !== targetPath) {
-				throw new Error("Hashline header must target the edit_file path.");
+				throw new Error("Hashline header must target the edit path.");
 			}
 			if (files.some(file => file.path === resolved)) {
 				throw new Error("Use one header per file, followed by its operations.");

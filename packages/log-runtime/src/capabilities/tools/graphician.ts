@@ -208,7 +208,7 @@ export const graphician: Tool = {
 		"Use search for hybrid FTS5 + topology search",
 		"Use traverse for bounded graph traversal with token budget",
 		"Use architecture for community/coupling overview",
-		"Fall back to find/grep/read_file when graphician has no data for the target",
+		"Fall back to find/grep/read when graphician has no data for the target",
 	],
 	parameters: {
 		type: "object",

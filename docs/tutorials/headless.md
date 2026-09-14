@@ -29,8 +29,8 @@ Example shape:
 
 ```jsonl
 {"type":"content","content":"I found the failing assertion."}
-{"type":"tool_use","id":"call_1","name":"read_file","input":{"path":"src/utils.ts"}}
-{"type":"tool_result","id":"call_1","name":"read_file","status":"success","output":"..."}
+{"type":"tool_use","id":"call_1","name":"read","input":{"path":"src/utils.ts"}}
+{"type":"tool_result","id":"call_1","name":"read","status":"success","output":"..."}
 {"type":"metadata","meta":{"receipt_kind":"terminal","status":"completed"}}
 {"type":"done"}
 ```

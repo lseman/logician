@@ -110,7 +110,7 @@ void test("permission denials and user-mediated approvals remain visible", () =>
 	assert.deepEqual(
 		mapAgentEvent({
 			type: "tool_permission_decision",
-			toolName: "write_file",
+			toolName: "write",
 			toolCallId: "call-user",
 			decision: "always",
 			source: "user",
@@ -119,7 +119,7 @@ void test("permission denials and user-mediated approvals remain visible", () =>
 			type: "notice",
 			level: "info",
 			label: "Permission",
-			text: "write_file: always (user)",
+			text: "write: always (user)",
 		},
 	);
 });
@@ -128,13 +128,13 @@ void test("tool preparation and execution remain distinct lifecycle phases", () 
 	assert.deepEqual(
 		mapAgentEvent({
 			type: "tool_call_start",
-			toolName: "read_file",
+			toolName: "read",
 			toolCallId: "call-1",
 			args: '{"path":"a.ts"}',
 		}),
 		{
 			type: "tool_call_start",
-			toolName: "read_file",
+			toolName: "read",
 			toolCallId: "call-1",
 			args: { path: "a.ts" },
 		},
@@ -162,7 +162,7 @@ void test("tool preparation and execution remain distinct lifecycle phases", () 
 	assert.equal(
 		mapAgentEvent({
 			type: "tool_call_end",
-			toolName: "read_file",
+			toolName: "read",
 			toolCallId: "call-1",
 			result: "ok",
 		}),

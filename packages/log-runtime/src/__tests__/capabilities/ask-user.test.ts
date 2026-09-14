@@ -45,6 +45,85 @@ void test("ask_user rejects removed single-question arguments", async () => {
 	);
 });
 
+void test("ask_user passes multi and recommended through, and only when recommended matches a real choice", async () => {
+	const result = await ask_user.execute(
+		{
+			questions: [
+				{
+					id: "tags",
+					question: "Which apply?",
+					multi: true,
+					recommended: "bug",
+					choices: [
+						{ value: "bug", label: "Bug" },
+						{ value: "perf", label: "Performance" },
+					],
+				},
+				{
+					id: "scope",
+					question: "Which scope?",
+					recommended: "does-not-exist",
+					choices: [{ value: "small", label: "Small" }],
+				},
+			],
+		},
+		{
+			onQuestionRequest: async ({ questions }) => {
+				assert.equal(questions[0]?.multi, true);
+				assert.equal(questions[0]?.recommended, "bug");
+				// A recommended value with no matching choice is dropped rather
+				// than passed through as a dangling reference.
+				assert.equal(questions[1]?.recommended, undefined);
+				return "ok";
+			},
+		},
+	);
+	assert.equal(result, "User responded: ok");
+});
+
+void test("ask_user with allowOther appends a reserved free-text choice", async () => {
+	const result = await ask_user.execute(
+		{
+			questions: [
+				{
+					id: "reason",
+					question: "Why?",
+					allowOther: true,
+					choices: [{ value: "a", label: "Option A" }],
+				},
+			],
+		},
+		{
+			onQuestionRequest: async ({ questions }) => {
+				const choices = questions[0]?.choices ?? [];
+				assert.equal(choices.length, 2);
+				const other = choices[1];
+				assert.equal(other?.isFreeText, true);
+				assert.equal(other?.label, "Other (type your own)");
+				return "custom answer";
+			},
+		},
+	);
+	assert.equal(result, "User responded: custom answer");
+});
+
+void test("ask_user with allowOther and no other choices is still valid (free-text-only question)", async () => {
+	const result = await ask_user.execute(
+		{
+			questions: [
+				{ id: "reason", question: "Why?", allowOther: true, choices: [] },
+			],
+		},
+		{
+			onQuestionRequest: async ({ questions }) => {
+				assert.equal(questions[0]?.choices.length, 1);
+				return "typed answer";
+			},
+		},
+	);
+	assert.equal(result, "User responded: typed answer");
+});
+
 void test("ask_user requires stable unique question ids", async () => {
 	const result = await ask_user.execute(
 		{

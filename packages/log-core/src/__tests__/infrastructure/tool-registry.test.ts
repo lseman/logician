@@ -239,7 +239,7 @@ void test("provider tool definitions normalize external JSON Schema dialects", (
 
 void test("MCP-origin tools are withheld from provider definitions until resolved", () => {
 	const registry = new ToolRegistry();
-	registry.register(makeTool({ name: "read_file" }));
+	registry.register(makeTool({ name: "read" }));
 	registry.register(
 		makeTool({
 			name: "github_search_issues",
@@ -252,7 +252,7 @@ void test("MCP-origin tools are withheld from provider definitions until resolve
 		const fn = def.function as { name: string };
 		return fn.name;
 	});
-	assert.ok(names.includes("read_file"));
+	assert.ok(names.includes("read"));
 	assert.ok(
 		names.includes("search_tools"),
 		"search_tools should auto-register",

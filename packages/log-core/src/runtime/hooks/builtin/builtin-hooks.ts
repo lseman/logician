@@ -161,6 +161,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	};
 
 	const hooks: AgentHooks = {};
+	// Batch accumulators for post-turn tool-call loop detection.
+	const batchCalls: Array<{ id: string; name: string; arguments: string }> = [];
+	const batchResults: Array<{ id: string; content: string }> = [];
 
 	// Pre-bash workspace snapshots keyed by tool call id, so the afterToolCall
 	// hook can diff and record the paths the command mutated.
@@ -170,7 +173,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		const originalArgs = args;
 		// Snapshot pre-write state for /rewind: file tools record the target
 		// path directly; bash records a workspace tree to diff afterwards.
-		if (toolCall.name === "write_file" || toolCall.name === "edit_file") {
+		if (toolCall.name === "write" || toolCall.name === "edit") {
 			const p = args.path ?? args.file_path ?? args.filename;
 			if (typeof p === "string" && p) {
 				recordFileBeforeWrite(p, config.cwd);
@@ -201,6 +204,13 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			}
 			args = rewrittenArgs;
 		}
+		// Accumulate for post-turn batch detection.
+		if (loopDetector)
+			batchCalls.push({
+				id: toolCall.id,
+				name: toolCall.name,
+				arguments: toolCall.arguments,
+			});
 		if (guardThresholds && loopDetector) {
 			const decision = loopDetector.checkToolCall(
 				toolCall.name,
@@ -240,6 +250,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				String(result),
 			);
 		}
+		// Accumulate for post-turn batch detection.
+		if (loopDetector)
+			batchResults.push({ id: toolCall.id, content: String(result) });
 		return undefined;
 	};
 
@@ -299,6 +312,30 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				: undefined;
 		};
 	}
+	// Post-turn batch detection: fire recordTurn before the compaction
+	// prepareNextTurn so the guard sees the full batch first.
+	const compactionPrepareNext = hooks.prepareNextTurn;
+	hooks.prepareNextTurn = async (ctx, signal) => {
+		// Only fire when there were tool calls this turn.
+		if (batchCalls.length > 0 && loopDetector) {
+			const detection = loopDetector.recordTurn(batchCalls, batchResults);
+			batchCalls.length = 0;
+			batchResults.length = 0;
+			if (detection) {
+				emitIntervention({
+					kind: "loop",
+					cause: "batch-loop",
+					detector: "tool_call_guard",
+					message:
+						`Model produced an identical tool-call batch ` +
+						`${detection.count} times in a row (threshold: 5). ` +
+						`Change your approach.`,
+					iteration: ctx.iteration,
+				});
+			}
+		}
+		return compactionPrepareNext?.(ctx, signal);
+	};
 
 	if (progress) {
 		hooks.shouldStopAfterTurn = ({ iteration }) => {

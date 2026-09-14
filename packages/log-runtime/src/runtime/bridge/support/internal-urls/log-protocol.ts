@@ -9,6 +9,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { ensureInsideCwd } from "../../../../capabilities/tools/support/utils/path-utils.ts";
 
 import type {
 	InternalResource,
@@ -88,9 +89,13 @@ export class LogProtocolHandler implements ProtocolHandler {
 		const resolvedAbs = path.resolve(resolved);
 
 		// Security: must be within docsDir
-		if (!resolvedAbs.startsWith(docsDir)) {
-			throw new Error(`Path traversal blocked: log://${hostname}${pathname}`);
-		}
+		ensureInsideCwd(
+			cwd,
+			docsDir,
+			context?.allowedPaths,
+			context?.allowAllPaths,
+		);
+		ensureInsideCwd(docsDir, resolvedAbs);
 
 		try {
 			const stat = await fs.stat(resolvedAbs);

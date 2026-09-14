@@ -61,7 +61,7 @@ function genTurn(turnIdx: number, chunkSize: number): Turn {
 		});
 	}
 	const toolResult = {
-		tool_name: ["read_file", "bash", "grep"][turnIdx % 3],
+		tool_name: ["read", "bash", "grep"][turnIdx % 3],
 		args: {},
 		result: genRandomText(chunkSize, turnIdx),
 		isError: false,

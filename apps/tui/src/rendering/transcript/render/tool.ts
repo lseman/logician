@@ -76,7 +76,7 @@ const BOX = {
 // benefits from the card layout.
 const SIMPLE_TOOL_NAMES = new Set([
 	// File / directory introspection
-	"read_file",
+	"read",
 	"ls",
 	"tree",
 	"file",
@@ -110,7 +110,6 @@ const SIMPLE_TOOL_NAMES = new Set([
 	"cat",
 	"head",
 	"tail",
-	"read",
 	"md5sum",
 	"sha1sum",
 	"sha224sum",
@@ -240,7 +239,7 @@ export function renderTool(
 		? String(tool.details?.agent || tool.args?.agent || "general")
 		: "";
 
-	// Extract file path for write_file / edit_file to show in header
+	// Extract file path for write / edit to show in header
 	const filePath = (() => {
 		const args = tool.args || {};
 		const path =
@@ -248,13 +247,13 @@ export function renderTool(
 			stringArg(args, "file_path") ||
 			streamedStringArg(tool.partialResult, "path") ||
 			streamedStringArg(tool.partialResult, "file_path") ||
-			(tool.tool_name === "write_file"
+			(tool.tool_name === "write"
 				? /^Created\s+(.+?)(?:\s+\([^\n]*\))?(?:\n|$)/.exec(
 						tool.result ?? "",
 					)?.[1]
 				: undefined);
 		if (!path) return "";
-		if (tool.tool_name === "write_file" || tool.tool_name === "edit_file") {
+		if (tool.tool_name === "write" || tool.tool_name === "edit") {
 			return path;
 		}
 		return "";
@@ -287,7 +286,7 @@ export function renderTool(
 	// Edits keep their compact diff preview. File writes and appends report
 	// their live line count in the header and reveal content on expand.
 	const showDiffResult =
-		!expanded && tool.tool_name === "edit_file" && !!tool.result;
+		!expanded && tool.tool_name === "edit" && !!tool.result;
 	if (showDiffResult) {
 		const resultText = tool.result ?? "";
 		const label = tool.isError ? "error" : "result";
@@ -417,9 +416,10 @@ function renderSimpleTool(
 	expanded = ctx.toolsExpanded,
 ): string[] {
 	tool = sanitizeToolForDisplay(ctx, tool);
+	const postEdit = extractPostEditDiagnostics(tool.result);
 	const displayTool = {
 		...tool,
-		result: stripInternalHookGuidance(tool.result),
+		result: stripInternalHookGuidance(postEdit.text),
 		partialResult: stripInternalHookGuidance(tool.partialResult),
 	};
 
@@ -442,7 +442,7 @@ function renderSimpleTool(
 	const elapsed =
 		tool.durationMs !== undefined ? formatDurationMs(tool.durationMs) : "";
 
-	// Build the one-liner:  › read_file  /path/to/file  done
+	// Build the one-liner:  › read  /path/to/file  done
 	const base = `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${
 		summary
 			? hyperlinkedFilePath(summary, `${DIM}${summary}${RESET}`)
@@ -618,7 +618,7 @@ function isAppendMode(tool: ToolExecution): boolean {
 function toolSummary(tool: ToolExecution): string {
 	const args = tool.args || {};
 	const path = stringArg(args, "path") || stringArg(args, "file_path");
-	if (tool.tool_name === "write_file") {
+	if (tool.tool_name === "write") {
 		const content = writeFileContent(tool) || "";
 		const lineCount = content ? content.split("\n").length : 0;
 		const verb = isAppendMode(tool) ? "appended" : "written";
@@ -626,14 +626,14 @@ function toolSummary(tool: ToolExecution): string {
 			tool.isComplete ? "" : " so far"
 		}`;
 	}
-	if (tool.tool_name === "edit_file") {
+	if (tool.tool_name === "edit") {
 		const editCount = Array.isArray(args.edits) ? args.edits.length : 1;
 		return `${editCount} edit${editCount === 1 ? "" : "s"}`;
 	}
 	if (tool.tool_name === "bash") {
 		return compactText(stringArg(args, "command") || "");
 	}
-	if (tool.tool_name === "read_file") {
+	if (tool.tool_name === "read") {
 		return path ? hyperlinkedFilePath(path, path) : "";
 	}
 	if (tool.tool_name === "rg_search") {
@@ -678,11 +678,11 @@ function toolDetailLines(
 		return lines;
 	}
 
-	if (tool.tool_name === "write_file") {
+	if (tool.tool_name === "write") {
 		lines.push(
 			...renderWriteDetails(ctx, tool, width, expanded, toolDetailHelpers),
 		);
-	} else if (tool.tool_name === "edit_file") {
+	} else if (tool.tool_name === "edit") {
 		lines.push(
 			...renderEditDetails(ctx, tool, width, expanded, toolDetailHelpers),
 		);
@@ -705,9 +705,7 @@ function toolDetailLines(
 
 	if (
 		result &&
-		!["write_file", "edit_file", "file_diff", "bash"].includes(
-			tool.tool_name,
-		) &&
+		!["write", "edit", "file_diff", "bash"].includes(tool.tool_name) &&
 		!tool.tool_name.startsWith("mcp__")
 	) {
 		lines.push(detailSection(tool.isError ? "error" : "result"));

@@ -191,8 +191,8 @@ void test("duplicate provider and execution starts count one running tool", () =
 	);
 	const toolStart = event({
 		type: "tool_execution_start",
-		tool: "read_file",
-		toolName: "read_file",
+		tool: "read",
+		toolName: "read",
 		toolCallId: "call-1",
 		args: { path: "file.ts" },
 	});
@@ -205,8 +205,8 @@ void test("duplicate provider and execution starts count one running tool", () =
 		duplicate,
 		event({
 			type: "tool_execution_end",
-			tool: "read_file",
-			toolName: "read_file",
+			tool: "read",
+			toolName: "read",
 			toolCallId: "call-1",
 			result: "done",
 		}),

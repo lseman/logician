@@ -6,7 +6,7 @@ test("chat-completions adapter owns endpoint and provider-specific payload", () 
 	const payload = adapter.buildPayload({
 		model: "model",
 		messages: [{ role: "user", content: "hello" }],
-		tools: [{ type: "function", function: { name: "read_file" } }],
+		tools: [{ type: "function", function: { name: "read" } }],
 		temperature: 0.2,
 		maxTokens: 2048,
 		thinkingLevel: "high",

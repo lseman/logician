@@ -45,12 +45,12 @@ void test("allow rule matches glob against the command", () => {
 void test("plan mode allows read-only tools, denies the rest", () => {
 	const pm = new PermissionPolicy({ mode: "plan" });
 	assert.equal(
-		pm.evaluate(call("read_file", { path: "a" }), { path: "a" }, {
+		pm.evaluate(call("read", { path: "a" }), { path: "a" }, {
 			readOnly: true,
 		} as never).decision,
 		"allow",
 	);
-	const denied = pm.evaluate(call("write_file", { path: "a" }), { path: "a" });
+	const denied = pm.evaluate(call("write", { path: "a" }), { path: "a" });
 	assert.equal(denied.decision, "deny");
 	assert.match(denied.reason ?? "", /plan mode/i);
 });
@@ -58,7 +58,7 @@ void test("plan mode allows read-only tools, denies the rest", () => {
 void test("acceptEdits allows edit tools, asks for bash", () => {
 	const pm = new PermissionPolicy({ mode: "acceptEdits" });
 	assert.equal(
-		pm.evaluate(call("edit_file", { path: "a" }), { path: "a" }).decision,
+		pm.evaluate(call("edit", { path: "a" }), { path: "a" }).decision,
 		"allow",
 	);
 	assert.equal(
@@ -71,16 +71,16 @@ void test("acceptEdits allows edit tools, asks for bash", () => {
 void test("session allow persists after an 'always' decision", () => {
 	const pm = new PermissionPolicy({ mode: "ask" });
 	assert.equal(
-		pm.evaluate(call("write_file", { path: "a" }), { path: "a" }).decision,
+		pm.evaluate(call("write", { path: "a" }), { path: "a" }).decision,
 		"ask",
 	);
-	pm.addSessionAllow("write_file", { path: "a" });
+	pm.addSessionAllow("write", { path: "a" });
 	assert.equal(
-		pm.evaluate(call("write_file", { path: "a" }), { path: "a" }).decision,
+		pm.evaluate(call("write", { path: "a" }), { path: "a" }).decision,
 		"allow",
 	);
 	assert.equal(
-		pm.evaluate(call("write_file", { path: "b" }), { path: "b" }).decision,
+		pm.evaluate(call("write", { path: "b" }), { path: "b" }).decision,
 		"ask",
 	);
 });

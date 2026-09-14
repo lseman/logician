@@ -334,8 +334,7 @@ export function createLocalHandlers(
 			if (restored === null) return "Nothing to rewind.";
 			return (
 				`Rewound to checkpoint: ${restored.messages} message(s) in ` +
-				`context, ${restored.filesRestored} file(s) restored ` +
-				"(bash mutations are not captured)."
+				`context, ${restored.filesRestored} file(s) restored.`
 			);
 		},
 		fork: () => {

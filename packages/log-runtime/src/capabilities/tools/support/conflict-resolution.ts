@@ -50,7 +50,9 @@ export function parseConflictBlocks(
 		const line = lines[i];
 
 		if (line.startsWith("<<<<<<< ")) {
-			const oursLabel = line.slice(10).trim();
+			// "<<<<<<< " is exactly 8 characters; slice(10) cut 2 characters
+			// into the label itself (e.g. "ours" -> "rs").
+			const oursLabel = line.slice(8).trim();
 			let oursEnd = i + 1;
 
 			while (oursEnd < lines.length && !lines[oursEnd].startsWith("=======")) {
@@ -69,7 +71,8 @@ export function parseConflictBlocks(
 
 			if (theirsEnd >= lines.length) break;
 
-			const theirsLabel = lines[theirsEnd].slice(10).trim();
+			// Same off-by-two as oursLabel above: ">>>>>>> " is 8 characters.
+			const theirsLabel = lines[theirsEnd].slice(8).trim();
 
 			const ours = lines.slice(i + 1, oursEnd).join("\n");
 			const theirs = lines.slice(oursEnd + 1, theirsEnd).join("\n");
@@ -123,12 +126,16 @@ export function resolveConflictBlock(
 }
 
 /**
- * Apply conflict resolution to a file and return the resolved content.
+ * Apply conflict resolution to a file and return the resolved content. When
+ * `index` is given, only that one block is resolved and the rest of the
+ * file's conflict markers are left untouched; when omitted, every block is
+ * resolved with the same strategy.
  */
 export function resolveConflictsInFile(
 	filePath: string,
 	strategy: "ours" | "theirs" | "ours+theirs" | "base",
 	baseContent?: string,
+	index?: number,
 ): string {
 	const content = fs.readFileSync(filePath, "utf-8");
 	const blocks = parseConflictBlocks(content, filePath);
@@ -137,14 +144,21 @@ export function resolveConflictsInFile(
 		return content;
 	}
 
+	if (index !== undefined && !blocks.some(b => b.index === index)) {
+		throw new Error(
+			`No conflict block at index ${index} in ${filePath} (${blocks.length} block${blocks.length === 1 ? "" : "s"} found)`,
+		);
+	}
+
 	let result = content;
+	let shift = 0;
 
 	for (const block of blocks) {
+		if (index !== undefined && block.index !== index) continue;
 		const resolved = resolveConflictBlock(block, strategy, baseContent);
-		result =
-			result.slice(0, block.offset) +
-			resolved +
-			result.slice(block.offset + block.content.length);
+		const start = block.offset + shift;
+		result = result.slice(0, start) + resolved + result.slice(start + block.content.length);
+		shift += resolved.length - block.content.length;
 	}
 
 	return result;

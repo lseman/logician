@@ -168,7 +168,7 @@ describe("agent eval", () => {
 			],
 		};
 		const trajectory = [
-			JSON.stringify({ type: "tool_use", id: "tool-1", name: "read_file" }),
+			JSON.stringify({ type: "tool_use", id: "tool-1", name: "read" }),
 			JSON.stringify({ type: "error", error: "denied interactive permission" }),
 			JSON.stringify({
 				type: "metadata",

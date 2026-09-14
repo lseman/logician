@@ -2,13 +2,18 @@
 // Gate tool execution behind modes and allow/deny rules, Claude-Code style.
 //
 // Rule syntax (string):
-//   "bash"            — every call of the bash tool
-//   "bash(git *)"     — bash calls whose command matches the glob "git *"
-//   "edit_file(src/*)"— edit_file calls whose primary arg matches "src/*"
+//   "bash"        — every call of the bash tool
+//   "bash(git *)" — bash calls whose command matches the glob "git *"
+//   "edit(src/*)" — edit calls whose primary arg matches "src/*"
 //
 // The "primary arg" used for the parenthesised pattern is the tool's most
 // command-like argument: `command` (bash/git), else `path`/`file_path`, else
 // the JSON-serialized args.
+//
+// NOTE: the edit tool was renamed from `edit_file` to `edit`, and `find` +
+// `list_files` were merged into one `glob` tool. Both are clean breaking
+// renames with no alias — an existing rule referencing "edit_file", "find",
+// or "list_files" will silently stop matching and must be updated by hand.
 //
 // Evaluation order: deny rules → allow rules (config + session "always") →
 // mode policy. Modes:
@@ -33,7 +38,7 @@ export interface PermissionVerdict {
 }
 
 // Tools auto-approved in acceptEdits mode on top of read-only ones.
-const EDIT_TOOLS = new Set(["edit_file", "write_file"]);
+const EDIT_TOOLS = new Set(["edit", "write"]);
 
 interface ParsedRule {
 	tool: string;

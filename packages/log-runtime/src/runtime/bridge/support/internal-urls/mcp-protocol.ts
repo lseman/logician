@@ -9,6 +9,7 @@ import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
 export class McpProtocolHandler implements ProtocolHandler {
 	readonly scheme = "mcp";
+	readonly immutable = true;
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const registry = getMcpRegistryInstance();

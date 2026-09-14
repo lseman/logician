@@ -7,7 +7,7 @@ import {
 
 void test("Claude hook matcher names cover Logician-native tools", () => {
 	assert.equal(claudeToolMatcherName("bash"), "Bash");
-	assert.equal(claudeToolMatcherName("read_file"), "Read");
+	assert.equal(claudeToolMatcherName("read"), "Read");
 	assert.equal(claudeToolMatcherName("spawn_agent"), "Agent");
 	assert.equal(claudeToolMatcherName("ask_user"), "AskUserQuestion");
 	assert.equal(
@@ -38,7 +38,7 @@ void test("non-blocking pre-tool guidance survives until the tool result", async
 	});
 	const toolCall = {
 		id: "read-1",
-		name: "read_file",
+		name: "read",
 		arguments: '{"path":"large.log"}',
 	};
 

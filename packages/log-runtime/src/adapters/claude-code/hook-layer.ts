@@ -163,12 +163,10 @@ export function claudeToolMatcherName(toolName: string): string {
 	if (toolName.startsWith("mcp__")) return toolName;
 	const aliases: Record<string, string> = {
 		bash: "Bash",
-		read_file: "Read",
-		write_file: "Write",
-		edit_file: "Edit",
+		read: "Read",
+		write: "Write",
+		edit: "Edit",
 		grep: "Grep",
-		find: "Glob",
-		list_files: "Glob",
 		todo: "TodoWrite|TaskCreate|TaskUpdate",
 		spawn_agent: "Agent",
 		ask_user: "AskUserQuestion",

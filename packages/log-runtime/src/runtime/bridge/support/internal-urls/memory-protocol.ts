@@ -35,17 +35,21 @@ type MemoryGateway = {
 
 export class MemoryProtocolHandler implements ProtocolHandler {
 	readonly scheme = "memory";
+	readonly immutable = true;
 
 	async resolve(
 		url: InternalUrl,
 		context?: ResolveContext,
 	): Promise<InternalResource> {
 		const gateway = context?.memory as MemoryGateway | undefined;
-		const hostname = url.host;
-		const pathname = url.pathname;
+		// The shared parser only puts the first path segment into `url.host`;
+		// the rest lands in `url.pathname`. Reassemble the full address before
+		// dispatching — see log-protocol.ts for the same pattern.
+		const full =
+			url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
 
 		// memory:// — list sessions
-		if (hostname === "memory" && pathname === "/") {
+		if (full === "") {
 			return {
 				url: url.href,
 				content:
@@ -68,37 +72,33 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 			};
 		}
 
-		if (hostname !== "memory") {
-			throw new Error(`memory:// URL requires host "memory": ${hostname}`);
-		}
-
 		// memory://list — list recent observations
-		if (pathname === "/list" || pathname === "/list/") {
+		if (full === "list") {
 			return this.handleList(gateway, url);
 		}
 
 		// memory://memories — list memories
-		if (pathname === "/memories" || pathname === "/memories/") {
+		if (full === "memories") {
 			return this.handleListMemories(gateway, url);
 		}
 
 		// memory://observe/<id> — get observation by ID
-		if (pathname.startsWith("/observe/")) {
-			const id = pathname.slice("/observe/".length);
+		if (full.startsWith("observe/")) {
+			const id = full.slice("observe/".length);
 			if (!id)
 				throw new Error("memory://observe/<id> requires an observation ID");
 			return this.handleObserve(gateway, id, url);
 		}
 
 		// memory://memory/<id> — get memory by ID
-		if (pathname.startsWith("/memory/")) {
-			const id = pathname.slice("/memory/".length);
+		if (full.startsWith("memory/")) {
+			const id = full.slice("memory/".length);
 			if (!id) throw new Error("memory://memory/<id> requires a memory ID");
 			return this.handleMemory(gateway, id, url);
 		}
 
 		throw new Error(
-			`Unknown memory:// path: ${pathname}. Use memory://list, memory://memories, memory://observe/<id>, or memory://memory/<id>.`,
+			`Unknown memory:// path: ${full}. Use memory://list, memory://memories, memory://observe/<id>, or memory://memory/<id>.`,
 		);
 	}
 
@@ -149,10 +149,20 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 	}
 
 	private async handleMemory(
-		_gateway: MemoryGateway,
-		_id: string,
-		_url: InternalUrl,
+		gateway: MemoryGateway,
+		id: string,
+		url: InternalUrl,
 	): Promise<InternalResource> {
-		throw new Error(`memory://memory/<id> not yet implemented`);
+		const memories = await gateway.listMemories();
+		const mem = memories.find(m => m.id === id);
+		if (!mem) {
+			throw new Error(`Unknown memory: ${id}`);
+		}
+		return {
+			url: url.href,
+			content: mem.content,
+			contentType: "text/plain",
+			sourcePath: `memory://memory/${id}`,
+		};
 	}
 }

@@ -20,10 +20,10 @@ triggers:
   - build a skill
   - skill authoring
 preferred_tools:
-  - write_file
-  - read_file
-  - edit_file
-  - list_files
+  - write
+  - read
+  - edit
+  - glob
   - bash
 example_queries:
   - create a skill for reviewing Python code
@@ -31,7 +31,7 @@ example_queries:
   - add a skill that wraps the docker CLI
   - implement a skill for GraphQL API testing
 when_not_to_use:
-  - the user already has a skill file that just needs content editing (use edit_file directly)
+  - the user already has a skill file that just needs content editing (use edit directly)
   - the task is about using an existing skill rather than creating a new one
   - the skill already exists and only needs minor fixes
 next_skills:
@@ -121,10 +121,10 @@ List only tools the skill actually needs. Be specific:
 
 ```yaml
 preferred_tools:
-  - read_file
+  - read
   - grep
   - bash
-  - edit_file
+  - edit
 ```
 
 If the skill wraps an external CLI tool, document it in the body.
@@ -174,7 +174,7 @@ triggers:
   - review the diff
   - code review
 preferred_tools:
-  - read_file
+  - read
   - grep
   - git
   - file_diff

@@ -1,16 +1,16 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-	compact,
-	serializeMessages,
-	normalizeText,
-	stripDimMarkers,
-	elideDataUrls,
-	dimStopwords,
-	truncateForSummary,
-	NEWLINE_GLYPH,
-	PRESERVE_KEY,
-	type CompactableMessage,
 	type Archive,
+	type CompactableMessage,
+	compact,
+	dimStopwords,
+	elideDataUrls,
+	NEWLINE_GLYPH,
+	normalizeText,
+	PRESERVE_KEY,
+	serializeMessages,
+	stripDimMarkers,
+	truncateForSummary,
 } from "../../../runtime/compaction/snapcompact.ts";
 
 describe("snapcompact", () => {
@@ -20,9 +20,7 @@ describe("snapcompact", () => {
 				{ role: "user", content: "Hello, world!" },
 				{
 					role: "assistant",
-					content: [
-						{ type: "text", text: "Hi there! How can I help?" },
-					],
+					content: [{ type: "text", text: "Hi there! How can I help?" }],
 				},
 			];
 			const result = serializeMessages(messages);
@@ -36,7 +34,12 @@ describe("snapcompact", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "toolCall", id: "call-1", name: "read_file", arguments: { path: "src/main.ts" } },
+						{
+							type: "toolCall",
+							id: "call-1",
+							name: "read",
+							arguments: { path: "src/main.ts" },
+						},
 					],
 				},
 				{
@@ -47,7 +50,7 @@ describe("snapcompact", () => {
 			];
 			const result = serializeMessages(messages);
 			expect(result).toContain("¶call:");
-			expect(result).toContain("read_file");
+			expect(result).toContain("read");
 			expect(result).toContain("<out>");
 		});
 
@@ -56,7 +59,12 @@ describe("snapcompact", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "toolCall", id: "call-1", name: "list_files", arguments: {} },
+						{
+							type: "toolCall",
+							id: "call-1",
+							name: "glob",
+							arguments: {},
+						},
 					],
 				},
 				{
@@ -67,7 +75,7 @@ describe("snapcompact", () => {
 			];
 			// Mark the tool result as useless
 			const result = serializeMessages(messages);
-			expect(result).toContain("list_files");
+			expect(result).toContain("glob");
 		});
 
 		it("handles thinking blocks", () => {
@@ -89,7 +97,7 @@ describe("snapcompact", () => {
 
 	describe("normalizeText", () => {
 		it("folds smart quotes", () => {
-			const text = "She said \"hello\" and \u00abworld\u00bb";
+			const text = 'She said "hello" and \u00abworld\u00bb';
 			const result = normalizeText(text);
 			expect(result).toContain('"');
 			expect(result).not.toContain("«");
@@ -141,7 +149,8 @@ describe("snapcompact", () => {
 
 	describe("elideDataUrls", () => {
 		it("replaces base64 data URLs", () => {
-			const text = "Check out data:image/png;base64,ABCD1234EFGH5678IJKLMNOPQRSTUVWXyz01234567890a for an image";
+			const text =
+				"Check out data:image/png;base64,ABCD1234EFGH5678IJKLMNOPQRSTUVWXyz01234567890a for an image";
 			const result = elideDataUrls(text);
 			expect(result).toContain("[data URL omitted: image/png]");
 			expect(result).not.toContain("ABCD1234");
@@ -154,9 +163,12 @@ describe("snapcompact", () => {
 		});
 
 		it("handles data URLs with parameters", () => {
-			const text = "data:application/json;charset=utf-8;base64,ABCD1234EFGH5678IJKLMNOPQRSTUVWXyz01234567890a";
+			const text =
+				"data:application/json;charset=utf-8;base64,ABCD1234EFGH5678IJKLMNOPQRSTUVWXyz01234567890a";
 			const result = elideDataUrls(text);
-			expect(result).toContain("[data URL omitted: application/json;charset=utf-8]");
+			expect(result).toContain(
+				"[data URL omitted: application/json;charset=utf-8]",
+			);
 		});
 	});
 
@@ -209,11 +221,14 @@ describe("snapcompact", () => {
 
 	describe("compact", () => {
 		it("produces a summary for compacted messages", async () => {
-			const messages: CompactableMessage[] = Array.from({ length: 10 }, (_, i) => ({
-				role: "user" as const,
-				content: `Message number ${i} with some content`,
-				entryId: `msg-${i}`,
-			}));
+			const messages: CompactableMessage[] = Array.from(
+				{ length: 10 },
+				(_, i) => ({
+					role: "user" as const,
+					content: `Message number ${i} with some content`,
+					entryId: `msg-${i}`,
+				}),
+			);
 			const result = await compact(messages);
 			expect(result.summary).toContain("Archived");
 			expect(result.archivedChars).toBeGreaterThan(0);
@@ -244,7 +259,9 @@ describe("snapcompact", () => {
 			const messages: CompactableMessage[] = [
 				{ role: "user" as const, content: "New message" },
 			];
-			const result = await compact(messages, { previousSummary: "Previous work" });
+			const result = await compact(messages, {
+				previousSummary: "Previous work",
+			});
 			expect(result.summary).toContain("Previous compaction summary");
 		});
 
@@ -300,11 +317,16 @@ describe("snapcompact", () => {
 			];
 			const result = await compact(messages, { shape: { cols: 40, rows: 10 } });
 			if (result.preserveData) {
-				const archive = result.preserveData[PRESERVE_KEY] as Archive | undefined;
+				const archive = result.preserveData[PRESERVE_KEY] as
+					| Archive
+					| undefined;
 				expect(archive).toBeDefined();
 				if (archive) {
 					// Text head and tail should contain recognizable content
-					const preserved = (archive.text ?? "") + (archive.textHead ?? "") + (archive.textTail ?? "");
+					const preserved =
+						(archive.text ?? "") +
+						(archive.textHead ?? "") +
+						(archive.textTail ?? "");
 					expect(preserved).toContain("hello world");
 				}
 			}

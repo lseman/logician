@@ -6,7 +6,7 @@ import { ensureInsideCwd } from "../tools/support/utils/path-utils.ts";
 import type { LspClientPool } from "./lsp-client-pool.ts";
 
 const MAX_SOURCE_BYTES = 1_000_000;
-const EDIT_TOOLS = new Set(["edit_file", "write_file"]);
+const EDIT_TOOLS = new Set(["edit", "write"]);
 
 export interface PostEditDiagnostic {
 	line: number;
@@ -17,14 +17,14 @@ export interface PostEditDiagnostic {
 }
 
 function successfulMutation(toolName: string, result: string): boolean {
-	if (toolName === "edit_file")
+	if (toolName === "edit")
 		return (
 			result.startsWith("Successfully replaced ") ||
 			/^Applied [1-9]\d* line change\(s\) across [1-9]\d* file\(s\)\./.test(
 				result,
 			)
 		);
-	if (toolName === "write_file") {
+	if (toolName === "write") {
 		return result.startsWith("Created ") || result.startsWith("Wrote ");
 	}
 	return false;

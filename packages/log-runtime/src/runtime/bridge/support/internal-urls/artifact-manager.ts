@@ -209,6 +209,12 @@ export class ArtifactRegistry {
 		return this.#manager?.dir ?? null;
 	}
 
+	/** Get the on-disk path for an artifact ID, without reading its content. */
+	async getPath(id: string): Promise<string | null> {
+		if (!this.#manager) return null;
+		return this.#manager.getPath(id);
+	}
+
 	#resolveArtifactDir(): string {
 		return path.join(this.#cwd, ".logician", "artifacts", this.#sessionId);
 	}

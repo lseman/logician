@@ -22,7 +22,7 @@ describe("createFileOps", () => {
 });
 
 describe("extractFileOpsFromMessages", () => {
-	it("extracts read_file calls", () => {
+	it("extracts read calls", () => {
 		const messages: Message[] = [
 			{
 				role: "assistant",
@@ -30,7 +30,7 @@ describe("extractFileOpsFromMessages", () => {
 				tool_calls: [
 					{
 						id: "1",
-						name: "read_file",
+						name: "read",
 						arguments: JSON.stringify({ path: "src/main.ts" }),
 					},
 				],
@@ -40,7 +40,7 @@ describe("extractFileOpsFromMessages", () => {
 		assert.ok(ops.read.has("src/main.ts"));
 	});
 
-	it("extracts edit_file calls", () => {
+	it("extracts edit calls", () => {
 		const messages: Message[] = [
 			{
 				role: "assistant",
@@ -48,7 +48,7 @@ describe("extractFileOpsFromMessages", () => {
 				tool_calls: [
 					{
 						id: "1",
-						name: "edit_file",
+						name: "edit",
 						arguments: JSON.stringify({
 							path: "src/main.ts",
 							old_text: "foo",
@@ -62,7 +62,7 @@ describe("extractFileOpsFromMessages", () => {
 		assert.ok(ops.modified.has("src/main.ts"));
 	});
 
-	it("extracts write_file calls", () => {
+	it("extracts write calls", () => {
 		const messages: Message[] = [
 			{
 				role: "assistant",
@@ -70,7 +70,7 @@ describe("extractFileOpsFromMessages", () => {
 				tool_calls: [
 					{
 						id: "1",
-						name: "write_file",
+						name: "write",
 						arguments: JSON.stringify({
 							path: "README.md",
 							content: "# Hello",
@@ -117,7 +117,7 @@ describe("extractFileOpsFromMessages", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "1", name: "read_file", arguments: "not json" }],
+				tool_calls: [{ id: "1", name: "read", arguments: "not json" }],
 			},
 		];
 		const ops = extractFileOpsFromMessages(messages);
@@ -226,7 +226,7 @@ describe("collectMessagesForBranchSummary", () => {
 				tool_calls: [
 					{
 						id: "1",
-						name: "read_file",
+						name: "read",
 						arguments: JSON.stringify({ path: "src/main.ts" }),
 					},
 				],
@@ -321,14 +321,14 @@ describe("serializeMessages", () => {
 				tool_calls: [
 					{
 						id: "1",
-						name: "read_file",
+						name: "read",
 						arguments: JSON.stringify({ path: "src/main.ts" }),
 					},
 				],
 			},
 		];
 		const result = serializeMessages(messages);
-		assert.ok(result.includes("[Tool Call: read_file"));
+		assert.ok(result.includes("[Tool Call: read"));
 	});
 
 	it("truncates long content", () => {

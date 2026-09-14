@@ -6,7 +6,7 @@
 // session — see apps/tui/src/app/research-manager.ts for how the TUI
 // constructs and threads it through.
 //
-// Not gated readOnly (same as bash/write_file): run_experiment executes
+// Not gated readOnly (same as bash/write): run_experiment executes
 // arbitrary shell commands and log_experiment runs git commit/checkout, so
 // both go through the same permission prompts as any other mutating tool.
 

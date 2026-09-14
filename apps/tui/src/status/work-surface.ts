@@ -7,8 +7,8 @@ import {
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 
-const MUTATING_TOOLS = new Set(["edit_file", "write_file"]);
-const FILE_TOOLS = new Set(["read_file", "edit_file", "write_file"]);
+const MUTATING_TOOLS = new Set(["edit", "write"]);
+const FILE_TOOLS = new Set(["read", "edit", "write"]);
 
 interface ToolRecord {
 	name: string;

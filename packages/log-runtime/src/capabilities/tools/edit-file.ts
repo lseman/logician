@@ -1,4 +1,4 @@
-// ── edit_file tool ────────────────────────────────────────────────────────────────
+// ── edit tool ────────────────────────────────────────────────────────────────────
 // Edit file contents with exact text replacement. Supports both single old_text/new_text
 // and multi-edit arrays, plus replaceAll for renames. Matching runs a three-tier ladder:
 // exact → whitespace/punctuation-normalized (position-mapped back to the original, so
@@ -638,22 +638,22 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 // Tool definition
 // ============================================================================
 
-export const edit_file: Tool = {
-	name: "edit_file",
+export const edit: Tool = {
+	name: "edit",
 	executionMode: "parallel",
 	label: "Edit File",
 	hookAliases: ["Edit"],
 	description:
-		"Edit a single file using exact text replacement. " +
+		"Edit a single file using exact text replacement, anchored by a content-hash read of the file. " +
 		"Every edits[].oldText must match a unique, " +
 		"non-overlapping region of the original file " +
 		"(or set replaceAll: true on an edit to replace every occurrence). " +
-		"The file must have been read with read_file first. " +
+		"The file must have been read with read first; a stale anchor (file changed since that read) is detected and rejected. " +
 		"Supports BOM handling and line-ending preservation.",
 	promptSnippet:
 		"Edit files using exact text replacement with precise matching",
 	promptGuidelines: [
-		"Use edit_file for surgical edits; keep oldText unique in the file, or set replaceAll for renames",
+		"Use edit for surgical edits; keep oldText unique in the file, or set replaceAll for renames",
 	],
 	parameters: editSchema,
 	prepareArguments,
@@ -666,7 +666,7 @@ export const edit_file: Tool = {
 		const input = String(args.input ?? "");
 
 		if (!path) {
-			return "Error: edit_file requires a path.";
+			return "Error: edit requires a path.";
 		}
 
 		if (input && edits.length > 0)
@@ -690,7 +690,7 @@ export const edit_file: Tool = {
 		if (!hasBeenRead(resolved)) {
 			return (
 				`${resolved} has not been read yet. ` +
-				"Read it with read_file before editing."
+				"Read it with read before editing."
 			);
 		}
 		const store = createEditStore();

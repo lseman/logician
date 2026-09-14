@@ -49,7 +49,7 @@ void test("loadAgentDefinitions parses a markdown file with YAML frontmatter int
 			"---",
 			"name: reviewer",
 			"description: Reviews code for correctness.",
-			"tools: [read_file, grep]",
+			"tools: [read, grep]",
 			"model: claude-haiku-4-5-20251001",
 			"max-turns: 8",
 			"max-execution-seconds: 30",
@@ -65,7 +65,7 @@ void test("loadAgentDefinitions parses a markdown file with YAML frontmatter int
 		const reviewer = defs.find(d => d.name === "reviewer");
 		assert.ok(reviewer);
 		assert.equal(reviewer.description, "Reviews code for correctness.");
-		assert.deepEqual(reviewer.tools, ["read_file", "grep"]);
+		assert.deepEqual(reviewer.tools, ["read", "grep"]);
 		assert.equal(reviewer.model, "claude-haiku-4-5-20251001");
 		assert.equal(reviewer.maxIterations, 8);
 		assert.equal(reviewer.maxExecutionTimeMs, 30_000);
@@ -84,7 +84,7 @@ void test("loadAgentDefinitions accepts a comma-separated tools string", async (
 			"---",
 			"name: fixer",
 			"description: Fixes bugs.",
-			"tools: read_file, edit_file , grep",
+			"tools: read, edit , grep",
 			"---",
 			"Fix the bug.",
 		].join("\n"),
@@ -93,7 +93,7 @@ void test("loadAgentDefinitions accepts a comma-separated tools string", async (
 	try {
 		const defs = await loadAgentDefinitions([dir]);
 		const fixer = defs.find(d => d.name === "fixer");
-		assert.deepEqual(fixer?.tools, ["read_file", "edit_file", "grep"]);
+		assert.deepEqual(fixer?.tools, ["read", "edit", "grep"]);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -229,7 +229,7 @@ function fakeTool(name: string, readOnly = false): Tool {
 void test("spawn_agent never forwards spawn_agent/spawn_agents to the child, even with no tool allowlist", async () => {
 	const capture: { names?: string[] } = {};
 	const parentTools = [
-		fakeTool("read_file"),
+		fakeTool("read"),
 		fakeTool("spawn_agent"),
 		fakeTool("spawn_agents"),
 	];
@@ -240,15 +240,15 @@ void test("spawn_agent never forwards spawn_agent/spawn_agents to the child, eve
 		emit: () => {},
 	});
 	await tool.execute({ task: "do it", agent: "general" }, {});
-	assert.deepEqual(capture.names, ["read_file"]);
+	assert.deepEqual(capture.names, ["read"]);
 });
 
 void test("spawn_agent with the explorer definition restricts the child to read-only tools", async () => {
 	const capture: { names?: string[] } = {};
 	const parentTools = [
-		fakeTool("read_file", true),
+		fakeTool("read", true),
 		fakeTool("grep", true),
-		fakeTool("edit_file", false),
+		fakeTool("edit", false),
 	];
 	const tool = createSpawnAgentTool({
 		config: () => ({ ...baseConfig, tools: parentTools }),
@@ -257,14 +257,14 @@ void test("spawn_agent with the explorer definition restricts the child to read-
 		emit: () => {},
 	});
 	await tool.execute({ task: "look around", agent: "explorer" }, {});
-	assert.deepEqual(capture.names?.sort(), ["grep", "read_file"]);
+	assert.deepEqual(capture.names?.sort(), ["grep", "read"]);
 });
 
 void test("spawn_agent with a custom allowlist restricts the child to exactly those tools", async () => {
 	const capture: { names?: string[] } = {};
 	const parentTools = [
-		fakeTool("read_file"),
-		fakeTool("edit_file"),
+		fakeTool("read"),
+		fakeTool("edit"),
 		fakeTool("bash"),
 	];
 	const tool = createSpawnAgentTool({
@@ -275,13 +275,13 @@ void test("spawn_agent with a custom allowlist restricts the child to exactly th
 				name: "editor-only",
 				description: "Can only edit.",
 				prompt: "Edit files.",
-				tools: ["edit_file"],
+				tools: ["edit"],
 			},
 		],
 		emit: () => {},
 	});
 	await tool.execute({ task: "edit it", agent: "editor-only" }, {});
-	assert.deepEqual(capture.names, ["edit_file"]);
+	assert.deepEqual(capture.names, ["edit"]);
 });
 
 // ── Error paths not covered by delegation-runtime.test.ts ────────────────

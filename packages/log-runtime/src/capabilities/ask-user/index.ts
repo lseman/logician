@@ -1,8 +1,17 @@
 // ── ask_user tool — agent Q&A ─────────────────────────────────────────────
 // The agent calls this tool when it needs to ask the user a question with
 // multiple-choice options. Execution blocks until the user selects or dismisses.
+//
+// A question may set `multi: true` (multiple choices selectable, answer
+// returned as a string array) and/or `allowOther: true` (appends a reserved
+// "Other (type your own)" choice; selecting it opens free-text entry instead
+// of submitting a fixed value). `recommended` names the value of the choice
+// to pre-select — a hint only, there is no auto-timeout/forced answer.
 
 import type { Tool, ToolContext } from "@logician/log-core";
+
+const OTHER_VALUE = "__other__";
+const OTHER_LABEL = "Other (type your own)";
 
 export const ask_user: Tool = {
 	readOnly: true,
@@ -14,7 +23,10 @@ export const ask_user: Tool = {
 		"Ask the user one or more tabbed questions with selectable options. Execution blocks " +
 		"until the user responds. Use this when the agent needs user input to " +
 		"proceed — e.g. clarifying requirements, choosing between alternatives, " +
-		"or getting confirmation.",
+		"or getting confirmation. Set multi: true on a question to allow selecting " +
+		"more than one choice (answer returned as an array). Set allowOther: true to " +
+		"add a free-text \"Other\" escape hatch. Set recommended to a choice's value " +
+		"to pre-select it as a hint (no auto-timeout).",
 	promptSnippet: "Ask the user structured questions with options",
 	parameters: {
 		type: "object",
@@ -29,6 +41,20 @@ export const ask_user: Tool = {
 						id: { type: "string", description: "Stable answer key." },
 						header: { type: "string", description: "Short tab label." },
 						question: { type: "string", description: "Question text." },
+						multi: {
+							type: "boolean",
+							description: "Allow selecting more than one choice (default: false).",
+						},
+						allowOther: {
+							type: "boolean",
+							description:
+								'Append a reserved "Other (type your own)" choice that opens free-text entry (default: false).',
+						},
+						recommended: {
+							type: "string",
+							description:
+								"Value of the choice to pre-select as a hint. No auto-timeout or forced answer.",
+						},
 						choices: {
 							type: "array",
 							items: {
@@ -66,11 +92,17 @@ export const ask_user: Tool = {
 	): Promise<string> => {
 		const normalizeChoices = (
 			rawChoices: unknown,
-		): Array<{ value: string; label: string; description?: string }> => {
+		): Array<{
+			value: string;
+			label: string;
+			description?: string;
+			isFreeText?: boolean;
+		}> => {
 			const choices: Array<{
 				value: string;
 				label: string;
 				description?: string;
+				isFreeText?: boolean;
 			}> = [];
 			if (!Array.isArray(rawChoices)) return choices;
 			for (const item of rawChoices) {
@@ -96,12 +128,25 @@ export const ask_user: Tool = {
 					const obj = item as Record<string, unknown>;
 					const question = String(obj.question || "").trim();
 					const choices = normalizeChoices(obj.choices);
+					if (obj.allowOther) {
+						choices.push({
+							value: OTHER_VALUE,
+							label: OTHER_LABEL,
+							isFreeText: true,
+						});
+					}
 					if (!question || !choices.length) return [];
+					const recommended = String(obj.recommended || "").trim();
+					const header = String(obj.header || "").trim();
 					return [
 						{
 							id: String(obj.id || "").trim(),
-							header: String(obj.header || "").trim() || undefined,
 							question,
+							multi: Boolean(obj.multi),
+							...(header ? { header } : {}),
+							...(recommended && choices.some(c => c.value === recommended)
+								? { recommended }
+								: {}),
 							choices,
 						},
 					];

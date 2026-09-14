@@ -42,8 +42,8 @@ Control which tools the agent can use:
 ```json
 {
   "permissions": {
-    "allow": ["read_file", "grep", "find"],
-    "deny": ["bash(git push *)", "edit_file(secrets/*)"]
+    "allow": ["read", "grep", "glob"],
+    "deny": ["bash(git push *)", "edit(secrets/*)"]
   }
 }
 ```
@@ -68,8 +68,8 @@ The workspace is always in scope. `allowedPaths` adds absolute roots outside it;
 Every action is logged:
 
 ```
-[10:23:45] read_file: src/auth.ts
-[10:23:46] edit_file: src/auth.ts (3 changes)
+[10:23:45] read: src/auth.ts
+[10:23:46] edit: src/auth.ts (3 changes)
 [10:23:47] bash: npm test (exit 0)
-[10:23:52] write_file: docs/changelog.md
+[10:23:52] write: docs/changelog.md
 ```

@@ -39,8 +39,8 @@ triggers:
   - edit this file
   - update the implementation
 allowed-tools:
-  - read_file
-  - edit_file
+  - read
+  - edit
 argument-hint: "[path]"
 ---
 

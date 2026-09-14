@@ -53,8 +53,7 @@ function truncateResultMiddle(text: string, maxChars: number): string {
 
 /** Common OS error codes translated into an actionable next step for the model. */
 const ERROR_CODE_HINTS: Record<string, string> = {
-	ENOENT:
-		"the path doesn't exist — double-check it, e.g. with list_files or find.",
+	ENOENT: "the path doesn't exist — double-check it, e.g. with glob.",
 	EACCES: "permission denied — check the path is within an allowed directory.",
 	EISDIR: "that path is a directory, not a file.",
 	ENOTDIR: "a parent segment of that path is a file, not a directory.",
@@ -231,6 +230,18 @@ export class ToolRegistry {
 	}
 
 	prepare(call: ToolCall): PreparedToolCall {
+		return this.prepareCall(call, new Set());
+	}
+
+	private prepareCall(call: ToolCall, visited: Set<string>): PreparedToolCall {
+		if (visited.has(call.name)) {
+			return {
+				call,
+				args: {},
+				error: `Error: Tool redirect cycle: ${call.name}`,
+			};
+		}
+		visited.add(call.name);
 		const tool = this.tools.get(call.name);
 		if (!tool) {
 			return {
@@ -244,6 +255,17 @@ export class ToolRegistry {
 			let args = parseToolInput(call.arguments);
 			if (tool.prepareArguments) {
 				args = tool.prepareArguments(args);
+			}
+			const target = tool.resolveCall?.(args);
+			if (target) {
+				return this.prepareCall(
+					{
+						...call,
+						name: target.name,
+						arguments: JSON.stringify(target.arguments),
+					},
+					visited,
+				);
 			}
 			return {
 				call: { ...call, arguments: JSON.stringify(args) },
@@ -264,6 +286,12 @@ export class ToolRegistry {
 		context?: ToolContext,
 		preparedArgs?: Record<string, unknown>,
 	): Promise<ToolResult> {
+		if (preparedArgs === undefined) {
+			const prepared = this.prepare(call);
+			if (prepared.error) return { content: prepared.error, isError: true };
+			call = prepared.call;
+			preparedArgs = prepared.args;
+		}
 		const tool = this.tools.get(call.name);
 		if (!tool) {
 			return { content: `Error: Unknown tool: ${call.name}` };
@@ -272,7 +300,7 @@ export class ToolRegistry {
 		const args = preparedArgs ?? this.prepare(call).args;
 
 		// ── Cache lookup — opt-in only. Tools with side effects (edits, bash,
-		// read_file's read-tracking) or time-varying output must never be
+		// read's read-tracking) or time-varying output must never be
 		// served from cache, so caching requires an explicit cacheable: true.
 		const useCache =
 			this.cache !== null &&
@@ -349,14 +377,21 @@ export class ToolRegistry {
 		const paths: string[] = [];
 
 		if (
-			toolName === "read_file" ||
-			toolName === "edit_file" ||
-			toolName === "write_file" ||
-			toolName === "list_files" ||
+			toolName === "read" ||
+			toolName === "edit" ||
+			toolName === "write" ||
 			toolName === "file_diff"
 		) {
 			const p = args.path;
 			if (typeof p === "string") paths.push(p);
+		} else if (toolName === "glob") {
+			// Only a bare directory/file path (list_files's old shape) has a
+			// single meaningful mtime to key on. A glob-pattern path (e.g.
+			// "src/**/*.ts") isn't a real file — statSync below would always
+			// fail and fall back to the "0" sentinel, making every such call
+			// collide on the same cache key regardless of what changed on disk.
+			const p = args.path;
+			if (typeof p === "string" && !/[*?[\]{}]/.test(p)) paths.push(p);
 		}
 
 		if (paths.length === 0) return null;

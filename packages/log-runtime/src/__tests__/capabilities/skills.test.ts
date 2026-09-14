@@ -20,7 +20,7 @@ void test("frontmatter extensions are parsed (allowed-tools, argument-hint, mode
 			"---",
 			"name: deploy-check",
 			"description: Verify a deployment",
-			"allowed-tools: bash, read_file",
+			"allowed-tools: bash, read",
 			"argument-hint: <environment>",
 			"model: small-fast",
 			"---",
@@ -36,13 +36,13 @@ void test("frontmatter extensions are parsed (allowed-tools, argument-hint, mode
 	assert.equal(skill.name, "deploy-check");
 	assert.equal(skill.displayName, "deploy-check");
 	assert.equal(skill.slashName, "deploy-check");
-	assert.deepEqual(skill.allowedTools, ["bash", "read_file"]);
+	assert.deepEqual(skill.allowedTools, ["bash", "read"]);
 	assert.equal(skill.argumentHint, "<environment>");
 	assert.equal(skill.model, "small-fast");
 
 	const invocation = formatSkillInvocation(skill, "User arguments: staging");
 	assert.match(invocation, /Step 1: check the thing\./);
-	assert.match(invocation, /Preferred tools.*bash, read_file/);
+	assert.match(invocation, /Preferred tools.*bash, read/);
 	assert.match(invocation, /User arguments: staging/);
 });
 
@@ -126,7 +126,7 @@ void test("skill catalog and invocation render openclaude metadata and resources
 			"---",
 			"name: File Ops",
 			"description: Use for local filesystem operations.",
-			"preferred_tools: read_file, edit_file",
+			"preferred_tools: read, edit",
 			"example_queries:",
 			"  - inspect this file",
 			"when_not_to_use:",
@@ -146,7 +146,7 @@ void test("skill catalog and invocation render openclaude metadata and resources
 	const catalog = formatSkillCatalog(skills);
 	assert.match(catalog, /name="coding\/file_ops"/);
 	assert.match(catalog, /display_name="File Ops"/);
-	assert.match(catalog, /preferred_tools="read_file, edit_file"/);
+	assert.match(catalog, /preferred_tools="read, edit"/);
 
 	const invocation = formatSkillInvocation(skill);
 	assert.match(invocation, /<metadata>/);

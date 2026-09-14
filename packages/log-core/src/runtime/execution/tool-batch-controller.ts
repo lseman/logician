@@ -137,9 +137,9 @@ export async function executeToolBatch(
 				args: prepared.args,
 			});
 			const text =
-				call.name === "write_file"
+				call.name === "write"
 					? `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. ` +
-						"The content is too large for a single call. Split it into smaller chunks and use write_file with append: true repeatedly (same path, in order) instead of retrying write_file with the full content."
+						"The content is too large for a single call. Split it into smaller chunks and use write with append: true repeatedly (same path, in order) instead of retrying write with the full content."
 					: `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
 			await emit({
 				type: "tool_call_end",
@@ -331,7 +331,7 @@ export async function executeToolBatch(
 		for (let index = 0; index < plans.length; index++) {
 			const plan = plans[index];
 			if (!plan) continue;
-			const mode = registry.get(toolCalls[index]?.name ?? "")?.executionMode;
+			const mode = registry.get(plan.prepared.call.name)?.executionMode;
 			if (mode !== "sequential") {
 				parallelStage.push(plan);
 				continue;

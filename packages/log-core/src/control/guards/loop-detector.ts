@@ -1,30 +1,77 @@
 // ── Tool Call Guards ──────────────────────────────────────────────────────
-// Pre-execution guards that block individual tool calls:
-//   - Duplicates (same tool+args called N times)
-//   - Repeated failures (same tool/path/category failed N times)
+//
+// Post-turn batch detection (OMP-style): records the full assistant message
+// after each turn, canonicalises the tool-call batch, and flags when the
+// same batch repeats across consecutive turns.
+//
+// Failure-loop detection runs independently — it does not depend on argument
+// patterns and catches repeated failures on the same tool regardless of args.
 
 export interface LoopGuardDecision {
 	block: boolean;
 	message?: string;
 	/** Which guard tripped — lets callers report/emit without parsing message text. */
-	guard?: "duplicate" | "failure";
+	guard?: "batch-loop" | "duplicate" | "failure";
+}
+
+/** A batch-loop detection result returned by `recordTurn`. */
+export interface RepeatedToolCallDetection {
+	readonly kind: "repeated_tool_call";
+	/** Name of the first non-exempt tool call that triggered the report. */
+	readonly toolName: string;
+	/** Number of consecutive turns producing an identical batch. */
+	readonly count: number;
+	/** Text summary of the tool result for the reported call (first 200 chars). */
+	readonly resultSummary: string;
+	/** Canonicalised argument text for the reported call (first 400 chars). */
+	readonly argumentsSummary: string;
 }
 
 export interface LoopDetectorOptions {
-	/** Duplicate call threshold — block when same tool+args called N times (default 3). */
+	/** Batch-loop threshold — block when the same tool-call batch repeats
+	 * across N consecutive assistant turns (default 5, matching OMP). */
+	batchThreshold?: number | undefined;
+	/** Per-call duplicate threshold — block when the same tool+args is
+	 * called N times within a single turn (default 3). */
 	duplicateThreshold?: number | undefined;
-	/** Failure loop threshold — block when same tool/path/category failed N times (default 3). */
+	/** Failure loop threshold — block when same tool/path/category failed
+	 * N times (default 3). */
 	failureThreshold?: number | undefined;
+	/** Tools excluded from batch/duplicate detection (e.g. polling tools). */
+	exemptTools?: readonly string[] | undefined;
 }
 
+const DEFAULT_BATCH_THRESHOLD = 5;
 const DEFAULT_DUPLICATE_THRESHOLD = 3;
 const DEFAULT_FAILURE_THRESHOLD = 3;
+const RESULT_SUMMARY_LIMIT = 200;
+const ARGUMENT_SUMMARY_LIMIT = 400;
 const MAX_CATEGORY_LEN = 120;
 
-// Normalize a single string leaf so timestamps and whitespace don't defeat
-// duplicate detection. Ordinary numbers remain significant: line ranges,
-// ports, IDs, offsets, and retry parameters can represent genuinely different
-// work and must not be collapsed into one call signature.
+// ── Canonicalisation ──────────────────────────────────────────────────────
+
+// Strip harness internals and sort object keys so key order never defeats
+// duplicate detection. Numbers stay significant (line ranges, ports, IDs).
+function canonicalizeToolCallValue(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map(item => canonicalizeToolCallValue(item));
+	}
+	if (!value || typeof value !== "object") {
+		return value;
+	}
+	const input = value as Record<string, unknown>;
+	const output: Record<string, unknown> = {};
+	for (const key of Object.keys(input).sort()) {
+		// Strip intent fields used by some providers/harnesses — they carry
+		// no semantic meaning for duplicate detection.
+		if (key === "__intent" || key === "_intent") continue;
+		output[key] = canonicalizeToolCallValue(input[key]);
+	}
+	return output;
+}
+
+// Normalize a single string leaf so timestamps and whitespace noise don't
+// defeat duplicate detection. Ordinary numbers remain significant.
 function normalizeLeaf(value: unknown): unknown {
 	if (typeof value === "number") return value;
 	if (typeof value !== "string") return value;
@@ -33,33 +80,9 @@ function normalizeLeaf(value: unknown): unknown {
 			/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g,
 			"#ts",
 		)
-		.replace(/\b\d{10,13}\b/g, "#ts") // unix ms/sec timestamps
+		.replace(/\b\d{10,13}\b/g, "#ts")
 		.replace(/\s+/g, " ")
 		.trim();
-}
-
-function normalizeForSignature(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(normalizeForSignature);
-	if (value && typeof value === "object") {
-		const out: Record<string, unknown> = {};
-		for (const k of Object.keys(value as Record<string, unknown>).sort()) {
-			out[k] = normalizeForSignature((value as Record<string, unknown>)[k]);
-		}
-		return out;
-	}
-	return normalizeLeaf(value);
-}
-
-// Stable signature for a tool call: name + canonical args, with cosmetic
-// noise normalized out so near-duplicates collapse to the same signature.
-function callSignature(name: string, args: string): string {
-	let argsKey = args || "";
-	try {
-		argsKey = JSON.stringify(normalizeForSignature(JSON.parse(args || "{}")));
-	} catch (_e: unknown) {
-		// Non-JSON args: use the raw string.
-	}
-	return `${name} ${argsKey}`;
 }
 
 // Target path from common arg names — used to bucket failures by file.
@@ -68,17 +91,12 @@ function callPath(args: string): string {
 		const parsed = JSON.parse(args) as Record<string, unknown>;
 		const raw = parsed.path ?? parsed.file_path ?? parsed.filename ?? "";
 		return String(raw).trim();
-	} catch (_e: unknown) {
+	} catch {
 		return "";
 	}
 }
 
-// Coarse error bucket so distinct-but-equivalent failures collapse together.
-// The body is normalized the same way call args are (numbers/timestamps ->
-// placeholders) before truncation, so two errors that differ only in a line
-// number or a timestamp still bucket together, while errors that differ in
-// substance (a different missing module, a different variable name) do not
-// collapse just because they happen to share a raw text prefix.
+// Coarse error bucket for failure detection.
 function failureCategory(toolName: string, result: string): string {
 	const body = normalizeLeaf(result.replace(/^Error:\s*/i, "").trim());
 	return `${toolName} ${String(body).slice(0, MAX_CATEGORY_LEN)}`;
@@ -91,74 +109,163 @@ function inc(map: Map<string, number>, key: string): number {
 }
 
 export class LoopDetector {
-	// ── Guard state ───────────────────────────────────────────────────────
-	// Duplicate guard: only counts CONSECUTIVE identical tool+args calls.
-	// Reset when a different tool or different args is called.
-	private lastCallSignature: string | null = null;
-	private consecutiveCallCount = 0;
-	private failSignatureCounts = new Map<string, number>();
-	private failCategoryCounts = new Map<string, number>();
-	private failPathCounts = new Map<string, number>();
+	// ── Batch detection (post-turn, OMP-style) ──────────────────────────
+	#batchThreshold: number;
+	#exemptTools: ReadonlySet<string>;
+	#lastHash: string | undefined;
+	#batchCount = 0;
+	#lastReportedCall: { toolCallId: string; name: string; arguments: string } | undefined;
 
-	private readonly duplicateThreshold: number;
-	private readonly failureThreshold: number;
+	// ── Per-call duplicate detection (pre-execution) ────────────────────
+	#dupThreshold: number;
+	#lastCallSignature: string | null = null;
+	#consecutiveCallCount = 0;
+
+	// ── Failure detection ───────────────────────────────────────────────
+	#failThreshold: number;
+	#failSignatureCounts = new Map<string, number>();
+	#failCategoryCounts = new Map<string, number>();
+	#failPathCounts = new Map<string, number>();
 
 	constructor(options: LoopDetectorOptions = {}) {
-		this.duplicateThreshold = Math.max(
-			0,
+		this.#batchThreshold = Math.max(1, Math.trunc(
+			options.batchThreshold ?? DEFAULT_BATCH_THRESHOLD,
+		));
+		this.#dupThreshold = Math.max(0, Math.trunc(
 			options.duplicateThreshold ?? DEFAULT_DUPLICATE_THRESHOLD,
-		);
-		this.failureThreshold = Math.max(
-			0,
+		));
+		this.#failThreshold = Math.max(0, Math.trunc(
 			options.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD,
-		);
+		));
+		this.#exemptTools = new Set(options.exemptTools ?? ["hub"]);
 	}
 
-	// ── Guard: pre-execution check ────────────────────────────────────────
 	/**
-	 * Check a tool call before execution. Returns block=true with a message
-	 * the loop records instead of executing the tool.
+	 * Record a completed assistant turn and check for repeated batches.
+	 * Called after tool results are collected.
+	 * Returns a detection when the same batch repeats across turns.
 	 */
-	checkToolCall(name: string, args: string): LoopGuardDecision {
-		const sig = callSignature(name, args);
-
-		// Duplicate guard: only count consecutive identical calls.
-		// Reset counter when a different tool or different args is called.
-		if (sig === this.lastCallSignature) {
-			this.consecutiveCallCount++;
-		} else {
-			this.lastCallSignature = sig;
-			this.consecutiveCallCount = 1;
+	recordTurn(
+		toolCalls: readonly { id: string; name: string; arguments: string }[],
+		toolResults: { id: string; content: string }[],
+	): RepeatedToolCallDetection | null {
+		// No tool calls in this turn — reset.
+		if (toolCalls.length === 0) {
+			this.#lastHash = undefined;
+			this.#batchCount = 0;
+			return null;
 		}
 
+		// If every call is exempt, reset.
+		if (toolCalls.every(tc => this.#exemptTools.has(tc.name))) {
+			this.#lastHash = undefined;
+			this.#batchCount = 0;
+			return null;
+		}
+
+		// Canonicalise: sort keys in args, sort calls by name then id.
+		const calls = toolCalls.map(tc => ({
+			...tc,
+			arguments: JSON.stringify(canonicalizeToolCallValue(JSON.parse(tc.arguments || "{}"))),
+		}));
+		calls.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+		const hash = JSON.stringify(calls.map(tc => [tc.name, tc.arguments]));
+
+		if (hash === this.#lastHash) {
+			this.#batchCount++;
+		} else {
+			this.#lastHash = hash;
+			this.#batchCount = 1;
+		}
+
+		if (this.#batchCount !== this.#batchThreshold) return null;
+
+		// Find first non-exempt call for the report.
+		const reportCall =
+			toolCalls.find(tc => !this.#exemptTools.has(tc.name))
+			?? toolCalls[0]!;
+		this.#lastReportedCall = { toolCallId: reportCall.id, name: reportCall.name, arguments: reportCall.arguments };
+
+		// Summarize result.
+		const resultMsg = toolResults.find(r => r.id === reportCall.id);
+		let resultSummary = "";
+		if (resultMsg) {
+			const text = String(resultMsg.content).replace(/\s+/g, " ").trim();
+			resultSummary = text.length > RESULT_SUMMARY_LIMIT
+				? `${text.slice(0, RESULT_SUMMARY_LIMIT)}…`
+				: text;
+		}
+
+		const argSummary = JSON.stringify(canonicalizeToolCallValue(
+			JSON.parse(reportCall.arguments || "{}"),
+		)).replace(/\s+/g, " ").trim();
+
+		return {
+			kind: "repeated_tool_call",
+			toolName: reportCall.name,
+			count: this.#batchCount,
+			resultSummary,
+			argumentsSummary: argSummary.length > ARGUMENT_SUMMARY_LIMIT
+				? `${argSummary.slice(0, ARGUMENT_SUMMARY_LIMIT)}…`
+				: argSummary,
+		};
+	}
+
+	// ── Pre-execution: per-call duplicate blocking ─────────────────────
+
+	/**
+	 * Check a tool call before execution. Blocks when the same tool+args
+	 * is repeated within a single turn (N times). Also blocks if a batch
+	 * loop was detected by `recordTurn` in a prior turn.
+	 */
+	checkToolCall(name: string, args: string): LoopGuardDecision {
+		// Batch-loop guard: if recordTurn already flagged a repeat, block.
 		if (
-			this.duplicateThreshold > 0 &&
-			this.consecutiveCallCount >= this.duplicateThreshold
+			this.#batchCount >= this.#batchThreshold
+			&& this.#lastReportedCall
+			&& this.#lastReportedCall.name === name
 		) {
 			return {
 				block: true,
-				guard: "duplicate",
-				message: `Error: [duplicate-guard] blocked — \`${name}\` called with the same (or cosmetically-varied) arguments ${this.consecutiveCallCount} times in a row (threshold: ${this.duplicateThreshold}). Stop repeating the same call; change your approach.`,
+				guard: "batch-loop",
+				message: this.#batchLoopMessage(name, this.#batchCount),
 			};
 		}
 
-		if (this.failureThreshold > 0) {
+		// Per-call duplicate guard.
+		if (this.#dupThreshold <= 0) return { block: false };
+
+		const sig = this.#callSignature(name, args);
+
+		if (sig === this.#lastCallSignature) {
+			this.#consecutiveCallCount++;
+		} else {
+			this.#lastCallSignature = sig;
+			this.#consecutiveCallCount = 1;
+		}
+
+		if (this.#consecutiveCallCount >= this.#dupThreshold) {
+			return {
+				block: true,
+				guard: "duplicate",
+				message: this.#dupMessage(name, this.#consecutiveCallCount),
+			};
+		}
+
+		if (this.#failThreshold > 0) {
 			const path = callPath(args);
-			if ((this.failSignatureCounts.get(sig) || 0) >= this.failureThreshold) {
-				return this.tripFailure(name, "the same call");
+			if ((this.#failSignatureCounts.get(sig) || 0) >= this.#failThreshold) {
+				return this.#tripFailure(name, "the same call");
 			}
 			if (
-				path &&
-				(this.failPathCounts.get(path) || 0) >= this.failureThreshold
+				path
+				&& (this.#failPathCounts.get(path) || 0) >= this.#failThreshold
 			) {
-				return this.tripFailure(name, `\`${path}\``);
+				return this.#tripFailure(name, `\`${path}\``);
 			}
-			// Category bucket: distinct-but-equivalent failures collapse
-			// to one category. Trip when any category for this tool crosses
-			// the threshold.
-			for (const [cat, count] of this.failCategoryCounts) {
-				if (count >= this.failureThreshold && cat.startsWith(`${name} `)) {
-					return this.tripFailure(name, "this kind of operation");
+			for (const [cat, count] of this.#failCategoryCounts) {
+				if (count >= this.#failThreshold && cat.startsWith(`${name} `)) {
+					return this.#tripFailure(name, "this kind of operation");
 				}
 			}
 		}
@@ -166,47 +273,78 @@ export class LoopDetector {
 		return { block: false };
 	}
 
-	/**
-	 * Record a failed tool call. Updates failure counts for the guard layer
-	 * and loop detection. Does NOT check thresholds — use checkToolCall() for that.
-	 */
+	// ── Failure recording ──────────────────────────────────────────────
+
 	recordFailure(name: string, args: string, result: string): void {
-		const sig = callSignature(name, args);
-		inc(this.failSignatureCounts, sig);
+		const sig = this.#callSignature(name, args);
+		inc(this.#failSignatureCounts, sig);
 		const path = callPath(args);
-		if (path) inc(this.failPathCounts, path);
-		const cat = failureCategory(name, result);
-		inc(this.failCategoryCounts, cat);
+		if (path) inc(this.#failPathCounts, path);
+		inc(this.#failCategoryCounts, failureCategory(name, result));
 	}
 
-	/** Successful work is evidence that a previously failing route recovered.
-	 * Decay matching failure state so old incidents do not poison the tool or
-	 * path for the remainder of a long-running harness session. */
 	recordSuccess(name: string, args: string): void {
-		this.failSignatureCounts.delete(callSignature(name, args));
+		this.#failSignatureCounts.delete(this.#callSignature(name, args));
 		const path = callPath(args);
-		if (path) this.failPathCounts.delete(path);
-		for (const category of this.failCategoryCounts.keys()) {
-			if (category.startsWith(`${name} `)) {
-				this.failCategoryCounts.delete(category);
+		if (path) this.#failPathCounts.delete(path);
+		for (const cat of this.#failCategoryCounts.keys()) {
+			if (cat.startsWith(`${name} `)) {
+				this.#failCategoryCounts.delete(cat);
 			}
 		}
 	}
 
-	private tripFailure(toolName: string, target: string): LoopGuardDecision {
+	// ── Helpers ────────────────────────────────────────────────────────
+
+	#callSignature(name: string, args: string): string {
+		try {
+			const canon = JSON.stringify(canonicalizeToolCallValue(
+				JSON.parse(args || "{}"),
+			));
+			return `${name} ${canon}`;
+		} catch {
+			return `${name} ${args || ""}`;
+		}
+	}
+
+	#batchLoopMessage(name: string, count: number): string {
+		return (
+			`Error: [batch-loop-guard] blocked — \`${name}\` was part of an identical `
+			+ `tool-call batch ${count} times in a row (threshold: ${this.#batchThreshold}). `
+			+ `Change your approach.`
+		);
+	}
+
+	#dupMessage(name: string, count: number): string {
+		return (
+			`Error: [duplicate-guard] blocked — \`${name}\` called with the same `
+			+ `(or cosmetically-varied) arguments ${count} times in a row `
+			+ `(threshold: ${this.#dupThreshold}). Stop repeating; change your approach.`
+		);
+	}
+
+	#tripFailure(toolName: string, target: string): LoopGuardDecision {
 		return {
 			block: true,
 			guard: "failure",
-			message: `Error: [failure-guard] blocked — \`${toolName}\` has failed on ${target} ${this.failureThreshold} times (threshold: ${this.failureThreshold}). Stop retrying the same approach; inspect the actual error, fix the root cause, or use a different tool.`,
+			message: (
+				`Error: [failure-guard] blocked — \`${toolName}\` has failed on `
+				+ `${target} ${this.#failThreshold} times. Stop retrying; inspect the `
+				+ `actual error, fix the root cause, or use a different tool.`
+			),
 		};
 	}
 
-	// ── Reset ─────────────────────────────────────────────────────────────
+	// ── Reset ──────────────────────────────────────────────────────────
+
 	reset(): void {
-		this.lastCallSignature = null;
-		this.consecutiveCallCount = 0;
-		this.failSignatureCounts.clear();
-		this.failCategoryCounts.clear();
-		this.failPathCounts.clear();
+		this.#lastHash = undefined;
+		this.#batchCount = 0;
+		this.#lastReportedCall = undefined;
+		this.#lastCallSignature = null;
+		this.#consecutiveCallCount = 0;
+		this.#failSignatureCounts.clear();
+		this.#failCategoryCounts.clear();
+		this.#failPathCounts.clear();
 	}
 }

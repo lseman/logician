@@ -27,7 +27,7 @@ triggers:
 example_queries:
   - Review the authentication changes before I commit them.
 allowed-tools:
-  - read_file
+  - read
   - grep
   - bash
 argument-hint: "[path]"

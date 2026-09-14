@@ -43,7 +43,7 @@ void test("accepts markdown-escaped tool_call wrapper names", () => {
 
 void test("accepts bold escaped XML tool markup without leaking markdown", () => {
 	const content = `**<tool\\_call>**
-    <function=read_file>
+    <function=read>
     <parameter=limit>
     50
     **</parameter>**
@@ -57,7 +57,7 @@ void test("accepts bold escaped XML tool markup without leaking markdown", () =>
     **</tool\\_call>**`;
 	const calls = parseTextToolCalls(content);
 	assert.equal(calls.length, 1);
-	assert.equal(calls[0].name, "read_file");
+	assert.equal(calls[0].name, "read");
 	assert.deepEqual(JSON.parse(calls[0].arguments), {
 		limit: 50,
 		offset: 2088,
@@ -68,13 +68,13 @@ void test("accepts bold escaped XML tool markup without leaking markdown", () =>
 
 // Regression test for the exact two-call format agents emit with stray `</tool_call>` markers.
 const textualTwoReadFileCalls = `<tool_call>
-    <function=read_file>
+    <function=read>
     <parameter=path>
     /data/dev/solvers/tests/test_amd_debug.cpp
     </parameter>
     </function>
 </tool_call>
-    <function=read_file>
+    <function=read>
     <parameter=path>
     /data/dev/solvers/CMakeLists.txt
     </parameter>
@@ -91,12 +91,12 @@ void test("parses multiple XML-parameter tool calls with stray markers", () => {
 	const calls = parseTextToolCalls(textualTwoReadFileCalls);
 	assert.equal(calls.length, 2);
 
-	assert.equal(calls[0].name, "read_file");
+	assert.equal(calls[0].name, "read");
 	assert.deepEqual(JSON.parse(calls[0].arguments), {
 		path: "/data/dev/solvers/tests/test_amd_debug.cpp",
 	});
 
-	assert.equal(calls[1].name, "read_file");
+	assert.equal(calls[1].name, "read");
 	const secondArgs = JSON.parse(calls[1].arguments);
 	assert.equal(secondArgs.path, "/data/dev/solvers/CMakeLists.txt");
 	assert.equal(secondArgs.offset, 1);
@@ -110,7 +110,7 @@ void test("strips stray markers when no surrounding prose exists", () => {
 void test("does not promote source code that resembles an unknown tool call", () => {
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: fixture contains literal source code.
 	const content = 'assert.match(catalog, new RegExp(`name="${skill.name}"`));';
-	const calls = parseTextToolCalls(content, name => name === "read_file");
+	const calls = parseTextToolCalls(content, name => name === "read");
 
 	assert.deepEqual(calls, []);
 });
@@ -155,8 +155,8 @@ void test("strips every promoted syntax without leaving nested fragments", () =>
 });
 
 void test("uses collision-resistant ids and ignores malformed partial calls", () => {
-	const first = parseTextToolCalls("read_file(path=/tmp/a)")[0];
-	const second = parseTextToolCalls("read_file(path=/tmp/a)")[0];
+	const first = parseTextToolCalls("read(path=/tmp/a)")[0];
+	const second = parseTextToolCalls("read(path=/tmp/a)")[0];
 	assert.ok(first.id.startsWith("tc_"));
 	assert.ok(second.id.startsWith("tc_"));
 	assert.notEqual(first.id, second.id);

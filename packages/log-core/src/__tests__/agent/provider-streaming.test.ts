@@ -44,12 +44,10 @@ void test("onSnapshot emits message_update once a tool call is present, even wit
 	callbacks.onSnapshot?.({
 		content: "",
 		reasoning: "",
-		toolCalls: [
-			{ id: "call_1", name: "read_file", arguments: '{"path":"a.ts"}' },
-		],
+		toolCalls: [{ id: "call_1", name: "read", arguments: '{"path":"a.ts"}' }],
 	});
 
 	const update = events.find(event => event.type === "message_update");
 	assert.ok(update && update.type === "message_update");
-	assert.equal(update.message.tool_calls?.[0]?.name, "read_file");
+	assert.equal(update.message.tool_calls?.[0]?.name, "read");
 });

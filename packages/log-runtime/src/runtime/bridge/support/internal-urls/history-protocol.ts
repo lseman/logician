@@ -23,6 +23,7 @@ function formatAgo(timestamp: number): string {
 
 export class HistoryProtocolHandler implements ProtocolHandler {
 	readonly scheme = "history";
+	readonly immutable = true;
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const registry = AgentOutputRegistry.instance();

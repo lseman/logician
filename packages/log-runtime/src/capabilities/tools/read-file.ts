@@ -1,197 +1,126 @@
-// ── read_file tool ────────────────────────────────────────────────────────────────
-// Read file contents with line-based pagination, two-axis truncation, and
-// hashline anchors for edit targeting. Output includes a [path#4hex] header
-// followed by numbered lines (1:content).
-// Also resolves registered internal URLs and xd:// virtual devices.
-
-import { createHash } from "node:crypto";
-import * as fs from "node:fs";
-import type { Tool, ToolContext } from "@logician/log-core";
+// Generic text-resource reader for files, directories, and internal URLs.
+import type { Tool } from "@logician/log-core";
+import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
+import { parseConflictBlocks } from "./support/conflict-resolution.ts";
 import {
-	extractInternalUrlScheme,
-	InternalUrlRouter,
-} from "../../runtime/bridge/support/internal-urls/index.js";
-import type { ResolveContext } from "../../runtime/bridge/support/internal-urls/types.js";
-import { parseConflictBlocks } from "./support/conflict-resolution.js";
-import {
-	formatHashlineHeader,
-	splitAddressableFileLines,
-} from "./support/hashline.js";
-import { recordRead } from "./support/read-tracker.js";
-import {
-	ensureInsideCwd,
-	resolveReadPath,
-} from "./support/utils/path-utils.js";
+	formatResourceRead,
+	type ReadPage,
+} from "./support/format-resource-read.ts";
+import { readResource } from "./support/read-resource.ts";
+import { recordRead } from "./support/read-tracker.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
-	truncateHead,
-} from "./support/utils/truncate.js";
-import {
-	listXdDevices,
-	readXdDeviceDocs,
-} from "./support/xd-device-registry.ts";
+} from "./support/utils/truncate.ts";
 
-export const read_file: Tool = {
-	readOnly: true,
-	cacheable: true,
-	name: "read_file",
-	label: "Read File",
-	hookAliases: ["Read"],
-	executionMode: "parallel",
-	description:
-		`Read file contents. Output includes hashline anchors ` +
-		`(format: [path#4hex] with numbered lines). ` +
-		`Truncated to ${DEFAULT_MAX_LINES} lines or ` +
-		`${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first). ` +
-		"Use offset/limit for large files; continue with offset until complete.",
-	promptSnippet:
-		"Read files; output includes [path#4hex] hashline header + numbered lines for edit targeting",
-	promptGuidelines: [
-		"Use read_file to read files; the output includes hashline anchors for edit_file targeting",
-	],
-	parameters: {
-		type: "object",
-		properties: {
-			path: {
-				type: "string",
-				description: "File path or internal resource URL to read",
+function readPage(args: Record<string, unknown>): ReadPage {
+	for (const key of ["offset", "limit"] as const) {
+		const value = args[key];
+		if (
+			value !== undefined &&
+			(typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+		) {
+			throw new Error(`${key} must be a positive integer.`);
+		}
+	}
+	return {
+		offset: (args.offset as number | undefined) ?? 1,
+		limit: args.limit as number | undefined,
+	};
+}
+
+export function createReadTool(router?: InternalUrlRouter): Tool {
+	return {
+		name: "read",
+		label: "Read",
+		hookAliases: ["Read"],
+		readOnly: true,
+		// Reads update file tracking and may resolve mutable device/resource catalogs.
+		cacheable: false,
+		executionMode: "parallel",
+		description:
+			"Read a text file, directory, or internal resource URL. Read xd:// to discover tool devices and xd://<name> for a device's documentation and JSON input schema. " +
+			"All text uses numbered lines with offset/limit pagination, bounded to " +
+			DEFAULT_MAX_LINES +
+			" lines or " +
+			formatSize(DEFAULT_MAX_BYTES) +
+			". " +
+			"Direct file reads also include [path#4hex] edit anchors; resource URLs are read-only. Unsupported URLs return an error. Prefix literal paths containing :// with ./. " +
+			"Supports .zip-family (.zip, .jar, .war, .ear, .apk) and .tar-family (.tar, .tar.gz, .tgz) archive entries via archive.ext:path/inside/archive (bare archive.ext lists entries; other archive formats are not supported). " +
+			"Supports SQLite via db.sqlite:table (schema + sample rows, bare db.sqlite lists tables) and db.sqlite:table:rowid (one row); non-rowid primary-key lookups are not supported.",
+		promptSnippet:
+			"Read files, directories, archives, SQLite, internal URLs, and xd:// device documentation with offset/limit pagination",
+		promptGuidelines: [
+			"Use read for files and internal resource URLs; only direct file reads provide edit anchors",
+			"Read xd:// to discover devices, then read xd://<name> for its input schema before invoking it with write",
+			"Read archive.ext:path/inside/archive for zip/tar members and db.sqlite:table[:rowid] for SQLite rows/tables — these are read-before-write tracked like direct file reads",
+		],
+		parameters: {
+			type: "object",
+			properties: {
+				path: {
+					type: "string",
+					description:
+						"File/directory path or resource URL, e.g. skill://name or xd://browser",
+				},
+				offset: {
+					type: "integer",
+					minimum: 1,
+					description: "1-based first line, for files and resource URLs",
+				},
+				limit: {
+					type: "integer",
+					minimum: 1,
+					description: "Maximum number of lines to read",
+				},
 			},
-			offset: {
-				type: "number",
-				description: "1-based line number to start reading from",
-			},
-			limit: {
-				type: "number",
-				description: "Maximum number of lines to read",
-			},
+			required: ["path"],
 		},
-		required: ["path"],
-	},
-	prepareArguments: (raw): Record<string, unknown> => {
-		if (typeof raw === "string") return { path: raw };
-		if (!raw || typeof raw !== "object") return {};
-		const args = raw as Record<string, unknown>;
-		return {
-			...args,
-			path: args.path ?? args.file_path ?? args.filename,
-		};
-	},
-	execute: async (args, ctx): Promise<string> => {
-		const filePath = String(args.path);
-		const scheme = extractInternalUrlScheme(filePath);
-		// xd:// virtual device listing / docs.
-		if (scheme === "xd" && filePath.length === "xd://".length) {
-			const devices = listXdDevices();
-			if (devices.size === 0) {
-				return "No xd:// devices are mounted in this session. Check your configuration.";
+		prepareArguments: raw => {
+			if (typeof raw === "string") return { path: raw };
+			if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+			const args = raw as Record<string, unknown>;
+			return { ...args, path: args.path ?? args.file_path ?? args.filename };
+		},
+		execute: async (args, ctx) => {
+			try {
+				if (typeof args.path !== "string" || args.path.length === 0)
+					throw new Error("path must be a non-empty string.");
+				const page = readPage(args);
+				const read = await readResource(
+					args.path,
+					ctx,
+					router ?? InternalUrlRouter.instance(),
+				);
+				const output = formatResourceRead(read, page);
+				if (read.kind === "resource") return output;
+				recordRead(read.path);
+				// Already viewing the formatted conflicts breakdown — don't
+				// append a second, redundant notice pointing back at itself.
+				if (args.path.endsWith(":conflicts")) return output;
+				return (
+					output +
+					formatConflictNotice(
+						read.resource.content,
+						parseConflictBlocks(read.resource.content, read.path),
+					)
+				);
+			} catch (error) {
+				return {
+					content:
+						"Error: " +
+						(error instanceof Error ? error.message : String(error)),
+					isError: true,
+				};
 			}
-			const lines = [...devices.entries()].map(
-				([name, desc]) => `  ${name}: ${desc}`,
-			);
-			return `# Available xd:// devices\n\nVirtual tool devices mounted behind write_file dispatch:\n\n${lines.join("\n")}`;
-		}
-		if (scheme === "xd") {
-			const deviceName = filePath.slice("xd://".length);
-			const docs = readXdDeviceDocs(deviceName);
-			if (docs !== null) return docs;
-			return `Unknown xd:// device: ${deviceName}. Run read_file with path="xd://" to list available devices.`;
-		}
-		// Recognized links must never fall through to filesystem reads.
-		if (scheme) {
-			return resolveInternalUrl(filePath, ctx);
-		}
-		const resolved = resolveReadPath(filePath, ctx.cwd || process.cwd());
-		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
+		},
+	};
+}
 
-		if (!fs.existsSync(resolved)) {
-			return `Error: File not found: ${resolved}`;
-		}
-		const stat = fs.statSync(resolved);
-		if (stat.isDirectory()) {
-			return `Error: Path is a directory: ${resolved}`;
-		}
+export const read = createReadTool();
 
-		const offset = Number(args.offset) || 0;
-		const limit = Number(args.limit) || 0;
-
-		const buffer = fs.readFileSync(resolved);
-		if (buffer.subarray(0, 8192).includes(0)) {
-			return (
-				`Error: ${resolved} appears to be a binary file ` +
-				`(${formatSize(stat.size)}). Use bash tools (file, xxd, strings) to inspect it.`
-			);
-		}
-		const fullContent = buffer.toString("utf-8");
-		recordRead(resolved);
-
-		// Compute hashline tag from full file content
-		const fileHash = createHash("sha256")
-			.update(buffer)
-			.digest("hex")
-			.slice(0, 4);
-		const header = formatHashlineHeader(filePath, fileHash);
-
-		// Split into addressable lines (no trailing empty line)
-		const allLines = splitAddressableFileLines(fullContent);
-		const totalLines = allLines.length;
-		// Detect merge conflicts
-		const conflictBlocks = parseConflictBlocks(fullContent, resolved);
-
-		// 1-based offset -> 0-based start.
-		const startLine = offset > 0 ? offset - 1 : 0;
-		if (startLine >= allLines.length) {
-			return `Error: Offset ${offset} is beyond end of file (${totalLines} lines total)`;
-		}
-		const startDisplay = startLine + 1;
-
-		let selectedLines: string[];
-		let userLimited = 0;
-		if (limit > 0) {
-			const end = Math.min(startLine + limit, allLines.length);
-			selectedLines = allLines.slice(startLine, end);
-			userLimited = end - startLine;
-		} else {
-			selectedLines = allLines.slice(startLine);
-		}
-
-		const t = truncateHead(selectedLines.join("\n"));
-
-		if (t.firstLineExceedsLimit) {
-			const lineSize = formatSize(
-				Buffer.byteLength(allLines[startLine], "utf-8"),
-			);
-			return (
-				`[Line ${startDisplay} is ${lineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. ` +
-				`Use bash: sed -n '${startDisplay}p' ${filePath} | head -c ${DEFAULT_MAX_BYTES}]`
-			);
-		}
-
-		if (t.truncated) {
-			const endDisplay = startDisplay + t.outputLines - 1;
-			const nextOffset = endDisplay + 1;
-			const limitNote =
-				t.truncatedBy === "lines"
-					? `Showing lines ${startDisplay}-${endDisplay} of ${totalLines}.`
-					: `Showing lines ${startDisplay}-${endDisplay} of ${totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit).`;
-			const conflictNotice = formatConflictNotice(fullContent, conflictBlocks);
-			return `${header}\n${t.content}\n\n[${limitNote} Use offset=${nextOffset} to continue.]${conflictNotice}`;
-		}
-
-		if (userLimited > 0 && startLine + userLimited < allLines.length) {
-			const remaining = allLines.length - (startLine + userLimited);
-			const nextOffset = startLine + userLimited + 1;
-			const conflictNotice = formatConflictNotice(fullContent, conflictBlocks);
-			return `${header}\n${t.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]${conflictNotice}`;
-		}
-
-		const conflictNotice = formatConflictNotice(fullContent, conflictBlocks);
-		return `${header}\n${t.content}${conflictNotice}`;
-	},
-};
-
-/** Build a conflict notice to append to read_file output. */
+/** Build a conflict notice to append to read output. */
 function formatConflictNotice(
 	fullContent: string,
 	blocks: {
@@ -202,10 +131,11 @@ function formatConflictNotice(
 		file: string;
 	}[],
 ): string {
-	if (blocks.length === 0) return "";
+	const firstBlock = blocks[0];
+	if (!firstBlock) return "";
 	const lines = [
 		"",
-		`# ⚠ Merge Conflicts: ${blocks.length} block${blocks.length > 1 ? "s" : ""} in ${blocks[0].file}`,
+		`# ⚠ Merge Conflicts: ${blocks.length} block${blocks.length > 1 ? "s" : ""} in ${firstBlock.file}`,
 		"",
 	];
 	for (const block of blocks) {
@@ -215,27 +145,9 @@ function formatConflictNotice(
 		);
 	}
 	lines.push("");
-	lines.push("[Use conflict://N?q=ours|theirs|ours+theirs|base to resolve]");
+	lines.push(
+		`[Use write path="conflict://${firstBlock.file}:N" content="ours"|"theirs"|"ours+theirs"|"base" to resolve block N, or path="conflict://${firstBlock.file}" to resolve every block]`,
+	);
 	lines.push("[Use :conflicts selector to view full conflict blocks]");
 	return `\n${lines.join("\n")}`;
-}
-/** Resolve an internal URL to its content. */
-async function resolveInternalUrl(
-	input: string,
-	ctx: ToolContext,
-): Promise<string> {
-	const router = InternalUrlRouter.instance();
-	const context: ResolveContext = {
-		cwd: ctx.cwd || process.cwd(),
-		skills: ctx.skills,
-		rules: ctx.rules,
-		memory: ctx.memory,
-	};
-	try {
-		const resource = await router.resolve(input, context);
-		return resource.content;
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		return `Error: ${message}`;
-	}
 }

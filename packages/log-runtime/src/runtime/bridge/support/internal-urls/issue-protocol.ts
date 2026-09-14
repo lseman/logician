@@ -37,11 +37,15 @@ interface IssuePathParts {
 }
 
 function parseIssuePath(url: InternalUrl): IssuePathParts | null {
-	const hostname = url.host;
+	// The shared parser only puts the first path segment into `url.host`; the
+	// rest lands in `url.pathname`. Reassemble the full address before
+	// splitting — see log-protocol.ts for the same pattern.
+	const full =
+		url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
 
-	if (!hostname) return null;
+	if (!full) return null;
 
-	const segments = hostname.split("/").filter(Boolean);
+	const segments = full.split("/").filter(Boolean);
 	if (segments.length < 2) return null;
 
 	const owner = segments[0];
@@ -49,7 +53,7 @@ function parseIssuePath(url: InternalUrl): IssuePathParts | null {
 	const rest = segments.slice(2);
 
 	const number = rest.length > 0 ? Number(rest[0]) : undefined;
-	if (number && !Number.isFinite(number)) return null;
+	if (number !== undefined && !Number.isFinite(number)) return null;
 
 	const actionStr = rest.length > 1 ? rest[1] : undefined;
 	const action =
@@ -64,6 +68,7 @@ function parseIssuePath(url: InternalUrl): IssuePathParts | null {
 
 export class IssueProtocolHandler implements ProtocolHandler {
 	readonly scheme = "issue";
+	readonly immutable = true;
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const parts = parseIssuePath(url);

@@ -10,6 +10,39 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Run the ast-grep CLI and parse its JSON output. ast-grep exits with code 1
+ * (not 0) whenever a run produces zero matches — same convention as
+ * grep/rg — even though stdout still holds a valid `[]`. `execFile`'s
+ * promisified form rejects on any non-zero exit, so a plain `await
+ * execFileAsync(...)` would surface "no matches" as a thrown error. Recover
+ * by parsing `error.stdout` (still populated by Node on a non-zero exit)
+ * as JSON; only propagate the error when that doesn't yield a valid result.
+ */
+async function runAstGrepCli(bin: string, args: string[]): Promise<AstMatch[]> {
+	let stdout: string;
+	try {
+		stdout = (await execFileAsync(bin, args)).stdout;
+	} catch (error) {
+		const stdoutFromError =
+			error && typeof error === "object" && "stdout" in error
+				? String((error as { stdout: unknown }).stdout ?? "")
+				: "";
+		if (!stdoutFromError.trim()) throw error;
+		try {
+			return JSON.parse(stdoutFromError) as AstMatch[];
+		} catch {
+			throw error;
+		}
+	}
+	if (!stdout.trim()) return [];
+	try {
+		return JSON.parse(stdout) as AstMatch[];
+	} catch {
+		return [];
+	}
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 /** A match found by ast-grep. */
@@ -118,6 +151,12 @@ function detectLanguage(filePath: string): string {
 
 /**
  * Run ast-grep rewrite and return matches with replacements.
+ *
+ * Does NOT pass `--no-ignore` — current ast-grep CLI versions (0.4x+) require
+ * it to take a FILE_TYPE value (`hidden`/`dot`/`exclude`/`global`/`parent`/
+ * `vcs`); passing it bare (as this used to) greedily consumes the first file
+ * path as that value and errors out, breaking every call. Omitting it just
+ * means normal .gitignore-respecting behavior, same as every other tool here.
  */
 async function runRewriteQuery(
 	bin: string,
@@ -126,7 +165,7 @@ async function runRewriteQuery(
 	rewrite: string,
 	filePaths: string[],
 ): Promise<AstMatch[]> {
-	const result = await execFileAsync(bin, [
+	return runAstGrepCli(bin, [
 		"run",
 		"--lang",
 		language,
@@ -135,20 +174,31 @@ async function runRewriteQuery(
 		"--rewrite",
 		rewrite,
 		"--json=compact",
-		"--no-ignore",
 		...filePaths,
 	]);
+}
 
-	if (!result.stdout.trim()) {
-		return [];
-	}
-
-	try {
-		const matches = JSON.parse(result.stdout) as AstMatch[];
-		return matches;
-	} catch {
-		return [];
-	}
+/**
+ * Run a pure ast-grep query (no --rewrite) and return matches. Separate from
+ * runRewriteQuery because the CLI always computes a replacement when
+ * --rewrite is passed — a read-only query has no replacement to offer and
+ * shouldn't be forced to invent one.
+ */
+async function runQuery(
+	bin: string,
+	language: string,
+	pattern: string,
+	filePaths: string[],
+): Promise<AstMatch[]> {
+	return runAstGrepCli(bin, [
+		"run",
+		"--lang",
+		language,
+		"--pattern",
+		pattern,
+		"--json=compact",
+		...filePaths,
+	]);
 }
 
 // ── Diff computation ───────────────────────────────────────────────────────────
@@ -236,4 +286,24 @@ export async function previewAstOp(
 
 	const lang = detectLanguage(paths[0] ?? "");
 	return runRewriteQuery(bin, lang, pat, out, paths);
+}
+
+/**
+ * Run a read-only structural query (no rewrite) across the given paths.
+ * Language is detected from the first path unless `language` overrides it.
+ */
+export async function queryAstPattern(
+	pattern: string,
+	paths: string[],
+	language?: string,
+): Promise<AstMatch[]> {
+	const bin = await getAstGrepBin();
+	if (!bin) {
+		throw new Error(
+			"ast-grep CLI not found. Install with: npm install -g @ast-grep/cli",
+		);
+	}
+
+	const lang = language || detectLanguage(paths[0] ?? "");
+	return runQuery(bin, lang, pattern, paths);
 }

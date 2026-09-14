@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ToolContext, ToolResult } from "@logician/log-core";
 import { createPostEditDiagnosticHooks } from "../../capabilities/lsp/post-edit-diagnostics.ts";
-import { edit_file } from "../../capabilities/tools/edit-file.ts";
-import { read_file } from "../../capabilities/tools/read-file.ts";
+import { edit } from "../../capabilities/tools/edit-file.ts";
+import { read as readTool } from "../../capabilities/tools/read-file.ts";
 import { createEditStore } from "../../capabilities/tools/support/edit-store.ts";
 import { hashlineHash } from "../../capabilities/tools/support/hashline.ts";
 import { previewHashlineEdit } from "../../capabilities/tools/support/hashline-engine.ts";
@@ -36,11 +36,11 @@ function text(result: string | ToolResult): string {
 
 test("read → hashline edit changes the file and runs post-edit diagnostics", async () => {
 	const f = fixture('{"valid": true}\n', "file.json");
-	const read = await read_file.execute({ path: f.name }, f.ctx);
+	const read = await readTool.execute({ path: f.name }, f.ctx);
 	const header = text(read).match(/\[file\.json#[a-f0-9]{4}\]/)?.[0];
 	expect(header).toBeDefined();
 	const args = { path: f.name, input: `${header}\nPUT 1.=1:{invalid` };
-	const result = await edit_file.execute(args, f.ctx);
+	const result = await edit.execute(args, f.ctx);
 	expect(readFileSync(f.file, "utf8")).toBe("{invalid\n");
 	expect(text(result)).toStartWith(
 		"Applied 1 line change(s) across 1 file(s).",
@@ -58,7 +58,7 @@ test("read → hashline edit changes the file and runs post-edit diagnostics", a
 	const diagnostic = await hook({
 		toolCall: {
 			id: "edit",
-			name: "edit_file",
+			name: "edit",
 			arguments: JSON.stringify(args),
 		},
 		args,
@@ -72,8 +72,8 @@ test("read → hashline edit changes the file and runs post-edit diagnostics", a
 
 test("multiple operations keep their target and preserve CRLF, BOM, and literal whitespace", async () => {
 	const f = fixture("\uFEFFfirst\r\nlast\r\n");
-	await read_file.execute({ path: f.name }, f.ctx);
-	const result = await edit_file.execute(
+	await readTool.execute({ path: f.name }, f.ctx);
+	const result = await edit.execute(
 		{ path: f.name, input: f.input("PUT >1:  middle  \nPUT 3.=3:changed") },
 		f.ctx,
 	);
@@ -93,8 +93,8 @@ test("preview never writes and no-op is not reported as applied", async () => {
 	expect(preview.applied).toBe(false);
 	expect(preview.diff).toContain("middle");
 	expect(readFileSync(f.file, "utf8")).toBe("first\nlast\n");
-	await read_file.execute({ path: f.name }, f.ctx);
-	const result = await edit_file.execute(
+	await readTool.execute({ path: f.name }, f.ctx);
+	const result = await edit.execute(
 		{ path: f.name, input: f.input("PUT 1.=1:first") },
 		f.ctx,
 	);
@@ -104,8 +104,8 @@ test("preview never writes and no-op is not reported as applied", async () => {
 test("rejects stale hashes even after a new read", async () => {
 	const f = fixture();
 	writeFileSync(f.file, "someone else's work\n");
-	await read_file.execute({ path: f.name }, f.ctx);
-	const result = await edit_file.execute(
+	await readTool.execute({ path: f.name }, f.ctx);
+	const result = await edit.execute(
 		{ path: f.name, input: f.input("PUT >1:middle") },
 		f.ctx,
 	);
@@ -117,12 +117,12 @@ test("requires a read and rejects a header targeting a different file", async ()
 	const f = fixture();
 	const input = f.input("PUT >1:middle");
 	expect(
-		text(await edit_file.execute({ path: f.name, input }, f.ctx)),
+		text(await edit.execute({ path: f.name, input }, f.ctx)),
 	).toContain("has not been read");
-	await read_file.execute({ path: f.name }, f.ctx);
+	await readTool.execute({ path: f.name }, f.ctx);
 	expect(
 		text(
-			await edit_file.execute(
+			await edit.execute(
 				{ path: f.name, input: input.replace("file.txt#", "../outside.txt#") },
 				f.ctx,
 			),
@@ -133,7 +133,7 @@ test("requires a read and rejects a header targeting a different file", async ()
 
 test("validates the whole proposal before writing and reports unsupported operations", async () => {
 	const f = fixture();
-	await read_file.execute({ path: f.name }, f.ctx);
+	await readTool.execute({ path: f.name }, f.ctx);
 	for (const operation of [
 		"PUT >99:oops",
 		"MV other.txt",
@@ -141,7 +141,7 @@ test("validates the whole proposal before writing and reports unsupported operat
 		"unexpected content",
 		"PUT 2.=1:oops",
 	]) {
-		const result = await edit_file.execute(
+		const result = await edit.execute(
 			{ path: f.name, input: f.input(`PUT >1:middle\n${operation}`) },
 			f.ctx,
 		);
@@ -152,10 +152,10 @@ test("validates the whole proposal before writing and reports unsupported operat
 
 test("concurrent proposals based on the same hash cannot overwrite one another", async () => {
 	const f = fixture();
-	await read_file.execute({ path: f.name }, f.ctx);
+	await readTool.execute({ path: f.name }, f.ctx);
 	const results = await Promise.all(
 		["alpha", "beta"].map(value =>
-			edit_file.execute(
+			edit.execute(
 				{ path: f.name, input: f.input(`PUT >1:${value}`) },
 				f.ctx,
 			),
@@ -181,7 +181,7 @@ test("diagnostics exclude failed and zero-change edits", async () => {
 	] as const) {
 		expect(
 			await hook({
-				toolCall: { id: "edit", name: "edit_file", arguments: "{}" },
+				toolCall: { id: "edit", name: "edit", arguments: "{}" },
 				args: { path: f.name },
 				result,
 				isError,

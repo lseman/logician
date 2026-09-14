@@ -74,8 +74,8 @@ export function extractFileOpsFromMessages(
 
 				// Write/modify operations
 				if (
-					name === "edit_file" ||
 					name === "write_file" ||
+					name === "write" ||
 					name === "edit" ||
 					name === "create_file" ||
 					name === "file_diff" ||

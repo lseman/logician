@@ -116,6 +116,115 @@ void test("multi-question popup uses tabs and submits a structured answer", () =
 	);
 });
 
+void test("multi-select question toggles choices with space and submits an array", () => {
+	const component = new ChoicePopup();
+	component.setQuestions([
+		{
+			id: "tags",
+			question: "Which labels apply?",
+			multi: true,
+			choices: [
+				{ value: "bug", label: "Bug" },
+				{ value: "perf", label: "Performance" },
+				{ value: "docs", label: "Docs" },
+			],
+		},
+	]);
+	component.show();
+
+	// Enter with nothing toggled does not submit.
+	assert.equal(component.handleInput("\n"), null);
+
+	component.handleInput(" "); // toggle "Bug" (cursor starts at index 0)
+	component.handleInput("j"); // move to "Performance"
+	component.handleInput("j"); // move to "Docs"
+	component.handleInput(" "); // toggle "Docs"
+
+	const rendered = plain(component.render(64).join("\n"));
+	assert.match(rendered, /\[x\] Bug/);
+	assert.match(rendered, /\[ \] Performance/);
+	assert.match(rendered, /\[x\] Docs/);
+
+	assert.deepEqual(component.handleInput("\n"), {
+		type: "submit",
+		answers: { tags: ["bug", "docs"] },
+	});
+	assert.equal(
+		component.getResponseValue(),
+		JSON.stringify({ tags: ["bug", "docs"] }),
+	);
+});
+
+void test("selecting a free-text choice opens typing entry and submits the typed value", () => {
+	const component = new ChoicePopup();
+	component.setQuestions([
+		{
+			id: "reason",
+			question: "Why?",
+			choices: [
+				{ value: "a", label: "Option A" },
+				{ value: "__other__", label: "Other (type your own)", isFreeText: true },
+			],
+		},
+	]);
+	component.show();
+
+	component.handleInput("j"); // move cursor to the free-text choice
+	assert.equal(component.handleInput("\n"), null); // opens typing mode, no submit yet
+
+	const typing = plain(component.render(64).join("\n"));
+	assert.match(typing, /enter submit {3}esc back to choices/);
+
+	for (const ch of "custom reason") component.handleInput(ch);
+	assert.equal(component.handleInput("\x7f"), null); // backspace
+	component.handleInput("n"); // restore the trailing char
+
+	assert.deepEqual(component.handleInput("\n"), {
+		type: "submit",
+		answers: { reason: "custom reason" },
+	});
+});
+
+void test("esc during typing cancels back to the choice list without dismissing the popup", () => {
+	const component = new ChoicePopup();
+	component.setQuestions([
+		{
+			id: "reason",
+			question: "Why?",
+			choices: [
+				{ value: "__other__", label: "Other (type your own)", isFreeText: true },
+			],
+		},
+	]);
+	component.show();
+	assert.equal(component.handleInput("\n"), null); // opens typing mode
+	component.handleInput("partial");
+	assert.equal(component.handleInput("\x1b"), null); // cancels typing, not close
+	assert.equal(component.visible, true);
+	const rendered = plain(component.render(64).join("\n"));
+	assert.match(rendered, /Other \(type your own\)/);
+});
+
+void test("recommended pre-selects and marks the named choice", () => {
+	const component = new ChoicePopup();
+	component.setQuestions([
+		{
+			id: "choice",
+			question: "Pick one",
+			recommended: "b",
+			choices: [
+				{ value: "a", label: "Alpha" },
+				{ value: "b", label: "Bravo" },
+			],
+		},
+	]);
+	component.show();
+
+	assert.equal(component.getSelected()?.value, "b");
+	const rendered = plain(component.render(64).join("\n"));
+	assert.match(rendered, /● Bravo.*\(recommended\)/);
+});
+
 void test("settings and selectors share the same dialog frame and focus style", () => {
 	const settings = new SettingsSelectorOverlay();
 	settings.setSettings([

@@ -90,7 +90,7 @@ void test("empty structured-tool snapshot preserves streamed assistant prose", (
 			tool_calls: [
 				{
 					id: "call_1",
-					name: "read_file",
+					name: "read",
 					arguments: '{"path":"implementation.ts"}',
 				},
 			],
@@ -98,13 +98,13 @@ void test("empty structured-tool snapshot preserves streamed assistant prose", (
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		args: { path: "implementation.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		result: "contents",
 	});
@@ -165,7 +165,7 @@ void test("promoted textual tool calls replace their streamed markup", () => {
 	transcript.handleEvent({
 		type: "token",
 		token:
-			"**<tool\\_call>**\n<function=read_file>raw markup</function>\n**</tool\\_call>**",
+			"**<tool\\_call>**\n<function=read>raw markup</function>\n**</tool\\_call>**",
 	});
 	transcript.handleEvent({
 		type: "message_update",
@@ -176,7 +176,7 @@ void test("promoted textual tool calls replace their streamed markup", () => {
 			tool_calls: [
 				{
 					id: "call_1",
-					name: "read_file",
+					name: "read",
 					arguments: '{"path":"file.ts"}',
 				},
 			],
@@ -192,7 +192,7 @@ void test("message_update applies streamed tool-call argument snapshots to the m
 	transcript.handleEvent({
 		type: "tool_call_start",
 		toolCallId: "call_1",
-		toolName: "read_file",
+		toolName: "read",
 		args: {},
 	});
 	transcript.handleEvent({
@@ -202,7 +202,7 @@ void test("message_update applies streamed tool-call argument snapshots to the m
 			role: "assistant",
 			content: "",
 			tool_calls: [
-				{ id: "call_1", name: "read_file", arguments: '{"path":"a.ts"}' },
+				{ id: "call_1", name: "read", arguments: '{"path":"a.ts"}' },
 			],
 		},
 	});
@@ -216,13 +216,13 @@ void test("message_update does not overwrite a completed tool call's partialResu
 	transcript.addTurn("read a file");
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		args: { path: "a.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		result: "contents",
 	});
@@ -233,7 +233,7 @@ void test("message_update does not overwrite a completed tool call's partialResu
 			role: "assistant",
 			content: "",
 			tool_calls: [
-				{ id: "call_1", name: "read_file", arguments: '{"path":"a.ts"}' },
+				{ id: "call_1", name: "read", arguments: '{"path":"a.ts"}' },
 			],
 		},
 	});
@@ -293,13 +293,13 @@ void test("message_reasoning_update only diffs against the latest contiguous thi
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		args: { path: "a.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		result: "contents",
 	});
@@ -327,13 +327,13 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 	transcript.handleEvent({ type: "token", token: "I will inspect the file." });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		args: { path: "file.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_1",
 		result: "file contents",
 	});
@@ -350,7 +350,7 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 			tool_calls: [
 				{
 					id: "call_2",
-					name: "read_file",
+					name: "read",
 					arguments: '{"path":"other.ts"}',
 				},
 			],
@@ -358,13 +358,13 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_2",
 		args: { path: "other.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call_2",
 		result: "other contents",
 	});
@@ -378,9 +378,9 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 		})),
 		[
 			{ type: "content", text: "I will inspect the file.", tool: undefined },
-			{ type: "tool", text: undefined, tool: "read_file" },
+			{ type: "tool", text: undefined, tool: "read" },
 			{ type: "content", text: "I found another file.", tool: undefined },
-			{ type: "tool", text: undefined, tool: "read_file" },
+			{ type: "tool", text: undefined, tool: "read" },
 		],
 	);
 });

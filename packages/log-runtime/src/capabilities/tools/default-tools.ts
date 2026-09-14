@@ -1,4 +1,6 @@
 import type { Tool, WebSearchConfig } from "@logician/log-core";
+import { createInternalUrlRouter } from "../../runtime/bridge/support/internal-urls/default-router.ts";
+import type { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
 import type { BrowserManager } from "../browser/browser-manager.ts";
 import { createBrowserTool } from "../browser/browser-tool.ts";
 import { createCompletionTool } from "../eval/completion-tool.ts";
@@ -11,25 +13,29 @@ import { defaultHub } from "../hub/process-manager.ts";
 import type { LspClientPool } from "../lsp/lsp-client-pool.ts";
 import { createLspTool } from "../lsp/lsp-tool.ts";
 import { ast_edit } from "./ast-edit.ts";
+import { ast_grep } from "./ast-grep-tool.ts";
 import { bash } from "./bash.ts";
 import { getBuiltInTools } from "./builtin-blocks.ts";
-import { edit_file } from "./edit-file.ts";
+import { edit } from "./edit-file.ts";
 import { file_diff } from "./file-diff.ts";
-import { find } from "./find.ts";
 import { git } from "./git.ts";
-import { list_files } from "./list-files.ts";
-import { read_file } from "./read-file.ts";
+import { glob } from "./glob.ts";
+import { createReadTool } from "./read-file.ts";
 import { OPTIONAL_CAPABILITIES } from "./registry.ts";
 import { sandbox } from "./sandbox.ts";
-import { grep } from "./search.ts";
+import { createGrepTool } from "./search.ts";
+import { XdDeviceRegistry } from "./support/xd-device-registry.ts";
 import { web_fetch } from "./web-fetch.ts";
 import { createWebSearchTool } from "./web-search.ts";
-import { write_file } from "./write-file.ts";
+import { createWriteTool } from "./write-file.ts";
 
 // Default SearXNG instance assumed for local development.
 export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
 
 export interface DefaultToolsOptions {
+	resourceRouter?: InternalUrlRouter;
+	devices?: XdDeviceRegistry;
+	xdevEnabled?: boolean;
 	// SearXNG config; defaults to DEFAULT_SEARXNG_URL when omitted.
 	webSearch?: WebSearchConfig;
 	graphicianEnabled?: boolean;
@@ -47,13 +53,13 @@ export interface DefaultToolsOptions {
 
 /** Tools that are always available as top-level function calls. */
 const CORE_TOOL_NAMES = new Set<string>([
-	"list_files",
-	"find",
-	"read_file",
+	"glob",
+	"read",
 	"grep",
-	"edit_file",
+	"edit",
 	"ast_edit",
-	"write_file",
+	"ast_grep",
+	"write",
 	"bash",
 	"todo",
 	"ask_user",
@@ -74,7 +80,7 @@ function filterCoreTools(tools: Tool[]): Tool[] {
 
 // ── Discoverable tools (xd:// devices) ────────────────────────────────────────
 
-/** Tools accessible via `write xd://<name>` — not advertised to the provider. */
+/** Tools that also support `write` through xd:// device addresses. */
 const DISCOVERABLE_TOOL_NAMES = new Set<string>([
 	"git",
 	"sandbox",
@@ -87,11 +93,16 @@ const DISCOVERABLE_TOOL_NAMES = new Set<string>([
 	"graphician",
 ]);
 
+/** Device aliases are available only for capabilities enabled in this session. */
+export function isDiscoverableTool(tool: Tool): boolean {
+	return DISCOVERABLE_TOOL_NAMES.has(tool.name) || tool.origin?.kind === "mcp";
+}
+
 /**
  * Extract discoverable tools from a tool array.
  */
 function filterDiscoverableTools(tools: Tool[]): Tool[] {
-	return tools.filter(t => DISCOVERABLE_TOOL_NAMES.has(t.name));
+	return tools.filter(isDiscoverableTool);
 }
 
 // ── Factory functions ─────────────────────────────────────────────────────────
@@ -100,6 +111,9 @@ function filterDiscoverableTools(tools: Tool[]): Tool[] {
  * Build all default tools. Used by the ToolRouter for dispatch and TUI display.
  */
 export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
+	const devices = opts.devices ?? new XdDeviceRegistry();
+	const resources = opts.resourceRouter ?? createInternalUrlRouter();
+	resources.register(devices);
 	const webSearch = opts.webSearch ?? { baseUrl: DEFAULT_SEARXNG_URL };
 	const enabled: Record<string, boolean | undefined> = {
 		graphician: opts.graphicianEnabled,
@@ -108,14 +122,14 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		cap => (enabled[cap.id] ?? cap.enabledByDefault) !== false,
 	).map(cap => cap.tool);
 	const tools: Tool[] = [
-		list_files,
-		find,
+		glob,
 		...optionalTools,
-		read_file,
-		grep,
-		edit_file,
+		createReadTool(resources),
+		createGrepTool(resources),
+		edit,
 		ast_edit,
-		write_file,
+		ast_grep,
+		createWriteTool(devices, resources),
 		file_diff,
 		bash,
 		sandbox,
@@ -141,6 +155,9 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		// ── LSP (language server protocol) ────────────────────────────────
 		...(opts.lspPool ? [createLspTool(opts.lspPool)] : []),
 	];
+	if (opts.xdevEnabled !== false) {
+		for (const tool of tools.filter(isDiscoverableTool)) devices.mount(tool);
+	}
 	return tools;
 }
 

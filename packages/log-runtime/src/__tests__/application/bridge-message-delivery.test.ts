@@ -421,7 +421,7 @@ void test("/context preserves complete long messages and tool results", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "call-1", name: "read_file", arguments: "{}" }],
+				tool_calls: [{ id: "call-1", name: "read", arguments: "{}" }],
 			},
 			{ role: "tool", tool_call_id: "call-1", content: longToolResult },
 		],
@@ -430,7 +430,7 @@ void test("/context preserves complete long messages and tool results", () => {
 	const context = bridge.getContext();
 
 	assert.match(context, /user-start[\s\S]*user-end/);
-	assert.match(context, /\[TOOL\] \(read_file\)\ntool-start[\s\S]*tool-end/);
+	assert.match(context, /\[TOOL\] \(read\)\ntool-start[\s\S]*tool-end/);
 	assert.doesNotMatch(context, /\.\.\. \[truncated\]/);
 });
 

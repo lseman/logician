@@ -265,7 +265,7 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 			);
 			if (
 				!event.isError &&
-				["edit_file", "write_file", "git", "bash"].includes(event.toolName)
+				["edit", "write", "git", "bash"].includes(event.toolName)
 			) {
 				updateGitFooter(ctx);
 			}

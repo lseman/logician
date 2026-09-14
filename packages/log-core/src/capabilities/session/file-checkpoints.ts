@@ -6,7 +6,7 @@
 // state the frame restores to.
 //
 // Two capture layers, both recorded via the builtin tool-call hooks:
-// 1. write_file / edit_file: the path's content is read before the write.
+// 1. write / edit: the path's content is read before the write.
 // 2. bash: the working tree is snapshotted to a git tree object (via a
 //    temporary index — worktree and real index untouched) before and after
 //    the command; the diff yields the paths bash mutated, and their pre-call

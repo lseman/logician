@@ -25,19 +25,15 @@ export {
 export {
 	type ApplyEditsResult,
 	type Edit,
-	edit_file,
+	edit,
 	fuzzyFindText,
 	normalizeForFuzzyMatch,
 } from "./capabilities/tools/edit-file.ts";
 export { file_diff } from "./capabilities/tools/file-diff.ts";
-export { find } from "./capabilities/tools/find.ts";
 export { git } from "./capabilities/tools/git.ts";
+export { glob } from "./capabilities/tools/glob.ts";
 export { graphician } from "./capabilities/tools/graphician.ts";
-export {
-	type ListFilesDetails,
-	list_files,
-} from "./capabilities/tools/list-files.ts";
-export { read_file } from "./capabilities/tools/read-file.ts";
+export { read } from "./capabilities/tools/read-file.ts";
 export {
 	getDefaultSandboxProfile,
 	type SandboxDetails,
@@ -85,4 +81,4 @@ export {
 } from "./capabilities/tools/support/utils/truncate.ts";
 export { web_fetch } from "./capabilities/tools/web-fetch.ts";
 export { createWebSearchTool } from "./capabilities/tools/web-search.ts";
-export { write_file } from "./capabilities/tools/write-file.ts";
+export { write } from "./capabilities/tools/write-file.ts";

@@ -24,7 +24,7 @@ const turn: Turn = {
 			{
 				seq: 4,
 				type: "tool",
-				tool: { tool_name: "read_file", isError: false, isComplete: true },
+				tool: { tool_name: "read", isError: false, isComplete: true },
 				isComplete: true,
 			},
 		],
@@ -52,7 +52,7 @@ describe("transcript selectors", () => {
 		expect(selectAssistantThinking(turn)).toBe("first\n\nsecond");
 		expect(selectAssistantContent(turn)).toBe("done stream");
 		expect(selectAssistantTools(turn).map(tool => tool.tool_name)).toEqual([
-			"read_file",
+			"read",
 		]);
 		expect(selectMessageCount([turn])).toBe(2);
 	});

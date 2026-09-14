@@ -8,8 +8,8 @@ void test("work surface renders working set and turn evidence", () => {
 	const surface = new WorkSurface();
 	surface.startRun();
 	surface.startTurn();
-	surface.recordToolStart("1", "edit_file", { path: "src/main.ts" });
-	surface.recordToolEnd("1", "edit_file", "ok\n<post_edit_diagnostics>", false);
+	surface.recordToolStart("1", "edit", { path: "src/main.ts" });
+	surface.recordToolEnd("1", "edit", "ok\n<post_edit_diagnostics>", false);
 	surface.setContext(1200, 8000);
 	const text = surface.render(100).join("\n");
 	assert.match(text, /Working set/);
@@ -35,15 +35,15 @@ void test("work surface resets turn count across loop iterations", () => {
 	// Simulate loop iteration 1 with 3 turns
 	surface.setLoopIteration(1);
 	surface.startTurn();
-	surface.recordToolStart("1", "read_file", { path: "a.ts" });
+	surface.recordToolStart("1", "read", { path: "a.ts" });
 	surface.endTurn();
 
 	surface.startTurn();
-	surface.recordToolStart("2", "read_file", { path: "b.ts" });
+	surface.recordToolStart("2", "read", { path: "b.ts" });
 	surface.endTurn();
 
 	surface.startTurn();
-	surface.recordToolStart("3", "write_file", { path: "c.ts" });
+	surface.recordToolStart("3", "write", { path: "c.ts" });
 	surface.setContext(1000, 8000);
 	surface.endTurn();
 
@@ -56,11 +56,11 @@ void test("work surface resets turn count across loop iterations", () => {
 
 	// Start two new turns in the new loop
 	surface.startTurn();
-	surface.recordToolStart("4", "read_file", { path: "d.ts" });
+	surface.recordToolStart("4", "read", { path: "d.ts" });
 	surface.endTurn();
 
 	surface.startTurn();
-	surface.recordToolStart("5", "write_file", { path: "e.ts" });
+	surface.recordToolStart("5", "write", { path: "e.ts" });
 	surface.setContext(2000, 8000);
 	surface.endTurn();
 
@@ -82,13 +82,13 @@ void test("a new agent run resets its internal turn count and evidence", () => {
 	const surface = new WorkSurface();
 	surface.startRun();
 	surface.startTurn();
-	surface.recordToolStart("1", "read_file", { path: "old.ts" });
+	surface.recordToolStart("1", "read", { path: "old.ts" });
 	surface.startTurn();
 	assert.match(surface.render(100).join("\n"), /2 turns/);
 
 	surface.startRun();
 	surface.startTurn();
-	surface.recordToolStart("2", "read_file", { path: "new.ts" });
+	surface.recordToolStart("2", "read", { path: "new.ts" });
 	const nextRun = surface.render(100).join("\n");
 	assert.match(nextRun, /1 turn( |$)/);
 	assert.match(nextRun, /1 tools/);
@@ -98,7 +98,7 @@ void test("active phase changes keep the work surface render cached", () => {
 	initTheme("dark");
 	const surface = new WorkSurface();
 	surface.startRun();
-	surface.recordToolStart("1", "read_file", { path: "src/main.ts" });
+	surface.recordToolStart("1", "read", { path: "src/main.ts" });
 	surface.setPhase("thinking");
 	const first = surface.render(100);
 

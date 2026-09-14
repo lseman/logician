@@ -5,7 +5,7 @@ import { Transcript } from "../../runtime/transcript/transcript.ts";
 function start(transcript: Transcript, id: string, path: string): void {
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: id,
 		args: { path },
 	});
@@ -19,25 +19,25 @@ void test("parallel same-name tool output stays attached to its call id", () => 
 
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call-a",
 		partialResult: "A progress",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call-b",
 		partialResult: "B progress",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call-b",
 		result: "B result",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call-a",
 		result: "A result",
 	});
@@ -72,7 +72,7 @@ void test("execution start enriches the card created during call preparation", (
 	transcript.addTurn("Read the file");
 	transcript.handleEvent({
 		type: "tool_call_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call-a",
 		args: {},
 	});
@@ -84,7 +84,7 @@ void test("execution start enriches the card created during call preparation", (
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		toolName: "read_file",
+		toolName: "read",
 		toolCallId: "call-a",
 		args: { path: "a.ts" },
 	});

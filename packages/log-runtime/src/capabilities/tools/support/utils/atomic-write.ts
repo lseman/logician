@@ -65,7 +65,7 @@ export async function atomicWriteFile(
 		}
 
 		// Note: expectedContent verification is intentionally skipped here.
-		// The edit_file tool already checks isStaleSinceRead() before writing,
+		// The edit tool already checks isStaleSinceRead() before writing,
 		// making this redundant readFile + full-text comparison unnecessary overhead.
 		if (options.expectedMissing) {
 			try {

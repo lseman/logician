@@ -60,7 +60,7 @@ void test("MCP tools expose concise names and retain qualified hook aliases", ()
 });
 
 void test("MCP tool name allocation qualifies only collisions", () => {
-	const used = new Set(["read_file", "search", "server__search"]);
+	const used = new Set(["read", "search", "server__search"]);
 	assert.equal(
 		allocateMcpToolName("ctx_execute", "context-mode", used),
 		"ctx_execute",

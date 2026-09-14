@@ -22,7 +22,7 @@ overrides in `.logician.json`:
   "temperature": 0.7,
   "permissionMode": "ask",
   "permissions": {
-    "allow": ["read_file", "grep"],
+    "allow": ["read", "grep"],
     "deny": []
   },
   "inferenceMode": "none",

@@ -1,4 +1,4 @@
-// ── write_file tool ───────────────────────────────────────────────────────────────
+// ── write tool ───────────────────────────────────────────────────────────────
 // Create or overwrite a complete file. Creates parent directories. Overwriting an
 // existing file requires it to have been read first (and not modified since), so the
 // model can never blind-clobber content. Returns the new content with syntax
@@ -13,6 +13,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Tool, ToolResult } from "@logician/log-core";
 import { extractInternalUrlScheme } from "../../runtime/bridge/support/internal-urls/parse.ts";
+import type { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
+import { archiveFamilyFromPath, writeArchiveMember } from "./support/archive-resource.ts";
 import { createMutationSession } from "./mutation/session.js";
 import { createEditStore } from "./support/edit-store.js";
 import { withFileMutationQueue } from "./support/mutation-queue.ts";
@@ -21,43 +23,63 @@ import {
 	isStaleSinceRead,
 	refreshAfterWrite,
 } from "./support/read-tracker.ts";
+import {
+	deleteSqliteRow,
+	insertSqliteRow,
+	updateSqliteRow,
+} from "./support/sqlite-resource.ts";
 import { appendToFile } from "./support/utils/atomic-write.ts";
 import { ensureInsideCwd, resolvePath } from "./support/utils/path-utils.ts";
+import {
+	detectArchiveSelector,
+	detectSqliteSelector,
+} from "./support/utils/selector-path.ts";
 import { highlightAuto } from "./support/utils/syntax-highlighter.ts";
 import {
 	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
 	formatSize,
 	truncateHead,
 } from "./support/utils/truncate.ts";
-import {
-	dispatchXdDevice,
-	hasXdDevice,
-	readXdDeviceDocs,
-} from "./support/xd-device-registry.ts";
+import type { XdDeviceRegistry } from "./support/xd-device-registry.ts";
 
-export const write_file: Tool = {
-	name: "write_file",
+function buildWriteTool(router?: InternalUrlRouter): Tool {
+	return {
+	name: "write",
 	executionMode: "parallel",
-	label: "Write File",
+	label: "Write",
 	hookAliases: ["Write"],
 	description:
+		`Write a file or invoke an xd:// tool device. For a device, content is a JSON object encoded as a string; read xd://<name> for its schema. ` +
 		`Create or overwrite a complete file. Creates parent directories. ` +
-		`Overwriting an existing file requires reading it with read_file first. ` +
-		`Output is truncated to \${DEFAULT_MAX_LINES} lines or ` +
+		`Overwriting an existing file requires reading it with read first. ` +
+		`Output is truncated to ${DEFAULT_MAX_LINES} lines or ` +
 		`${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first). ` +
 		`With append: true, appends content to the end of the file instead of ` +
-		`overwriting. Useful for streaming large files across multiple tool calls.`,
+		`overwriting. Useful for streaming large files across multiple tool calls. ` +
+		`Supports .zip-family (.zip, .jar, .war, .ear, .apk) and .tar-family (.tar, .tar.gz, .tgz) ` +
+		`archive entries via archive.ext:path/inside/archive (whole-archive rewrite under the hood; ` +
+		`other archive formats are not supported at all). Requires reading the archive first when it ` +
+		`already exists, same as any other overwrite; a new archive is created on first write. ` +
+		`Supports SQLite row writes via db.sqlite:table (insert, auto-creating the table from the JSON ` +
+		`body's keys if needed), db.sqlite:table:rowid (update with a JSON object body, delete with empty ` +
+		`content). SQLite writes do not require reading the database first.`,
 	promptSnippet:
 		"Create or overwrite files; automatically create parent directories; use append: true to append",
 	promptGuidelines: [
-		"Use write_file for new files or complete rewrites",
+		"Use write for new files or complete rewrites",
 		"Use append: true to add content to the end of an existing file without overwriting it",
+		"Use write with archive.ext:path/inside/archive or db.sqlite:table[:rowid] to write archive members or SQLite rows; archive writes require reading the container first, SQLite writes do not",
 	],
 	parameters: {
 		type: "object",
 		properties: {
-			path: { type: "string", description: "File path to write" },
-			content: { type: "string", description: "Complete file contents" },
+			path: { type: "string", description: "File path or xd://<device> URL" },
+			content: {
+				type: "string",
+				description:
+					"Complete file contents, or a JSON object encoded as a string for a device",
+			},
 			append: {
 				type: "boolean",
 				description:
@@ -80,31 +102,95 @@ export const write_file: Tool = {
 		const content = String(args.content ?? "");
 		const append = Boolean(args.append);
 		const scheme = extractInternalUrlScheme(filePath);
-		// xd:// virtual device dispatch.
 		if (scheme === "xd") {
-			const deviceName = filePath.slice("xd://".length);
-			const deviceDocs = readXdDeviceDocs(deviceName);
-			if (deviceDocs !== null) {
-				// Writing to a device that exists but has no handler yet.
-				// Return the docs so the model knows how to dispatch properly.
-				return `Device "${deviceName}" is not mounted. See documentation:\n\n${deviceDocs}`;
-			}
-			if (!hasXdDevice(deviceName)) {
-				return `Unknown xd:// device: ${deviceName}. Run read_file with path="xd://" to list available devices, or run write_file with path="./xd://<name>" (prefixed with ./) to create a literal file.`;
-			}
-			let parsedArgs: Record<string, unknown>;
-			try {
-				parsedArgs = JSON.parse(content) as Record<string, unknown>;
-			} catch {
-				return `Invalid JSON for xd:// device "${deviceName}": ${content.slice(0, 100)}...`;
-			}
-			const result = await dispatchXdDevice(deviceName, parsedArgs);
-			return result;
+			return {
+				content:
+					"Error: Device calls must be dispatched through ToolRegistry so target permissions and hooks run.",
+				isError: true,
+			};
 		}
 
 		if (scheme) {
-			return `Error: write_file does not support ${scheme}:// links. Use ./ before the path if a literal file is intended.`;
+			if (!router?.canResolve(filePath)) {
+				return `Error: write does not support ${scheme}:// links. Use ./ before the path if a literal file is intended.`;
+			}
+			if (append) {
+				return `Error: append is not supported for ${scheme}:// links.`;
+			}
+			try {
+				await router.write(filePath, content, ctx);
+				return `Wrote ${filePath} (${Buffer.byteLength(content, "utf-8")} bytes)`;
+			} catch (error) {
+				return `Error: ${error instanceof Error ? error.message : String(error)}`;
+			}
 		}
+
+		if (!scheme) {
+			const cwd = ctx.cwd ?? process.cwd();
+
+			const archiveMatch = detectArchiveSelector(filePath, cwd, { requireExisting: false });
+			if (archiveMatch && archiveMatch.selector) {
+				if (append) return "Error: append is not supported for archive members.";
+				return withFileMutationQueue(archiveMatch.absolutePath, async () => {
+					const containerExists = fs.existsSync(archiveMatch.absolutePath);
+					if (containerExists) {
+						if (!hasBeenRead(archiveMatch.absolutePath)) {
+							return (
+								`${archiveMatch.absolutePath} already exists but has not been read. ` +
+								"Read it with read before overwriting."
+							);
+						}
+						if (isStaleSinceRead(archiveMatch.absolutePath)) {
+							return (
+								`${archiveMatch.absolutePath} has been modified since it was last read. ` +
+								"Read it again before overwriting."
+							);
+						}
+					}
+					ensureInsideCwd(ctx.cwd, archiveMatch.absolutePath, ctx.allowedPaths, ctx.allowAllPaths);
+					const family = archiveFamilyFromPath(archiveMatch.absolutePath);
+					if (!family) return `Error: unsupported archive format for ${archiveMatch.absolutePath}.`;
+					try {
+						const { created } = await writeArchiveMember(
+							archiveMatch.absolutePath,
+							family,
+							archiveMatch.selector,
+							content,
+						);
+						refreshAfterWrite(archiveMatch.absolutePath);
+						return `${created ? "Created" : "Updated"} ${filePath} (${Buffer.byteLength(content, "utf-8")} bytes)`;
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				});
+			}
+
+			const sqliteMatch = detectSqliteSelector(filePath, cwd, { requireExisting: false });
+			if (sqliteMatch && sqliteMatch.selector) {
+				if (append) return "Error: append is not supported for SQLite rows.";
+				return withFileMutationQueue(sqliteMatch.absolutePath, async () => {
+					ensureInsideCwd(ctx.cwd, sqliteMatch.absolutePath, ctx.allowedPaths, ctx.allowAllPaths);
+					const [table, rowid] = sqliteMatch.selector.split(":");
+					if (!table) return "Error: SQLite writes require a table name, e.g. db.sqlite:table.";
+					const trimmed = content.trim();
+					try {
+						let resultText: string;
+						if (rowid === undefined) {
+							resultText = insertSqliteRow(sqliteMatch.absolutePath, table, content);
+						} else if (trimmed.length === 0) {
+							resultText = deleteSqliteRow(sqliteMatch.absolutePath, table, rowid);
+						} else {
+							resultText = updateSqliteRow(sqliteMatch.absolutePath, table, rowid, content);
+						}
+						refreshAfterWrite(sqliteMatch.absolutePath);
+						return resultText;
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				});
+			}
+		}
+
 		const resolved = resolvePath(ctx.cwd, filePath);
 		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 
@@ -122,7 +208,7 @@ export const write_file: Tool = {
 				if (!hasBeenRead(resolved)) {
 					return (
 						`${resolved} already exists but has not been read. ` +
-						"Read it with read_file before overwriting, or use edit_file for targeted changes."
+						"Read it with read before overwriting, or use edit for targeted changes."
 					);
 				}
 				if (isStaleSinceRead(resolved)) {
@@ -140,7 +226,7 @@ export const write_file: Tool = {
 				if (!hasBeenRead(resolved)) {
 					return (
 						`${resolved} already exists but has not been read. ` +
-						"Read it with read_file before appending, or use write_file for a complete overwrite."
+						"Read it with read before appending, or use write for a complete overwrite."
 					);
 				}
 				if (isStaleSinceRead(resolved)) {
@@ -165,14 +251,14 @@ export const write_file: Tool = {
 				refreshAfterWrite(resolved);
 				result =
 					`Appended to ${resolved} (+${chunkBytes} bytes, file size now ${formatSize(chunkBytes + fileStat.size - Buffer.byteLength(content, "utf-8"))}). ` +
-					"Call write_file with the next chunk, or stop if this was the last one.";
+					"Call write with the next chunk, or stop if this was the last one.";
 			} else if (append && !fileExists) {
 				// Append mode with new file: just create and write.
 				await appendToFile(resolved, content);
 				refreshAfterWrite(resolved);
 				result =
 					`Created ${resolved} (${chunkBytes} bytes) with append mode. ` +
-					"Call write_file with the next chunk, or stop if this was the last one.";
+					"Call write with the next chunk, or stop if this was the last one.";
 			} else {
 				// Overwrite mode (normal) — use mutation session for stale detection.
 				const beforeContent = fileExists
@@ -237,4 +323,28 @@ export const write_file: Tool = {
 			return result;
 		});
 	},
-};
+	};
+}
+
+export function createWriteTool(
+	devices?: XdDeviceRegistry,
+	router?: InternalUrlRouter,
+): Tool {
+	return {
+		...buildWriteTool(router),
+		resolveCall: args => {
+			if (
+				typeof args.path !== "string" ||
+				extractInternalUrlScheme(args.path) !== "xd"
+			)
+				return undefined;
+			if (args.append)
+				throw new Error("append is not supported for xd:// devices.");
+			if (!devices)
+				throw new Error("No xd:// devices are mounted in this session.");
+			return devices.resolveCall(args.path.slice("xd://".length), args.content);
+		},
+	};
+}
+
+export const write = createWriteTool();

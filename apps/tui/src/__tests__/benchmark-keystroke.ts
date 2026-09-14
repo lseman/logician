@@ -112,12 +112,12 @@ function genRandomText(length: number, seed: number): string {
 
 function genToolResult(resultSize: number, turnIdx: number): ToolExecution {
 	const toolNames = [
-		"read_file",
-		"write_file",
-		"edit_file",
+		"read",
+		"write",
+		"edit",
 		"grep",
 		"bash",
-		"find",
+		"glob",
 		"git",
 	];
 	const tool = toolNames[turnIdx % toolNames.length];

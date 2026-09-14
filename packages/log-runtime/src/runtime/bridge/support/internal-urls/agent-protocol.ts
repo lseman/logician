@@ -11,6 +11,7 @@ import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
 export class AgentProtocolHandler implements ProtocolHandler {
 	readonly scheme = "agent";
+	readonly immutable = true;
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const registry = AgentOutputRegistry.instance();
