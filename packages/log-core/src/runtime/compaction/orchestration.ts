@@ -17,6 +17,7 @@ import {
 	compactToFit,
 	shakeCompaction,
 } from "./engine.ts";
+import type { FrameConfig } from "./snapcompact.ts";
 
 export interface CompactionOutcome {
 	changed: boolean;
@@ -34,6 +35,7 @@ export interface CompactionOutcome {
  * - "shake": drop recoverable heavy content without LLM (bash output, large
  *   tool results, oversized messages)
  * - "auto": try shake first, fall back to LLM if shake wasn't enough
+ * - "snapcompact": local, deterministic bitmap frame rendering (no LLM call)
  */
 export async function runCompaction(
 	backend: LLMBackend,
@@ -41,11 +43,13 @@ export async function runCompaction(
 	tokensBefore: number,
 	options: {
 		reason: "auto" | "manual";
-		mode?: "llm" | "shake" | "auto" | "remote" | undefined;
+		mode?: "llm" | "shake" | "auto" | "remote" | "snapcompact" | undefined;
 		presetSummary?: string | undefined;
 		temperature?: number | undefined;
 		maxTokens?: number | undefined;
 		thinkingLevel?: ThinkingLevel | undefined;
+		/** Provider-aware frame sizing, used only when mode is "snapcompact". */
+		frameOptions?: FrameConfig | undefined;
 	},
 ): Promise<CompactionOutcome> {
 	const { mode = "auto" } = options;
@@ -106,6 +110,24 @@ export async function runCompaction(
 			messages: remoteResult.messages,
 			tokensBefore,
 			tokensAfter: remoteResult.tokensAfter,
+		};
+	}
+
+	// Snapcompact mode: local, deterministic bitmap frame rendering — no LLM call.
+	if (mode === "snapcompact") {
+		const snapcompactResult = await compactToFit(shakeResult.messages, {
+			triggerTokens: 0,
+			settings: {
+				mode: "snapcompact",
+				...(options.frameOptions ? { frameOptions: options.frameOptions } : {}),
+			},
+		});
+
+		return {
+			changed: snapcompactResult.changed,
+			messages: snapcompactResult.messages,
+			tokensBefore,
+			tokensAfter: snapcompactResult.tokensAfter,
 		};
 	}
 

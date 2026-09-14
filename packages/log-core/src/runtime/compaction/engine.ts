@@ -12,7 +12,7 @@
 // - Usage metrics: tokensBefore / tokensAfter on compaction results
 
 import { randomUUID } from "node:crypto";
-import { compact as snapcompact, type Frame, type FrameConfig, computeFrameTokenOverhead } from "./snapcompact.ts";
+import { compact as snapcompact, type Archive, type Frame, type FrameConfig, computeFrameTokenOverhead, PRESERVE_KEY } from "./snapcompact.ts";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AgentMessage,
@@ -133,9 +133,12 @@ function estimateCompressableTokens(
 	} else if (role === "custom") {
 		chars += textContent.length;
 	} else if (role === "branchSummary" || role === "compactionSummary") {
-		const branchMsg = msg as { summary?: string; snapcompact?: Record<string, unknown> };
-		chars += branchMsg.summary?.length ?? 0;
+		// CompactableMessage stores this text under `.content` (already read
+		// above as `textContent`) — `.summary` is a stale field name that is
+		// never set on the actual constructed message and always undefined.
+		chars += textContent.length;
 		// Add token overhead for PNG frames stored in snapcompact archive.
+		const branchMsg = msg as { snapcompact?: Record<string, unknown> };
 		const archive = branchMsg.snapcompact as { snapcompact?: { frames?: Array<{ data: string }> } } | undefined;
 		const frames = archive?.snapcompact?.frames ?? [];
 		chars += computeFrameTokenOverhead(frames as Frame[]) * 4; // rough char-equiv: 4 chars ≈ 1 token
@@ -733,6 +736,8 @@ async function compactToFitFull(
 			shape?: { cols?: number; rows?: number; lineRepeat?: number };
 			serializeOptions?: { provider?: string; render?: boolean };
 			render?: boolean;
+			previousArchive?: Archive;
+			previousSummary?: string;
 		} = { maxFrames: frameConfig?.maxFrames ?? 40 };
 		if (firstKeptId) compactOpts.firstKeptEntryId = firstKeptId;
 		if (frameConfig) {
@@ -749,6 +754,25 @@ async function compactToFitFull(
 				compactOpts.serializeOptions = opts;
 			}
 		}
+
+		// Fold forward a prior compactionSummary about to be cut away, so its
+		// archived text/frames aren't silently dropped — serializeMessages()
+		// only understands user/assistant/toolResult roles and would otherwise
+		// contribute nothing for it.
+		const priorSummary = [...messagesToSummarize]
+			.reverse()
+			.find(m => m.role === "compactionSummary");
+		if (priorSummary) {
+			const priorArchive = (
+				priorSummary.snapcompact as Record<string, unknown> | undefined
+			)?.[PRESERVE_KEY] as Archive | undefined;
+			if (priorArchive) {
+				compactOpts.previousArchive = priorArchive;
+			} else if (typeof priorSummary.content === "string" && priorSummary.content) {
+				compactOpts.previousSummary = priorSummary.content;
+			}
+		}
+
 		const result = await snapcompact(messagesToSummarize, compactOpts);
 
 		compacted = [
@@ -991,4 +1015,4 @@ export function shakeCompaction(
 }
 
 /** Compaction mode: shake, auto, or llm. */
-export type CompactionMode = "shake" | "auto" | "llm";
+export type CompactionMode = "shake" | "auto" | "llm" | "snapcompact";

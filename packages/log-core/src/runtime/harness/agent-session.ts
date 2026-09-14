@@ -1127,7 +1127,9 @@ export class AgentSession {
 
 	// ── Compaction ─────────────────────────────────────────────────────────
 
-	async compact(mode?: "shake" | "auto" | "llm"): Promise<number | null> {
+	async compact(
+		mode?: "shake" | "auto" | "llm" | "snapcompact",
+	): Promise<number | null> {
 		this.assertIdle("compact");
 		if (!this.session.conversation.history.length) return null;
 		return this.runInPhase("compaction", "compact", () =>

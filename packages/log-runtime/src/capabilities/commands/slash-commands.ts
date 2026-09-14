@@ -284,7 +284,7 @@ export function createSlashCommands(
 		),
 		cmd(
 			"/compact",
-			"Compact history (options: shake, auto, llm)",
+			"Compact history (options: shake, auto, llm, snapcompact)",
 			"bridge",
 			true,
 			{

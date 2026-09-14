@@ -165,7 +165,7 @@ export class ConversationSession {
 		return (await this.currentSession?.abort()) ?? null;
 	}
 
-	async compact(mode?: "shake" | "auto" | "llm"): Promise<{
+	async compact(mode?: "shake" | "auto" | "llm" | "snapcompact"): Promise<{
 		tokensSaved: number;
 		tokensBefore: number;
 		tokensAfter: number;

@@ -10,7 +10,7 @@ test("convertToLlm attaches snapcompact frames as images on the compaction summa
 	const messages: AgentMessage[] = [
 		{
 			role: "compactionSummary",
-			summary: "Archived 1,234 chars. Rendered onto 2 frames.",
+			content: "Archived 1,234 chars. Rendered onto 2 frames.",
 			tokensBefore: 100,
 			timestamp: 0,
 			snapcompact: {
@@ -58,7 +58,7 @@ test("convertToLlm omits images and the frames note when no frames are present",
 	const messages: AgentMessage[] = [
 		{
 			role: "compactionSummary",
-			summary: "No prior history.",
+			content: "No prior history.",
 			tokensBefore: 0,
 			timestamp: 0,
 		},

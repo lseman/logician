@@ -56,10 +56,13 @@ export type CompactableMessage = {
  * (capabilities layer) can share it without capabilities depending on runtime. */
 export const SNAPCOMPACT_PRESERVE_KEY = "snapcompact";
 
-/** Compaction summary text — emitted after context compaction. */
+/** Compaction summary text — emitted after context compaction. Field is named
+ * `content` (not `summary`) to match the shape the compaction engine actually
+ * constructs (`CompactableMessage.content`) — every real construction site
+ * writes `content`, so a `summary` field here silently read as `undefined`. */
 export interface CompactionSummaryMessage {
 	role: "compactionSummary";
-	summary: string;
+	content: string;
 	tokensBefore: number;
 	timestamp: number;
 	/** Files read in the compacted history. */

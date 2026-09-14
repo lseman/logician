@@ -1087,7 +1087,7 @@ export class AgentRuntime {
 	}
 
 	/** Manual context compaction. Returns { tokensSaved, tokensBefore, tokensAfter } or null if nothing to compact. */
-	async compact(mode?: "shake" | "auto" | "llm"): Promise<{
+	async compact(mode?: "shake" | "auto" | "llm" | "snapcompact"): Promise<{
 		tokensSaved: number;
 		tokensBefore: number;
 		tokensAfter: number;

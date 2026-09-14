@@ -145,6 +145,22 @@ export class SessionCompactor {
 			});
 
 			const config = this.dependencies.config();
+			// A caller-supplied mode wins; otherwise fall back to the configured
+			// default mode — only the "snapcompact" case (CompactionSettings.mode
+			// also allows "remote"/"auto"/"shake", a pre-existing, differently
+			// shaped union not unified here).
+			const effectiveMode: CompactionMode | undefined =
+				mode ?? (this.settings.mode === "snapcompact" ? "snapcompact" : undefined);
+			// Auto-derive the vision-model provider hint from the live model
+			// unless explicitly configured — otherwise PROVIDER_COLS tuning is
+			// unreachable.
+			const frameOptions =
+				effectiveMode === "snapcompact"
+					? {
+							...this.settings.frameOptions,
+							provider: this.settings.frameOptions?.provider ?? config.model,
+						}
+					: undefined;
 			const result = await runCompaction(
 				this.dependencies.backend(),
 				messages,
@@ -154,7 +170,8 @@ export class SessionCompactor {
 					presetSummary: preResult?.summary,
 					temperature: config.temperature,
 					maxTokens: config.maxTokens,
-					mode,
+					mode: effectiveMode,
+					...(frameOptions ? { frameOptions } : {}),
 				},
 			);
 

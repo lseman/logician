@@ -138,6 +138,7 @@ export {
 	type Archive,
 	type CompactResult,
 	type Frame,
+	type FrameConfig,
 	type SerializeOptions,
 	PRESERVE_KEY,
 } from "./runtime/compaction/snapcompact.ts";

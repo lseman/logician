@@ -92,7 +92,7 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 					role: "user",
 					content:
 						COMPACTION_SUMMARY_PREFIX +
-						m.summary +
+						m.content +
 						COMPACTION_SUMMARY_SUFFIX +
 						(frames.length ? COMPACTION_FRAMES_NOTE : ""),
 					timestamp: m.timestamp,

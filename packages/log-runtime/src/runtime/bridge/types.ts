@@ -1,6 +1,7 @@
 import type {
 	AgentConfig,
 	AgentModelConfig,
+	FrameConfig,
 	ThinkingFormat,
 	Tool,
 	TruncationConfig,
@@ -122,6 +123,10 @@ export interface AgentBridgeOptions {
 		enabled?: boolean;
 		reserveTokens?: number;
 		keepRecentTokens?: number;
+		/** Compaction strategy default; only "snapcompact" is selectable here today. */
+		mode?: "snapcompact";
+		/** Provider-aware frame sizing for snapcompact PNG rendering. */
+		frameOptions?: FrameConfig;
 	};
 	maxParallelAgents?: number;
 	continuationEnabled?: boolean;

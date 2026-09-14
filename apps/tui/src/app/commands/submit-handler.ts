@@ -55,12 +55,13 @@ export function createSlashSubmitHandler(
 			}
 			if (match && match.command === "/compact") {
 				const trimmed = args.trim().toLowerCase();
-				const validMode: "shake" | "auto" | "llm" | undefined = [
+				const validMode: "shake" | "auto" | "llm" | "snapcompact" | undefined = [
 					"shake",
 					"auto",
 					"llm",
+					"snapcompact",
 				].includes(trimmed)
-					? (trimmed as "shake" | "auto" | "llm")
+					? (trimmed as "shake" | "auto" | "llm" | "snapcompact")
 					: undefined;
 				void ctx.bridge.compact(validMode).then(result => {
 					if (result === null) {
