@@ -15,6 +15,11 @@ import {
 const embedder = new TransformersEmbedder();
 const pipelines = new Map<string, IngestionPipeline>();
 
+function requireCwd(ctx: ToolContext): string {
+	if (!ctx.cwd) throw new Error("cwd is required for RAG operations.");
+	return ctx.cwd;
+}
+
 export function getPipeline(cwd: string): IngestionPipeline {
 	let pipeline = pipelines.get(cwd);
 	if (!pipeline) {
@@ -176,9 +181,4 @@ export const rag_delete: Tool = {
 	},
 };
 
-export const rag_tools: Tool[] = [
-	rag_ingest,
-	rag_search,
-	rag_list,
-	rag_delete,
-];
+export const rag_tools: Tool[] = [rag_ingest, rag_search, rag_list, rag_delete];
