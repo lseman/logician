@@ -45,16 +45,27 @@ async function readArchiveResource(
 	match: ContainerSelectorMatch,
 	ctx: ToolContext,
 ): Promise<ReadResource> {
-	ensureInsideCwd(ctx.cwd, match.absolutePath, ctx.allowedPaths, ctx.allowAllPaths);
+	ensureInsideCwd(
+		ctx.cwd,
+		match.absolutePath,
+		ctx.allowedPaths,
+		ctx.allowAllPaths,
+	);
 	const family = archiveFamilyFromPath(match.absolutePath);
-	if (!family) throw new Error(`Unsupported archive format: ${match.absolutePath}`);
+	if (!family)
+		throw new Error(`Unsupported archive format: ${match.absolutePath}`);
 
 	if (!match.selector) {
 		const content = await listArchiveEntries(match.absolutePath, family);
 		return {
 			kind: "container",
 			path: match.absolutePath,
-			resource: { url: input, content, sourcePath: match.absolutePath, isDirectory: true },
+			resource: {
+				url: input,
+				content,
+				sourcePath: match.absolutePath,
+				isDirectory: true,
+			},
 		};
 	}
 
@@ -85,9 +96,16 @@ function readSqliteResource(
 	match: ContainerSelectorMatch,
 	ctx: ToolContext,
 ): ReadResource {
-	ensureInsideCwd(ctx.cwd, match.absolutePath, ctx.allowedPaths, ctx.allowAllPaths);
+	ensureInsideCwd(
+		ctx.cwd,
+		match.absolutePath,
+		ctx.allowedPaths,
+		ctx.allowAllPaths,
+	);
 	if (!isSqliteFile(match.absolutePath)) {
-		throw new Error(`${match.absolutePath} does not look like a SQLite database.`);
+		throw new Error(
+			`${match.absolutePath} does not look like a SQLite database.`,
+		);
 	}
 
 	let content: string;

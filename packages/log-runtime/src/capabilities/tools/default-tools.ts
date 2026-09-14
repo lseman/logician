@@ -162,11 +162,16 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		...(opts.lspPool ? [createLspTool(opts.lspPool)] : []),
 		// ── Memoriam (long-term memory) ─────────────────────────────────
 		...(opts.memoriam?.isEnabled() && opts.sessionId
-			? [createRetainTool({ gateway: opts.memoriam, sessionId: opts.sessionId })]
+			? [
+					createRetainTool({
+						gateway: opts.memoriam,
+						sessionId: opts.sessionId,
+					}),
+				]
 			: []),
 	];
 	if (opts.xdevEnabled !== false) {
-		for (const tool of tools.filter(isDiscoverableTool)) devices.mount(tool);
+		for (const tool of filterDiscoverableTools(tools)) devices.mount(tool);
 	}
 	return tools;
 }

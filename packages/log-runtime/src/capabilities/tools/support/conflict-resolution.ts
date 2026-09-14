@@ -157,7 +157,10 @@ export function resolveConflictsInFile(
 		if (index !== undefined && block.index !== index) continue;
 		const resolved = resolveConflictBlock(block, strategy, baseContent);
 		const start = block.offset + shift;
-		result = result.slice(0, start) + resolved + result.slice(start + block.content.length);
+		result =
+			result.slice(0, start) +
+			resolved +
+			result.slice(start + block.content.length);
 		shift += resolved.length - block.content.length;
 	}
 

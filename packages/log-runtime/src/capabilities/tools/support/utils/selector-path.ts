@@ -42,7 +42,10 @@ function buildPattern(extensions: readonly string[]): RegExp {
 const ARCHIVE_PATTERN = buildPattern(ARCHIVE_EXTENSIONS);
 const SQLITE_PATTERN = buildPattern(SQLITE_EXTENSIONS);
 
-function candidatesFor(input: string, pattern: RegExp): ContainerSelectorMatch[] {
+function candidatesFor(
+	input: string,
+	pattern: RegExp,
+): ContainerSelectorMatch[] {
 	pattern.lastIndex = 0;
 	const candidates: Array<{ containerPath: string; selector: string }> = [];
 	let match: RegExpExecArray | null;
@@ -80,7 +83,10 @@ function detect(
 				continue;
 			}
 			if (!stat.isFile()) continue;
-		} else if (fs.existsSync(absolutePath) && !fs.statSync(absolutePath).isFile()) {
+		} else if (
+			fs.existsSync(absolutePath) &&
+			!fs.statSync(absolutePath).isFile()
+		) {
 			continue;
 		}
 		return { ...candidate, absolutePath };

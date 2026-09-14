@@ -72,8 +72,7 @@ export const glob: Tool = {
 		"A bare directory lists its whole subtree recursively; a bare file path returns just that file. " +
 		"Respects .gitignore. Includes hidden files. Directories are suffixed with '/'. " +
 		`Truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB.`,
-	promptSnippet:
-		"List a directory (recursively) or find files by glob pattern",
+	promptSnippet: "List a directory (recursively) or find files by glob pattern",
 	promptGuidelines: [
 		"Use glob to browse structure or find files by name; use grep for content search",
 	],

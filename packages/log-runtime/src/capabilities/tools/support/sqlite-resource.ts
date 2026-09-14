@@ -40,7 +40,10 @@ function sanitizeCell(value: unknown): string {
 	if (Buffer.isBuffer(value)) text = `<blob ${value.length}B>`;
 	else if (value instanceof Uint8Array) text = `<blob ${value.length}B>`;
 	else text = String(value);
-	text = text.replace(/\r\n/g, "\\r\\n").replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+	text = text
+		.replace(/\r\n/g, "\\r\\n")
+		.replace(/\n/g, "\\n")
+		.replace(/\r/g, "\\r");
 	if (text.length > CELL_CHAR_LIMIT) {
 		text = `${text.slice(0, CELL_CHAR_LIMIT)}... [truncated]`;
 	}
@@ -90,11 +93,17 @@ function assertHasRowid(db: DatabaseSync, table: string): void {
 		.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
 		.get(table) as { sql?: string } | undefined;
 	if (row?.sql && /\bWITHOUT\s+ROWID\b/i.test(row.sql)) {
-		throw new Error(`Table ${table} has no rowid (WITHOUT ROWID); not supported in this scope.`);
+		throw new Error(
+			`Table ${table} has no rowid (WITHOUT ROWID); not supported in this scope.`,
+		);
 	}
 }
 
-function withDatabase<T>(absolutePath: string, readOnly: boolean, fn: (db: DatabaseSync) => T): T {
+function withDatabase<T>(
+	absolutePath: string,
+	readOnly: boolean,
+	fn: (db: DatabaseSync) => T,
+): T {
 	const db = new DatabaseSync(absolutePath, readOnly ? { readOnly: true } : {});
 	try {
 		return fn(db);
@@ -116,9 +125,14 @@ export function listSqliteTables(absolutePath: string): string {
 		return tables
 			.map(t => {
 				const count = db
-					.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM "${t.name}" LIMIT ?)`)
+					.prepare(
+						`SELECT COUNT(*) AS n FROM (SELECT 1 FROM "${t.name}" LIMIT ?)`,
+					)
 					.get(ROW_COUNT_PROBE_CAP + 1) as { n: number };
-				const rows = count.n > ROW_COUNT_PROBE_CAP ? `${ROW_COUNT_PROBE_CAP}+` : String(count.n);
+				const rows =
+					count.n > ROW_COUNT_PROBE_CAP
+						? `${ROW_COUNT_PROBE_CAP}+`
+						: String(count.n);
 				return `${t.name} (${rows} rows)`;
 			})
 			.join("\n");
@@ -130,21 +144,29 @@ export function readSqliteTable(absolutePath: string, table: string): string {
 	return withDatabase(absolutePath, true, db => {
 		if (!tableExists(db, table)) throw new Error(`No such table: ${table}`);
 		const schema = db
-			.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
+			.prepare(
+				`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+			)
 			.get(table) as { sql: string };
-		const rows = db.prepare(`SELECT rowid AS rowid, * FROM "${table}" LIMIT ?`).all(SAMPLE_ROW_LIMIT) as Row[];
+		const rows = db
+			.prepare(`SELECT rowid AS rowid, * FROM "${table}" LIMIT ?`)
+			.all(SAMPLE_ROW_LIMIT) as Row[];
 		return [schema.sql, "", renderRows(rows)].join("\n");
 	});
 }
 
-export function readSqliteRow(absolutePath: string, table: string, rowid: string): string | undefined {
+export function readSqliteRow(
+	absolutePath: string,
+	table: string,
+	rowid: string,
+): string | undefined {
 	assertValidTableName(table);
 	return withDatabase(absolutePath, true, db => {
 		if (!tableExists(db, table)) throw new Error(`No such table: ${table}`);
 		assertHasRowid(db, table);
-		const row = db.prepare(`SELECT rowid AS rowid, * FROM "${table}" WHERE rowid = ?`).get(rowid) as
-			| Row
-			| undefined;
+		const row = db
+			.prepare(`SELECT rowid AS rowid, * FROM "${table}" WHERE rowid = ?`)
+			.get(rowid) as Row | undefined;
 		if (!row) return undefined;
 		return renderRows([row]);
 	});
@@ -153,7 +175,8 @@ export function readSqliteRow(absolutePath: string, table: string, rowid: string
 // ── writes ──────────────────────────────────────────────────────────────────
 
 function inferColumnType(value: unknown): string {
-	if (typeof value === "number") return Number.isInteger(value) ? "INTEGER" : "REAL";
+	if (typeof value === "number")
+		return Number.isInteger(value) ? "INTEGER" : "REAL";
 	if (typeof value === "boolean") return "INTEGER";
 	return "TEXT";
 }
@@ -180,21 +203,32 @@ function parseJsonObject(content: string): Row {
 	return parsed as Row;
 }
 
-export function insertSqliteRow(absolutePath: string, table: string, content: string): string {
+export function insertSqliteRow(
+	absolutePath: string,
+	table: string,
+	content: string,
+): string {
 	assertValidTableName(table);
 	const values = parseJsonObject(content);
 	const columns = Object.keys(values);
-	if (columns.length === 0) throw new Error("Insert requires at least one column in the JSON body.");
+	if (columns.length === 0)
+		throw new Error("Insert requires at least one column in the JSON body.");
 	for (const col of columns) assertValidColumnName(col);
 	return withDatabase(absolutePath, false, db => {
 		if (!tableExists(db, table)) {
-			const columnDefs = columns.map(col => `"${col}" ${inferColumnType(values[col])}`).join(", ");
+			const columnDefs = columns
+				.map(col => `"${col}" ${inferColumnType(values[col])}`)
+				.join(", ");
 			db.exec(`CREATE TABLE IF NOT EXISTS "${table}" (${columnDefs})`);
 		}
 		const placeholders = columns.map(() => "?").join(", ");
 		const columnList = columns.map(col => `"${col}"`).join(", ");
-		const stmt = db.prepare(`INSERT INTO "${table}" (${columnList}) VALUES (${placeholders})`);
-		const result = stmt.run(...(columns.map(col => toBindValue(values[col])) as never[]));
+		const stmt = db.prepare(
+			`INSERT INTO "${table}" (${columnList}) VALUES (${placeholders})`,
+		);
+		const result = stmt.run(
+			...(columns.map(col => toBindValue(values[col])) as never[]),
+		);
 		return `Inserted into ${table} (rowid ${result.lastInsertRowid})`;
 	});
 }
@@ -208,13 +242,16 @@ export function updateSqliteRow(
 	assertValidTableName(table);
 	const values = parseJsonObject(content);
 	const columns = Object.keys(values);
-	if (columns.length === 0) throw new Error("Update requires at least one column in the JSON body.");
+	if (columns.length === 0)
+		throw new Error("Update requires at least one column in the JSON body.");
 	for (const col of columns) assertValidColumnName(col);
 	return withDatabase(absolutePath, false, db => {
 		if (!tableExists(db, table)) throw new Error(`No such table: ${table}`);
 		assertHasRowid(db, table);
 		const assignments = columns.map(col => `"${col}" = ?`).join(", ");
-		const stmt = db.prepare(`UPDATE "${table}" SET ${assignments} WHERE rowid = ?`);
+		const stmt = db.prepare(
+			`UPDATE "${table}" SET ${assignments} WHERE rowid = ?`,
+		);
 		const result = stmt.run(
 			...(columns.map(col => toBindValue(values[col])) as never[]),
 			rowid as unknown as never,
@@ -224,7 +261,11 @@ export function updateSqliteRow(
 	});
 }
 
-export function deleteSqliteRow(absolutePath: string, table: string, rowid: string): string {
+export function deleteSqliteRow(
+	absolutePath: string,
+	table: string,
+	rowid: string,
+): string {
 	assertValidTableName(table);
 	return withDatabase(absolutePath, false, db => {
 		if (!tableExists(db, table)) throw new Error(`No such table: ${table}`);

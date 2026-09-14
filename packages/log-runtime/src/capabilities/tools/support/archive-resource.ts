@@ -21,16 +21,23 @@ const TAR_GZ_EXTENSIONS = [".tar.gz", ".tgz"];
 
 export const MAX_ARCHIVE_MEMBER_BYTES = 8 * 1024 * 1024; // matches artifact-protocol.ts's MAX_ARTIFACT_BYTES
 
-export function archiveFamilyFromPath(absolutePath: string): ArchiveFamily | undefined {
+export function archiveFamilyFromPath(
+	absolutePath: string,
+): ArchiveFamily | undefined {
 	const lower = absolutePath.toLowerCase();
 	if (ZIP_EXTENSIONS.some(ext => lower.endsWith(ext))) return "zip";
-	if (TAR_GZ_EXTENSIONS.some(ext => lower.endsWith(ext)) || lower.endsWith(".tar"))
+	if (
+		TAR_GZ_EXTENSIONS.some(ext => lower.endsWith(ext)) ||
+		lower.endsWith(".tar")
+	)
 		return "tar";
 	return undefined;
 }
 
 function isGzipped(absolutePath: string): boolean {
-	return TAR_GZ_EXTENSIONS.some(ext => absolutePath.toLowerCase().endsWith(ext));
+	return TAR_GZ_EXTENSIONS.some(ext =>
+		absolutePath.toLowerCase().endsWith(ext),
+	);
 }
 
 function assertSafeMemberPath(memberPath: string): void {
@@ -50,7 +57,10 @@ function tempPathFor(absolutePath: string): string {
 	);
 }
 
-async function renameOver(tempPath: string, absolutePath: string): Promise<void> {
+async function renameOver(
+	tempPath: string,
+	absolutePath: string,
+): Promise<void> {
 	await fs.promises.mkdir(path.dirname(absolutePath), { recursive: true });
 	await fs.promises.rename(tempPath, absolutePath);
 }
@@ -70,7 +80,10 @@ function listZipEntries(absolutePath: string): string {
 	return names.join("\n");
 }
 
-function readZipMember(absolutePath: string, memberPath: string): { content: Buffer; size: number } {
+function readZipMember(
+	absolutePath: string,
+	memberPath: string,
+): { content: Buffer; size: number } {
 	const zip = new AdmZip(absolutePath);
 	const entry = zip.getEntry(memberPath);
 	if (!entry) throw new Error(`No such archive member: ${memberPath}`);
@@ -155,8 +168,13 @@ async function readTarEntries(absolutePath: string): Promise<TarEntry[]> {
 	return entries;
 }
 
-function readTarMember(entries: TarEntry[], memberPath: string): { content: Buffer; size: number } {
-	const entry = entries.find(e => e.header.name === memberPath && e.header.type === "file");
+function readTarMember(
+	entries: TarEntry[],
+	memberPath: string,
+): { content: Buffer; size: number } {
+	const entry = entries.find(
+		e => e.header.name === memberPath && e.header.type === "file",
+	);
 	if (!entry) throw new Error(`No such archive member: ${memberPath}`);
 	if (entry.data.length > MAX_ARCHIVE_MEMBER_BYTES) {
 		throw new Error(
@@ -179,7 +197,12 @@ async function writeTarMember(
 	);
 	const created = existingIndex === -1;
 	const newEntry: TarEntry = {
-		header: { name: memberPath, size: buffer.length, type: "file", mode: 0o644 } as tar.Header,
+		header: {
+			name: memberPath,
+			size: buffer.length,
+			type: "file",
+			mode: 0o644,
+		} as tar.Header,
 		data: buffer,
 	};
 	if (existingIndex === -1) entries.push(newEntry);
@@ -206,7 +229,14 @@ async function writeTarMember(
 		}
 
 		for (const entry of entries) {
-			packStream.entry({ name: entry.header.name, size: entry.data.length, mode: entry.header.mode ?? 0o644 }, entry.data);
+			packStream.entry(
+				{
+					name: entry.header.name,
+					size: entry.data.length,
+					mode: entry.header.mode ?? 0o644,
+				},
+				entry.data,
+			);
 		}
 		packStream.finalize();
 	});
@@ -242,6 +272,7 @@ export async function writeArchiveMember(
 	content: string,
 ): Promise<{ created: boolean }> {
 	assertSafeMemberPath(memberPath);
-	if (family === "zip") return writeZipMember(absolutePath, memberPath, content);
+	if (family === "zip")
+		return writeZipMember(absolutePath, memberPath, content);
 	return writeTarMember(absolutePath, memberPath, content);
 }
