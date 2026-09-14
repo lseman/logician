@@ -90,13 +90,13 @@ export async function loadPluginHooks(
 	return out;
 }
 
-export async function readPluginManifest(
+async function readPluginManifest(
 	pluginDir: string,
 ): Promise<Record<string, unknown>> {
 	return readJson(path.join(pluginDir, ".claude-plugin", "plugin.json"));
 }
 
-export async function mergeManifestHooks(
+async function mergeManifestHooks(
 	merged: Record<string, HookDefinition[]>,
 	pluginDir: string,
 	hooks: unknown,
@@ -118,9 +118,7 @@ export async function mergeManifestHooks(
 	}
 }
 
-export function parseHooksDict(
-	data: unknown,
-): Record<string, HookDefinition[]> {
+function parseHooksDict(data: unknown): Record<string, HookDefinition[]> {
 	if (!data || typeof data !== "object" || Array.isArray(data)) return {};
 	const out: Record<string, HookDefinition[]> = {};
 	for (const [eventName, entries] of Object.entries(
@@ -178,7 +176,7 @@ export async function executeLoadedHook(
 	return aggregate;
 }
 
-export async function executeCommand(
+async function executeCommand(
 	command: HookCommand,
 	hook: LoadedHook,
 	source: string,
@@ -277,7 +275,7 @@ export function parseHookResponse(rawOutput: string): HookExecutionResult {
 	return result;
 }
 
-export function applyHookResponseObject(
+function applyHookResponseObject(
 	result: HookExecutionResult,
 	data: Record<string, unknown>,
 ): void {
@@ -422,7 +420,7 @@ export function parseHookEventType(value: string): HookEventType | null {
 	return events.find(event => event.toLowerCase() === clean) || null;
 }
 
-export function mergeHooks(
+function mergeHooks(
 	target: Record<string, HookDefinition[]>,
 	source: Record<string, HookDefinition[]>,
 ): void {
@@ -656,7 +654,7 @@ export async function findPluginManifest(root: string): Promise<string | null> {
 	return null;
 }
 
-export async function fileExists(file: string): Promise<boolean> {
+async function fileExists(file: string): Promise<boolean> {
 	try {
 		await fs.access(file);
 		return true;
@@ -665,7 +663,7 @@ export async function fileExists(file: string): Promise<boolean> {
 	}
 }
 
-export async function pluginNameFor(
+async function pluginNameFor(
 	pluginDir: string,
 	pluginId: string,
 ): Promise<string> {
@@ -705,17 +703,17 @@ export async function copyDir(src: string, dst: string): Promise<void> {
 	}
 }
 
-export function hookType(value: string): HookCommand["type"] {
+function hookType(value: string): HookCommand["type"] {
 	return value === "prompt" || value === "agent" || value === "http"
 		? value
 		: "command";
 }
 
-export function stringOrUndefined(value: unknown): string | undefined {
+function stringOrUndefined(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -729,7 +727,7 @@ export function nowIso(): string {
 	return new Date().toISOString();
 }
 
-export function envNumber(name: string, fallback: number): number {
+function envNumber(name: string, fallback: number): number {
 	const raw = Number(process.env[name] || "");
 	return Number.isFinite(raw) && raw > 0 ? raw : fallback;
 }
