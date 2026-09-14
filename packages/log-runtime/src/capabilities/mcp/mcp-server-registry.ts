@@ -205,6 +205,7 @@ export function getMcpRegistryInstance(): McpServerRegistry | undefined {
 }
 export class McpServerRegistry {
 	private _clients: McpClient[] = [];
+	private _tools: Tool[] = [];
 	private loaded = false;
 
 	get clients(): McpClient[] {
@@ -216,18 +217,24 @@ export class McpServerRegistry {
 		this._clients = value;
 	}
 
+	// Setter for test access — do not use in production code.
+	set tools(value: Tool[]) {
+		this._tools = value;
+	}
+
 	/** Get server info derived from loaded clients. */
 	get servers(): McpServerInfo[] {
 		return this._clients.map(client => ({
 			serverName: client.name,
 			server: {} as McpServerConfig,
 			enabled: true,
-			toolCount: 0,
+			toolCount: this._tools.filter(
+				t => t.origin?.kind === "mcp" && t.origin.server === client.name,
+			).length,
 			loaded: true,
 			configPath: "",
 		}));
 	}
-	private tools: Tool[] = [];
 	private errors: string[] = [];
 	private readonly pluginConfigLoader: () => Promise<
 		Record<string, McpServerConfig>
@@ -274,7 +281,7 @@ export class McpServerRegistry {
 	): Promise<McpLoadResult> {
 		if (this.loaded) {
 			return {
-				tools: this.tools,
+				tools: this._tools,
 				servers: this._clients.length,
 				errors: this.errors,
 			};
@@ -298,7 +305,7 @@ export class McpServerRegistry {
 						usedToolNames,
 					);
 					usedToolNames.add(exposedName);
-					this.tools.push(createMcpTool(client, def, exposedName) as Tool);
+					this._tools.push(createMcpTool(client, def, exposedName) as Tool);
 				}
 				this._clients.push(client);
 				client = null;
@@ -310,7 +317,7 @@ export class McpServerRegistry {
 		}
 
 		return {
-			tools: this.tools,
+			tools: this._tools,
 			servers: this._clients.length,
 			errors: this.errors,
 		};

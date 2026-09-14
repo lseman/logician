@@ -311,6 +311,7 @@ export class AgentRuntime {
 			emit: event => this.emit(event),
 			xdevEnabled: opts.xdevEnabled,
 			todoEnabled: opts.todoEnabled,
+			memoriam: this.memoriam,
 			onToolAdded: _tool => {
 				if (!this.config) return;
 				this.config.tools = this.toolRouter.getDefaultTools();

@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { Tool } from "@logician/log-core";
 import type { McpClient } from "../../capabilities/mcp/client.ts";
 import { McpServerRegistry } from "../../capabilities/mcp/mcp-server-registry.ts";
 
@@ -120,6 +121,47 @@ void test("MCP snapshot includes loaded plugin-provided servers", async () => {
 		assert.deepEqual(snapshot.loadedServers, {
 			plugin_example_server: { toolCount: 1 },
 		});
+	});
+});
+
+void test("servers getter reports real tool counts (used by mcp:// listing)", async () => {
+	await withIsolatedMcpEnvironment(async () => {
+		const manager = new McpServerRegistry();
+		const client: McpClient = {
+			name: "alpha",
+			initialize: async () => {},
+			listTools: async () => [],
+			callTool: async () => ({}),
+			close: () => {},
+		};
+		(manager as unknown as { clients: McpClient[] }).clients = [client];
+		(manager as unknown as { tools: Tool[] }).tools = [
+			{
+				name: "alpha__search",
+				origin: { kind: "mcp", server: "alpha", tool: "search" },
+				description: "",
+				parameters: {},
+				execute: async () => "",
+			},
+			{
+				name: "alpha__fetch",
+				origin: { kind: "mcp", server: "alpha", tool: "fetch" },
+				description: "",
+				parameters: {},
+				execute: async () => "",
+			},
+			{
+				name: "beta__other",
+				origin: { kind: "mcp", server: "beta", tool: "other" },
+				description: "",
+				parameters: {},
+				execute: async () => "",
+			},
+		];
+
+		assert.equal(manager.servers.length, 1);
+		assert.equal(manager.servers[0]?.serverName, "alpha");
+		assert.equal(manager.servers[0]?.toolCount, 2);
 	});
 });
 

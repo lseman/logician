@@ -16,6 +16,7 @@ import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import { runPluginBackend } from "../../../adapters/claude-code/plugin-runtime.ts";
 import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
 import type { LspClientPool } from "../../../capabilities/lsp/lsp-client-pool.ts";
+import type { MemoriamGateway } from "../../../capabilities/memoriam/memoriam-gateway.ts";
 import {
 	McpServerRegistry,
 	type McpSnapshotResult,
@@ -90,6 +91,8 @@ export interface ToolRouterDeps {
 	xdevEnabled?: boolean;
 	/** Whether the `todo` tool is included (default: true). */
 	todoEnabled?: boolean;
+	/** Memoriam gateway; when enabled, adds the `retain` tool. */
+	memoriam?: MemoriamGateway;
 }
 
 /** Snapshot of MCP/skill state as reported by getState()/init(). */
@@ -197,6 +200,8 @@ export class ToolRouter {
 					xdevEnabled: this.xdevEnabled,
 					kernelManager: deps.kernelManager,
 					todoEnabled: deps.todoEnabled,
+					memoriam: deps.memoriam,
+					sessionId: deps.sessionId,
 				});
 		if (deps.extraTools?.length) {
 			this.defaultTools = [

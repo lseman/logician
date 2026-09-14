@@ -12,6 +12,8 @@ import { createHubTool } from "../hub/hub-tool.ts";
 import { defaultHub } from "../hub/process-manager.ts";
 import type { LspClientPool } from "../lsp/lsp-client-pool.ts";
 import { createLspTool } from "../lsp/lsp-tool.ts";
+import type { MemoriamGateway } from "../memoriam/memoriam-gateway.ts";
+import { createRetainTool } from "../memoriam/retain-tool.ts";
 import { ast_edit } from "./ast-edit.ts";
 import { ast_grep } from "./ast-grep-tool.ts";
 import { bash } from "./bash.ts";
@@ -47,6 +49,9 @@ export interface DefaultToolsOptions {
 	lspPool?: LspClientPool;
 	// Whether to include the `todo` tool (default: true).
 	todoEnabled?: boolean;
+	// Memoriam gateway; when enabled, adds the `retain` tool. Requires sessionId.
+	memoriam?: MemoriamGateway;
+	sessionId?: string;
 }
 
 // ── Core tools (top-level, always advertised to the provider) ────────────────
@@ -63,6 +68,7 @@ const CORE_TOOL_NAMES = new Set<string>([
 	"bash",
 	"todo",
 	"ask_user",
+	"retain",
 	"rag_search",
 	"rag_ingest",
 	"eval",
@@ -154,6 +160,10 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 			: []),
 		// ── LSP (language server protocol) ────────────────────────────────
 		...(opts.lspPool ? [createLspTool(opts.lspPool)] : []),
+		// ── Memoriam (long-term memory) ─────────────────────────────────
+		...(opts.memoriam?.isEnabled() && opts.sessionId
+			? [createRetainTool({ gateway: opts.memoriam, sessionId: opts.sessionId })]
+			: []),
 	];
 	if (opts.xdevEnabled !== false) {
 		for (const tool of tools.filter(isDiscoverableTool)) devices.mount(tool);
