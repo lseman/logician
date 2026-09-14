@@ -358,6 +358,20 @@ test("session device registries are isolated, honor xdev, and follow capability 
 	).toBe(true);
 });
 
+test("bash's background-task pointer to manage_task is reachable through the registry", async () => {
+	const registry = new ToolRegistry();
+	registry.registerMany(createDefaultTools());
+	expect(registry.has("manage_task")).toBe(true);
+	// defaultTaskManager is a process-wide singleton other test files also
+	// populate, so only assert this reaches the real handler (not "unknown
+	// tool") rather than an exact empty-state message.
+	const result = await registry.execute(
+		call("manage_task", { action: "list" }),
+	);
+	expect(result.isError).toBeFalsy();
+	expect(result.content).toMatch(/background task/i);
+});
+
 test("standalone default tools also have a working device catalog", async () => {
 	const registry = new ToolRegistry();
 	registry.registerMany(createDefaultTools());

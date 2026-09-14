@@ -22,6 +22,7 @@ import { edit } from "./edit-file.ts";
 import { file_diff } from "./file-diff.ts";
 import { git } from "./git.ts";
 import { glob } from "./glob.ts";
+import { manage_task } from "./manage-task.ts";
 import { createReadTool } from "./read-file.ts";
 import { OPTIONAL_CAPABILITIES } from "./registry.ts";
 import { sandbox } from "./sandbox.ts";
@@ -67,6 +68,7 @@ const CORE_TOOL_NAMES = new Set<string>([
 	"ast_grep",
 	"write",
 	"bash",
+	"manage_task",
 	"todo",
 	"ask",
 	"retain",
@@ -141,6 +143,7 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		createWriteTool(devices, resources),
 		file_diff,
 		bash,
+		manage_task,
 		sandbox,
 		git,
 		resolve,
