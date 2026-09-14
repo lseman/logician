@@ -58,7 +58,7 @@ export type RuntimeSettingsPatch = Partial<
 // flat — namespacing those would rename every AgentConfig-forwarded field
 // for no seam benefit, since there's nothing to swap behind them.
 
-export interface LspCapabilityConfig {
+interface LspCapabilityConfig {
 	enabled?: boolean;
 	timeoutMs?: number;
 	serverOverrides?: Record<
@@ -67,21 +67,21 @@ export interface LspCapabilityConfig {
 	>;
 }
 
-export interface RepositoryMapCapabilityConfig {
+interface RepositoryMapCapabilityConfig {
 	enabled?: boolean;
 	maxTokens?: number;
 }
 
-export interface PermissionsCapabilityConfig {
+interface PermissionsCapabilityConfig {
 	mode?: PermissionMode;
 	rules?: PermissionRules;
 }
 
-export interface ExtensionsCapabilityConfig {
+interface ExtensionsCapabilityConfig {
 	dirs?: { user?: string; paths?: string[] };
 }
 
-export interface EventStreamConfig {
+interface EventStreamConfig {
 	/** Number of protocol notifications retained for reconnect replay. */
 	historyCapacity?: number;
 }

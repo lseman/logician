@@ -189,7 +189,6 @@ export class AgentRuntime {
 		});
 	}
 
-
 	private readonly memoriam: MemoriamGateway;
 	private get memoriamEnabled(): boolean {
 		return this.memoriam.isEnabled();
@@ -668,8 +667,6 @@ export class AgentRuntime {
 		};
 	}
 
-	/** Add a tool to the default set and propagate it into live config/harness/system prompt. */
-	/** Propagate a tool the router just registered into live config/harness/system prompt. */
 	// ── Event registration ─────────────────────────────────────────────────
 
 	private emit(event: RuntimeEvent): void {
