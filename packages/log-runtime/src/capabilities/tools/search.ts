@@ -77,26 +77,15 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 	const args = raw as Record<string, unknown>;
 	return {
-		pattern: args.pattern ?? args.query ?? args.regex,
-		path: args.path ?? args.file_path ?? args.directory,
+		pattern: args.pattern,
+		path: args.path,
 		glob: args.glob,
 		ignoreCase: args.ignoreCase,
 		literal: args.literal,
 		context: args.context ?? 0,
-		limit: args.limit ?? args.max_results ?? args.maxResults ?? DEFAULT_LIMIT,
+		limit: args.limit ?? DEFAULT_LIMIT,
 	};
 }
-
-/** Pluggable operations for grep. Override to delegate to remote systems. */
-interface SearchOperations {
-	isDirectory: (p: string) => Promise<boolean>;
-	readFile: (p: string) => Promise<string>;
-}
-
-const defaultOps: SearchOperations = {
-	isDirectory: async p => (await fsStat(p)).isDirectory(),
-	readFile: p => fsReadFile(p, "utf-8"),
-};
 
 /**
  * Regex-search already-resolved text content line by line (no rg subprocess,
@@ -259,10 +248,9 @@ export function createGrepTool(router?: InternalUrlRouter): Tool {
 					ctx.allowAllPaths,
 				);
 			}
-			const ops = defaultOps;
 			let isDirectory: boolean;
 			try {
-				isDirectory = await ops.isDirectory(searchPath);
+				isDirectory = (await fsStat(searchPath)).isDirectory();
 			} catch (_e: unknown) {
 				return `Error: Path not found: ${searchPath}`;
 			}
@@ -285,7 +273,7 @@ export function createGrepTool(router?: InternalUrlRouter): Tool {
 				let lines = fileCache.get(filePath);
 				if (!lines) {
 					try {
-						const content = await ops.readFile(filePath);
+						const content = await fsReadFile(filePath, "utf-8");
 						lines = content
 							.replace(/\r\n/g, "\n")
 							.replace(/\r/g, "\n")
