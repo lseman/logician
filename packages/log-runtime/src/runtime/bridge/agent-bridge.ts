@@ -1,7 +1,5 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
-import { type Dirent, readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import type { AgentConfig, Message, QueueMode, Tool } from "@logician/log-core";
 import { OpenAIBackend, TtsrManager } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
@@ -29,10 +27,6 @@ import type {
 import { MemoriamGateway } from "../../capabilities/memoriam/memoriam-gateway.ts";
 import type { Prompt } from "../../capabilities/prompts/loader.ts";
 import type { RepositoryMap } from "../../capabilities/repository-map/repository-map.ts";
-import {
-	frontmatterToRule,
-	parseFrontmatter,
-} from "../../capabilities/rules/loader.ts";
 import type { Skill } from "../../capabilities/skills/loader.ts";
 import type { TaskPhase } from "../../capabilities/tasks/todo.ts";
 import { getTasks, onTodosChanged } from "../../capabilities/tasks/todo.ts";
@@ -184,7 +178,6 @@ export class AgentRuntime {
 			...this.#ttsrSettings,
 		};
 		const manager = new TtsrManager(settings);
-		this.loadTtsrRules(manager);
 		return new TtsrCoordinator({
 			manager,
 			abort: async () => {
@@ -196,35 +189,6 @@ export class AgentRuntime {
 		});
 	}
 
-	private loadTtsrRules(manager: TtsrManager): void {
-		const rulesDir = path.join(this.cwd, ".logician", "rules");
-		let entries: Dirent[];
-		try {
-			entries = readdirSync(rulesDir, { withFileTypes: true });
-		} catch {
-			return;
-		}
-		for (const entry of entries) {
-			if (
-				!entry.isFile() ||
-				!entry.name.endsWith(".md") ||
-				entry.name.startsWith(".")
-			)
-				continue;
-			const filePath = path.join(rulesDir, entry.name);
-			let content: string;
-			try {
-				content = readFileSync(filePath, "utf-8");
-			} catch {
-				continue;
-			}
-			const parsed = parseFrontmatter(content);
-			if (!parsed) continue;
-			const rule = frontmatterToRule(parsed.frontmatter, filePath);
-			if (!rule?.name || rule.conditions.length === 0) continue;
-			manager.addRule(rule);
-		}
-	}
 
 	private readonly memoriam: MemoriamGateway;
 	private get memoriamEnabled(): boolean {

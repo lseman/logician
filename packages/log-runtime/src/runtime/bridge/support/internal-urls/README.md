@@ -37,9 +37,9 @@ Use `mcp://<server>/<resource-uri>` to select a server explicitly. For example,
 servers return errors; there is no fallback to another client. The old
 `mcp://<resource-uri>` form is no longer supported. Bare `mcp://` lists servers.
 
-`skill://<name>` and `rule://<name>` read an exact loaded name, with an optional
-trailing slash. Extra paths, queries and fragments are rejected. They do not read
-relative files. Pass user-provided skill URLs unchanged to `read`;
+`skill://<name>` reads an exact loaded name, with an optional trailing slash.
+Extra paths, queries and fragments are rejected. It does not read relative files.
+Pass user-provided skill URLs unchanged to `read`;
 `read_skill` remains the tool for formatted skill invocation from the catalog.
 
 `pr://owner/repo/1428` reads a GitHub pull request via the GitHub MCP server.

@@ -15,7 +15,6 @@ export {
 } from "./parse";
 export { PrProtocolHandler } from "./pr-protocol";
 export { InternalUrlRouter } from "./router";
-export { RuleProtocolHandler } from "./rule-protocol";
 export { SkillProtocolHandler } from "./skill-protocol";
 export { SshProtocolHandler } from "./ssh-protocol";
 export type {

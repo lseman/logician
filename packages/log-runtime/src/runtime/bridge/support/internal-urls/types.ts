@@ -42,7 +42,6 @@ export interface ResolveContext {
 	allowedPaths?: string[] | undefined;
 	allowAllPaths?: boolean | undefined;
 	skills?: Array<{ name: string; content: string; path: string }> | undefined;
-	rules?: Array<{ name: string; content: string; path: string }> | undefined;
 	memory?:
 		| {
 				listObservations: (

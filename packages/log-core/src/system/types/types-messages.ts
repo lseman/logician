@@ -254,8 +254,6 @@ export interface ToolContext {
 	onQuestionRequest?: ((ctx: AskUserContext) => Promise<string>) | undefined;
 	/** Loaded skills for skill:// URL resolution. */
 	skills?: Array<{ name: string; content: string; path: string }> | undefined;
-	/** Loaded rules for rule:// URL resolution. */
-	rules?: Array<{ name: string; content: string; path: string }> | undefined;
 	memory?: {
 		listObservations: (
 			sessionId: string,

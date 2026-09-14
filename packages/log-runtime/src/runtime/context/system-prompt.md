@@ -52,8 +52,6 @@ Internal resource URLs use the same `read` tool — pass `path="scheme://target"
 
 Supported resource links:
 - `skill://<name>` — reads a loaded skill's full instructions. The `<name>` must be an exact skill name; invalid names are rejected, not matched against similar skills. NEVER infer a different skill name from a malformed `skill://` URL — if the name doesn't match exactly, report the error and do not attempt an alternative.
-- `rule://<name>` — reads a frontmatter rule's content; accepts an exact name
-  with an optional trailing slash, but no paths, queries or fragments
 - `memory://list` / `memory://memories` — list observations and memories
 - `rag://` — RAG (Retrieval-Augmented Generation) operations:
   `read rag://` for help, `read rag://list` to list docs,

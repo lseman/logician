@@ -8,9 +8,8 @@ import { LogProtocolHandler } from "./log-protocol.ts";
 import { McpProtocolHandler } from "./mcp-protocol.ts";
 import { MemoryProtocolHandler } from "./memory-protocol.ts";
 import { PrProtocolHandler } from "./pr-protocol.ts";
-import { InternalUrlRouter } from "./router.ts";
 import { RagProtocolHandler } from "./rag-protocol.ts";
-import { RuleProtocolHandler } from "./rule-protocol.ts";
+import { InternalUrlRouter } from "./router.ts";
 import { SkillProtocolHandler } from "./skill-protocol.ts";
 import { SshProtocolHandler } from "./ssh-protocol.ts";
 
@@ -19,7 +18,6 @@ export function createInternalUrlRouter(): InternalUrlRouter {
 	const router = new InternalUrlRouter();
 	for (const handler of [
 		new SkillProtocolHandler(),
-		new RuleProtocolHandler(),
 		new MemoryProtocolHandler(),
 		new LocalProtocolHandler(),
 		new McpProtocolHandler(),
