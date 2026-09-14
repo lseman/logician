@@ -198,70 +198,16 @@ function findDestructiveMatch(command: string): string | undefined {
 	return undefined;
 }
 
+// `cmd` is the one alias models reliably send instead of `command`; keep it,
+// but don't guess at unrelated fields (see docs/debugging/bash.md).
 function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (typeof raw === "string") return { command: raw };
 	if (!raw || typeof raw !== "object") return {};
 	const args = raw as Record<string, unknown>;
-	// Check for common command field aliases
-	let command =
-		args.command ??
-		args.cmd ??
-		args.script ??
-		args.input ??
-		args.run ??
-		args.exec ??
-		args.do ??
-		args.shell ??
-		args.action;
-	if (command === undefined) {
-		// Check nested objects and stringified JSON for a command field.
-		for (const [_key, val] of Object.entries(args)) {
-			if (typeof val === "string") {
-				// Try parsing as JSON in case it's stringified: '{"command": "ls"}'
-				try {
-					const parsed = JSON.parse(val);
-					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-						const c =
-							(parsed as Record<string, unknown>).command ??
-							(parsed as Record<string, unknown>).cmd ??
-							(parsed as Record<string, unknown>).script ??
-							(parsed as Record<string, unknown>).input ??
-							(parsed as Record<string, unknown>).run ??
-							(parsed as Record<string, unknown>).exec;
-						if (c !== undefined) {
-							command = c;
-							break;
-						}
-					}
-				} catch {
-					/* not JSON */
-				}
-			} else if (
-				typeof val === "object" &&
-				val !== null &&
-				!Array.isArray(val)
-			) {
-				const nested = val as Record<string, unknown>;
-				const nestedCmd =
-					nested.command ??
-					nested.cmd ??
-					nested.script ??
-					nested.input ??
-					nested.run ??
-					nested.exec ??
-					nested.do;
-				if (nestedCmd !== undefined) {
-					command = nestedCmd;
-					break;
-				}
-			}
-		}
+	if (args.command === undefined && args.cmd !== undefined) {
+		return { ...args, command: args.cmd };
 	}
-
-	return {
-		...args,
-		...(command !== undefined ? { command } : {}),
-	};
+	return args;
 }
 
 export const bash: Tool = {
