@@ -150,6 +150,7 @@ import {
 	renderEvalDetails,
 	renderFileDiffDetails,
 	renderLspDetails,
+	renderMcpDetails,
 	renderWriteDetails,
 	type ToolDetailHelpers,
 } from "./tool-details.ts";
@@ -695,6 +696,7 @@ function toolDetailLines(
 	} else if (tool.tool_name === "lsp") {
 		lines.push(...renderLspDetails(ctx, tool, width, toolDetailHelpers));
 	} else if (tool.tool_name.startsWith("mcp__")) {
+		lines.push(...renderMcpDetails(ctx, tool, width, toolDetailHelpers));
 	} else {
 		const argText = JSON.stringify(args, null, 2);
 		if (argText && argText !== "{}") {

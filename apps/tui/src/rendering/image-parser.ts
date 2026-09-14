@@ -13,75 +13,8 @@ export interface ParsedImage {
 	isDataUri: boolean;
 }
 
-// Regex for markdown images: ![alt](src) or ![alt](src "title")
-const MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\((data:[^)]+|"([^"]*)")\)/g;
 // Regex for data URIs: data:image/{type};base64,{base64}
 const DATA_URI_PATTERN = /^data:image\/(\w+);base64,(.+)$/;
-
-/**
- * Parse inline images from markdown text. Returns an array of image nodes
- * that replace their original positions in the text, plus the text with
- * image placeholders removed.
- */
-export function parseInlineImages(text: string): {
-	images: ParsedImage[];
-	text: string;
-} {
-	const images: ParsedImage[] = [];
-	const segments: Array<string | ParsedImage> = [];
-
-	// First pass: find all images
-	let lastIndex = 0;
-	// Reset regex state
-	MARKDOWN_IMAGE_PATTERN.lastIndex = 0;
-
-	for (const match of text.matchAll(MARKDOWN_IMAGE_PATTERN)) {
-		// Add text before this image
-		if (match.index > lastIndex) {
-			segments.push(text.slice(lastIndex, match.index));
-		}
-
-		// Parse the image source
-		const src = match[2]; // Full src including quotes
-		const alt = match[1];
-
-		// Remove surrounding quotes if present
-		const cleanSrc = src.startsWith('"') ? src.slice(1, -1) : src;
-
-		const dataUriMatch = cleanSrc.match(DATA_URI_PATTERN);
-		if (dataUriMatch) {
-			const mimeType = `image/${dataUriMatch[1]}`;
-			const base64Data = dataUriMatch[2];
-			segments.push({
-				alt,
-				mimeType,
-				data: base64Data,
-				isDataUri: true,
-			});
-		} else {
-			// External image reference — not supported in TUI
-			segments.push(alt);
-		}
-
-		lastIndex = match.index + match[0].length;
-	}
-
-	// Add remaining text
-	if (lastIndex < text.length) {
-		segments.push(text.slice(lastIndex));
-	}
-
-	// Separate images from text
-	for (const seg of segments) {
-		if (typeof seg === "object" && "mimeType" in seg) {
-			images.push(seg);
-		}
-	}
-
-	const textOnly = segments.map(s => (typeof s === "string" ? s : "")).join("");
-
-	return { images, text: textOnly };
-}
 
 /**
  * Parse inline images from a single line of markdown. Returns the first
