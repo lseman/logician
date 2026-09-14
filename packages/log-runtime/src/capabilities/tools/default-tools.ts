@@ -91,8 +91,6 @@ const DISCOVERABLE_TOOL_NAMES = new Set<string>([
 	"git",
 	"sandbox",
 	"file_diff",
-	"web_fetch",
-	"web_search",
 	"browser",
 	"lsp",
 	"hub",
