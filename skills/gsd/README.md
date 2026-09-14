@@ -76,7 +76,7 @@ GSD workflows are adapted for Logician via the **GSDBRIDGE protocol**:
 2. The bridge returns a `GSDBRIDGE:workflow:...` response
 3. The Logician agent reads the corresponding workflow from `repos/gsd-core/gsd-core/workflows/`
 4. The agent executes the workflow using Logician's native tools:
-   - `ask_user_question` replaces `AskUserQuestion`
+   - `ask` replaces `AskUserQuestion`
    - `subagent` replaces `Agent` tool
    - `state.ts` provides STATE.md operations
    - `phase.ts` provides phase lifecycle operations
@@ -88,7 +88,7 @@ In Logician, these are handled by:
 
 1. **STATE.md operations** → `state.ts` functions
 2. **Phase directory operations** → `phase.ts` functions
-3. **Interactive questioning** → `ask_user_question` tool
+3. **Interactive questioning** → `ask` tool
 4. **Subagent spawning** → `subagent` tool
 5. **Git operations** → `Bash` tool
 

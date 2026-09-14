@@ -9,11 +9,11 @@ allowed-tools:
   - Glob
   - Grep
   - subagent
-  - ask_user_question
+  - ask
 ---
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API.
 </runtime_note>
 
 <objective>

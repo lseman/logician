@@ -74,7 +74,7 @@ const NODES = {
 		type: "leaf",
 		summary: "Modal surfaces drawn on top of the transcript.",
 		bullets: [
-			"ask_user prompts pause the loop and wait for an answer here.",
+			"ask prompts pause the loop and wait for an answer here.",
 			"Permission confirmations for acceptEdits / ask permission modes.",
 			"File pickers and other transient UI.",
 		],

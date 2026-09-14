@@ -11,7 +11,7 @@ allowed-tools:
   - subagent
   - WebFetch
   - WebSearch
-  - ask_user_question
+  - ask
   - mcp__context7__*
 ---
 

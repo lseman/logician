@@ -7,7 +7,7 @@ allowed-tools:
   - Write
   - Bash
   - subagent
-  - ask_user_question
+  - ask
 ---
 
 

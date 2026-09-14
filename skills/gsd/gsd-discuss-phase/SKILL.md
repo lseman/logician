@@ -8,7 +8,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - ask_user_question
+  - ask
   - subagent
   - mcp__context7__resolve-library-id
   - mcp__context7__query-docs
@@ -35,7 +35,7 @@ Do not pre-load any workflow files before reading the mode routing instructions.
 </execution_context>
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API.
 </runtime_note>
 
 <context>

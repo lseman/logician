@@ -9,7 +9,7 @@ allowed-tools:
   - Grep
   - Glob
   - SlashCommand
-  - ask_user_question
+  - ask
 ---
 
 <objective>

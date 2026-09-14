@@ -24,10 +24,10 @@ export function getPipeline(cwd: string): IngestionPipeline {
 	return pipeline;
 }
 
-function requireCwd(ctx: ToolContext): string {
-	if (!ctx.cwd) throw new Error("cwd is required for RAG tools");
-	return ctx.cwd;
-}
+// Built-in tools backed by @logician/log-rag (also available as rag:// URLs):
+//   - rag_ingest(path, docId?) — ingest a document into the vector store
+//   - rag_search(query, k?) — search indexed documents
+//   - rag_list() — list indexed document IDs
 
 export const rag_ingest: Tool = {
 	name: "rag_ingest",

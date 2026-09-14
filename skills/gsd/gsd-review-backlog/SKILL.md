@@ -5,7 +5,7 @@ allowed-tools:
   - Read
   - Write
   - Bash
-  - ask_user_question
+  - ask
 ---
 
 
@@ -27,7 +27,7 @@ milestone sequence or remove stale entries.
    ```
    Show each backlog item with its description, any accumulated context (CONTEXT.md, RESEARCH.md), and creation date.
 
-3. **Present the list to the user** via ask_user_question:
+3. **Present the list to the user** via ask:
    - For each backlog item, show: phase number, description, accumulated artifacts
    - Options per item: **Promote** (move to active), **Keep** (leave in backlog), **Remove** (delete)
 

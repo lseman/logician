@@ -8,7 +8,7 @@ allowed-tools:
   - Grep
   - Glob
   - subagent
-  - ask_user_question
+  - ask
 ---
 
 <objective>

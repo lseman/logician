@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - Grep
   - Glob
-  - ask_user_question
+  - ask
   - WebSearch
   - WebFetch
   - mcp__context7__resolve-library-id
@@ -40,7 +40,7 @@ Does not require prior new-project setup — auto-creates `.planning/sketches/` 
 </execution_context>
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`.
 </runtime_note>
 
 <context>

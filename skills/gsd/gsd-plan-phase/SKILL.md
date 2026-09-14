@@ -10,7 +10,7 @@ allowed-tools:
   - Glob
   - Grep
   - subagent
-  - ask_user_question
+  - ask
   - WebFetch
   - mcp__context7__*
 ---
@@ -36,7 +36,7 @@ Create executable phase prompts (PLAN.md files) for a roadmap phase with integra
 </execution_context>
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API. Do not skip questioning steps because `ask_user_question` appears unavailable; use `vscode_askquestions` instead.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API. Do not skip questioning steps because `ask` appears unavailable; use `vscode_askquestions` instead.
 </runtime_note>
 
 <context>

@@ -9,7 +9,7 @@ allowed-tools:
   - Glob
   - Grep
   - subagent
-  - ask_user_question
+  - ask
 ---
 
 <objective>
@@ -30,7 +30,7 @@ Phase 1 of the vertical-mvp-slice PRD shipped the planner-side machinery; this c
 </execution_context>
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`. Equivalent API.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`. Equivalent API.
 </runtime_note>
 
 <context>

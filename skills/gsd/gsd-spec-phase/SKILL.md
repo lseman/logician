@@ -8,7 +8,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - ask_user_question
+  - ask
 ---
 
 
@@ -34,7 +34,7 @@ Clarify phase requirements through structured Socratic questioning with quantita
 </execution_context>
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`. They are equivalent.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`. They are equivalent.
 </runtime_note>
 
 <context>

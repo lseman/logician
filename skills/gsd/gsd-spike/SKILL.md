@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - Grep
   - Glob
-  - ask_user_question
+  - ask
   - WebSearch
   - WebFetch
   - mcp__context7__resolve-library-id
@@ -36,7 +36,7 @@ Does not require prior new-project setup — auto-creates `.planning/spikes/` if
 </execution_context>
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`.
 </runtime_note>
 
 <context>
@@ -44,7 +44,7 @@ Idea: $ARGUMENTS
 
 **Available flags:**
 - `--quick` — Skip decomposition/alignment, jump straight to building. Use when you already know what to spike.
-- `--text` — Use plain-text numbered lists instead of ask_user_question (for non-Claude runtimes).
+- `--text` — Use plain-text numbered lists instead of ask (for non-Claude runtimes).
 - `--wrap-up` — Package spike findings into a persistent project skill for future build conversations. Runs the spike-wrap-up workflow.
 </context>
 

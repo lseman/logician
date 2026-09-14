@@ -12,7 +12,7 @@ allowed-tools:
   - Bash
   - subagent
   - TodoWrite
-  - ask_user_question
+  - ask
 ---
 
 <objective>
@@ -38,7 +38,7 @@ Context budget: ~15% orchestrator, 100% fresh per subagent.
 </execution_context>
 
 <runtime_note>
-**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask_user_question`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API.
+**Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `ask`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API.
 </runtime_note>
 
 <context>

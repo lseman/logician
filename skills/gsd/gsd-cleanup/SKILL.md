@@ -5,7 +5,7 @@ allowed-tools:
   - Read
   - Write
   - Bash
-  - ask_user_question
+  - ask
 ---
 
 <objective>

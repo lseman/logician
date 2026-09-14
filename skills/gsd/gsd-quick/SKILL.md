@@ -10,7 +10,7 @@ allowed-tools:
   - Grep
   - Bash
   - subagent
-  - ask_user_question
+  - ask
 ---
 
 <objective>

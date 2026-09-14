@@ -8,7 +8,7 @@ allowed-tools:
   - Grep
   - Glob
   - Write
-  - ask_user_question
+  - ask
 ---
 
 <objective>

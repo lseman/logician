@@ -7,7 +7,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - ask_user_question
+  - ask
 ---
 
 
