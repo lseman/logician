@@ -5,8 +5,6 @@ import type {
 	ProtocolHandler,
 } from "../../../runtime/bridge/support/internal-urls/types.ts";
 
-export const DISCOVERABLE_XD_PREFIX = "xd://";
-
 /** Session-owned catalog. Execution stays in the harness's ToolRegistry. */
 export class XdDeviceRegistry implements ProtocolHandler {
 	readonly scheme = "xd";

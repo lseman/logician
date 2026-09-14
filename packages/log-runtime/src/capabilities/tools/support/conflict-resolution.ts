@@ -106,7 +106,7 @@ export function parseConflictBlocks(
 /**
  * Resolve a conflict block by choosing ours, theirs, base, or both.
  */
-export function resolveConflictBlock(
+function resolveConflictBlock(
 	block: ConflictBlock,
 	strategy: "ours" | "theirs" | "ours+theirs" | "base",
 	baseContent?: string,
@@ -168,34 +168,11 @@ export function resolveConflictsInFile(
 }
 
 /**
- * Check if a file has unresolved merge conflicts.
- */
-export function hasConflicts(filePath: string): boolean {
-	const content = fs.readFileSync(filePath, "utf-8");
-	return (
-		content.includes("<<<<<<<") &&
-		content.includes("=======") &&
-		content.includes(">>>>>>>")
-	);
-}
-
-/**
  * Get all conflict blocks for a file.
  */
 export function getConflictBlocks(filePath: string): ConflictBlock[] {
 	const content = fs.readFileSync(filePath, "utf-8");
 	return parseConflictBlocks(content, filePath);
-}
-
-/**
- * Get a specific conflict block by index.
- */
-export function getConflictBlock(
-	filePath: string,
-	index: number,
-): ConflictBlock | null {
-	const blocks = getConflictBlocks(filePath);
-	return blocks[index] ?? null;
 }
 
 /**

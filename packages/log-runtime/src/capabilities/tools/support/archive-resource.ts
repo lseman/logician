@@ -19,7 +19,7 @@ export type ArchiveFamily = "zip" | "tar";
 const ZIP_EXTENSIONS = [".zip", ".jar", ".war", ".ear", ".apk"];
 const TAR_GZ_EXTENSIONS = [".tar.gz", ".tgz"];
 
-export const MAX_ARCHIVE_MEMBER_BYTES = 8 * 1024 * 1024; // matches artifact-protocol.ts's MAX_ARTIFACT_BYTES
+const MAX_ARCHIVE_MEMBER_BYTES = 8 * 1024 * 1024; // matches artifact-protocol.ts's MAX_ARTIFACT_BYTES
 
 export function archiveFamilyFromPath(
 	absolutePath: string,

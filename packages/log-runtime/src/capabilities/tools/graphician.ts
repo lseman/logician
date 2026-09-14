@@ -41,7 +41,7 @@ async function executable(pathname: string): Promise<boolean> {
 }
 
 /** Resolve an explicitly configured CLI first, then fall back to PATH. */
-export async function resolveGraphicianBinary(): Promise<string | null> {
+async function resolveGraphicianBinary(): Promise<string | null> {
 	const candidates = [
 		process.env.GRAPHICIAN_BIN,
 		path.join(bundledGraphicianRoot, ".venv/bin/graphician"),

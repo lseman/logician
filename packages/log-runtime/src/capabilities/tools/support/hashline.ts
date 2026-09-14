@@ -19,19 +19,16 @@ import { createHash } from "node:crypto";
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 /** Length of hashline file tags (4 hex chars). */
-export const HASHLINE_TAG_LENGTH = 4;
+const HASHLINE_TAG_LENGTH = 4;
 
 /** File header prefix: [path#4hex] */
-export const HL_FILE_PREFIX = "[";
-export const HL_FILE_SUFFIX = "]";
-export const HL_FILE_HASH_SEP = "#";
+const HL_FILE_PREFIX = "[";
+const HL_FILE_SUFFIX = "]";
+const HL_FILE_HASH_SEP = "#";
 
 /** Operation keywords */
-export const HL_MOVE_KEYWORD = "MV";
-export const HL_REM_KEYWORD = "REM";
-
-/** Separator between line number and line content */
-export const HL_LINE_BODY_SEP = ":";
+const HL_MOVE_KEYWORD = "MV";
+const HL_REM_KEYWORD = "REM";
 
 // ── Hash generation ────────────────────────────────────────────────────────────
 
@@ -80,16 +77,6 @@ export function quickFileFingerprint(text: string): string {
 		.update(fingerprint, "utf-8")
 		.digest("hex")
 		.slice(0, 8);
-}
-
-/**
- * Check if a file has been modified since a fingerprint was recorded.
- */
-export function isFileStale(
-	currentFingerprint: string,
-	recordedFingerprint: string,
-): boolean {
-	return currentFingerprint !== recordedFingerprint;
 }
 
 // ── Edit operation types ───────────────────────────────────────────────────────

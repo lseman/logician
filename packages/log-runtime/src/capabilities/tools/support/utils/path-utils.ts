@@ -16,10 +16,7 @@ export interface PathInputOptions {
 	normalizeUnicodeSpaces?: boolean;
 }
 
-export function normalizePath(
-	input: string,
-	options: PathInputOptions = {},
-): string {
+function normalizePath(input: string, options: PathInputOptions = {}): string {
 	let normalized = options.trim ? input.trim() : input;
 	if (options.normalizeUnicodeSpaces) {
 		normalized = normalized.replace(UNICODE_SPACES, " ");
@@ -58,10 +55,6 @@ export function resolvePath(cwd: string | undefined, filePath: string): string {
 	// actual working directory instead of the filesystem root.
 	const effectiveCwd = cwd && cwd !== "/" ? cwd : process.cwd();
 	return path.resolve(effectiveCwd, normalized);
-}
-
-export function resolveToCwd(filePath: string, cwd: string): string {
-	return resolvePath(cwd, filePath);
 }
 
 /**
@@ -167,7 +160,7 @@ function readPathVariants(resolved: string): string[] {
 }
 
 export function resolveReadPath(filePath: string, cwd: string): string {
-	const resolved = resolveToCwd(filePath, cwd);
+	const resolved = resolvePath(cwd, filePath);
 	if (fileExists(resolved)) return resolved;
 
 	for (const variant of readPathVariants(resolved)) {

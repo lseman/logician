@@ -419,7 +419,7 @@ function getNoChangeError(path: string, totalEdits: number): Error {
 // Edit application
 // ============================================================================
 
-export function applyEditsToNormalizedContent(
+function applyEditsToNormalizedContent(
 	normalizedContent: string,
 	edits: Edit[],
 	filePath: string,

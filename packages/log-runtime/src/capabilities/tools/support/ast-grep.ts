@@ -208,7 +208,7 @@ async function runQuery(
  * Groups matches by file and sorts by byte offset (descending) so replacements
  * can be applied without offset shifts.
  */
-export function computeFileEdits(matches: AstMatch[]): Array<{
+function computeFileEdits(matches: AstMatch[]): Array<{
 	file: string;
 	edits: AstEditResult[];
 }> {
@@ -267,25 +267,6 @@ export async function executeAstOp(
 	}
 
 	return computeFileEdits(allMatches);
-}
-
-/**
- * Execute a single AST operation and return matches for preview.
- */
-export async function previewAstOp(
-	pat: string,
-	out: string,
-	paths: string[],
-): Promise<AstMatch[]> {
-	const bin = await getAstGrepBin();
-	if (!bin) {
-		throw new Error(
-			"ast-grep CLI not found. Install with: npm install -g @ast-grep/cli",
-		);
-	}
-
-	const lang = detectLanguage(paths[0] ?? "");
-	return runRewriteQuery(bin, lang, pat, out, paths);
 }
 
 /**
