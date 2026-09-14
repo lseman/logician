@@ -83,7 +83,7 @@ const CORE_TOOL_NAMES = new Set<string>([
 /**
  * Extract only core tools from a tool array.
  */
-function filterCoreTools(tools: Tool[]): Tool[] {
+export function filterCoreTools(tools: Tool[]): Tool[] {
 	return tools.filter(t => CORE_TOOL_NAMES.has(t.name));
 }
 
