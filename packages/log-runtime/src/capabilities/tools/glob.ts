@@ -93,17 +93,7 @@ export const glob: Tool = {
 	prepareArguments: (raw): Record<string, unknown> => {
 		if (typeof raw === "string") return { path: raw };
 		if (!raw || typeof raw !== "object") return {};
-		const args = raw as Record<string, unknown>;
-		const pathArg = args.path ?? args.directory ?? args.dir;
-		const patternArg = args.pattern ?? args.glob ?? args.query;
-		const combined =
-			pathArg && patternArg
-				? `${String(pathArg).replace(/\/+$/, "")}/${patternArg}`
-				: (pathArg ?? patternArg);
-		return {
-			path: combined,
-			limit: args.limit ?? args.max_results ?? args.max_files,
-		};
+		return raw as Record<string, unknown>;
 	},
 	execute: async (args, ctx): Promise<string> => {
 		const inputPath = String(args.path ?? "") || ".";
