@@ -24,6 +24,13 @@ export {
 	parseTextToolCalls,
 	stripTextToolCalls,
 } from "./capabilities/provider/text-tool-calls.ts";
+export {
+	setBashDebugger,
+	getBashDebuggerReport,
+	clearBashDebugger,
+	isBashDebuggerEnabled,
+	type BashDebugEntry,
+} from "./capabilities/tools/bash-debugger.ts";
 export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
 export {
 	MAX_ESCALATIONS,

@@ -19,6 +19,14 @@ import type {
 import { parseToolInput } from "./internal/parser.ts";
 import { normalizeProviderToolSchema } from "./provider-schema.ts";
 import { ToolResultCache } from "./tool-result-cache.ts";
+import {
+	logStage,
+	setResult,
+	getBashDebuggerReport,
+	setBashDebugger,
+	clearBashDebugger,
+	isBashDebuggerEnabled,
+} from "./bash-debugger.ts";
 
 /** Default cap on tool execution time. Tools can override via timeoutMs. */
 const DEFAULT_TOOL_TIMEOUT_MS = 600_000;
@@ -242,6 +250,10 @@ export class ToolRegistry {
 		visited.add(call.name);
 		const tool = this.tools.get(call.name);
 		if (!tool) {
+			// Log debug for bash even when tool is unknown
+			if (isBashDebuggerEnabled() && call.name === "bash") {
+				logStage(call.id, call.name, 0, call.arguments);
+			}
 			return {
 				call,
 				args: parseToolInput(call.arguments),
@@ -250,9 +262,21 @@ export class ToolRegistry {
 		}
 
 		try {
+			// Stage 0: Log raw arguments from model
+			if (isBashDebuggerEnabled() && call.name === "bash") {
+				logStage(call.id, call.name, 0, call.arguments);
+			}
 			let args = parseToolInput(call.arguments);
+			// Stage 1: Log after parseToolInput
+			if (isBashDebuggerEnabled() && call.name === "bash") {
+				logStage(call.id, call.name, 1, args);
+			}
 			if (tool.prepareArguments) {
 				args = tool.prepareArguments(args);
+			}
+			// Stage 2: Log after prepareArguments
+			if (isBashDebuggerEnabled() && call.name === "bash") {
+				logStage(call.id, call.name, 2, args);
 			}
 			const target = tool.resolveCall?.(args);
 			if (target) {
@@ -296,6 +320,10 @@ export class ToolRegistry {
 		}
 
 		const args = preparedArgs ?? this.prepare(call).args;
+		// Stage 3: Log final args before execute (only if not already logged via prepare)
+		if (isBashDebuggerEnabled() && call.name === "bash" && preparedArgs === undefined) {
+			logStage(call.id, call.name, 3, args);
+		}
 
 		// ── Cache lookup — opt-in only. Tools with side effects (edits, bash,
 		// read's read-tracking) or time-varying output must never be
@@ -360,6 +388,9 @@ export class ToolRegistry {
 			return result;
 		} catch (_e: unknown) {
 			const error = _e as Error;
+			if (isBashDebuggerEnabled() && call.name === "bash") {
+				setResult(call.id, `Error executing ${call.name}: ${describeToolError(error)}`);
+			}
 			return {
 				content: `Error executing ${call.name}: ${describeToolError(error)}`,
 				isError: true,
@@ -419,6 +450,17 @@ export class ToolRegistry {
 		this.cache?.clear();
 	}
 
+	// ── Bash debugger API ───────────────────────────────────────────────────────
+	/** Get a report of recent bash tool call traces. */
+	getBashDebuggerReport(limit: number = 10): string {
+		return getBashDebuggerReport(limit);
+	}
+
+	/** Enable or disable bash debugging. */
+	setBashDebugger(on: boolean): void {
+		setBashDebugger(on);
+	}
+
 	toToolDefinitions(): Record<string, unknown>[] {
 		// Deferred, unresolved tools are excluded from the request entirely —
 		// their name+description already appear as plain text in the (cached)
@@ -459,5 +501,10 @@ export class ToolRegistry {
 			}
 		}
 		return guidelines;
+	}
+
+	/** Clear all bash debug entries. */
+	clearBashDebugger(): void {
+		clearBashDebugger();
 	}
 }
