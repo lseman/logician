@@ -199,7 +199,7 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (!raw || typeof raw !== "object") return {};
 	const args = raw as Record<string, unknown>;
 	// Check for common command field aliases
-	const command =
+	let command =
 		args.command ??
 		args.cmd ??
 		args.script ??
@@ -210,17 +210,39 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 		args.shell ??
 		args.action;
 	if (command === undefined) {
-		// Fallback: use the shortest string-valued field as the command.
+		// Check nested objects and stringified JSON for a command field.
+		for (const [_key, val] of Object.entries(args)) {
+			if (typeof val === "string") {
+				// Try parsing as JSON in case it's stringified: '{"command": "ls"}'
+				try {
+					const parsed = JSON.parse(val);
+					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+						const c = (parsed as Record<string, unknown>).command ??
+							(parsed as Record<string, unknown>).cmd ??
+							(parsed as Record<string, unknown>).script ??
+							(parsed as Record<string, unknown>).input ??
+							(parsed as Record<string, unknown>).run ??
+							(parsed as Record<string, unknown>).exec;
+						if (c !== undefined) { command = c; break; }
+					}
+				} catch { /* not JSON */ }
+			} else if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+				const nested = val as Record<string, unknown>;
+				const nestedCmd = nested.command ?? nested.cmd ?? nested.script ?? nested.input ??
+					nested.run ?? nested.exec ?? nested.do;
+				if (nestedCmd !== undefined) { command = nestedCmd; break; }
+			}
+		}
+	}
+	if (command === undefined) {
+		// Fallback: use the shortest non-empty string-valued field as the command.
 		// Commands are typically shorter than reasoning/thought fields.
 		let best: unknown = undefined;
 		let bestLen = Infinity;
 		for (const [_k, v] of Object.entries(args)) {
-			if (typeof v === "string") {
-				const len = v.length;
-				if (len < bestLen) {
-					best = v;
-					bestLen = len;
-				}
+			if (typeof v === "string" && v.length > 0 && v.length < bestLen) {
+				best = v;
+				bestLen = v.length;
 			}
 		}
 		if (typeof best === "string") {
