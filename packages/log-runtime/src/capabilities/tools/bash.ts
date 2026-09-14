@@ -738,7 +738,7 @@ function formatOutput(
 		const startLine = truncation.totalLines - truncation.outputLines + 1;
 		const endLine = truncation.totalLines;
 		const displayPath = artifactId
-			? `artifact://${artifactId}`
+			? `local://${artifactId}`
 			: snapshot.fullOutputPath;
 
 		const notices: string[] = [];

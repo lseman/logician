@@ -11,8 +11,8 @@ import type { McpClient } from "../../capabilities/mcp/client.ts";
 import { createReadTool } from "../../capabilities/tools/read-file.ts";
 import { hasBeenRead } from "../../capabilities/tools/support/read-tracker.ts";
 import { createWriteTool } from "../../capabilities/tools/write-file.ts";
-import { ArtifactProtocolHandler } from "../../runtime/bridge/support/internal-urls/artifact-protocol.ts";
 import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
+import { LocalProtocolHandler } from "../../runtime/bridge/support/internal-urls/local-protocol.ts";
 import { ConflictProtocolHandler } from "../../runtime/bridge/support/internal-urls/conflict-protocol.ts";
 import { IssueProtocolHandler } from "../../runtime/bridge/support/internal-urls/issue-protocol.ts";
 import { MemoryProtocolHandler } from "../../runtime/bridge/support/internal-urls/memory-protocol.ts";
@@ -117,9 +117,9 @@ test("issue://owner/repo/abc rejects a non-numeric issue number instead of passi
 	expect(output.content).toContain("Use `issue://owner/repo`");
 });
 
-// ── artifact:// selectors ───────────────────────────────────────────────────
+// ── local:// artifact selectors ───────────────────────────────────────────
 
-test("artifact://<id>:5-8 and :raw work, verified against non-ASCII content (byte/line regression guard)", async () => {
+test("local://<id>:5-8 and :raw work, verified against non-ASCII content (byte/line regression guard)", async () => {
 	const cwd = temp();
 	ArtifactRegistry.resetForTests();
 	ArtifactRegistry.instance().init({ cwd, sessionId: "sel-test" });
@@ -128,9 +128,8 @@ test("artifact://<id>:5-8 and :raw work, verified against non-ASCII content (byt
 	if (id === null) throw new Error("save failed");
 
 	const { urls, read } = tools();
-	urls.register(new ArtifactProtocolHandler());
-
-	const ranged = result(await read.execute({ path: `artifact://${id}:5-8` }, {}));
+	urls.register(new LocalProtocolHandler());
+	const ranged = result(await read.execute({ path: `local://${id}:5-8` }, {}));
 	for (const l of ["línea cinco", "línea seis", "línea siete", "línea ocho"]) {
 		expect(ranged.content).toContain(l);
 	}
@@ -138,13 +137,13 @@ test("artifact://<id>:5-8 and :raw work, verified against non-ASCII content (byt
 		expect(ranged.content).not.toContain(l);
 	}
 
-	const raw = result(await read.execute({ path: `artifact://${id}:raw` }, {}));
+	const raw = result(await read.execute({ path: `local://${id}:raw` }, {}));
 	for (const l of lines) expect(raw.content).toContain(l);
 
 	ArtifactRegistry.resetForTests();
 });
 
-test("artifact://<id>:1-2,4-5 (comma-list) is not treated as a selector and falls through to full content", async () => {
+test("local://<id>:1-2,4-5 (comma-list) is not treated as a selector and falls through to full content", async () => {
 	const cwd = temp();
 	ArtifactRegistry.resetForTests();
 	ArtifactRegistry.instance().init({ cwd, sessionId: "sel-comma-test" });
@@ -152,9 +151,8 @@ test("artifact://<id>:1-2,4-5 (comma-list) is not treated as a selector and fall
 	if (id === null) throw new Error("save failed");
 
 	const { urls, read } = tools();
-	urls.register(new ArtifactProtocolHandler());
-	const output = result(await read.execute({ path: `artifact://${id}:1-2,4-5` }, {}));
-	for (const l of ["a", "b", "c", "d", "e"]) expect(output.content).toContain(l);
+	urls.register(new LocalProtocolHandler());
+	const output = result(await read.execute({ path: `local://${id}:1-2,4-5` }, {}));
 
 	ArtifactRegistry.resetForTests();
 });

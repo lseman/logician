@@ -102,7 +102,7 @@ const defaultOps: SearchOperations = {
  * Regex-search already-resolved text content line by line (no rg subprocess,
  * no multiline support — matches rg's own default non-multiline behavior).
  * Used for internal resources with no backing file on disk (memory://,
- * artifact://, mcp:// results, ...); resources that DO have a `sourcePath`
+ * local:// artifacts, mcp:// results, ...); resources that DO have a `sourcePath`
  * are rebased onto it and grepped through the normal rg pipeline instead,
  * for full feature parity and to avoid a second search implementation.
  */
@@ -187,8 +187,7 @@ export function createGrepTool(router?: InternalUrlRouter): Tool {
 		"path also accepts internal resource URLs (e.g. skill://name, memory://list) — resources backed by a real file are searched with full rg feature parity; others are searched in-process. A directory-shaped resource with no backing file is rejected.",
 	promptSnippet: "Search file contents with pattern matching and line numbers",
 	promptGuidelines: [
-		"Use grep to search file contents; use find to search by name",
-		"grep also accepts internal resource URLs (skill://, memory://, artifact://, ...) as path",
+		"grep also accepts internal resource URLs (skill://, memory://, local://, ...) as path",
 	],
 	parameters: grepSchema,
 	prepareArguments,

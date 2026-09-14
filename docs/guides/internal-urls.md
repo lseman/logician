@@ -1,6 +1,6 @@
 ---
 title: Internal Resources
-description: rag://, pr://, issue://, artifact://, and other internal URL schemes.
+description: rag://, pr://, issue://, local://, and other internal URL schemes.
 ---
 
 # Internal Resources
@@ -52,29 +52,23 @@ Read pull requests and issues through your configured GitHub MCP server:
 Both require a GitHub MCP server configured; they return a diagnostic message
 when unavailable.
 
-## Session artifacts — `artifact://`
+## Local workspace and artifacts — `local://`
 
-Tool output from previous turns is stored as session-scoped artifacts:
+Reads files under `.logician/artifacts/`. Supports writes. Numeric hosts access artifacts by ID; line-range selectors work on artifacts.
 
 | URL | Action |
 |---|---|
-| `artifact://` | List available artifacts |
-| `artifact://<id>` | Read one artifact |
-| `artifact://<id>/details.metrics.turns` | Read metadata fields |
-
-## Local workspace — `local://`
-
-Reads files under `.logician/artifacts/`. Supports writes.
-
+| `read local://<path>` | Read a file in the artifacts directory |
+| `read local://0` | Read artifact by numeric ID |
+| `read local://0:10-30` | Artifact with line range |
+| `read local://0:raw` | Artifact verbatim |
+| `read local://` | List artifacts directory |
+| `write local://<path>` | Write a file in the artifacts directory |
 ## Merge conflicts — `conflict://`
 
-| URL | Action |
-|---|---|
-| `conflict://<file>` | List all merge conflict blocks in a file |
-| `conflict://<file>:<index>` | Read one block |
-
-`write conflict://<file>` with `content` set to `ours`, `theirs`,
-`ours+theirs`, or `base` resolves that block (or every block for the bare form).
+Lists merge conflicts in a file; `conflict://<file>:<index>` reads one block.
+`write conflict://<file>` with `content` set to `ours`, `theirs`, `ours+theirs`,
+or `base` resolves that block (or every block for the bare form).
 
 ## Subagents — `agent://`
 

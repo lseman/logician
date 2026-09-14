@@ -147,12 +147,8 @@ dependency) — this capability is available and tested, not yet wired to a UI.
 
 `ResolveContext.pathOnly` tells a handler that the caller only needs
 `sourcePath`/shape info, not materialized content — useful when content would
-be expensive to read (a large artifact, a remote listing). `local://` and
-`artifact://` honor it; every other handler ignores it since they have no
-real backing path to substitute for content. No caller in logician sets it
-yet (`ToolContext` in `packages/log-core` has no `pathOnly` field) — like
-`complete()` before this, it's forward-compatible handler support without a
-live caller.
+be expensive to read (a large file, a remote listing). `local://` honors it;
+every other handler ignores it since they have no real backing path to substitute for content. No caller in logician sets it yet (`ToolContext` in `packages/log-core` has no `pathOnly` field) — like `complete()` before this, it's forward-compatible handler support without a live caller.
 
 ## Known limitation: single session per process
 
@@ -160,7 +156,7 @@ live caller.
 called once from `ToolRouter`'s constructor. This is safe today because
 `ToolRouter` is constructed exactly once per `AgentBridge`. If logician ever
 hosts multiple sessions in one process, a second `init()` call would silently
-repoint `artifact://` resolution for every session to the new session's
+repoint `local://` artifact-ID resolution for every session to the new session's
 directory. Fixing this would mean a per-`ToolRouter` `ArtifactManager` (or an
 `ArtifactRegistry` keyed by session id), not threading session identity
 through every `ProtocolHandler`'s `ResolveContext` the way a multi-session

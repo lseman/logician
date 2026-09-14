@@ -1,6 +1,5 @@
 export { AgentProtocolHandler } from "./agent-protocol";
 export { ArtifactRegistry } from "./artifact-manager";
-export { ArtifactProtocolHandler } from "./artifact-protocol";
 export { ConflictProtocolHandler } from "./conflict-protocol";
 export { findGithubClient } from "./github-client";
 export { IssueProtocolHandler } from "./issue-protocol";

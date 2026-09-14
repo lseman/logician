@@ -19,9 +19,8 @@ import {
 } from "../../capabilities/tools/support/utils/truncate.ts";
 import { XdDeviceRegistry } from "../../capabilities/tools/support/xd-device-registry.ts";
 import { createWriteTool } from "../../capabilities/tools/write-file.ts";
-import { ArtifactProtocolHandler } from "../../runtime/bridge/support/internal-urls/artifact-protocol.ts";
-import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
 import { LocalProtocolHandler } from "../../runtime/bridge/support/internal-urls/local-protocol.ts";
+import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
 import { LogProtocolHandler } from "../../runtime/bridge/support/internal-urls/log-protocol.ts";
 import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
 import { SkillProtocolHandler } from "../../runtime/bridge/support/internal-urls/skill-protocol.ts";
@@ -619,9 +618,9 @@ test("write to an immutable scheme surfaces the read-only-for-write message", as
 	expect(output.content).toContain("read-only for write");
 });
 
-// ── artifact:// pathOnly ────────────────────────────────────────────────────
+// ── local:// artifact pathOnly ─────────────────────────────────────────────
 
-test("artifact:// pathOnly resolves sourcePath without reading full content", async () => {
+test("local:// artifact pathOnly resolves sourcePath without reading full content", async () => {
 	const cwd = temp();
 	ArtifactRegistry.resetForTests();
 	ArtifactRegistry.instance().init({ cwd, sessionId: "path-only" });
@@ -629,12 +628,11 @@ test("artifact:// pathOnly resolves sourcePath without reading full content", as
 	if (id === null) throw new Error("artifact save failed");
 
 	const urls = new InternalUrlRouter();
-	urls.register(new ArtifactProtocolHandler());
-	const withContent = await urls.resolve(`artifact://${id}`);
+	urls.register(new LocalProtocolHandler());
+	const withContent = await urls.resolve(`local://${id}`);
 	expect(withContent.content).toBe("full artifact body");
 
-	const pathOnly = await urls.resolve(`artifact://${id}`, { pathOnly: true });
+	const pathOnly = await urls.resolve(`local://${id}`, { pathOnly: true });
 	expect(pathOnly.content).toBe("");
 	expect(pathOnly.sourcePath).toBeDefined();
-	ArtifactRegistry.resetForTests();
 });

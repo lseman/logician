@@ -59,7 +59,7 @@ Supported resource links:
   \`write rag://search\` with JSON \`{"query":"...","k?:number"}\` to search,
   \`write rag://ingest\` with JSON \`{"path":"...","docId?:string"}\` to ingest,
   \`write rag://delete\` with JSON \`{"docId":"..."}\` to delete a document
-- \`local://<path>\` — reads files under \`.logician/artifacts/\`
+- \`local://<path>\` — reads files under \`.logician/artifacts/\`. Supports writes. Numeric hosts (\`local://0\`, \`local://0:10-30\`) access artifacts by ID with line-range selectors.
 - \`conflict://<file>\` — lists merge conflicts in a file; \`conflict://<file>:<index>\`
   reads one block. \`write\` with the same path and \`content\` set to \`ours\`,
   \`theirs\`, \`ours+theirs\`, or \`base\` resolves that block (or every block, for
@@ -73,8 +73,6 @@ Supported resource links:
   \`log://guides/\` — lists doc categories; \`log://<path>\` — reads a doc file
 - \`ssh://\` — reads files on remote hosts via SSH/scp; \`ssh://<host>/path\` —
   reads a remote file; \`ssh://\` — lists configured hosts (see \`~/.logician/ssh.json\`)
-- \`artifact://\` — reads session-scoped tool output artifacts; use
-  \`artifact://\` to list available artifacts, or \`artifact://<id>\` to read one
 ### Critical rule for skill:// URLs
 When the user provides a \`skill://\` URL, pass the entire URL unchanged to
 \`read\`. Skill URLs accept an exact name only (an optional trailing slash is

@@ -1,13 +1,14 @@
-// ── Session-scoped artifact storage ──────────────────────────────────────────
+// -- Session-scoped artifact storage ------------------------------------------
 // Artifacts are stored in a per-session directory under .logician/artifacts/.
 // Each artifact gets a sequential numeric ID (0, 1, 2, ...) and is accessible
-// via artifact://<id> URLs.
+// via local://<id> URLs (the unified local:// handler resolves numeric hosts
+// to artifact entries).
 //
 // Usage:
 //   const reg = ArtifactRegistry.instance();
 //   await reg.init(cwd, sessionId);
 //   const id = await reg.save(content, toolType);
-//   // → artifact://0 is now readable
+//   // → local://0 is now readable
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
