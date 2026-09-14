@@ -144,7 +144,7 @@
                 <li><code>log-runtime</code> is the composition point: it depends on <code>log-core</code>
                     and all four <code>packages/blocks/*</code> packages (<code>log-autoresearch</code>,
                     <code>log-eoh</code>, <code>log-memory</code>, <code>log-rag</code>), and hosts every
-                    optional capability (reasoning, delegation, tasks, ask-user, RAG tools, and more) as one
+                    optional capability (reasoning, delegation, tasks, ask, RAG tools, and more) as one
                     folder each under <code>capabilities/</code>.</li>
                 <li><code>tui</code> sits on top of everything it needs directly:
                     <code>log-core</code>, <code>log-runtime</code>, <code>blocks/log-autoresearch</code>,
@@ -213,7 +213,7 @@
                             base and registry.</li>
                         <li><code>capabilities/delegation/</code> — subagent spawning and definitions.</li>
                         <li><code>capabilities/tasks/</code> — todo tracking with status transitions.</li>
-                        <li><code>capabilities/ask-user/</code> — structured prompts back to the user
+                        <li><code>capabilities/ask/</code> — structured prompts back to the user
                             mid-turn.</li>
                         <li><code>capabilities/rag/</code> — retrieval-backed tools, the one place this
                             package depends on <code>@logician/log-rag</code>.</li>

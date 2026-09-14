@@ -1,9 +1,9 @@
 // ── RAG (Retrieval-Augmented Generation) Tools ───────────────────────────────
 // Built-in tools backed by @logician/log-rag:
-//   - rag_ingest_pdf(path, docId?) — ingest a document into the vector store
-//   - rag_search_docs(query, k?) — search indexed documents
-//   - rag_list_docs() — list indexed document IDs
-//   - rag_delete_doc(docId) — remove a document and its chunks
+//   - rag_ingest(path, docId?) — ingest a document into the vector store
+//   - rag_search(query, k?) — search indexed documents
+//   - rag_list() — list indexed document IDs
+//   - rag_delete(docId) — remove a document and its chunks
 
 import type { Tool, ToolContext } from "@logician/log-core";
 import {
@@ -15,7 +15,7 @@ import {
 const embedder = new TransformersEmbedder();
 const pipelines = new Map<string, IngestionPipeline>();
 
-function getPipeline(cwd: string): IngestionPipeline {
+export function getPipeline(cwd: string): IngestionPipeline {
 	let pipeline = pipelines.get(cwd);
 	if (!pipeline) {
 		pipeline = new IngestionPipeline(cwd, { embedder, dbName: "logician-rag" });
@@ -29,9 +29,9 @@ function requireCwd(ctx: ToolContext): string {
 	return ctx.cwd;
 }
 
-export const rag_ingest_pdf: Tool = {
-	name: "rag_ingest_pdf",
-	label: "RAG: Ingest PDF",
+export const rag_ingest: Tool = {
+	name: "rag_ingest",
+	label: "RAG: Ingest",
 	description:
 		"Ingest a document (PDF, DOCX, etc.) into the RAG vector store for later retrieval. Path must be absolute or relative to cwd.",
 	promptSnippet: "Ingest a document into the RAG vector store",
@@ -80,9 +80,9 @@ export const rag_ingest_pdf: Tool = {
 	},
 };
 
-export const rag_search_docs: Tool = {
-	name: "rag_search_docs",
-	label: "RAG: Search Docs",
+export const rag_search: Tool = {
+	name: "rag_search",
+	label: "RAG: Search",
 	description:
 		"Search indexed documents in the RAG vector store. Returns top-k most similar chunks by cosine similarity.",
 	promptSnippet: "Search indexed documents in the RAG vector store",
@@ -128,9 +128,9 @@ export const rag_search_docs: Tool = {
 	},
 };
 
-export const rag_list_docs: Tool = {
-	name: "rag_list_docs",
-	label: "RAG: List Docs",
+export const rag_list: Tool = {
+	name: "rag_list",
+	label: "RAG: List",
 	description: "List document IDs currently indexed in the RAG vector store.",
 	promptSnippet: "List documents indexed in the RAG vector store",
 	readOnly: true,
@@ -148,9 +148,9 @@ export const rag_list_docs: Tool = {
 	},
 };
 
-export const rag_delete_doc: Tool = {
-	name: "rag_delete_doc",
-	label: "RAG: Delete Doc",
+export const rag_delete: Tool = {
+	name: "rag_delete",
+	label: "RAG: Delete",
 	description:
 		"Remove a document and all its chunks from the RAG vector store.",
 	promptSnippet: "Delete a document from the RAG vector store",
@@ -177,8 +177,8 @@ export const rag_delete_doc: Tool = {
 };
 
 export const rag_tools: Tool[] = [
-	rag_ingest_pdf,
-	rag_search_docs,
-	rag_list_docs,
-	rag_delete_doc,
+	rag_ingest,
+	rag_search,
+	rag_list,
+	rag_delete,
 ];

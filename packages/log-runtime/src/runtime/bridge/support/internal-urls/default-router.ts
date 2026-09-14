@@ -9,6 +9,7 @@ import { McpProtocolHandler } from "./mcp-protocol.ts";
 import { MemoryProtocolHandler } from "./memory-protocol.ts";
 import { PrProtocolHandler } from "./pr-protocol.ts";
 import { InternalUrlRouter } from "./router.ts";
+import { RagProtocolHandler } from "./rag-protocol.ts";
 import { RuleProtocolHandler } from "./rule-protocol.ts";
 import { SkillProtocolHandler } from "./skill-protocol.ts";
 import { SshProtocolHandler } from "./ssh-protocol.ts";
@@ -28,8 +29,8 @@ export function createInternalUrlRouter(): InternalUrlRouter {
 		new HistoryProtocolHandler(),
 		new ArtifactProtocolHandler(),
 		new ConflictProtocolHandler(),
-		new PrProtocolHandler(),
 		new IssueProtocolHandler(),
+		new RagProtocolHandler(),
 	])
 		router.register(handler);
 	return router;

@@ -67,7 +67,7 @@ export class InternalUrlRouter {
 		input: string,
 		content: string,
 		context?: WriteContext,
-	): Promise<void> {
+	): Promise<string | void> {
 		context?.signal?.throwIfAborted();
 		const scheme = extractInternalUrlScheme(input);
 		if (!scheme) throw new Error(`Unknown scheme in: ${input}`);
@@ -80,8 +80,9 @@ export class InternalUrlRouter {
 			);
 		}
 		const url = parseInternalUrl(input);
-		await handler.write(url, content, context);
+		const result = await handler.write(url, content, context);
 		context?.signal?.throwIfAborted();
+		return result;
 	}
 
 	/** Schemes whose handler supports host/path autocomplete. */

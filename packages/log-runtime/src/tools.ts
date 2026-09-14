@@ -13,7 +13,7 @@ export {
 	runSessionStartHooks,
 	splitPluginArgs,
 } from "./adapters/claude-code/plugin-runtime.ts";
-export { ask_user } from "./capabilities/ask-user/index.ts";
+export { ask } from "./capabilities/ask/index.ts";
 export { createReadSkillTool } from "./capabilities/skills/read-skill-tool.ts";
 export { createAutoresearchTools } from "./capabilities/tools/autoresearch.ts";
 export { type BashDetails, bash } from "./capabilities/tools/bash.ts";

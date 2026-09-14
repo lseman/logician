@@ -1,4 +1,4 @@
-// ── ask_user tool — agent Q&A ─────────────────────────────────────────────
+// ── ask tool — agent Q&A ─────────────────────────────────────────────
 // The agent calls this tool when it needs to ask the user a question with
 // multiple-choice options. Execution blocks until the user selects or dismisses.
 //
@@ -13,10 +13,10 @@ import type { Tool, ToolContext } from "@logician/log-core";
 const OTHER_VALUE = "__other__";
 const OTHER_LABEL = "Other (type your own)";
 
-export const ask_user: Tool = {
+export const ask: Tool = {
 	readOnly: true,
 	executionMode: "sequential",
-	name: "ask_user",
+	name: "ask",
 	label: "Ask User",
 	hookAliases: ["AskUser"],
 	description:
@@ -157,10 +157,10 @@ export const ask_user: Tool = {
 			questions.length === 0 ||
 			questions.some(item => !item.id || !item.choices.length)
 		) {
-			return "Error: ask_user requires at least one choice with 'value' and 'label'.";
+			return "Error: ask requires at least one choice with 'value' and 'label'.";
 		}
 		if (new Set(questions.map(item => item.id)).size !== questions.length) {
-			return "Error: ask_user question ids must be unique.";
+			return "Error: ask question ids must be unique.";
 		}
 
 		if (ctx?.onQuestionRequest) {
@@ -168,6 +168,6 @@ export const ask_user: Tool = {
 			return `User responded: ${answer}`;
 		}
 
-		return "Error: ask_user requires a question request handler (not available in non-interactive context).";
+		return "Error: ask requires a question request handler (not available in non-interactive context).";
 	},
 };

@@ -104,7 +104,7 @@
     <rect x="150" y="335" width="7" height="110" rx="3.5" fill="#22d3ee"/>
     <text x="184" y="362" class="package" fill="#22d3ee">packages/log-runtime</text>
     <text x="184" y="388" class="card-title">Log Runtime</text>
-    <text x="184" y="411" class="body">reasoning · delegation · tasks · ask-user · rag · tools</text>
+    <text x="184" y="411" class="body">reasoning · delegation · tasks · ask · rag · tools</text>
     <text x="184" y="428" class="body">memory · lsp · mcp · skills · interactions · extensions — one folder per capability</text>
     <rect x="900" y="368" width="315" height="22" rx="11" fill="#22d3ee" fill-opacity=".08" stroke="#22d3ee" stroke-opacity=".45"/>
     <text x="1057.5" y="383" text-anchor="middle" class="chip">composition point</text>

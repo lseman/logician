@@ -169,7 +169,7 @@ export function claudeToolMatcherName(toolName: string): string {
 		grep: "Grep",
 		todo: "TodoWrite|TaskCreate|TaskUpdate",
 		spawn_agent: "Agent",
-		ask_user: "AskUserQuestion",
+		ask: "AskUserQuestion",
 	};
 	return aliases[toolName] ?? toolName;
 }

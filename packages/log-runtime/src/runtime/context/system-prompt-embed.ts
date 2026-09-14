@@ -49,13 +49,18 @@ When \`tools.xdev\` is enabled, selected capabilities also have \`xd://\` device
 In addition to the core tools above, you may have access to other custom tools depending on the project.
 {mcpWorkflow}
 
-Internal resource URLs use the same \`read\` tool — pass \`path="scheme://target"\` to read them. Schemes are case-insensitive; resource names and targets are preserved exactly. Unsupported schemes return an error. Prefix a literal filename with \`./\` if it contains \`://\`. Most internal resource URLs are read-only; \`write\` dispatches \`xd://\` devices and any scheme whose handler supports writes (currently \`local://\`) the same way it dispatches archive/SQLite writes — an unsupported scheme or protocol returns a clear error instead of silently touching a filesystem path.
+Internal resource URLs use the same \`read\` tool — pass \`path="scheme://target"\` to read them. Schemes are case-insensitive; resource names and targets are preserved exactly. Unsupported schemes return an error. Prefix a literal filename with \`./\` if it contains \`://\`. Most internal resource URLs are read-only; \`write\` dispatches \`xd://\` devices and any scheme whose handler supports writes (currently \`local://\`, \`rag://\`) the same way it dispatches archive/SQLite writes — an unsupported scheme or protocol returns a clear error instead of silently touching a filesystem path.
 
 Supported resource links:
 - \`skill://<name>\` — reads a loaded skill's full instructions. The \`<name>\` must be an exact skill name; invalid names are rejected, not matched against similar skills. NEVER infer a different skill name from a malformed \`skill://\` URL — if the name doesn't match exactly, report the error and do not attempt an alternative.
 - \`rule://<name>\` — reads a frontmatter rule's content; accepts an exact name
   with an optional trailing slash, but no paths, queries or fragments
 - \`memory://list\` / \`memory://memories\` — list observations and memories
+- \`rag://\` — RAG (Retrieval-Augmented Generation) operations:
+  \`read rag://\` for help, \`read rag://list\` to list docs,
+  \`write rag://search\` with JSON \`{"query":"...","k?:number"}\` to search,
+  \`write rag://ingest\` with JSON \`{"path":"...","docId?:string"}\` to ingest,
+  \`write rag://delete\` with JSON \`{"docId":"..."}\` to delete a document
 - \`local://<path>\` — reads files under \`.logician/artifacts/\`
 - \`conflict://<file>\` — lists merge conflicts in a file; \`conflict://<file>:<index>\`
   reads one block. \`write\` with the same path and \`content\` set to \`ours\`,

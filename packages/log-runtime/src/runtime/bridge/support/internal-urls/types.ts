@@ -110,7 +110,7 @@ export interface ProtocolHandler {
 		url: InternalUrl,
 		content: string,
 		context?: WriteContext,
-	) => Promise<void>;
+	) => Promise<string | void>;
 	complete?: (
 		query: string,
 		context?: ResolveContext,

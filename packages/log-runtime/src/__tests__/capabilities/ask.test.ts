@@ -1,9 +1,9 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { ask_user } from "../../capabilities/ask-user/index.ts";
+import { ask } from "../../capabilities/ask/index.ts";
 
-void test("ask_user sends canonical multi-question requests", async () => {
-	const result = await ask_user.execute(
+void test("ask sends canonical multi-question requests", async () => {
+	const result = await ask.execute(
 		{
 			questions: [
 				{
@@ -33,20 +33,20 @@ void test("ask_user sends canonical multi-question requests", async () => {
 	assert.equal(result, 'User responded: {"scope":"small","tests":"full"}');
 });
 
-void test("ask_user rejects removed single-question arguments", async () => {
-	const prepared = ask_user.prepareArguments?.({
+void test("ask rejects removed single-question arguments", async () => {
+	const prepared = ask.prepareArguments?.({
 		question: "Continue?",
 		choices: [{ value: "yes", label: "Yes" }],
 	});
 	assert.deepEqual(prepared, { questions: undefined });
 	assert.match(
-		String(await ask_user.execute(prepared ?? {}, {})),
+		String(await ask.execute(prepared ?? {}, {})),
 		/requires at least one choice/,
 	);
 });
 
-void test("ask_user passes multi and recommended through, and only when recommended matches a real choice", async () => {
-	const result = await ask_user.execute(
+void test("ask passes multi and recommended through, and only when recommended matches a real choice", async () => {
+	const result = await ask.execute(
 		{
 			questions: [
 				{
@@ -81,8 +81,8 @@ void test("ask_user passes multi and recommended through, and only when recommen
 	assert.equal(result, "User responded: ok");
 });
 
-void test("ask_user with allowOther appends a reserved free-text choice", async () => {
-	const result = await ask_user.execute(
+void test("ask with allowOther appends a reserved free-text choice", async () => {
+	const result = await ask.execute(
 		{
 			questions: [
 				{
@@ -107,8 +107,8 @@ void test("ask_user with allowOther appends a reserved free-text choice", async 
 	assert.equal(result, "User responded: custom answer");
 });
 
-void test("ask_user with allowOther and no other choices is still valid (free-text-only question)", async () => {
-	const result = await ask_user.execute(
+void test("ask with allowOther and no other choices is still valid (free-text-only question)", async () => {
+	const result = await ask.execute(
 		{
 			questions: [
 				{ id: "reason", question: "Why?", allowOther: true, choices: [] },
@@ -124,8 +124,8 @@ void test("ask_user with allowOther and no other choices is still valid (free-te
 	assert.equal(result, "User responded: typed answer");
 });
 
-void test("ask_user requires stable unique question ids", async () => {
-	const result = await ask_user.execute(
+void test("ask requires stable unique question ids", async () => {
+	const result = await ask.execute(
 		{
 			questions: [
 				{

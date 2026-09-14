@@ -9,7 +9,7 @@ void test("Claude hook matcher names cover Logician-native tools", () => {
 	assert.equal(claudeToolMatcherName("bash"), "Bash");
 	assert.equal(claudeToolMatcherName("read"), "Read");
 	assert.equal(claudeToolMatcherName("spawn_agent"), "Agent");
-	assert.equal(claudeToolMatcherName("ask_user"), "AskUserQuestion");
+	assert.equal(claudeToolMatcherName("ask"), "AskUserQuestion");
 	assert.equal(
 		claudeToolMatcherName("mcp__plugin_context_mode__ctx_execute"),
 		"mcp__plugin_context_mode__ctx_execute",

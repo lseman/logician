@@ -268,7 +268,7 @@ const NODES = {
 		type: "grid",
 		summary:
 			"Optional feature modules layered on agent-core: task tracking, user prompts, child agents, and structured reasoning.",
-		children: ["cap-todo", "cap-ask-user", "cap-subagents", "cap-reasoners"],
+		children: ["cap-todo", "cap-ask", "cap-subagents", "cap-reasoners"],
 	},
 	"cap-todo": {
 		title: "tasks",
@@ -281,7 +281,7 @@ const NODES = {
 			"Visible in the TUI as the run progresses.",
 		],
 	},
-	"cap-ask-user": {
+	"cap-ask": {
 		title: "interaction",
 		kicker: "agent-blocks/interaction",
 		color: "#22d3ee",

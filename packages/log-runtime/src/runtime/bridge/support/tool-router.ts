@@ -35,6 +35,7 @@ import {
 import { createReadSkillTool } from "../../../capabilities/skills/read-skill-tool.ts";
 import {
 	createDefaultTools,
+	filterCoreTools,
 	isDiscoverableTool,
 } from "../../../capabilities/tools/default-tools.ts";
 import { graphician } from "../../../capabilities/tools/graphician.ts";
@@ -245,7 +246,7 @@ export class ToolRouter {
 	// ── Default tools ────────────────────────────────────────────────────
 
 	getDefaultTools(): Tool[] {
-		return this.defaultTools;
+		return filterCoreTools(this.defaultTools);
 	}
 
 	private syncDevices(): void {

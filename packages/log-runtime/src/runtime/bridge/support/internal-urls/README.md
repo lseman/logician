@@ -126,6 +126,13 @@ call `recordRead()`). Extending read-tracking to resource reads, so protocol
 writes get the same guarantee, is a known gap and would need to apply to
 every protocol at once, not just `local://`.
 
+`rag://` (Retrieval-Augmented Generation) operations on the vector store.
+`read rag://` shows usage help; `read rag://list` lists indexed document IDs.
+`write` dispatches JSON payloads: `write rag://search` with `{"query":"...","k?:number"}`
+returns search results as JSON; `write rag://ingest` with `{"path":"...","docId?:string"}`
+ingests a document; `write rag://delete` with `{"docId":"..."}` removes it.
+All operations require `cwd` from the write context and access the shared RAG pipeline singleton.
+
 ## Completion and path-only resolution
 
 `ProtocolHandler.complete?(query, context?)` returns autocomplete candidates

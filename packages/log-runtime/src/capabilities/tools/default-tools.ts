@@ -67,14 +67,17 @@ const CORE_TOOL_NAMES = new Set<string>([
 	"write",
 	"bash",
 	"todo",
-	"ask_user",
+	"ask",
 	"retain",
-	"rag_search",
-	"rag_ingest",
 	"eval",
 	"workpool",
 	"completion",
 	"wait",
+	"graphician",
+	"spawn_agent",
+	"spawn_agents",
+	"web_fetch",
+	"web_search",
 ]);
 
 /**

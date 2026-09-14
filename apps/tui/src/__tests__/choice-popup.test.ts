@@ -32,7 +32,7 @@ function popup(): ChoicePopup {
 	return result;
 }
 
-void test("choice popup renders a compact ask-user card with stacked details", () => {
+void test("choice popup renders a compact ask card with stacked details", () => {
 	const component = popup();
 	const lines = component.render(64);
 	const output = plain(lines.join("\n"));

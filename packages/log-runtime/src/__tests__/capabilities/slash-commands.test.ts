@@ -78,7 +78,7 @@ void test("file-backed EoH is discoverable", () => {
 	assert.match(command.argHint ?? "", /heuristic\.py/);
 });
 
-void test("ask-user popup preview is discoverable and invokes its local handler", () => {
+void test("ask popup preview is discoverable and invokes its local handler", () => {
 	let opened = false;
 	const commands = createSlashCommands(bridge, {
 		askPreview: () => {

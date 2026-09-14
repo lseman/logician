@@ -88,7 +88,7 @@ capability, organized as one folder per capability under `capabilities/`:
   In-Context CoT, GoT, plus a shared base and registry
 - `delegation/` — subagent spawning and definitions
 - `tasks/` — todo/task tracking
-- `ask-user/` — structured mid-turn prompts back to the user
+- `ask/` — structured mid-turn prompts back to the user
 - `rag/` — retrieval-backed tools (backed by `@logician/log-rag`)
 - `tools/` — the built-in tool registry, including `builtin-blocks.ts`,
   which assembles tools from the capabilities above

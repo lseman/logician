@@ -7,7 +7,7 @@ import type {
 	LLMBackend,
 	Tool,
 } from "@logician/log-core";
-import { ask_user } from "../ask-user/index.ts";
+import { ask } from "../ask/index.ts";
 import {
 	createSpawnAgentsTool,
 	createSpawnAgentTool,
@@ -35,7 +35,7 @@ export interface SubagentToolDeps {
 export function getBuiltInTools(opts: BuiltinToolsOptions = {}): Tool[] {
 	const tools: Tool[] = [];
 	if (opts.todoEnabled !== false) tools.push(todo_tool);
-	tools.push(ask_user, ...rag_tools);
+	tools.push(ask, ...rag_tools);
 	return tools;
 }
 

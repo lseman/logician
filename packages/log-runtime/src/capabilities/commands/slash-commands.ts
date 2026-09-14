@@ -440,7 +440,7 @@ export function createSlashCommands(
 		),
 		cmd(
 			"/ask-preview",
-			"Preview the interactive ask-user popup",
+			"Preview the interactive ask popup",
 			"local",
 			false,
 			{ category: "display", examples: ["/ask-preview"] },

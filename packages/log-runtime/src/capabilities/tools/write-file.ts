@@ -118,7 +118,8 @@ function buildWriteTool(router?: InternalUrlRouter): Tool {
 				return `Error: append is not supported for ${scheme}:// links.`;
 			}
 			try {
-				await router.write(filePath, content, ctx);
+				const result = await router.write(filePath, content, ctx);
+				if (typeof result === "string") return result;
 				return `Wrote ${filePath} (${Buffer.byteLength(content, "utf-8")} bytes)`;
 			} catch (error) {
 				return `Error: ${error instanceof Error ? error.message : String(error)}`;

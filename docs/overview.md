@@ -25,7 +25,7 @@ graph TB
     C[Agent loop / harness]
   end
   subgraph Runtime["log-runtime"]
-    D[Capabilities: reasoning, delegation,<br/>tasks, ask-user, rag, tools, memory,<br/>lsp, mcp, skills]
+    D[Capabilities: reasoning, delegation,<br/>tasks, ask, rag, tools, memory,<br/>lsp, mcp, skills]
   end
   subgraph Evolution
     G[EOH Engine]
@@ -54,7 +54,7 @@ graph TB
 | Package | Responsibility |
 |---|---|
 | `log-core` | Agent loop, harness, context, configuration, sessions, hooks, compaction, tools, and versioned client notifications |
-| `log-runtime` | Runtime composition: capabilities (reasoning, delegation, tasks, ask-user, RAG tools, built-in tools, memory wiring, LSP, MCP, skills) plus orchestration (bridge, session, transcript) |
+| `log-runtime` | Runtime composition: capabilities (reasoning, delegation, tasks, ask, RAG tools, built-in tools, memory wiring, LSP, MCP, skills) plus orchestration (bridge, session, transcript) |
 | `log-eoh` | Evolution of Heuristics — standalone optimization engine, wired into `log-runtime`'s capabilities |
 | `memoriam` | Standalone Python memory engine (`ecosystem/memoriam`): SQLite-backed observation capture, consolidation, retrieval; embedded via its JSON-lines SDK worker |
 | `log-rag` | Hybrid dense + BM25 retrieval, chunking, reranking, context budgets |
