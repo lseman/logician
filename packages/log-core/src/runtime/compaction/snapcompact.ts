@@ -84,45 +84,43 @@ export interface CompactResult {
 // ============================================================================
 
 /** Default per-tool-result character cap in serialized history. */
-export const TOOL_RESULT_MAX_CHARS = 2000;
-
-/** Default per-argument-value character cap. */
-export const TOOL_ARG_MAX_CHARS = 500;
+const TOOL_RESULT_MAX_CHARS = 2000;
 
 /** Default char cap across one tool call's full argument list. */
-export const TOOL_CALL_MAX_CHARS = 2000;
+const TOOL_CALL_MAX_CHARS = 2000;
 
 /** Default fraction of truncation budget spent on head. */
-export const TRUNCATE_HEAD_RATIO = 0.6;
-
+const TRUNCATE_HEAD_RATIO = 0.6;
 
 /** Estimated token overhead per PNG frame sent to a vision model. */
-export const PNG_FRAME_OVERHEAD_TOKENS = 200;
+const PNG_FRAME_OVERHEAD_TOKENS = 200;
 /** Zero-width dim ink markers (shift-out / shift-in). */
-export const DIM_ON = "\u000e";
-export const DIM_OFF = "\u000f";
+const DIM_ON = "\u000e";
+const DIM_OFF = "\u000f";
 
 /** Printed in place of newline runs: a block character that fills the cell. */
 export const NEWLINE_GLYPH = "\u2588";
 
 /** Frame geometry for the default bitmap shape. */
-export const DEFAULT_COLS = 100;
-export const DEFAULT_ROWS = 60;
+const DEFAULT_COLS = 100;
+const DEFAULT_ROWS = 60;
 
 /** Max frames to carry in every rebuilt request. */
-export const MAX_FRAMES_DEFAULT = 60;
+const MAX_FRAMES_DEFAULT = 60;
 
 /** Key under `CompactionEntry.preserveData` holding the frame archive. */
 export const PRESERVE_KEY = SNAPCOMPACT_PRESERVE_KEY;
 
 /** Stopwords that readers can reconstruct from context. */
-const STOPWORDS = new Set((
-	"the a an and or of to in on at as is are was were be been by for with that " +
+const STOPWORDS = new Set(
+	(
+		"the a an and or of to in on at as is are was were be been by for with that " +
 		"this it its from had has have not but he she his her they their them which " +
 		"also who whom when where while will would could should there then than into " +
 		"over under about after before between during each such these those some most " +
 		"more other only so"
-).split(" "));
+	).split(" "),
+);
 
 // ============================================================================
 // Message Serialization
@@ -146,7 +144,11 @@ export function serializeMessages(
 		const lastIdx = parts.length - 1;
 		if (lastIdx >= 0 && lastPrefix === prefix) {
 			const last = parts[lastIdx];
-			if (last) parts[lastIdx] = last.endsWith("\n") || content.startsWith("\n") ? last + content : last + "\n" + content;
+			if (last)
+				parts[lastIdx] =
+					last.endsWith("\n") || content.startsWith("\n")
+						? last + content
+						: last + "\n" + content;
 		} else {
 			parts.push(prefix + content);
 			lastPrefix = prefix;
@@ -169,10 +171,22 @@ export function serializeMessages(
 	// Second pass: serialize each message.
 	for (const msg of messages) {
 		if (msg.role === "user") {
-			const content = typeof msg.content === "string" ? msg.content : extractTextContent(msg.content);
+			const content =
+				typeof msg.content === "string"
+					? msg.content
+					: extractTextContent(msg.content);
 			if (content) pushPart("¶user:", stripDimMarkers(content));
 		} else if (msg.role === "assistant") {
-			const blocks = msg.content as Array<{ type: string; text?: string; thinking?: string; id?: string; name?: string; arguments?: unknown }> | undefined;
+			const blocks = msg.content as
+				| Array<{
+						type: string;
+						text?: string;
+						thinking?: string;
+						id?: string;
+						name?: string;
+						arguments?: unknown;
+				  }>
+				| undefined;
 			for (const block of blocks ?? []) {
 				if (block?.type === "text") {
 					const text = stripDimMarkers(block.text ?? "");
@@ -185,11 +199,20 @@ export function serializeMessages(
 					const id = block.id;
 					if (id && uselessCallIds.has(id)) continue;
 					const argsStr = formatToolArgs(block.arguments, headRatio);
-					const callLines: string[] = [`${block.name ?? "unknown"}(${argsStr})`];
+					const callLines: string[] = [
+						`${block.name ?? "unknown"}(${argsStr})`,
+					];
 					if (id) {
 						const resultText = resultTextByCallId.get(id);
 						if (resultText) {
-							callLines.push(renderResultBlock(resultText, toolResultMax, headRatio, dimToolResults));
+							callLines.push(
+								renderResultBlock(
+									resultText,
+									toolResultMax,
+									headRatio,
+									dimToolResults,
+								),
+							);
 						}
 					}
 					pushPart("¶call:", callLines.join("\n"));
@@ -199,7 +222,11 @@ export function serializeMessages(
 			const id = msg.toolCallId;
 			if (id && resultTextByCallId.has(id)) continue;
 			const resultText = id ? resultTextByCallId.get(id) : "";
-			if (resultText) pushPart("¶call:", `\n${renderResultBlock(resultText, toolResultMax, headRatio, dimToolResults)}`);
+			if (resultText)
+				pushPart(
+					"¶call:",
+					`\n${renderResultBlock(resultText, toolResultMax, headRatio, dimToolResults)}`,
+				);
 		}
 	}
 
@@ -212,27 +239,73 @@ export function serializeMessages(
 
 /** Unicode code-point folds for characters the bitmap fonts cannot render. */
 const CHAR_FOLD: Record<string, string> = {
-	"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
-	"\u201c": '"', "\u201d": '"', "\u201e": '"', "\u2032": "'", "\u2033": '"',
-	"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
-	"\u2026": "...", "\u22ef": "...",
-	"\u2022": "*", "\u2023": "*", "\u2219": "*", "\u25cf": "*", "\u25a0": "*", "\u25aa": "*",
-	"\u2190": "<-", "\u2191": "^", "\u2192": "->", "\u2193": "v", "\u2194": "<->",
-	"\u21d0": "<=", "\u21d2": "=>", "\u21d4": "<=>",
-	"\u2713": "v", "\u2714": "v", "\u2717": "x", "\u2718": "x",
-	"\u2044": "/", "\u2024": ".", "\u2025": "..", "\u00ab": '"', "\u00bb": '"',
+	"\u2018": "'",
+	"\u2019": "'",
+	"\u201a": "'",
+	"\u201b": "'",
+	"\u201c": '"',
+	"\u201d": '"',
+	"\u201e": '"',
+	"\u2032": "'",
+	"\u2033": '"',
+	"\u2010": "-",
+	"\u2011": "-",
+	"\u2012": "-",
+	"\u2013": "-",
+	"\u2014": "-",
+	"\u2015": "-",
+	"\u2212": "-",
+	"\u2026": "...",
+	"\u22ef": "...",
+	"\u2022": "*",
+	"\u2023": "*",
+	"\u2219": "*",
+	"\u25cf": "*",
+	"\u25a0": "*",
+	"\u25aa": "*",
+	"\u2190": "<-",
+	"\u2191": "^",
+	"\u2192": "->",
+	"\u2193": "v",
+	"\u2194": "<->",
+	"\u21d0": "<=",
+	"\u21d2": "=>",
+	"\u21d4": "<=>",
+	"\u2713": "v",
+	"\u2714": "v",
+	"\u2717": "x",
+	"\u2718": "x",
+	"\u2044": "/",
+	"\u2024": ".",
+	"\u2025": "..",
+	"\u00ab": '"',
+	"\u00bb": '"',
 };
 
 /** Emoji → text labels for tool output. */
 const EMOJI_FOLD: Record<string, string> = {
-	"✅": "[OK]", "☑": "[OK]", "✔": "[OK]",
-	"❌": "[FAIL]", "❎": "[FAIL]", "✖": "[FAIL]",
-	"⚠": "[WARN]", "🚨": "[ALERT]", "ℹ": "[INFO]",
-	"🐛": "[BUG]", "💥": "[CRASH]", "🔥": "[HOT]",
-	"🔒": "[LOCK]", "🔓": "[UNLOCK]",
-	"📁": "[DIR]", "📂": "[DIR]", "📄": "[FILE]",
-	"📝": "[NOTE]", "🧪": "[TEST]",
-	"⏳": "[WAIT]", "⌛": "[WAIT]", "🚀": "[RUN]",
+	"✅": "[OK]",
+	"☑": "[OK]",
+	"✔": "[OK]",
+	"❌": "[FAIL]",
+	"❎": "[FAIL]",
+	"✖": "[FAIL]",
+	"⚠": "[WARN]",
+	"🚨": "[ALERT]",
+	ℹ: "[INFO]",
+	"🐛": "[BUG]",
+	"💥": "[CRASH]",
+	"🔥": "[HOT]",
+	"🔒": "[LOCK]",
+	"🔓": "[UNLOCK]",
+	"📁": "[DIR]",
+	"📂": "[DIR]",
+	"📄": "[FILE]",
+	"📝": "[NOTE]",
+	"🧪": "[TEST]",
+	"⏳": "[WAIT]",
+	"⌛": "[WAIT]",
+	"🚀": "[RUN]",
 };
 
 const EMOJI_PICTOGRAPH = /\p{Extended_Pictographic}/u;
@@ -253,7 +326,9 @@ export function stripDimMarkers(text: string): string {
 export function normalizeText(text: string): string {
 	const stripped = text.includes("\u001b") ? Bun.stripANSI(text) : text;
 	const collapsed = stripped
-		.replace(COLLAPSIBLE, (run) => (LINE_BREAK.test(run) ? NEWLINE_GLYPH : /[^\p{Cf}]/u.test(run) ? " " : ""))
+		.replace(COLLAPSIBLE, run =>
+			LINE_BREAK.test(run) ? NEWLINE_GLYPH : /[^\p{Cf}]/u.test(run) ? " " : "",
+		)
 		.replace(EDGE_RUNS, "");
 
 	const chars = [...collapsed];
@@ -264,7 +339,10 @@ export function normalizeText(text: string): string {
 		if (cp === undefined) continue;
 
 		const folded = CHAR_FOLD[ch];
-		if (folded !== undefined) { out.push(folded); continue; }
+		if (folded !== undefined) {
+			out.push(folded);
+			continue;
+		}
 
 		// FONT_DATA only covers ASCII 32-126; Latin-1 supplement (0xa0-0xff)
 		// is NOT directly renderable and must fall through to NFKD folding
@@ -280,11 +358,20 @@ export function normalizeText(text: string): string {
 		}
 
 		const emoji = EMOJI_FOLD[ch];
-		if (emoji !== undefined) { out.push(emoji); continue; }
+		if (emoji !== undefined) {
+			out.push(emoji);
+			continue;
+		}
 		if (EMOJI_PICTOGRAPH.test(ch)) continue;
 
 		if (cp >= 0x2500 && cp <= 0x25ff) {
-			out.push(cp === 0x2502 || cp === 0x2503 ? "|" : cp === 0x2500 || cp === 0x2501 ? "-" : "+");
+			out.push(
+				cp === 0x2502 || cp === 0x2503
+					? "|"
+					: cp === 0x2500 || cp === 0x2501
+						? "-"
+						: "+",
+			);
 			continue;
 		}
 
@@ -294,14 +381,16 @@ export function normalizeText(text: string): string {
 			if (folded !== undefined) out.push(folded);
 			else {
 				const code = decomposed.codePointAt(0);
-				if (code !== undefined && code >= 0x20 && code < 0x7f) out.push(decomposed);
+				if (code !== undefined && code >= 0x20 && code < 0x7f)
+					out.push(decomposed);
 				else if (UNRENDERABLE.test(ch)) continue;
 				else out.push("?");
 			}
 		} else if (decomposed.length > 1) {
 			const first = decomposed.charAt(0);
 			const firstCp = first.codePointAt(0);
-			if (firstCp !== undefined && firstCp >= 0x20 && firstCp < 0x7f) out.push(first);
+			if (firstCp !== undefined && firstCp >= 0x20 && firstCp < 0x7f)
+				out.push(first);
 			else out.push(CHAR_FOLD[ch] ?? "?");
 		} else {
 			out.push(CHAR_FOLD[ch] ?? "?");
@@ -325,11 +414,16 @@ export function dimStopwords(text: string): string {
 	let out = "";
 
 	for (const part of parts) {
-		if (part === DIM_ON) { dim = true; out += part; }
-		else if (part === DIM_OFF) { dim = false; out += part; }
-		else if (dim) { out += part; }
-		else {
-			out += part.replace(ALPHA_RUN, (word) =>
+		if (part === DIM_ON) {
+			dim = true;
+			out += part;
+		} else if (part === DIM_OFF) {
+			dim = false;
+			out += part;
+		} else if (dim) {
+			out += part;
+		} else {
+			out += part.replace(ALPHA_RUN, word =>
 				STOPWORDS.has(word.toLowerCase()) ? DIM_ON + word + DIM_OFF : word,
 			);
 		}
@@ -342,11 +436,15 @@ export function dimStopwords(text: string): string {
 // Data URL elision
 // ============================================================================
 
-const DATA_URL_RE = /data:([A-Za-z][\w.+-]*\/[\w.+-]+(?:;[\w!#$%&'*+.^|~-]+=[\w!#$%&'*+.^|~-]+)*);base64,([A-Za-z0-9+/=]{40,})/gi;
+const DATA_URL_RE =
+	/data:([A-Za-z][\w.+-]*\/[\w.+-]+(?:;[\w!#$%&'*+.^|~-]+=[\w!#$%&'*+.^|~-]+)*);base64,([A-Za-z0-9+/=]{40,})/gi;
 
 export function elideDataUrls(text: string): string {
 	if (!/;base64,/i.test(text)) return text;
-	return text.replace(DATA_URL_RE, (_match, mime) => `[data URL omitted: ${mime}]`);
+	return text.replace(
+		DATA_URL_RE,
+		(_match, mime) => `[data URL omitted: ${mime}]`,
+	);
 }
 
 // ============================================================================
@@ -354,7 +452,11 @@ export function elideDataUrls(text: string): string {
 // ============================================================================
 
 /** Truncate text keeping head and tail, eliding the middle. */
-export function truncateForSummary(text: string, maxChars: number, headRatio: number = TRUNCATE_HEAD_RATIO): string {
+export function truncateForSummary(
+	text: string,
+	maxChars: number,
+	headRatio: number = TRUNCATE_HEAD_RATIO,
+): string {
 	if (text.length <= maxChars) return text;
 	const headChars = Math.round(maxChars * headRatio);
 	const tailChars = maxChars - headChars;
@@ -371,13 +473,26 @@ function extractTextContent(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
-		.filter((b): b is { type: string; text: string } => typeof b === "object" && b !== null && "type" in b && b.type === "text" && "text" in b && typeof (b as { text: string }).text === "string")
-		.map((b) => (b as { text: string }).text)
+		.filter(
+			(b): b is { type: string; text: string } =>
+				typeof b === "object" &&
+				b !== null &&
+				"type" in b &&
+				b.type === "text" &&
+				"text" in b &&
+				typeof (b as { text: string }).text === "string",
+		)
+		.map(b => (b as { text: string }).text)
 		.join("");
 }
 
 function formatToolArgs(args: unknown, headRatio: number): string {
-	if (typeof args === "string") return truncateForSummary(elideDataUrls(args), TOOL_CALL_MAX_CHARS, headRatio);
+	if (typeof args === "string")
+		return truncateForSummary(
+			elideDataUrls(args),
+			TOOL_CALL_MAX_CHARS,
+			headRatio,
+		);
 	if (typeof args === "object" && args !== null) {
 		return truncateForSummary(
 			Object.entries(args as Record<string, unknown>)
@@ -390,9 +505,20 @@ function formatToolArgs(args: unknown, headRatio: number): string {
 	return String(args ?? "");
 }
 
-function renderResultBlock(rawText: string, maxChars: number, headRatio: number, dim: boolean): string {
-	const body = truncateForSummary(elideDataUrls(stripDimMarkers(rawText)), maxChars, headRatio);
-	return dim ? `<out>\n${DIM_ON}${body}${DIM_OFF}\n</out>` : `<out>\n${body}\n</out>`;
+function renderResultBlock(
+	rawText: string,
+	maxChars: number,
+	headRatio: number,
+	dim: boolean,
+): string {
+	const body = truncateForSummary(
+		elideDataUrls(stripDimMarkers(rawText)),
+		maxChars,
+		headRatio,
+	);
+	return dim
+		? `<out>\n${DIM_ON}${body}${DIM_OFF}\n</out>`
+		: `<out>\n${body}\n</out>`;
 }
 
 // ============================================================================
@@ -407,12 +533,27 @@ function makePng(
 ): Uint8Array {
 	const sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 
-	function makeChunk(type: string, data: Uint8Array<ArrayBufferLike>): Uint8Array {
-		const len = new Uint8Array(4); len[0] = 0; len[1] = 0; len[2] = 0; len[3] = 0;
-		len[3] = data.length & 0xFF; len[2] = (data.length >> 8) & 0xFF; len[1] = (data.length >> 16) & 0xFF; len[0] = (data.length >> 24) & 0xFF;
-		const typeBytes = new Uint8Array([...type.split("").map(c => c.charCodeAt(0))]);
+	function makeChunk(
+		type: string,
+		data: Uint8Array<ArrayBufferLike>,
+	): Uint8Array {
+		const len = new Uint8Array(4);
+		len[0] = 0;
+		len[1] = 0;
+		len[2] = 0;
+		len[3] = 0;
+		len[3] = data.length & 0xff;
+		len[2] = (data.length >> 8) & 0xff;
+		len[1] = (data.length >> 16) & 0xff;
+		len[0] = (data.length >> 24) & 0xff;
+		const typeBytes = new Uint8Array([
+			...type.split("").map(c => c.charCodeAt(0)),
+		]);
 		const crc = new Uint8Array(4);
-		crc[0] = len[0]!; crc[1] = len[1]!; crc[2] = len[2]!; crc[3] = len[3]!;
+		crc[0] = len[0]!;
+		crc[1] = len[1]!;
+		crc[2] = len[2]!;
+		crc[3] = len[3]!;
 		// @ts-expect-error noUncheckedIndexedAccess makes typed arrays return T|undefined
 		for (let i = 0; i < typeBytes.length; i++) crc[i] ^= typeBytes[i]!;
 		// @ts-expect-error noUncheckedIndexedAccess makes typed arrays return T|undefined
@@ -420,14 +561,17 @@ function makePng(
 		const table = new Uint32Array(256);
 		for (let i = 0; i < 256; i++) {
 			let c = i;
-			for (let j = 0; j < 8; j++) c = (c >>> 1) ^ (c & 1 ? 0xEDB88320 : 0);
+			for (let j = 0; j < 8; j++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0);
 			table[i] = c >>> 0;
 		}
-		let crcVal = 0xFFFFFFFF;
-		// @ts-expect-error noUncheckedIndexedAccess makes typed arrays return T|undefined
-		for (let i = 0; i < data.length; i++) crcVal = table[(crcVal ^ data[i]!) & 0xFF] ^ (crcVal >>> 8);
-		crcVal ^= 0xFFFFFFFF;
-		crc[0] = (crcVal >> 24) & 0xFF; crc[1] = (crcVal >> 16) & 0xFF; crc[2] = (crcVal >> 8) & 0xFF; crc[3] = crcVal & 0xFF;
+		let crcVal = 0xffffffff;
+		for (let i = 0; i < data.length; i++)
+			crcVal = table[(crcVal ^ data[i]!) & 0xff]! ^ (crcVal >>> 8);
+		crcVal ^= 0xffffffff;
+		crc[0] = (crcVal >> 24) & 0xff;
+		crc[1] = (crcVal >> 16) & 0xff;
+		crc[2] = (crcVal >> 8) & 0xff;
+		crc[3] = crcVal & 0xff;
 		const out = new Uint8Array(4 + 4 + data.length + 4);
 		out.set(len, 0);
 		out.set(typeBytes, 4);
@@ -441,8 +585,8 @@ function makePng(
 		const v = new DataView(b);
 		v.setInt32(0, width, false);
 		v.setInt32(4, height, false);
-		v.setUint8(8, 8);  // bit depth
-		v.setUint8(9, 6);  // color type: RGBA
+		v.setUint8(8, 8); // bit depth
+		v.setUint8(9, 6); // color type: RGBA
 		v.setUint8(10, 0); // compression
 		v.setUint8(11, 0); // filter
 		v.setUint8(12, 0); // interlace
@@ -470,9 +614,12 @@ function makePng(
 	const total = sig.length + ihdr.length + idat.length + end.length;
 	const result = new Uint8Array(total);
 	let off = 0;
-	result.set(sig, off); off += sig.length;
-	result.set(ihdr, off); off += ihdr.length;
-	result.set(idat, off); off += idat.length;
+	result.set(sig, off);
+	off += sig.length;
+	result.set(ihdr, off);
+	off += ihdr.length;
+	result.set(idat, off);
+	off += idat.length;
 	result.set(end, off);
 	return result;
 }
@@ -482,7 +629,8 @@ function toBase64(data: Uint8Array): string {
 	let binary = "";
 	for (let i = 0; i < data.length; i += 8192) {
 		const chunk = data.subarray(i, i + 8192);
-		for (let j = 0; j < chunk.length; j++) binary += String.fromCharCode(chunk[j]!);
+		for (let j = 0; j < chunk.length; j++)
+			binary += String.fromCharCode(chunk[j]!);
 	}
 	return btoa(binary);
 }
@@ -495,127 +643,114 @@ const FONT_HEIGHT = 16;
 /** Compact bitmap font data: 95 printable ASCII chars, 16 bytes each. */
 const FONT_DATA = new Uint8Array([
 	// Space (32)
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	// Exclamation (33)
-	0,0,0,0,16,16,16,16,16,16,16,16,16,0,0,0,
+	0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 0,
 	// Double quote (34)
-	0,0,48,48,0,0,0,0,0,0,0,0,0,0,0,0,
+	0, 0, 48, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	// Hash (35)
-	0,68,68,124,68,68,68,0,68,68,124,68,68,68,0,0,
+	0, 68, 68, 124, 68, 68, 68, 0, 68, 68, 124, 68, 68, 68, 0, 0,
 	// Dollar (36)
-	0,56,100,100,24,24,34,34,4,24,102,100,100,56,0,0,
+	0, 56, 100, 100, 24, 24, 34, 34, 4, 24, 102, 100, 100, 56, 0, 0,
 	// Percent (37)
-	0,0,66,35,21,12,18,36,0,0,36,18,12,21,35,66,
+	0, 0, 66, 35, 21, 12, 18, 36, 0, 0, 36, 18, 12, 21, 35, 66,
 	// Ampersand (38)
-	0,24,36,68,72,72,100,100,24,24,96,68,68,34,24,0,
+	0, 24, 36, 68, 72, 72, 100, 100, 24, 24, 96, 68, 68, 34, 24, 0,
 	// Apostrophe (39)
-	0,0,0,0,0,16,32,0,0,0,0,0,0,0,0,0,
+	0, 0, 0, 0, 0, 16, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	// Left paren (40)
-	0,2,4,8,16,16,16,8,4,2,0,0,0,0,0,0,
+	0, 2, 4, 8, 16, 16, 16, 8, 4, 2, 0, 0, 0, 0, 0, 0,
 	// Right paren (41)
-	0,32,16,8,4,4,4,8,16,32,0,0,0,0,0,0,
+	0, 32, 16, 8, 4, 4, 4, 8, 16, 32, 0, 0, 0, 0, 0, 0,
 	// Asterisk (42)
-	0,0,0,18,68,34,18,64,18,34,68,18,0,0,0,0,
+	0, 0, 0, 18, 68, 34, 18, 64, 18, 34, 68, 18, 0, 0, 0, 0,
 	// Plus (43)
-	0,0,0,0,0,16,16,124,16,16,0,0,0,0,0,0,
+	0, 0, 0, 0, 0, 16, 16, 124, 16, 16, 0, 0, 0, 0, 0, 0,
 	// Comma (44)
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,12,16,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 16,
 	// Minus (45)
-	0,0,0,0,0,0,0,0,124,0,0,0,0,0,0,0,
+	0, 0, 0, 0, 0, 0, 0, 0, 124, 0, 0, 0, 0, 0, 0, 0,
 	// Period (46)
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,64,64,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 64,
 	// Forward slash (47)
-	1,1,2,2,4,4,8,8,16,16,32,32,64,64,0,0,
+	1, 1, 2, 2, 4, 4, 8, 8, 16, 16, 32, 32, 64, 64, 0, 0,
 	// Digits 0-9 (48-57)
-	0,56,102,195,195,195,195,195,195,195,195,102,56,0,0,0,
-	0,0,0,0,16,48,16,16,16,16,16,16,16,60,0,0,
-	0,56,102,6,12,24,48,96,96,96,192,192,254,0,0,0,
-	0,56,102,6,12,24,6,6,6,6,12,102,120,0,0,0,
-	0,6,14,30,54,102,102,102,254,6,6,6,6,0,0,0,
-	0,126,96,96,96,120,6,6,6,102,102,56,0,0,0,0,
-	0,56,102,96,96,124,102,102,102,102,102,102,56,0,0,0,
-	0,126,6,12,24,48,48,64,64,64,64,64,64,0,0,0,
-	0,56,102,102,102,56,102,102,102,102,102,102,56,0,0,0,
-	0,56,102,102,102,60,6,6,6,6,102,102,56,0,0,0,
+	0, 56, 102, 195, 195, 195, 195, 195, 195, 195, 195, 102, 56, 0, 0, 0, 0, 0, 0,
+	0, 16, 48, 16, 16, 16, 16, 16, 16, 16, 60, 0, 0, 0, 56, 102, 6, 12, 24, 48,
+	96, 96, 96, 192, 192, 254, 0, 0, 0, 0, 56, 102, 6, 12, 24, 6, 6, 6, 6, 12,
+	102, 120, 0, 0, 0, 0, 6, 14, 30, 54, 102, 102, 102, 254, 6, 6, 6, 6, 0, 0, 0,
+	0, 126, 96, 96, 96, 120, 6, 6, 6, 102, 102, 56, 0, 0, 0, 0, 0, 56, 102, 96,
+	96, 124, 102, 102, 102, 102, 102, 102, 56, 0, 0, 0, 0, 126, 6, 12, 24, 48, 48,
+	64, 64, 64, 64, 64, 64, 0, 0, 0, 0, 56, 102, 102, 102, 56, 102, 102, 102, 102,
+	102, 102, 56, 0, 0, 0, 0, 56, 102, 102, 102, 60, 6, 6, 6, 6, 102, 102, 56, 0,
+	0, 0,
 	// Punctuation (58-64)
-	0,0,0,0,0,64,64,0,0,0,64,64,0,0,0,0,
-	0,0,0,0,0,64,64,0,0,0,0,0,0,0,12,16,
-	0,0,0,0,6,12,24,48,96,48,24,12,6,0,0,0,
-	0,0,0,0,0,0,124,0,124,0,0,0,0,0,0,0,
-	0,0,0,0,96,96,48,24,12,12,24,48,96,0,0,0,
-	0,0,56,102,6,12,24,48,64,0,0,0,0,0,0,0,
-	0,0,56,102,211,211,211,247,211,211,211,203,102,56,0,0,
+	0, 0, 0, 0, 0, 64, 64, 0, 0, 0, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 64, 0,
+	0, 0, 0, 0, 0, 0, 12, 16, 0, 0, 0, 0, 6, 12, 24, 48, 96, 48, 24, 12, 6, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 124, 0, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96, 48,
+	24, 12, 12, 24, 48, 96, 0, 0, 0, 0, 0, 56, 102, 6, 12, 24, 48, 64, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 56, 102, 211, 211, 211, 247, 211, 211, 211, 203, 102, 56, 0, 0,
 	// Letters A-H (65-72)
-	0,0,56,102,102,102,102,126,102,102,102,102,102,0,0,0,
-	0,0,124,98,98,98,124,98,98,98,98,98,124,0,0,0,
-	0,0,60,98,96,96,96,96,96,96,96,98,60,0,0,0,
-	0,0,120,100,98,98,98,98,98,98,98,100,120,0,0,0,
-	0,0,126,96,96,96,120,96,96,96,96,96,126,0,0,0,
-	0,0,126,96,96,96,120,96,96,96,96,96,96,0,0,0,
-	0,0,60,98,96,96,96,112,98,98,98,98,60,0,0,0,
-	0,0,102,102,102,102,126,102,102,102,102,102,102,0,0,0,
+	0, 0, 56, 102, 102, 102, 102, 126, 102, 102, 102, 102, 102, 0, 0, 0, 0, 0,
+	124, 98, 98, 98, 124, 98, 98, 98, 98, 98, 124, 0, 0, 0, 0, 0, 60, 98, 96, 96,
+	96, 96, 96, 96, 96, 98, 60, 0, 0, 0, 0, 0, 120, 100, 98, 98, 98, 98, 98, 98,
+	98, 100, 120, 0, 0, 0, 0, 0, 126, 96, 96, 96, 120, 96, 96, 96, 96, 96, 126, 0,
+	0, 0, 0, 0, 126, 96, 96, 96, 120, 96, 96, 96, 96, 96, 96, 0, 0, 0, 0, 0, 60,
+	98, 96, 96, 96, 112, 98, 98, 98, 98, 60, 0, 0, 0, 0, 0, 102, 102, 102, 102,
+	126, 102, 102, 102, 102, 102, 102, 0, 0, 0,
 	// Letters I-P (73-80)
-	0,0,24,8,8,8,8,8,8,8,8,8,24,0,0,0,
-	0,0,24,8,8,8,8,8,8,8,8,8,120,0,0,0,
-	0,0,102,102,98,98,120,112,98,98,98,102,102,0,0,0,
-	0,0,96,96,96,96,96,96,96,96,96,96,126,0,0,0,
-	0,0,102,102,118,118,126,110,110,102,102,102,102,0,0,0,
-	0,0,102,102,102,102,110,110,118,118,102,102,102,0,0,0,
-	0,0,56,102,195,195,195,195,195,195,195,195,102,56,0,0,
-	0,0,124,98,98,98,98,124,96,96,96,96,96,0,0,0,
+	0, 0, 24, 8, 8, 8, 8, 8, 8, 8, 8, 8, 24, 0, 0, 0, 0, 0, 24, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 120, 0, 0, 0, 0, 0, 102, 102, 98, 98, 120, 112, 98, 98, 98, 102, 102,
+	0, 0, 0, 0, 0, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 126, 0, 0, 0, 0, 0,
+	102, 102, 118, 118, 126, 110, 110, 102, 102, 102, 102, 0, 0, 0, 0, 0, 102,
+	102, 102, 102, 110, 110, 118, 118, 102, 102, 102, 0, 0, 0, 0, 0, 56, 102, 195,
+	195, 195, 195, 195, 195, 195, 195, 102, 56, 0, 0, 0, 0, 124, 98, 98, 98, 98,
+	124, 96, 96, 96, 96, 96, 0, 0, 0,
 	// Letters Q-Z (81-90)
-	0,0,56,102,195,195,195,195,195,195,195,195,102,56,2,4,
-	0,0,124,98,98,98,98,124,98,98,102,102,98,0,0,0,
-	0,0,60,98,96,96,56,6,6,96,96,98,60,0,0,0,
-	0,0,126,8,8,8,8,8,8,8,8,8,8,0,0,0,
-	0,0,102,102,102,102,102,102,102,102,102,102,56,0,0,0,
-	0,0,98,98,98,98,98,98,54,54,26,26,12,0,0,0,
-	0,0,102,102,102,102,102,102,102,110,110,118,118,0,0,0,
-	0,0,102,102,58,58,20,20,58,58,102,102,102,0,0,0,
-	0,0,102,102,102,58,20,20,8,8,8,8,8,0,0,0,
-	0,0,126,6,12,24,48,96,96,96,96,96,126,0,0,0,
+	0, 0, 56, 102, 195, 195, 195, 195, 195, 195, 195, 195, 102, 56, 2, 4, 0, 0,
+	124, 98, 98, 98, 98, 124, 98, 98, 102, 102, 98, 0, 0, 0, 0, 0, 60, 98, 96, 96,
+	56, 6, 6, 96, 96, 98, 60, 0, 0, 0, 0, 0, 126, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0,
+	0, 0, 0, 0, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 56, 0, 0, 0, 0,
+	0, 98, 98, 98, 98, 98, 98, 54, 54, 26, 26, 12, 0, 0, 0, 0, 0, 102, 102, 102,
+	102, 102, 102, 102, 110, 110, 118, 118, 0, 0, 0, 0, 0, 102, 102, 58, 58, 20,
+	20, 58, 58, 102, 102, 102, 0, 0, 0, 0, 0, 102, 102, 102, 58, 20, 20, 8, 8, 8,
+	8, 8, 0, 0, 0, 0, 0, 126, 6, 12, 24, 48, 96, 96, 96, 96, 96, 126, 0, 0, 0,
 	// Brackets + symbols (91-96)
-	0,0,62,32,32,32,32,62,32,32,32,32,62,0,0,0,
-	0,0,64,64,32,32,16,16,8,8,4,4,2,2,0,0,
-	0,0,62,2,2,2,2,62,2,2,2,2,62,0,0,0,
-	0,0,0,0,0,0,0,0,66,36,24,0,0,0,0,0,
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,0,
-	0,0,0,0,0,0,0,48,24,8,0,0,0,0,0,0,
+	0, 0, 62, 32, 32, 32, 32, 62, 32, 32, 32, 32, 62, 0, 0, 0, 0, 0, 64, 64, 32,
+	32, 16, 16, 8, 8, 4, 4, 2, 2, 0, 0, 0, 0, 62, 2, 2, 2, 2, 62, 2, 2, 2, 2, 62,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 66, 36, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 48, 24, 8, 0, 0, 0, 0, 0,
+	0,
 	// Lowercase a-f (97-102)
-	0,0,0,0,0,0,56,6,62,6,6,62,0,0,0,0,
-	0,0,0,0,0,0,96,96,120,100,100,100,120,0,0,0,
-	0,0,0,0,0,0,56,32,32,32,36,36,24,0,0,0,
-	0,0,0,0,0,0,24,36,36,36,60,36,24,0,0,0,
-	0,0,0,0,0,0,56,36,32,124,36,36,24,0,0,0,
-	0,0,0,0,0,0,48,8,60,34,2,2,4,0,0,0,
+	0, 0, 0, 0, 0, 0, 56, 6, 62, 6, 6, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96,
+	120, 100, 100, 100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 32, 32, 32, 36, 36,
+	24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 36, 36, 36, 60, 36, 24, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 56, 36, 32, 124, 36, 36, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48, 8, 60,
+	34, 2, 2, 4, 0, 0, 0,
 	// Lowercase g-m (103-109)
-	0,0,0,0,0,0,24,36,36,60,36,36,24,6,18,8,
-	0,0,0,0,0,0,96,96,96,100,100,100,120,0,0,0,
-	0,0,0,0,0,0,16,16,56,0,16,16,16,0,0,0,
-	0,0,0,0,0,0,16,16,56,0,16,16,16,16,16,8,
-	0,0,0,0,0,0,96,96,96,100,104,112,100,0,0,0,
-	0,0,0,0,0,0,56,16,16,16,16,16,16,0,0,0,
-	0,0,0,0,0,0,100,100,116,124,108,100,100,0,0,0,
+	0, 0, 0, 0, 0, 0, 24, 36, 36, 60, 36, 36, 24, 6, 18, 8, 0, 0, 0, 0, 0, 0, 96,
+	96, 96, 100, 100, 100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 16, 56, 0, 16, 16,
+	16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 16, 56, 0, 16, 16, 16, 16, 16, 8, 0, 0, 0,
+	0, 0, 0, 96, 96, 96, 100, 104, 112, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 16,
+	16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 116, 124, 108, 100,
+	100, 0, 0, 0,
 	// Lowercase n-t (110-116)
-	0,0,0,0,0,0,96,96,100,100,100,100,120,0,0,0,
-	0,0,0,0,0,0,56,36,32,32,32,36,56,0,0,0,
-	0,0,0,0,0,0,96,96,120,100,100,100,120,0,0,0,
-	0,0,0,0,0,0,24,36,36,36,60,36,36,6,2,2,
-	0,0,0,0,0,0,96,96,100,100,96,96,96,0,0,0,
-	0,0,0,0,0,0,56,32,56,4,4,32,56,0,0,0,
-	0,0,0,0,0,0,24,8,60,8,8,16,8,0,0,0,
+	0, 0, 0, 0, 0, 0, 96, 96, 100, 100, 100, 100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	56, 36, 32, 32, 32, 36, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96, 120, 100, 100,
+	100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 36, 36, 36, 60, 36, 36, 6, 2, 2, 0,
+	0, 0, 0, 0, 0, 96, 96, 100, 100, 96, 96, 96, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56,
+	32, 56, 4, 4, 32, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 8, 60, 8, 8, 16, 8, 0, 0,
+	0,
 	// Lowercase u-z (117-122)
-	0,0,0,0,0,0,100,100,100,100,100,100,56,0,0,0,
-	0,0,0,0,0,0,98,98,98,98,54,54,24,0,0,0,
-	0,0,0,0,0,0,102,102,102,102,102,110,54,0,0,0,
-	0,0,0,0,0,0,102,102,58,20,58,102,102,0,0,0,
-	0,0,0,0,0,0,102,102,102,54,54,24,24,32,32,16,
-	0,0,0,0,0,0,124,6,12,24,48,96,124,0,0,0,
+	0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 100, 100, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	98, 98, 98, 98, 54, 54, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102, 102, 102, 102,
+	102, 110, 54, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102, 102, 58, 20, 58, 102, 102, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 102, 102, 102, 54, 54, 24, 24, 32, 32, 16, 0, 0, 0, 0, 0,
+	0, 124, 6, 12, 24, 48, 96, 124, 0, 0, 0,
 	// Final symbols (123-126)
-	0,0,6,8,16,32,32,60,32,32,16,8,6,0,0,0,
-	0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,
-	0,0,48,16,8,8,16,60,8,8,16,32,24,0,0,0,
-	0,0,0,0,0,0,0,0,0,0,0,0,0,84,40,0,
+	0, 0, 6, 8, 16, 32, 32, 60, 32, 32, 16, 8, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48, 16, 8, 8, 16, 60, 8, 8, 16, 32, 24, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 84, 40, 0,
 ]);
 
 /** ASCII index → row bytes offset in FONT_DATA. */
@@ -639,7 +774,10 @@ function rasterizeText(
 		const ch = text[ci] ?? "";
 		const code = ch.charCodeAt(0);
 		if (code === 10 || code === 13) {
-			if (code === 10) { row++; col = 0; }
+			if (code === 10) {
+				row++;
+				col = 0;
+			}
 			continue;
 		}
 		if (code < 32 || code === 127) continue;
@@ -652,23 +790,24 @@ function rasterizeText(
 			for (let bit = 0; bit < FONT_WIDTH; bit++) {
 				if (byte & (1 << (7 - bit))) {
 					const px = y + bit * 4;
-					rgba[px] = 0; rgba[px + 1] = 0;
-					rgba[px + 2] = 0; rgba[px + 3] = 255;
+					rgba[px] = 0;
+					rgba[px + 1] = 0;
+					rgba[px + 2] = 0;
+					rgba[px + 3] = 255;
 				}
 			}
 		}
 		col++;
-		if (col >= frameWidth) { col = 0; row++; }
+		if (col >= frameWidth) {
+			col = 0;
+			row++;
+		}
 	}
 	return rgba;
 }
 
 /** Render a single text frame page → base64 PNG. */
-function renderFramePng(
-	pageText: string,
-	cols: number,
-	rows: number,
-): string {
+function renderFramePng(pageText: string, cols: number, rows: number): string {
 	const rgba = rasterizeText(pageText, cols, rows);
 	const pngBytes = makePng(cols * FONT_WIDTH, rows * FONT_HEIGHT, rgba);
 	return toBase64(pngBytes);
@@ -712,15 +851,22 @@ interface ArchiveLayout {
 	truncatedChars: number;
 }
 
-
-function planArchive(archiveText: string, cols: number, rows: number, maxFrames: number): ArchiveLayout {
+function planArchive(
+	archiveText: string,
+	cols: number,
+	rows: number,
+	maxFrames: number,
+): ArchiveLayout {
 	const capacity = cols * rows;
 	const totalCapacity = maxFrames * capacity;
 	const truncatedChars = Math.max(0, archiveText.length - totalCapacity);
 
 	// Keep text at both edges (one page worth each).
 	const edgeChars = capacity;
-	const textHead = archiveText.slice(0, Math.min(edgeChars, archiveText.length));
+	const textHead = archiveText.slice(
+		0,
+		Math.min(edgeChars, archiveText.length),
+	);
 	const remaining = archiveText.slice(edgeChars);
 
 	// Determine text tail.
@@ -746,8 +892,6 @@ function planArchive(archiveText: string, cols: number, rows: number, maxFrames:
 
 export interface SerializeOptions {
 	toolResultMaxChars?: number;
-	toolArgMaxChars?: number;
-	toolCallMaxChars?: number;
 	truncateHeadRatio?: number;
 	dimToolResults?: boolean;
 	includeThinking?: boolean;
@@ -781,13 +925,15 @@ export async function compact(
 		serializeOptions?: SerializeOptions;
 		/** Override frame rendering: true to force, false to disable. */
 		render?: boolean;
-
 	},
 ): Promise<CompactResult> {
 	const maxFrames = options?.maxFrames ?? MAX_FRAMES_DEFAULT;
 
 	// Provider-aware frame sizing.
-	const cols = resolveCols(options?.shape?.cols ?? DEFAULT_COLS, options?.serializeOptions?.provider);
+	const cols = resolveCols(
+		options?.shape?.cols ?? DEFAULT_COLS,
+		options?.serializeOptions?.provider,
+	);
 	const rows = options?.shape?.rows ?? DEFAULT_ROWS;
 
 	// Serialize messages.
@@ -799,16 +945,22 @@ export async function compact(
 	// Fold in previous archive text if one exists.
 	let archiveText = elided;
 	if (options?.previousArchive) {
-		const prevText = options.previousArchive.text ?? options.previousArchive.textHead ?? "";
+		const prevText =
+			options.previousArchive.text ?? options.previousArchive.textHead ?? "";
 		const prevTail = options.previousArchive.textTail ?? "";
 		if (prevText || prevTail) {
-			archiveText = prevText + (prevTail ? NEWLINE_GLYPH + prevTail : "") + (archiveText ? NEWLINE_GLYPH + archiveText : "");
+			archiveText =
+				prevText +
+				(prevTail ? NEWLINE_GLYPH + prevTail : "") +
+				(archiveText ? NEWLINE_GLYPH + archiveText : "");
 		}
 	}
 
 	// Fold in previous text summary if no archive exists.
 	if (options?.previousSummary && !options?.previousArchive?.text) {
-		archiveText = `[Summary of earlier history] ${options.previousSummary}` + (archiveText ? NEWLINE_GLYPH + archiveText : "");
+		archiveText =
+			`[Summary of earlier history] ${options.previousSummary}` +
+			(archiveText ? NEWLINE_GLYPH + archiveText : "");
 	}
 
 	// Normalize.
@@ -819,12 +971,17 @@ export async function compact(
 
 	// Estimate character counts.
 	const textChars = layout.textHead.length + layout.textTail.length;
-	const frameChars = layout.framePages.reduce((sum, page) => sum + page.replace(DIM_MARKERS, "").length, 0);
+	const frameChars = layout.framePages.reduce(
+		(sum, page) => sum + page.replace(DIM_MARKERS, "").length,
+		0,
+	);
 	const totalChars = frameChars + textChars;
 
 	// Build frames from the planned pages.
-	const renderPng = options?.render ?? (typeof Bun !== "undefined" && typeof Bun.deflateSync === "function");
-	const frames: Frame[] = layout.framePages.map((pageText) => {
+	const renderPng =
+		options?.render ??
+		(typeof Bun !== "undefined" && typeof Bun.deflateSync === "function");
+	const frames: Frame[] = layout.framePages.map(pageText => {
 		const clean = pageText.replace(DIM_MARKERS, "");
 		const rendered = Math.min(clean.length, cols * rows);
 		let data = "";
@@ -849,7 +1006,13 @@ export async function compact(
 	const previousTotal = options?.previousArchive?.totalChars ?? 0;
 
 	// Build human-readable summary.
-	const summary = buildSummary(frames.length, totalChars, layout.truncatedChars, textChars, options?.previousSummary);
+	const summary = buildSummary(
+		frames.length,
+		totalChars,
+		layout.truncatedChars,
+		textChars,
+		options?.previousSummary,
+	);
 
 	const result: CompactResult = {
 		summary,
@@ -857,39 +1020,45 @@ export async function compact(
 		archivedChars: totalChars,
 	};
 	if (frames.length > 0) result.frames = frames;
-	const preserve = frames.length > 0 || layout.keptText.length > 0
-		? { [PRESERVE_KEY]: {
-				frames,
-				totalChars,
-				truncatedChars: layout.truncatedChars + (options?.previousArchive?.truncatedChars ?? 0),
-				text: layout.keptText,
-				textHead: layout.textHead,
-				textTail: layout.textTail,
-			} as Archive }
-		: null;
+	const preserve =
+		frames.length > 0 || layout.keptText.length > 0
+			? {
+					[PRESERVE_KEY]: {
+						frames,
+						totalChars,
+						truncatedChars:
+							layout.truncatedChars +
+							(options?.previousArchive?.truncatedChars ?? 0),
+						text: layout.keptText,
+						textHead: layout.textHead,
+						textTail: layout.textTail,
+					} as Archive,
+				}
+			: null;
 	if (preserve) result.preserveData = preserve;
 	return result;
 }
 
 /** Provider-specific optimal frame widths (chars per row). */
 const PROVIDER_COLS: Record<string, number> = {
-	"openai": DEFAULT_COLS,
-	"gpt4o": 120,
+	openai: DEFAULT_COLS,
+	gpt4o: 120,
 	"gpt4o-mini": 100,
-	"claude": 110,
+	claude: 110,
 	"claude-sonnet": 110,
 	"claude-opus": 100,
-	"gemini": 120,
+	gemini: 120,
 	"gemini-flash": 100,
-	"llama": 140,
-	"mistral": 130,
+	llama: 140,
+	mistral: 130,
 };
 
 /** Resolve frame column count using provider hint. */
 function resolveCols(cols: number, provider?: string): number {
 	if (!provider) return cols;
 	const key = provider.toLowerCase();
-	if (key in PROVIDER_COLS) return PROVIDER_COLS[key as keyof typeof PROVIDER_COLS] as number;
+	if (key in PROVIDER_COLS)
+		return PROVIDER_COLS[key as keyof typeof PROVIDER_COLS] as number;
 	return cols;
 }
 
@@ -912,26 +1081,35 @@ function buildSummary(
 	textChars: number,
 	previousSummary?: string,
 ): string {
-	const textNote = textChars > 0 ? ` (+${textChars.toLocaleString()} chars as text)` : "";
+	const textNote =
+		textChars > 0 ? ` (+${textChars.toLocaleString()} chars as text)` : "";
 
 	if (frameCount === 0 && textChars === 0) {
 		return previousSummary ?? "No prior history.";
 	}
 
 	const parts: string[] = [];
-	parts.push(`Archived ${totalChars.toLocaleString()} chars of conversation history${textNote}.`);
+	parts.push(
+		`Archived ${totalChars.toLocaleString()} chars of conversation history${textNote}.`,
+	);
 
 	if (frameCount > 0) {
-		parts.push(`Rendered onto ${frameCount} text frame${frameCount === 1 ? "" : "s"}.`);
+		parts.push(
+			`Rendered onto ${frameCount} text frame${frameCount === 1 ? "" : "s"}.`,
+		);
 		parts.push("Frames are normalized text (monospace, black-on-white).");
 	}
 
 	if (truncatedChars > 0) {
-		parts.push(`${truncatedChars.toLocaleString()} additional characters were elided to fit the frame budget.`);
+		parts.push(
+			`${truncatedChars.toLocaleString()} additional characters were elided to fit the frame budget.`,
+		);
 	}
 
 	if (previousSummary) {
-		parts.push(`Previous compaction summary: ${previousSummary.slice(0, 120)}${previousSummary.length > 120 ? "…" : ""}`);
+		parts.push(
+			`Previous compaction summary: ${previousSummary.slice(0, 120)}${previousSummary.length > 120 ? "…" : ""}`,
+		);
 	}
 
 	return parts.join("\n");
