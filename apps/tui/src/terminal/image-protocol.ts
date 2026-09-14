@@ -5,7 +5,7 @@
 import { encodeSixel } from "./image-encoding.ts";
 import {
 	getKittyGraphics,
-	KITTY_PLACEHOLDER_MAX_CELLS,
+	kittyPlaceholdersFit,
 	renderKittyPlaceholderLines,
 	setKittyGraphics,
 } from "./kitty-graphics.ts";
@@ -242,8 +242,7 @@ export function renderImage(
 		// Unicode placeholders render as real text cells.
 		if (
 			graphics.unicodePlaceholders &&
-			fit.columns <= KITTY_PLACEHOLDER_MAX_CELLS &&
-			fit.rows <= KITTY_PLACEHOLDER_MAX_CELLS
+			kittyPlaceholdersFit(fit.columns, fit.rows)
 		) {
 			const lines = renderKittyPlaceholderLines({
 				imageId: options.imageId ?? 0,

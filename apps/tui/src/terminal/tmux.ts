@@ -1,10 +1,10 @@
 /** Whether the process is running inside a tmux session. */
-export function isInsideTmux(env: NodeJS.ProcessEnv = Bun.env): boolean {
+function isInsideTmux(env: NodeJS.ProcessEnv = Bun.env): boolean {
 	return Boolean(env.TMUX);
 }
 
 /** Wrap a control sequence in tmux's DCS passthrough envelope. */
-export function wrapTmuxPassthrough(payload: string): string {
+function wrapTmuxPassthrough(payload: string): string {
 	return `\x1bPtmux;${payload.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
 }
 
