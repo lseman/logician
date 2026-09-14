@@ -26,6 +26,7 @@ import { createReadTool } from "./read-file.ts";
 import { OPTIONAL_CAPABILITIES } from "./registry.ts";
 import { sandbox } from "./sandbox.ts";
 import { createGrepTool } from "./search.ts";
+import { reject, resolve } from "./support/resolve-devices.ts";
 import { XdDeviceRegistry } from "./support/xd-device-registry.ts";
 import { web_fetch } from "./web-fetch.ts";
 import { createWebSearchTool } from "./web-search.ts";
@@ -97,6 +98,8 @@ const DISCOVERABLE_TOOL_NAMES = new Set<string>([
 	"browser",
 	"lsp",
 	"hub",
+	"resolve",
+	"reject",
 ]);
 
 /** Device aliases are available only for capabilities enabled in this session. */
@@ -140,6 +143,8 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		bash,
 		sandbox,
 		git,
+		resolve,
+		reject,
 		...getBuiltInTools(),
 		web_fetch,
 		...(opts.kernelManager
@@ -174,23 +179,4 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		for (const tool of filterDiscoverableTools(tools)) devices.mount(tool);
 	}
 	return tools;
-}
-
-/**
- * Build only core tools. Used for provider tool list and system prompt.
- * Discoverable tools are NOT advertised to the model as top-level tools.
- */
-export function createCoreTools(opts: DefaultToolsOptions = {}): Tool[] {
-	const allTools = createDefaultTools(opts);
-	return filterCoreTools(allTools);
-}
-
-/**
- * Build only discoverable tools. Used for xd:// device mounting.
- */
-export function createDiscoverableTools(
-	opts: DefaultToolsOptions = {},
-): Tool[] {
-	const allTools = createDefaultTools(opts);
-	return filterDiscoverableTools(allTools);
 }

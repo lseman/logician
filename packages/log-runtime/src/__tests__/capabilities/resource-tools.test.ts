@@ -1,13 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
+import { execFile } from "node:child_process";
 import {
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { Tool, ToolResult } from "@logician/log-core";
 import { ToolRegistry } from "@logician/log-core/runtime";
 import { createDefaultTools } from "../../capabilities/tools/default-tools.ts";
@@ -366,6 +369,74 @@ test("standalone default tools also have a working device catalog", async () => 
 	).toBe("git");
 });
 
+async function hasAstGrepCli(): Promise<boolean> {
+	for (const bin of ["sg", "ast-grep"]) {
+		try {
+			await promisify(execFile)(bin, ["--version"]);
+			return true;
+		} catch {}
+	}
+	return false;
+}
+const astGrepTest = (await hasAstGrepCli()) ? test : test.skip;
+
+astGrepTest(
+	"ast_edit's staged preview is applied to disk via xd://resolve",
+	async () => {
+		const cwd = temp();
+		const filePath = path.join(cwd, "sample.ts");
+		writeFileSync(filePath, 'console.log("hi");\n');
+		const registry = new ToolRegistry({ cwd });
+		registry.registerMany(createDefaultTools());
+
+		const staged = await registry.execute(
+			call("ast_edit", {
+				ops: [{ pat: "console.log($X)", out: "logger.info($X)" }],
+				paths: ["sample.ts"],
+			}),
+		);
+		expect(staged.isError).toBeFalsy();
+		expect(readFileSync(filePath, "utf-8")).toBe('console.log("hi");\n');
+
+		const resolved = await registry.execute(
+			call("write", {
+				path: "xd://resolve",
+				content: '{"reason":"looks right"}',
+			}),
+		);
+		expect(resolved.isError).toBeFalsy();
+		const applied = readFileSync(filePath, "utf-8");
+		expect(applied).toContain('logger.info("hi")');
+		expect(applied).not.toContain("console.log");
+	},
+);
+
+astGrepTest(
+	"xd://reject discards ast_edit's staged preview without touching disk",
+	async () => {
+		const cwd = temp();
+		const filePath = path.join(cwd, "sample.ts");
+		writeFileSync(filePath, 'console.log("hi");\n');
+		const registry = new ToolRegistry({ cwd });
+		registry.registerMany(createDefaultTools());
+
+		await registry.execute(
+			call("ast_edit", {
+				ops: [{ pat: "console.log($X)", out: "logger.info($X)" }],
+				paths: ["sample.ts"],
+			}),
+		);
+		const rejected = await registry.execute(
+			call("write", {
+				path: "xd://reject",
+				content: '{"reason":"not needed"}',
+			}),
+		);
+		expect(rejected.isError).toBeFalsy();
+		expect(readFileSync(filePath, "utf-8")).toBe('console.log("hi");\n');
+	},
+);
+
 test("local and documentation URLs cannot escape their roots through siblings or symlinks", async () => {
 	const cwd = temp();
 	const outside = temp();
@@ -565,8 +636,9 @@ test("local:// write rejects path traversal and writing over an existing directo
 		recursive: true,
 	});
 	expect(
-		result(await writeTool.execute({ path: "local://adir", content: "x" }, { cwd }))
-			.content,
+		result(
+			await writeTool.execute({ path: "local://adir", content: "x" }, { cwd }),
+		).content,
 	).toContain("Error");
 });
 
@@ -624,7 +696,10 @@ test("local:// artifact pathOnly resolves sourcePath without reading full conten
 	const cwd = temp();
 	ArtifactRegistry.resetForTests();
 	ArtifactRegistry.instance().init({ cwd, sessionId: "path-only" });
-	const id = await ArtifactRegistry.instance().save("full artifact body", "tool");
+	const id = await ArtifactRegistry.instance().save(
+		"full artifact body",
+		"tool",
+	);
 	if (id === null) throw new Error("artifact save failed");
 
 	const urls = new InternalUrlRouter();

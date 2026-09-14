@@ -1,16 +1,16 @@
 // ── xd://resolve and xd://reject devices ──────────────────────────────────────
-// These devices handle the accept/reject flow for staged (previewed) edits.
-// They are dispatched via: write xd://resolve {reason, sourceToolName, label, ...}
-//                         write xd://reject  {reason, sourceToolName, label, ...}
+// These devices handle the accept/reject flow for staged (previewed) edits
+// left by tools like ast_edit and ast_grep. Dispatched via:
+//   write path="xd://resolve" content='{"reason": "..."}'  → apply to disk
+//   write path="xd://reject"  content='{"reason": "..."}'  → discard
 //
-// The system prompt describes them as:
-//   write xd://resolve: one-line reason → disk move happens (atomic, all or nothing)
-//   write xd://reject: discard the staged changes
+// `files` normally comes from the staged-edits singleton (set by the
+// previewing tool); a caller may pass its own `files` to bypass that.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { Tool } from "@logician/log-core";
 import type { EditStore } from "./edit-store.js";
-import { createEditStore } from "./edit-store.js";
 import { clearStagedEdit, getStagedEdit } from "./staged-edits.js";
 import { atomicWriteFile } from "./utils/atomic-write.js";
 
@@ -33,13 +33,9 @@ export interface ResolutionResult {
 /** Arguments for xd://resolve and xd://reject. */
 export interface ResolutionArgs {
 	/** Reason for the accept/reject decision. */
-	reason: string;
-	/** Name of the tool that created the staged edit. */
-	sourceToolName: string;
-	/** Display label for the staged edit. */
-	label: string;
-	/** The staged edit ID (optional — if omitted, uses the most recent). */
-	editId?: string;
+	reason?: string;
+	/** Display label for the staged edit, used in the reject message. */
+	label?: string;
 	/** Files to apply (for resolve). Falls back to staged edits singleton. */
 	files?: Array<{
 		path: string;
@@ -117,7 +113,7 @@ export async function handleResolve(
  * Discard a staged edit. This is the "reject" device handler.
  * No disk changes — just clears the staging state.
  */
-export async function handleReject(
+async function handleReject(
 	args: ResolutionArgs,
 	store?: EditStore,
 ): Promise<ResolutionResult> {
@@ -137,50 +133,47 @@ export async function handleReject(
 /**
  * Device names for xd:// dispatch.
  */
-export const RESOLVE_DEVICE_NAME = "resolve";
-export const REJECT_DEVICE_NAME = "reject";
+const RESOLVE_DEVICE_NAME = "resolve";
+const REJECT_DEVICE_NAME = "reject";
 
-/**
- * Check if a device name is a resolution device.
- */
-export function isResolutionDeviceName(name: string): boolean {
-	return name === RESOLVE_DEVICE_NAME || name === REJECT_DEVICE_NAME;
-}
+// ── xd:// device wiring ─────────────────────────────────────────────────────
+// Mounted as ordinary discoverable tools (see default-tools.ts) so `write
+// path="xd://resolve"` reaches them through the normal ToolRegistry dispatch.
+// The `write` tool's resolveCall already parses the JSON body, so execute()
+// receives args directly — no re-parsing needed here.
 
-/**
- * Execute a resolution device call.
- */
-export async function executeResolutionDevice(
-	deviceName: string,
-	content: string,
-	cwd: string,
-	store?: EditStore,
-): Promise<ResolutionResult> {
-	let args: ResolutionArgs;
-	try {
-		args = JSON.parse(content) as ResolutionArgs;
-	} catch {
-		return {
-			success: false,
-			message: `Invalid JSON: ${content.slice(0, 100)}...`,
-		};
-	}
-
-	if (deviceName === RESOLVE_DEVICE_NAME) {
-		return handleResolve(args, cwd, store);
-	} else if (deviceName === REJECT_DEVICE_NAME) {
-		return handleReject(args, store);
-	}
-
+function resolutionTool(
+	name: typeof RESOLVE_DEVICE_NAME | typeof REJECT_DEVICE_NAME,
+): Tool {
+	const applying = name === RESOLVE_DEVICE_NAME;
 	return {
-		success: false,
-		message: `Unknown resolution device: ${deviceName}`,
+		name,
+		label: applying ? "Resolve" : "Reject",
+		description: applying
+			? "Apply the most recently staged edit preview (from ast_edit, ast_grep, or a hashline edit) to disk."
+			: "Discard the most recently staged edit preview without writing to disk.",
+		promptSnippet: applying
+			? "Apply a staged edit preview"
+			: "Discard a staged edit preview",
+		parameters: {
+			type: "object",
+			properties: {
+				reason: {
+					type: "string",
+					description: "One-sentence reason for the decision.",
+				},
+			},
+			required: ["reason"],
+		},
+		execute: async (args, ctx) => {
+			const resolutionArgs = args as ResolutionArgs;
+			const result = applying
+				? await handleResolve(resolutionArgs, ctx.cwd || process.cwd())
+				: await handleReject(resolutionArgs);
+			return { content: result.message, isError: !result.success };
+		},
 	};
 }
 
-/**
- * Create a default edit store for simple usage.
- */
-export function createDefaultResolutionStore(): EditStore {
-	return createEditStore();
-}
+export const resolve: Tool = resolutionTool(RESOLVE_DEVICE_NAME);
+export const reject: Tool = resolutionTool(REJECT_DEVICE_NAME);
