@@ -175,8 +175,7 @@ bun start -- doctor --json
 | `Ctrl+M` / `Alt+M` | Open the inference-mode selector |
 | `Ctrl+I` | Toggle autonomous and minimal execution |
 | `Ctrl+A` | Open the autoresearch dashboard |
-
-Type `/help` for the live command list. Common entry points include `/sessions`, `/context`, `/compact`, `/agents`, `/plugins`, `/mcp`, `/permissions`, `/settings`, and `/rag`.
+Type `/help` for the live command list. Common entry points include `/sessions`, `/context`, `/compact`, `/agents`, `/plugins`, `/mcp`, `/permissions`, and `/settings`.
 
 ## Architecture
 

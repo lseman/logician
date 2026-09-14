@@ -45,7 +45,7 @@ export default withMermaid(
 						{ text: "Reasoning & Inference", link: "/guides/reasoning" },
 						{ text: "Subagents", link: "/guides/subagents" },
 						{ text: "Agent Evaluation", link: "/guides/agent-evaluation" },
-						{ text: "Trust & Safety", link: "/guides/trust" },
+						{ text: "Internal Resources", link: "/guides/internal-urls" },
 						{ text: "Configuration", link: "/guides/configuration" },
 						{ text: "Troubleshooting", link: "/guides/troubleshooting" },
 					],
