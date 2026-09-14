@@ -166,6 +166,134 @@ function buildBwrapCommand(
 
 // ── Execution ──────────────────────────────────────────────────────────────────
 
+interface ChildRunOutcome {
+	content: string;
+	exitCode: number | null;
+	signal: string | null;
+	status: SandboxRunResult["status"];
+	truncation?: TruncationResult;
+	fullOutputPath?: string;
+}
+
+/**
+ * Stream a spawned child's stdout/stderr into an OutputAccumulator, honoring
+ * abort/timeout by killing its process tree, and resolve once it exits.
+ * Shared by the bwrap path and the no-isolation fallback — the only
+ * difference between them is how the child is spawned.
+ */
+function runChildAndCollect(
+	child: ReturnType<typeof spawn>,
+	ctx: Parameters<Tool["execute"]>[1],
+	timeoutSeconds: number | undefined,
+	tempFilePrefix: string,
+	errorPrefix: string,
+): Promise<ChildRunOutcome> {
+	const output = new OutputAccumulator({ tempFilePrefix });
+	const throttledUpdate = makeUpdateThrottler();
+	let settled = false;
+	let timedOut = false;
+	let hasError = false;
+
+	const settle = (fn: () => void) => {
+		if (!settled) {
+			settled = true;
+			fn();
+		}
+	};
+
+	return new Promise<ChildRunOutcome>(resolve => {
+		let timeoutHandle: NodeJS.Timeout | undefined;
+
+		const onAbort = () => {
+			if (child.pid) killProcessTree(child.pid);
+		};
+
+		if (ctx.signal) {
+			if (ctx.signal.aborted) {
+				onAbort();
+			} else {
+				ctx.signal.addEventListener("abort", onAbort, { once: true });
+			}
+		}
+
+		if (timeoutSeconds && timeoutSeconds > 0) {
+			timeoutHandle = setTimeout(() => {
+				timedOut = true;
+				if (child.pid) killProcessTree(child.pid);
+			}, timeoutSeconds * 1000);
+		}
+
+		const handleData = (data: Buffer) => {
+			output.append(data);
+			if (ctx.onUpdate) {
+				throttledUpdate(() => {
+					const snapshot = output.snapshot();
+					if (snapshot.content) ctx.onUpdate?.(snapshot.content);
+				});
+			}
+		};
+
+		child.stdout?.on("data", handleData);
+		child.stderr?.on("data", handleData);
+
+		child.on("error", (err: Error) => {
+			hasError = true;
+			output.finish();
+			settle(() => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				ctx.signal?.removeEventListener("abort", onAbort);
+				resolve({
+					content: `${errorPrefix}: ${err.message || "Command failed"}`,
+					exitCode: null,
+					signal: null,
+					status: "failed",
+				});
+			});
+		});
+
+		child.on("close", (code, signal) => {
+			output.finish();
+			if (timeoutHandle) clearTimeout(timeoutHandle);
+			ctx.signal?.removeEventListener("abort", onAbort);
+
+			settle(() => {
+				const snapshot = output.snapshot({ persistIfTruncated: true });
+				output.closeTempFile().catch(() => {});
+
+				if (hasError) return;
+
+				const truncated = snapshot.content.length >= DEFAULT_MAX_BYTES;
+				let content = snapshot.content || "(no output)";
+
+				if (truncated && snapshot.truncation) {
+					const trunc = snapshot.truncation;
+					const notice =
+						trunc.truncatedBy === "lines"
+							? `Showing lines ${trunc.totalLines - trunc.outputLines + 1}-${trunc.totalLines} of ${trunc.totalLines}. Full output: ${snapshot.fullOutputPath}`
+							: `Showing ${DEFAULT_MAX_BYTES / 1024}KB limit. Full output: ${snapshot.fullOutputPath}`;
+					content += `\n\n[${notice}]`;
+				}
+
+				let status: SandboxRunResult["status"] =
+					code === 0 ? "completed" : "failed";
+				if (timedOut) status = "timed_out";
+				else if (ctx.signal?.aborted) status = "aborted";
+
+				resolve({
+					content,
+					exitCode: code,
+					signal,
+					status,
+					...(truncated ? { truncation: snapshot.truncation } : {}),
+					...(snapshot.fullOutputPath
+						? { fullOutputPath: snapshot.fullOutputPath }
+						: {}),
+				});
+			});
+		});
+	});
+}
+
 async function executeSandboxed(
 	command: string,
 	profile: SandboxProfile,
@@ -205,138 +333,33 @@ async function executeSandboxed(
 
 		const bwrapArgs = buildBwrapCommand(command, profile, cwd, sandboxTmpdir);
 
-		const output = new OutputAccumulator({
-			tempFilePrefix: "logician-sandbox",
+		const child = spawn(bwrapPath, bwrapArgs, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: getShellEnv(cwd),
 		});
-		const throttledUpdate = makeUpdateThrottler();
-		const timeoutSeconds = timeout;
-		let settled = false;
-		let timedOut = false;
-		let hasError = false;
-
-		const settle = (fn: () => void) => {
-			if (!settled) {
-				settled = true;
-				fn();
-			}
+		const outcome = await runChildAndCollect(
+			child,
+			ctx,
+			timeout,
+			"logician-sandbox",
+			"Sandbox error",
+		);
+		return {
+			content: outcome.content,
+			exitCode: outcome.exitCode,
+			signal: outcome.signal,
+			status: outcome.status,
+			details: {
+				bwrapAvailable: true,
+				bwrapPath: bwrap.path,
+				profile,
+				...(outcome.truncation ? { truncation: outcome.truncation } : {}),
+				...(outcome.fullOutputPath
+					? { fullOutputPath: outcome.fullOutputPath }
+					: {}),
+			},
 		};
-
-		const result = await new Promise<SandboxRunResult>(resolve => {
-			const child = spawn(bwrapPath, bwrapArgs, {
-				cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-				env: getShellEnv(cwd),
-				timeout: timeoutSeconds ? timeoutSeconds * 1000 : undefined,
-			});
-
-			let timeoutHandle: NodeJS.Timeout | undefined;
-
-			const onAbort = () => {
-				if (child.pid) killProcessTree(child.pid);
-			};
-
-			// Abort signal
-			if (ctx.signal) {
-				if (ctx.signal.aborted) {
-					onAbort();
-				} else {
-					ctx.signal.addEventListener("abort", onAbort, { once: true });
-				}
-			}
-
-			// Timeout
-			if (timeoutSeconds && timeoutSeconds > 0) {
-				timeoutHandle = setTimeout(() => {
-					timedOut = true;
-					if (child.pid) killProcessTree(child.pid);
-				}, timeoutSeconds * 1000);
-			}
-
-			// Stream output
-			const handleData = (data: Buffer) => {
-				output.append(data);
-				if (ctx.onUpdate) {
-					throttledUpdate(() => {
-						const snapshot = output.snapshot();
-						if (snapshot.content) ctx.onUpdate?.(snapshot.content);
-					});
-				}
-			};
-
-			child.stdout?.on("data", handleData);
-			child.stderr?.on("data", handleData);
-
-			child.on("error", (err: Error) => {
-				hasError = true;
-				output.finish();
-				settle(() => {
-					if (timeoutHandle) clearTimeout(timeoutHandle);
-					ctx.signal?.removeEventListener("abort", onAbort);
-					resolve({
-						content: `Sandbox error: ${err.message || "Command failed"}`,
-						exitCode: null,
-						signal: null,
-						status: "failed",
-						details: {
-							bwrapAvailable: true,
-							bwrapPath: bwrap.path,
-							profile,
-						},
-					});
-				});
-			});
-
-			child.on("close", (code, signal) => {
-				output.finish();
-				if (timeoutHandle) clearTimeout(timeoutHandle);
-				ctx.signal?.removeEventListener("abort", onAbort);
-
-				settle(() => {
-					const snapshot = output.snapshot({ persistIfTruncated: true });
-					output.closeTempFile().catch(() => {});
-
-					if (hasError) return;
-
-					const truncated = snapshot.content.length >= DEFAULT_MAX_BYTES;
-					let content = snapshot.content || "(no output)";
-
-					if (truncated && snapshot.truncation) {
-						const trunc = snapshot.truncation;
-						const notices: string[] = [];
-						if (trunc.truncatedBy === "lines") {
-							notices.push(
-								`Showing lines ${trunc.totalLines - trunc.outputLines + 1}-${trunc.totalLines} of ${trunc.totalLines}. Full output: ${snapshot.fullOutputPath}`,
-							);
-						} else {
-							notices.push(
-								`Showing ${DEFAULT_MAX_BYTES / 1024}KB limit. Full output: ${snapshot.fullOutputPath}`,
-							);
-						}
-						content += `\n\n[${notices.join(". ")}]`;
-					}
-
-					let status: SandboxRunResult["status"] =
-						code === 0 ? "completed" : "failed";
-					if (timedOut) status = "timed_out";
-					else if (ctx.signal?.aborted) status = "aborted";
-
-					resolve({
-						content,
-						exitCode: code,
-						signal,
-						status,
-						details: {
-							bwrapAvailable: true,
-							bwrapPath: bwrap.path,
-							profile,
-							truncation: truncated ? snapshot.truncation : undefined,
-							fullOutputPath: snapshot.fullOutputPath,
-						},
-					});
-				});
-			});
-		});
-		return result;
 	} finally {
 		// Cleanup sandbox directory
 		try {
@@ -352,134 +375,21 @@ async function executeFallback(
 	cwd: string,
 	timeout: number | undefined,
 	ctx: Parameters<Tool["execute"]>[1],
-): Promise<{
-	content: string;
-	exitCode: number | null;
-	signal: string | null;
-	status: SandboxRunResult["status"];
-}> {
+): Promise<ChildRunOutcome> {
 	const { shell, args: shellArgs } = getShellConfig();
-	const shellEnv = getShellEnv(cwd);
-	const output = new OutputAccumulator({
-		tempFilePrefix: "logician-sandbox-fallback",
+	const child = spawn(shell, [...shellArgs, command], {
+		cwd,
+		stdio: ["ignore", "pipe", "pipe"],
+		env: getShellEnv(cwd),
+		detached: process.platform !== "win32",
 	});
-	const throttledUpdate = makeUpdateThrottler();
-	let settled = false;
-	let timedOut = false;
-	let hasError = false;
-
-	const settle = (fn: () => void) => {
-		if (!settled) {
-			settled = true;
-			fn();
-		}
-	};
-
-	return new Promise<{
-		content: string;
-		exitCode: number | null;
-		signal: string | null;
-		status: SandboxRunResult["status"];
-	}>(resolve => {
-		const child = spawn(shell, [...shellArgs, command], {
-			cwd,
-			stdio: ["ignore", "pipe", "pipe"],
-			env: shellEnv,
-			detached: process.platform !== "win32",
-		});
-
-		let timeoutHandle: NodeJS.Timeout | undefined;
-
-		const onAbort = () => {
-			if (child.pid) killProcessTree(child.pid);
-		};
-
-		if (ctx.signal) {
-			if (ctx.signal.aborted) {
-				onAbort();
-			} else {
-				ctx.signal.addEventListener("abort", onAbort, { once: true });
-			}
-		}
-
-		if (timeout && timeout > 0) {
-			timeoutHandle = setTimeout(() => {
-				timedOut = true;
-				if (child.pid) killProcessTree(child.pid);
-			}, timeout * 1000);
-		}
-
-		const handleData = (data: Buffer) => {
-			output.append(data);
-			if (ctx.onUpdate) {
-				throttledUpdate(() => {
-					const snapshot = output.snapshot();
-					if (snapshot.content) ctx.onUpdate?.(snapshot.content);
-				});
-			}
-		};
-
-		child.stdout?.on("data", handleData);
-		child.stderr?.on("data", handleData);
-
-		child.on("error", (err: Error) => {
-			hasError = true;
-			output.finish();
-			settle(() => {
-				if (timeoutHandle) clearTimeout(timeoutHandle);
-				ctx.signal?.removeEventListener("abort", onAbort);
-				resolve({
-					content: `Sandbox fallback error: ${err.message || "Command failed"}`,
-					exitCode: null,
-					signal: null,
-					status: "failed",
-				});
-			});
-		});
-
-		child.on("close", (code, signal) => {
-			output.finish();
-			if (timeoutHandle) clearTimeout(timeoutHandle);
-			ctx.signal?.removeEventListener("abort", onAbort);
-
-			settle(() => {
-				const snapshot = output.snapshot({ persistIfTruncated: true });
-				output.closeTempFile().catch(() => {});
-
-				if (hasError) return;
-
-				const truncated = snapshot.content.length >= DEFAULT_MAX_BYTES;
-				let content = snapshot.content || "(no output)";
-
-				if (truncated && snapshot.truncation) {
-					const trunc = snapshot.truncation;
-					const notices: string[] = [];
-					if (trunc.truncatedBy === "lines") {
-						notices.push(
-							`Showing lines ${trunc.totalLines - trunc.outputLines + 1}-${trunc.totalLines} of ${trunc.totalLines}. Full output: ${snapshot.fullOutputPath}`,
-						);
-					} else {
-						notices.push(
-							`Showing ${DEFAULT_MAX_BYTES / 1024}KB limit. Full output: ${snapshot.fullOutputPath}`,
-						);
-					}
-					content += `\n\n[${notices.join(". ")}]`;
-				}
-
-				let status: SandboxRunResult["status"] =
-					code === 0 ? "completed" : "failed";
-				if (timedOut) status = "timed_out";
-				else if (ctx.signal?.aborted) status = "aborted";
-
-				resolve({
-					content,
-					exitCode: code,
-					signal,
-					status,
-				});
-			});
-		});
-	});
+	return runChildAndCollect(
+		child,
+		ctx,
+		timeout,
+		"logician-sandbox-fallback",
+		"Sandbox fallback error",
+	);
 }
 
 // ── Schema ─────────────────────────────────────────────────────────────────────
@@ -521,11 +431,10 @@ export const sandbox: Tool = {
 		if (typeof raw === "string") return { command: raw };
 		if (!raw || typeof raw !== "object") return {};
 		const args = raw as Record<string, unknown>;
-		const command = args.command ?? args.cmd ?? args.script ?? args.input;
-		return {
-			...args,
-			...(command === undefined ? {} : { command: String(command) }),
-		};
+		if (args.command === undefined && args.cmd !== undefined) {
+			return { ...args, command: args.cmd };
+		}
+		return args;
 	},
 	resolveTimeoutMs: (args: Record<string, unknown>) => {
 		const timeout = Number((args as SandboxArgs).timeout) || 0;
