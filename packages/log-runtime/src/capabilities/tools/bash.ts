@@ -28,7 +28,7 @@ import {
 const bashSchema = {
 	type: "object",
 	properties: {
-		command: { type: "string", description: "Bash command to execute" },
+		command: { type: "string", description: "Bash command to execute. Aliases: cmd, script, input, run, exec, shell, action. Any string field is also accepted as fallback." },
 		commands: {
 			type: "array",
 			description: "Structured commands to execute as a batch",
@@ -198,10 +198,38 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (typeof raw === "string") return { command: raw };
 	if (!raw || typeof raw !== "object") return {};
 	const args = raw as Record<string, unknown>;
-	const command = args.command ?? args.cmd ?? args.script ?? args.input;
+	// Check for common command field aliases
+	const command =
+		args.command ??
+		args.cmd ??
+		args.script ??
+		args.input ??
+		args.run ??
+		args.exec ??
+		args.do ??
+		args.shell ??
+		args.action;
+	if (command === undefined) {
+		// Fallback: use the shortest string-valued field as the command.
+		// Commands are typically shorter than reasoning/thought fields.
+		let best: unknown = undefined;
+		let bestLen = Infinity;
+		for (const [_k, v] of Object.entries(args)) {
+			if (typeof v === "string") {
+				const len = v.length;
+				if (len < bestLen) {
+					best = v;
+					bestLen = len;
+				}
+			}
+		}
+		if (typeof best === "string") {
+			return { ...args, command: best };
+		}
+	}
 	return {
 		...args,
-		...(command === undefined ? {} : { command: String(command) }),
+		...(command !== undefined ? { command: String(command) } : {}),
 	};
 }
 
@@ -210,11 +238,11 @@ export const bash: Tool = {
 	executionMode: "sequential",
 	label: "Bash",
 	hookAliases: ["Bash"],
-	description: `Execute bash commands with timeout. REQUIRED: pass {command: "shell command here"}. Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
+	description: `Execute bash commands with timeout. Accepts {command: "ls"} or any string field (cmd, script, input, run, exec, shell, action). Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
 	promptSnippet:
 		"Execute shell commands in a managed subprocess with timeout and approval policy",
 	promptGuidelines: [
-		"bash requires a 'command' field — e.g. {command: 'ls -la'}",
+		"bash accepts {command: 'ls'} or {cmd: 'ls'} or {run: 'ls'} — any string field works",
 		"Use bash for file operations like ls, grep, find; use read for file content instead of cat",
 	],
 	parameters: bashSchema,
