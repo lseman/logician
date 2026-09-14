@@ -66,6 +66,7 @@ Supported resource links:
   the bare \`conflict://<file>\` form) and writes the result back
 - \`agent://<id>\` — reads a subagent's result; use \`agent://\` to list
   completed agents, or access fields like \`agent://<id>/content\` or
+  \`agent://<id>/details.metrics.turns\`
 - \`mcp://\` — lists configured MCP servers; \`mcp://<server>/<resource-uri>\`
   reads from that exact server. Preserve the resource URI, including queries and
   fragments. A server name is required; no server is selected automatically.
