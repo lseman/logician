@@ -210,10 +210,11 @@ export const bash: Tool = {
 	executionMode: "sequential",
 	label: "Bash",
 	hookAliases: ["Bash"],
-	description: `Execute bash commands with timeout. Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
+	description: `Execute bash commands with timeout. REQUIRED: pass {command: "shell command here"}. Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
 	promptSnippet:
 		"Execute shell commands in a managed subprocess with timeout and approval policy",
 	promptGuidelines: [
+		"bash requires a 'command' field — e.g. {command: 'ls -la'}",
 		"Use bash for file operations like ls, grep, find; use read for file content instead of cat",
 	],
 	parameters: bashSchema,

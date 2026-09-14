@@ -102,11 +102,12 @@ MUST use specialized tool over shell equivalent:
   for code intelligence.
 - Regex search/target location → \`grep\`, not shell \`grep\`, \`rg\`, \`awk\`.
 - Structure mapping/globbing → \`glob\`, not \`ls **/*.ext\` or \`fd\`.
-- \`bash\`: execute shell commands — pass \`{command: "..."}\` for a single command
-  or \`{commands: [{id: "...", command: "..."}]}\` for a batch. Real binaries/short
-  fact pipelines only; commands shadowing specialized tools blocked. Bash litmus:
-  one external-CLI call/short pipeline returning count, frequency, set difference,
-  checksum. For merely moving, paging, trimming fetchable bytes: use a tool.
+- \`bash\` — **required format**: \`{command: "ls"}\`. The \`command\` key is mandatory;
+  omitting it causes an error. For batches: \`{commands: [{id: "a", command: "ls"}]}\`.
+  Real binaries/short fact pipelines only; commands shadowing specialized tools
+  blocked. Bash litmus: one external-CLI call/short pipeline returning count,
+  frequency, set difference, checksum. For merely moving, paging, trimming
+  fetchable bytes: use a tool.
 
 # Exploration
 NEVER open files hoping. AVOID unneeded files/sections.
