@@ -102,10 +102,9 @@ MUST use specialized tool over shell equivalent:
   for code intelligence.
 - Regex search/target location → \`grep\`, not shell \`grep\`, \`rg\`, \`awk\`.
 - Structure mapping/globbing → \`glob\`, not \`ls **/*.ext\` or \`fd\`.
-- \`bash\` accepts \`{command: "ls"}\` or any string field
-  (\`{cmd: "ls"}\`, \`{run: "ls"}\`, \`{script: "ls"}\`, \`{exec: "ls"}\`,
-  \`{shell: "ls"}\`, \`{action: "ls"}\`) — or just pass a bare command string.
+- \`bash\` requires \`{command: "ls"}\` for a single command.
   For batches: \`{commands: [{id: "a", command: "ls"}]}\`.
+  Send a JSON object with one of these fields; never send an empty object.
   Real binaries/short fact pipelines only; commands shadowing specialized tools
   blocked. Bash litmus: one external-CLI call/short pipeline returning count,
   frequency, set difference, checksum. For merely moving, paging, trimming

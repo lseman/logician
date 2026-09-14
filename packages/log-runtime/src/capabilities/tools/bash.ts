@@ -28,7 +28,11 @@ import {
 const bashSchema = {
 	type: "object",
 	properties: {
-		command: { type: "string", description: "Bash command to execute. Aliases: cmd, script, input, run, exec, shell, action. Any string field is also accepted as fallback." },
+		command: {
+			type: "string",
+			description:
+				"Non-empty shell command to execute. Provide command or commands.",
+		},
 		commands: {
 			type: "array",
 			description: "Structured commands to execute as a batch",
@@ -217,41 +221,46 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 				try {
 					const parsed = JSON.parse(val);
 					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-						const c = (parsed as Record<string, unknown>).command ??
+						const c =
+							(parsed as Record<string, unknown>).command ??
 							(parsed as Record<string, unknown>).cmd ??
 							(parsed as Record<string, unknown>).script ??
 							(parsed as Record<string, unknown>).input ??
 							(parsed as Record<string, unknown>).run ??
 							(parsed as Record<string, unknown>).exec;
-						if (c !== undefined) { command = c; break; }
+						if (c !== undefined) {
+							command = c;
+							break;
+						}
 					}
-				} catch { /* not JSON */ }
-			} else if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+				} catch {
+					/* not JSON */
+				}
+			} else if (
+				typeof val === "object" &&
+				val !== null &&
+				!Array.isArray(val)
+			) {
 				const nested = val as Record<string, unknown>;
-				const nestedCmd = nested.command ?? nested.cmd ?? nested.script ?? nested.input ??
-					nested.run ?? nested.exec ?? nested.do;
-				if (nestedCmd !== undefined) { command = nestedCmd; break; }
+				const nestedCmd =
+					nested.command ??
+					nested.cmd ??
+					nested.script ??
+					nested.input ??
+					nested.run ??
+					nested.exec ??
+					nested.do;
+				if (nestedCmd !== undefined) {
+					command = nestedCmd;
+					break;
+				}
 			}
 		}
 	}
-	if (command === undefined) {
-		// Fallback: use the shortest non-empty string-valued field as the command.
-		// Commands are typically shorter than reasoning/thought fields.
-		let best: unknown = undefined;
-		let bestLen = Infinity;
-		for (const [_k, v] of Object.entries(args)) {
-			if (typeof v === "string" && v.length > 0 && v.length < bestLen) {
-				best = v;
-				bestLen = v.length;
-			}
-		}
-		if (typeof best === "string") {
-			return { ...args, command: best };
-		}
-	}
+
 	return {
 		...args,
-		...(command !== undefined ? { command: String(command) } : {}),
+		...(command !== undefined ? { command } : {}),
 	};
 }
 
@@ -260,11 +269,11 @@ export const bash: Tool = {
 	executionMode: "sequential",
 	label: "Bash",
 	hookAliases: ["Bash"],
-	description: `Execute bash commands with timeout. Accepts {command: "ls"} or any string field (cmd, script, input, run, exec, shell, action). Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
+	description: `Execute bash commands with timeout. Provide {command: "ls"} or {commands: [{command: "ls"}]} for a batch. Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
 	promptSnippet:
 		"Execute shell commands in a managed subprocess with timeout and approval policy",
 	promptGuidelines: [
-		"bash accepts {command: 'ls'} or {cmd: 'ls'} or {run: 'ls'} — any string field works",
+		"Call bash with a non-empty command string or a non-empty commands batch; never send {}",
 		"Use bash for file operations like ls, grep, find; use read for file content instead of cat",
 	],
 	parameters: bashSchema,
@@ -284,10 +293,19 @@ export const bash: Tool = {
 	execute: async (args, ctx): Promise<string | ToolResult> => {
 		const parsed = args as BashArgs;
 		if (parsed.command !== undefined && parsed.commands !== undefined) {
-			return "Error: provide either command or commands, not both.";
+			return {
+				content: "Error: provide either command or commands, not both.",
+				isError: true,
+			};
 		}
 		if (parsed.commands !== undefined) return executeBatch(parsed, ctx);
-		if (!parsed.command) return "Error: missing 'command' field. Call bash as {command: \"ls\"} or {commands: [{id: \"a\", command: \"ls\"}]}. Do NOT pass the command as a bare string or in another field name.";
+		if (typeof parsed.command !== "string" || !parsed.command.trim()) {
+			return {
+				content:
+					'Error: missing or invalid command. Call bash as {"command":"pwd"} or {"commands":[{"command":"pwd"}]}. The command must be a non-empty string.',
+				isError: true,
+			};
+		}
 		const blockedReason = findDestructiveMatch(parsed.command);
 		if (blockedReason) {
 			return {
@@ -328,7 +346,16 @@ export const bash: Tool = {
 			},
 			ctx,
 		);
-		return { content: result.content, details: result.details };
+		return {
+			content: result.content,
+			details: {
+				...result.details,
+				exitCode: result.exitCode,
+				signal: result.signal,
+				status: result.status,
+			},
+			isError: result.status !== "completed",
+		};
 	},
 };
 
@@ -636,6 +663,7 @@ async function executeBatch(
 	}
 
 	return {
+		isError: results.some(isBatchFailure),
 		content: results
 			.map(
 				result =>

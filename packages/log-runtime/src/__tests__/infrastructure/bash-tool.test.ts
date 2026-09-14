@@ -148,3 +148,36 @@ void test("bash runPersistent executes inside persistent shell session", async (
 	if (typeof res2 === "string") return;
 	assert.match(res2.content, /foo123/);
 });
+
+void test("bash rejects empty, invalid and unrelated arguments as errors", async () => {
+	for (const input of [
+		{},
+		{ command: "" },
+		{ command: "  " },
+		{ command: 42 },
+		{ command: false },
+		{ terminalId: "default" },
+		{ description: "printf should-not-run" },
+	]) {
+		const args = bash.prepareArguments!(input);
+		const result = await bash.execute(args, { cwd: tmpdir() });
+		assert.equal(typeof result, "object");
+		if (typeof result === "string") continue;
+		assert.equal(result.isError, true);
+		assert.match(result.content, /non-empty string/);
+	}
+});
+
+void test("bash preserves documented alias support and reports execution failures", async () => {
+	const args = bash.prepareArguments!({ cmd: "printf alias-ok" });
+	const success = await bash.execute(args, { cwd: tmpdir() });
+	assert.equal(typeof success, "object");
+	if (typeof success === "string") return;
+	assert.equal(success.content, "alias-ok");
+	assert.equal(success.isError, false);
+	const failure = await bash.execute({ command: "exit 7" }, { cwd: tmpdir() });
+	assert.equal(typeof failure, "object");
+	if (typeof failure === "string") return;
+	assert.equal(failure.isError, true);
+	assert.equal(failure.details?.exitCode, 7);
+});

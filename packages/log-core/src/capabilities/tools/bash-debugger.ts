@@ -1,3 +1,5 @@
+import { appendFileSync } from "node:fs";
+
 // ── Bash Tool Debugger ────────────────────────────────────────────────────────
 // Traces bash tool calls through the full pipeline to diagnose why arguments
 // may be empty or malformed. Logs at 4 stages:
@@ -13,10 +15,10 @@
 export interface BashDebugEntry {
 	id: string;
 	toolName: string;
-	stage0_rawArgs: string | null;       // Raw JSON string from model
-	stage1_parsed: Record<string, unknown> | null;  // After parseToolInput
+	stage0_rawArgs: string | null; // Raw JSON string from model
+	stage1_parsed: Record<string, unknown> | null; // After parseToolInput
 	stage2_prepared: Record<string, unknown> | null; // After prepareArguments
-	stage3_final: Record<string, unknown> | null;    // Final args for execute
+	stage3_final: Record<string, unknown> | null; // Final args for execute
 	stage0_timestamp: number;
 	stage3_timestamp?: number;
 	result?: string;
@@ -31,7 +33,7 @@ const entries: BashDebugEntry[] = [];
 export function setBashDebugger(on: boolean): void {
 	enabled = on;
 	if (on) {
-		console.log("[bash-debugger] ENABLED — tracing all tool calls");
+		console.error("[bash-debugger] ENABLED — tracing bash calls");
 	}
 }
 
@@ -47,7 +49,7 @@ export function logStage(
 	stage: 0 | 1 | 2 | 3,
 	value: string | Record<string, unknown> | null,
 ): void {
-	if (!enabled) return;
+	if (!enabled || toolName !== "bash") return;
 
 	let entry = entries.find(e => e.id === entryId);
 	if (!entry) {
@@ -67,32 +69,63 @@ export function logStage(
 
 	switch (stage) {
 		case 0:
-			entry.stage0_rawArgs = typeof value === "string" ? value : JSON.stringify(value);
+			entry.stage0_rawArgs =
+				typeof value === "string" ? value : JSON.stringify(value);
 			break;
 		case 1:
-			entry.stage1_parsed = value as Record<string, unknown> | null;
-			if (!entry.isEmptyArgs && value && Object.keys(value).length === 0) {
+			entry.stage1_parsed = structuredClone(value) as Record<
+				string,
+				unknown
+			> | null;
+			if (
+				!entry.isEmptyArgs &&
+				typeof value === "object" &&
+				(value === null ||
+					Object.keys(value).length === 0 ||
+					(typeof value.command === "string" && value.command.trim() === ""))
+			) {
 				entry.isEmptyArgs = true;
 			}
 			break;
 		case 2:
-			entry.stage2_prepared = value as Record<string, unknown> | null;
-			if (!entry.isEmptyArgs && value && Object.keys(value).length === 0) {
+			entry.stage2_prepared = structuredClone(value) as Record<
+				string,
+				unknown
+			> | null;
+			if (
+				!entry.isEmptyArgs &&
+				typeof value === "object" &&
+				(value === null ||
+					Object.keys(value).length === 0 ||
+					(typeof value.command === "string" && value.command.trim() === ""))
+			) {
 				entry.isEmptyArgs = true;
 			}
 			break;
 		case 3:
-			entry.stage3_final = value as Record<string, unknown> | null;
+			entry.stage3_final = structuredClone(value) as Record<
+				string,
+				unknown
+			> | null;
 			entry.stage3_timestamp = Date.now();
-			if (!entry.isEmptyArgs && value && Object.keys(value).length === 0) {
+			if (
+				!entry.isEmptyArgs &&
+				typeof value === "object" &&
+				(value === null ||
+					Object.keys(value).length === 0 ||
+					(typeof value.command === "string" && value.command.trim() === ""))
+			) {
 				entry.isEmptyArgs = true;
 			}
 			break;
 	}
 
+	writeBashDebugEvent("tool.stage", { id: entryId, toolName, stage, value });
+
 	// Log to stderr for visibility
 	const stageLabel = ["raw", "parsed", "prepared", "final"][stage];
-	const displayValue = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+	const displayValue =
+		typeof value === "string" ? value : JSON.stringify(value, null, 2);
 	console.error(
 		`[bash-debugger] ${toolName} [${entryId}] stage=${stageLabel}: ${displayValue.slice(0, 500)}`,
 	);
@@ -100,9 +133,14 @@ export function logStage(
 
 /** Set the result for a completed tool call. */
 export function setResult(entryId: string, result: string): void {
+	if (!enabled) return;
 	const entry = entries.find(e => e.id === entryId);
 	if (entry) {
 		entry.result = result;
+		writeBashDebugEvent("tool.result", { id: entryId, result });
+		console.error(
+			`[bash-debugger] [${entryId}] result: ${JSON.stringify(result).slice(0, 500)}`,
+		);
 	}
 }
 
@@ -125,13 +163,21 @@ export function getBashDebuggerReport(limit: number = 10): string {
 
 		lines.push(`\n── ${entry.id.slice(0, 12)}... (${elapsed}) ──`);
 		lines.push(`  Stage 0 (raw):     ${entry.stage0_rawArgs || "(none)"}`);
-		lines.push(`  Stage 1 (parsed):  ${JSON.stringify(entry.stage1_parsed) || "(none)"}`);
-		lines.push(`  Stage 2 (prepared):${JSON.stringify(entry.stage2_prepared) || "(none)"}`);
-		lines.push(`  Stage 3 (final):   ${JSON.stringify(entry.stage3_final) || "(none)"}`);
+		lines.push(
+			`  Stage 1 (parsed):  ${JSON.stringify(entry.stage1_parsed) || "(none)"}`,
+		);
+		lines.push(
+			`  Stage 2 (prepared):${JSON.stringify(entry.stage2_prepared) || "(none)"}`,
+		);
+		lines.push(
+			`  Stage 3 (final):   ${JSON.stringify(entry.stage3_final) || "(none)"}`,
+		);
 		lines.push(`  isEmptyArgs:       ${entry.isEmptyArgs ? "YES ⚠️" : "no"}`);
 		if (entry.result) {
 			const preview = entry.result.slice(0, 200);
-			lines.push(`  result:            ${preview}${entry.result.length > 200 ? "..." : ""}`);
+			lines.push(
+				`  result:            ${preview}${entry.result.length > 200 ? "..." : ""}`,
+			);
 		}
 	}
 
@@ -139,9 +185,15 @@ export function getBashDebuggerReport(limit: number = 10): string {
 	const emptyCount = relevant.filter(e => e.isEmptyArgs).length;
 	if (emptyCount > 0) {
 		lines.push("\n" + "=".repeat(80));
-		lines.push(`SUMMARY: ${emptyCount}/${relevant.length} bash calls had empty arguments.`);
-		lines.push("This means the model sent {} or a string that couldn't be parsed.");
-		lines.push("Check: (1) tool schema in system prompt, (2) model's understanding of bash usage.");
+		lines.push(
+			`SUMMARY: ${emptyCount}/${relevant.length} bash calls had empty arguments.`,
+		);
+		lines.push(
+			"Compare raw, parsed, prepared, and final stages to locate where arguments became empty.",
+		);
+		lines.push(
+			"Check: (1) tool schema in system prompt, (2) model's understanding of bash usage.",
+		);
 	}
 
 	return lines.join("\n");
@@ -150,10 +202,30 @@ export function getBashDebuggerReport(limit: number = 10): string {
 /** Clear all debug entries. */
 export function clearBashDebugger(): void {
 	entries.length = 0;
-	console.log("[bash-debugger] Cleared.");
+	console.error("[bash-debugger] Cleared.");
 }
 
 // Auto-enable from environment variable
 if (process.env.LOGICIAN_BASH_DEBUG === "1") {
 	setBashDebugger(true);
+}
+
+/** Optional JSONL trace. Full prompts and output are written only to an explicit path. */
+export function writeBashDebugEvent(event: string, data: unknown): void {
+	if (!enabled || !process.env.LOGICIAN_BASH_DEBUG_FILE) return;
+	try {
+		appendFileSync(
+			process.env.LOGICIAN_BASH_DEBUG_FILE,
+			JSON.stringify({
+				timestamp: new Date().toISOString(),
+				pid: process.pid,
+				event,
+				data,
+			}) + "\n",
+			{ mode: 0o600 },
+		);
+	} catch (error) {
+		// Diagnostics must never turn a valid tool call into an execution failure.
+		console.error("[bash-debugger] Cannot write trace:", error);
+	}
 }

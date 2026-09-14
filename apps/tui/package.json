@@ -6,8 +6,8 @@
 	"type": "module",
 	"main": "src/index.ts",
 	"scripts": {
-		"dev": "tsx src/index.ts",
-		"start": "tsx src/index.ts",
+		"dev": "bun src/index.ts",
+		"start": "bun src/index.ts",
 		"test": "bun test $(find src -name '*.test.ts' -type f -print)",
 		"bench": "tsx src/__tests__/benchmark.ts",
 		"bench:keystroke": "tsx src/__tests__/benchmark-keystroke.ts",

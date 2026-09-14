@@ -219,11 +219,19 @@ export class LoopDetector {
 	 * loop was detected by `recordTurn` in a prior turn.
 	 */
 	checkToolCall(name: string, args: string): LoopGuardDecision {
-		// Batch-loop guard: if recordTurn already flagged a repeat, block.
+		// Batch-loop guard: only block the exact offending call. A changed
+		// argument set is a changed approach and must be allowed through.
+		const repeatedCallMatches =
+			this.#lastReportedCall?.name === name
+			&& this.#callSignature(name, args)
+				=== this.#callSignature(
+					this.#lastReportedCall.name,
+					this.#lastReportedCall.arguments,
+				);
+
 		if (
 			this.#batchCount >= this.#batchThreshold
-			&& this.#lastReportedCall
-			&& this.#lastReportedCall.name === name
+			&& repeatedCallMatches
 		) {
 			return {
 				block: true,

@@ -16,17 +16,17 @@ import type {
 	ToolContext,
 	ToolResult,
 } from "../../system/types/types-messages.ts";
+import {
+	clearBashDebugger,
+	getBashDebuggerReport,
+	isBashDebuggerEnabled,
+	logStage,
+	setBashDebugger,
+	setResult,
+} from "./bash-debugger.ts";
 import { parseToolInput } from "./internal/parser.ts";
 import { normalizeProviderToolSchema } from "./provider-schema.ts";
 import { ToolResultCache } from "./tool-result-cache.ts";
-import {
-	logStage,
-	setResult,
-	getBashDebuggerReport,
-	setBashDebugger,
-	clearBashDebugger,
-	isBashDebuggerEnabled,
-} from "./bash-debugger.ts";
 
 /** Default cap on tool execution time. Tools can override via timeoutMs. */
 const DEFAULT_TOOL_TIMEOUT_MS = 600_000;
@@ -310,7 +310,10 @@ export class ToolRegistry {
 	): Promise<ToolResult> {
 		if (preparedArgs === undefined) {
 			const prepared = this.prepare(call);
-			if (prepared.error) return { content: prepared.error, isError: true };
+			if (prepared.error) {
+				if (call.name === "bash") setResult(call.id, prepared.error);
+				return { content: prepared.error, isError: true };
+			}
 			call = prepared.call;
 			preparedArgs = prepared.args;
 		}
@@ -320,8 +323,8 @@ export class ToolRegistry {
 		}
 
 		const args = preparedArgs ?? this.prepare(call).args;
-		// Stage 3: Log final args before execute (only if not already logged via prepare)
-		if (isBashDebuggerEnabled() && call.name === "bash" && preparedArgs === undefined) {
+		// Stage 3: Record the actual execution arguments, including pre-prepared calls.
+		if (isBashDebuggerEnabled() && call.name === "bash") {
 			logStage(call.id, call.name, 3, args);
 		}
 
@@ -385,11 +388,15 @@ export class ToolRegistry {
 				);
 			}
 
+			if (call.name === "bash") setResult(call.id, result.content);
 			return result;
 		} catch (_e: unknown) {
 			const error = _e as Error;
 			if (isBashDebuggerEnabled() && call.name === "bash") {
-				setResult(call.id, `Error executing ${call.name}: ${describeToolError(error)}`);
+				setResult(
+					call.id,
+					`Error executing ${call.name}: ${describeToolError(error)}`,
+				);
 			}
 			return {
 				content: `Error executing ${call.name}: ${describeToolError(error)}`,

@@ -1,7 +1,11 @@
+import { randomUUID } from "node:crypto";
+import { writeBashDebugEvent } from "../tools/bash-debugger.ts";
+
 // ── LLM Backend ──────────────────────────────────────────────────────────────────
 // OpenAI-compatible HTTP client for streaming LLM responses.
 // Mirrors Python LlamaCppClient/VLLMClient but simplified for TS.
 
+import type { RemoteCompactionResult } from "../../runtime/compaction/engine.ts";
 import type {
 	ThinkingFormat,
 	ThinkingLevel,
@@ -11,7 +15,6 @@ import {
 	OpenAIChatCompletionsAdapter,
 	type ProviderAdapter,
 } from "./provider-adapter.ts";
-import type { RemoteCompactionResult } from "../../runtime/compaction/engine.ts";
 
 // ── Typed backend errors ───────────────────────────────────────────────────
 // The backend classifies provider/network failures at the boundary so the loop
@@ -464,6 +467,11 @@ export class OpenAIBackend implements LLMBackend {
 
 		// Let a provider-payload hook inspect/rewrite the final body.
 		const finalBody = transformPayload ? await transformPayload(body) : body;
+		const debugRequestId = randomUUID();
+		writeBashDebugEvent("provider.request", {
+			requestId: debugRequestId,
+			body: finalBody,
+		});
 
 		const timeoutSignal =
 			timeoutMs !== undefined && timeoutMs > 0
@@ -533,6 +541,10 @@ export class OpenAIBackend implements LLMBackend {
 			for (const line of lines) {
 				if (!line.startsWith("data: ")) continue;
 				const data = line.slice(6).trim();
+				writeBashDebugEvent("provider.sse", {
+					requestId: debugRequestId,
+					data,
+				});
 				if (!data || data === "[DONE]") continue;
 
 				try {
@@ -645,6 +657,12 @@ export class OpenAIBackend implements LLMBackend {
 			onTextEnd?.();
 		}
 
+		writeBashDebugEvent("provider.assembled", {
+			requestId: debugRequestId,
+			toolCalls,
+			content: fullContent,
+			finishReason,
+		});
 		toolCalls = toolCalls
 			.filter(tc => tc?.name)
 			.map((tc, index) => ({
@@ -699,7 +717,9 @@ export class OpenAIBackend implements LLMBackend {
 		const model = compactionModel ?? this.model;
 
 		const timeoutSignal = AbortSignal.timeout(timeoutMs);
-		const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+		const requestSignal = signal
+			? AbortSignal.any([signal, timeoutSignal])
+			: timeoutSignal;
 
 		const body = {
 			model,
@@ -719,7 +739,9 @@ export class OpenAIBackend implements LLMBackend {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(`Remote compaction failed: ${response.status} ${errorText}`);
+			throw new Error(
+				`Remote compaction failed: ${response.status} ${errorText}`,
+			);
 		}
 
 		const result = (await response.json()) as {
@@ -753,17 +775,24 @@ export class OpenAIBackend implements LLMBackend {
 
 		// Parse token usage
 		const usage: RemoteCompactionResult["usage"] = result.usage
-			? ([
-					["promptTokens", result.usage.input_tokens],
-					["completionTokens", result.usage.output_tokens],
-					["totalTokens", result.usage.total_tokens],
-				] as [string, number | undefined][]).filter((entry): entry is [string, number] => entry[1] !== undefined)
-				.reduce<Record<string, number>>((acc, [key, val]) => {
-					acc[key] = val;
-					return acc;
-				}, {})
+			? (
+					[
+						["promptTokens", result.usage.input_tokens],
+						["completionTokens", result.usage.output_tokens],
+						["totalTokens", result.usage.total_tokens],
+					] as [string, number | undefined][]
+				)
+					.filter((entry): entry is [string, number] => entry[1] !== undefined)
+					.reduce<Record<string, number>>((acc, [key, val]) => {
+						acc[key] = val;
+						return acc;
+					}, {})
 			: undefined;
 
-		return { summary, ...(Object.keys(preserveData).length > 0 ? { preserveData } : {}), usage };
+		return {
+			summary,
+			...(Object.keys(preserveData).length > 0 ? { preserveData } : {}),
+			usage,
+		};
 	}
 }
