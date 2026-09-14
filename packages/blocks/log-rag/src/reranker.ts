@@ -3,6 +3,7 @@
 // scored jointly). Much more accurate than re-ranking with independent encoders.
 // Uses @huggingface/transformers in-process.
 
+import { tokenize } from "./tokenize.ts";
 import type { IReranker, RAGChunk } from "./types.ts";
 
 type TextPairClassificationPipeline = (
@@ -140,83 +141,6 @@ export class BM25Reranker implements IReranker {
 }
 
 // ── Inline helpers ───────────────────────────────────────────────────────────
-
-const STOP_WORDS = new Set([
-	"a",
-	"an",
-	"the",
-	"and",
-	"or",
-	"but",
-	"in",
-	"on",
-	"at",
-	"to",
-	"for",
-	"of",
-	"with",
-	"by",
-	"from",
-	"is",
-	"are",
-	"was",
-	"were",
-	"be",
-	"been",
-	"have",
-	"has",
-	"had",
-	"do",
-	"does",
-	"did",
-	"will",
-	"would",
-	"could",
-	"should",
-	"may",
-	"might",
-	"shall",
-	"can",
-	"this",
-	"that",
-	"these",
-	"those",
-	"it",
-	"its",
-	"i",
-	"me",
-	"my",
-	"we",
-	"our",
-	"you",
-	"your",
-	"he",
-	"she",
-	"they",
-	"them",
-	"their",
-	"what",
-	"which",
-	"who",
-	"how",
-	"when",
-	"where",
-	"why",
-	"not",
-	"no",
-	"yes",
-	"so",
-	"if",
-	"as",
-]);
-
-function tokenize(text: string): string[] {
-	return text
-		.toLowerCase()
-		.replace(/[^a-z0-9\s]/g, " ")
-		.split(/\s+/)
-		.filter(t => t.length > 1 && !STOP_WORDS.has(t));
-}
 
 function scoreBM25(queryTerms: string[], docTerms: string[]): number {
 	const k1 = 1.5;

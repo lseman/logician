@@ -3,6 +3,7 @@
 // boundary detection), and parent-child (small chunks with large context parents).
 // All produce chunks with overlap and respect structural boundaries.
 
+import { cosineSimilarity } from "./embedder.ts";
 import type { ChunkingConfig, ParentContext, RAGChunk } from "./types.ts";
 
 // ── Recursive Chunking ───────────────────────────────────────────────────────
@@ -336,20 +337,4 @@ export async function smartChunk(
 		default:
 			return recursiveChunk(text, config);
 	}
-}
-
-// ── Inline helpers ───────────────────────────────────────────────────────────
-
-function cosineSimilarity(a: number[], b: number[]): number {
-	let dot = 0,
-		na = 0,
-		nb = 0;
-	const len = Math.min(a.length, b.length);
-	for (let i = 0; i < len; i++) {
-		dot += a[i] * b[i];
-		na += a[i] * a[i];
-		nb += b[i] * b[i];
-	}
-	if (na === 0 || nb === 0) return 0;
-	return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }

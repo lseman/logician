@@ -1,0 +1,81 @@
+// ── Tokenizer ─────────────────────────────────────────────────────────────────
+// Shared by the BM25 store (hybrid-store.ts) and the lexical overlap reranker
+// (reranker.ts): lowercase, strip punctuation, split on whitespace, drop stop
+// words and single characters.
+
+const STOP_WORDS = new Set([
+	"a",
+	"an",
+	"the",
+	"and",
+	"or",
+	"but",
+	"in",
+	"on",
+	"at",
+	"to",
+	"for",
+	"of",
+	"with",
+	"by",
+	"from",
+	"is",
+	"are",
+	"was",
+	"were",
+	"be",
+	"been",
+	"have",
+	"has",
+	"had",
+	"do",
+	"does",
+	"did",
+	"will",
+	"would",
+	"could",
+	"should",
+	"may",
+	"might",
+	"shall",
+	"can",
+	"this",
+	"that",
+	"these",
+	"those",
+	"it",
+	"its",
+	"i",
+	"me",
+	"my",
+	"we",
+	"our",
+	"you",
+	"your",
+	"he",
+	"she",
+	"they",
+	"them",
+	"their",
+	"what",
+	"which",
+	"who",
+	"how",
+	"when",
+	"where",
+	"why",
+	"not",
+	"no",
+	"yes",
+	"so",
+	"if",
+	"as",
+]);
+
+export function tokenize(text: string): string[] {
+	return text
+		.toLowerCase()
+		.replace(/[^a-z0-9\s]/g, " ")
+		.split(/\s+/)
+		.filter(t => t.length > 1 && !STOP_WORDS.has(t));
+}

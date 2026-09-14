@@ -3,136 +3,23 @@
 // BM25 term frequencies stored in SQLite; IDF computed on demand.
 // Scores fused via reciprocal rank fusion (RRF) for robust ranking.
 
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { Index, MetricKind } from "usearch";
 import type { RAGChunk, SearchHit } from "../types.ts";
+import {
+	type ChunkRow,
+	resolveSqliteDatabase,
+	resolveStoragePaths,
+	type SqliteDatabase,
+	type SqliteStatement,
+	toRAGChunk,
+} from "./sqlite-shared.ts";
+import { tokenize } from "../tokenize.ts";
 
 // ── SQLite helpers ─────────────────────────────────────────────────────────────
 
 const SCHEMA_VERSION = 2;
-
-interface SqliteStatement {
-	run(...args: unknown[]): unknown;
-	get(...args: unknown[]): unknown;
-	all(...args: unknown[]): unknown[];
-}
-
-interface SqliteDatabase {
-	exec(sql: string): unknown;
-	prepare(sql: string): SqliteStatement;
-	close(): void;
-}
-
-type SqliteDatabaseConstructor = new (path: string) => SqliteDatabase;
-
-function resolveSqliteDatabase(): SqliteDatabaseConstructor {
-	const runtimeRequire = createRequire(import.meta.url);
-	const isBun = "Bun" in globalThis;
-	const mod = isBun
-		? runtimeRequire("bun:sqlite")
-		: runtimeRequire("node:sqlite");
-	return (isBun ? mod.Database : mod.DatabaseSync) as SqliteDatabaseConstructor;
-}
-
-function resolveStoragePaths(
-	projectDir: string,
-	dbName = "rag",
-): { dbPath: string; indexPath: string } {
-	const base = "tui/rag-storage";
-	const storageRoot = process.env.XDG_DATA_HOME
-		? join(process.env.XDG_DATA_HOME, base)
-		: join(process.env.HOME || ".", ".local", "share", base);
-	const key = `${createHash("sha256")
-		.update(projectDir.toLowerCase())
-		.digest("hex")
-		.slice(0, 8)}-${dbName}`;
-	return {
-		dbPath: join(storageRoot, `${key}.db`),
-		indexPath: join(storageRoot, `${key}.usearch`),
-	};
-}
-
-// ── Tokenizer ──────────────────────────────────────────────────────────────────
-
-const STOP_WORDS = new Set([
-	"a",
-	"an",
-	"the",
-	"and",
-	"or",
-	"but",
-	"in",
-	"on",
-	"at",
-	"to",
-	"for",
-	"of",
-	"with",
-	"by",
-	"from",
-	"is",
-	"are",
-	"was",
-	"were",
-	"be",
-	"been",
-	"have",
-	"has",
-	"had",
-	"do",
-	"does",
-	"did",
-	"will",
-	"would",
-	"could",
-	"should",
-	"may",
-	"might",
-	"shall",
-	"can",
-	"this",
-	"that",
-	"these",
-	"those",
-	"it",
-	"its",
-	"i",
-	"me",
-	"my",
-	"we",
-	"our",
-	"you",
-	"your",
-	"he",
-	"she",
-	"they",
-	"them",
-	"their",
-	"what",
-	"which",
-	"who",
-	"how",
-	"when",
-	"where",
-	"why",
-	"not",
-	"no",
-	"yes",
-	"so",
-	"if",
-	"as",
-]);
-
-export function tokenize(text: string): string[] {
-	return text
-		.toLowerCase()
-		.replace(/[^a-z0-9\s]/g, " ")
-		.split(/\s+/)
-		.filter(t => t.length > 1 && !STOP_WORDS.has(t));
-}
 
 // ── BM25 Scorer (in-process) ──────────────────────────────────────────────────
 
@@ -259,19 +146,6 @@ export class BM25Scorer {
 		const entries = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
 		return entries.slice(0, k).map(([id, score]) => ({ id, score }));
 	}
-}
-
-// ── Chunk Row interface ────────────────────────────────────────────────────────
-
-interface ChunkRow {
-	id: string;
-	document_id: string | null;
-	filename: string;
-	text: string;
-	metadata_json: string;
-	chunk_index: number;
-	created_at: string;
-	rowid: number;
 }
 
 // ── HybridVectorStore ──────────────────────────────────────────────────────────
@@ -878,13 +752,4 @@ export class HybridVectorStore {
 	close(): void {
 		this.db.close();
 	}
-}
-
-function toRAGChunk(row: ChunkRow): RAGChunk {
-	return {
-		id: row.id,
-		documentId: row.document_id || undefined,
-		text: row.text,
-		metadata: JSON.parse(row.metadata_json),
-	};
 }

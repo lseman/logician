@@ -3,68 +3,22 @@
 // index persisted alongside it. Search queries the ANN index, then hydrates
 // hits from SQLite by id.
 
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { Index, MetricKind } from "usearch";
 import type { IVectorStore, RAGChunk, SearchHit } from "../types.ts";
+import {
+	type ChunkRow,
+	resolveSqliteDatabase,
+	resolveStoragePaths,
+	type SqliteDatabase,
+	type SqliteStatement,
+	toRAGChunk,
+} from "./sqlite-shared.ts";
 
 // ── Database helpers ──────────────────────────────────────────────────────────
 
 const SCHEMA_VERSION = 1;
-
-interface SqliteStatement {
-	run(...args: unknown[]): unknown;
-	get(...args: unknown[]): unknown;
-	all(...args: unknown[]): unknown[];
-}
-
-interface SqliteDatabase {
-	exec(sql: string): unknown;
-	prepare(sql: string): SqliteStatement;
-	close(): void;
-}
-
-type SqliteDatabaseConstructor = new (path: string) => SqliteDatabase;
-
-function resolveSqliteDatabase(): SqliteDatabaseConstructor {
-	const runtimeRequire = createRequire(import.meta.url);
-	const isBun = "Bun" in globalThis;
-	const mod = isBun
-		? runtimeRequire("bun:sqlite")
-		: runtimeRequire("node:sqlite");
-	return (isBun ? mod.Database : mod.DatabaseSync) as SqliteDatabaseConstructor;
-}
-
-/** Resolve storage paths (SQLite db + USearch index) using XDG data dir or fallback to user home. */
-function resolveStoragePaths(
-	projectDir: string,
-	dbName = "rag",
-): { dbPath: string; indexPath: string } {
-	const base = "tui/rag-storage";
-	const storageRoot = process.env.XDG_DATA_HOME
-		? join(process.env.XDG_DATA_HOME, base)
-		: join(process.env.HOME || ".", ".local", "share", base);
-	const key = `${createHash("sha256").update(projectDir.toLowerCase()).digest("hex").slice(0, 8)}-${dbName}`;
-	return {
-		dbPath: join(storageRoot, `${key}.db`),
-		indexPath: join(storageRoot, `${key}.usearch`),
-	};
-}
-
-// ── ChunkRow interface ────────────────────────────────────────────────────────
-
-interface ChunkRow {
-	id: string;
-	document_id: string | null;
-	filename: string;
-	text: string;
-	metadata_json: string;
-	chunk_index: number;
-	created_at: string;
-	rowid: number;
-}
 
 // ── SQLiteVectorStore ─────────────────────────────────────────────────────────
 
@@ -299,13 +253,4 @@ export class SQLiteVectorStore implements IVectorStore {
 	close(): void {
 		this.db.close();
 	}
-}
-
-function toRAGChunk(row: ChunkRow): RAGChunk {
-	return {
-		id: row.id,
-		documentId: row.document_id || undefined,
-		text: row.text,
-		metadata: JSON.parse(row.metadata_json),
-	};
 }
