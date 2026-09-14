@@ -31,7 +31,7 @@ export interface HubConfig {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type ProcessStatus =
+type ProcessStatus =
 	| "starting"
 	| "ready"
 	| "running"
@@ -39,9 +39,9 @@ export type ProcessStatus =
 	| "killed"
 	| "failed";
 
-export type RestartPolicy = "no" | "on-failure" | "always";
+type RestartPolicy = "no" | "on-failure" | "always";
 
-export interface ReadinessSpec {
+interface ReadinessSpec {
 	/** Regex pattern matched against process output. */
 	log?: string;
 	/** TCP port that must accept connections. */

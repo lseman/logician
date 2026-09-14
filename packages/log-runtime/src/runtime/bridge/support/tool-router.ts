@@ -122,7 +122,7 @@ export interface ToolRouterStatus {
 /** Result of a ToolProvider's load(): the tools it contributes plus any
  * system-prompt context and diagnostics. Tools/context accumulate into the
  * router's state; errors are surfaced but never block other providers. */
-export interface ToolProviderResult {
+interface ToolProviderResult {
 	tools: Tool[];
 	/** Text appended to the system prompt (server status, skill catalog, ...). */
 	context?: string;

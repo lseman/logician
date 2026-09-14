@@ -3,7 +3,7 @@
 // registers with the bus, can send messages to peers, wait for responses, and
 // observe the status of its siblings.
 
-export interface HubMessage {
+interface HubMessage {
 	/** Unique message identifier. */
 	id: string;
 	/** Unix timestamp (ms). */
@@ -18,7 +18,7 @@ export interface HubMessage {
 	meta?: Record<string, unknown>;
 }
 
-export interface HubAgentInfo {
+interface HubAgentInfo {
 	/** Unique agent ID (e.g. "agent_abc123"). */
 	id: string;
 	/** Agent definition name (e.g. "general", "explorer"). */

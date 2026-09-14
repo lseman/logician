@@ -2,7 +2,7 @@
 // decide whether an optional continuation nudge is useful.
 
 /** Status values for phased todo tasks. */
-export type TaskStatus = "pending" | "in_progress" | "completed" | "abandoned";
+type TaskStatus = "pending" | "in_progress" | "completed" | "abandoned";
 
 /** A single task in the phased todo list. */
 export interface Task {

@@ -12,10 +12,10 @@ interface TaskLedger {
 import type { Task, TaskPhase } from "./state.ts";
 import { getTasks, mutateTasks } from "./state.ts";
 
-export type { Task, TaskPhase, TaskStatus } from "./state.ts";
+export type { TaskPhase } from "./state.ts";
 export { getTasks, onTodosChanged } from "./state.ts";
 
-export type TodoOp =
+type TodoOp =
 	| "init"
 	| "start"
 	| "done"

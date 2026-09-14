@@ -192,7 +192,7 @@ export interface SpawnAgentDeps {
 
 // ── Session-local concurrency limiter ───────────────────────────────────────
 
-export interface SpawnCtx {
+interface SpawnCtx {
 	signal?: AbortSignal;
 	onUpdate?: (delta: string) => void;
 	/** Position within a spawn_agents batch, if run as part of one. */

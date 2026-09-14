@@ -84,13 +84,6 @@ export interface WriteContext {
 	signal?: AbortSignal | undefined;
 }
 
-/** Memory entry shape for memory:// resolution. */
-export interface MemoryEntry {
-	id: string;
-	content: string;
-	metadata?: Record<string, unknown>;
-}
-
 /** Protocol handler for a specific internal URL scheme. */
 export interface ProtocolHandler {
 	scheme: string;
