@@ -346,13 +346,11 @@ test("session device registries are isolated, honor xdev, and follow capability 
 		"No devices",
 	);
 	a.setGraphicianEnabled(false);
+	a.setGraphicianEnabled(true);
+	// graphician is a core tool but not xd://discoverable (clean native interface)
 	expect(
 		result(await readA.execute({ path: "xd://graphician" }, {})).isError,
 	).toBe(true);
-	a.setGraphicianEnabled(true);
-	expect(
-		result(await readA.execute({ path: "xd://graphician" }, {})).isError,
-	).not.toBe(true);
 	expect(
 		result(await readB.execute({ path: "xd://graphician" }, {})).isError,
 	).toBe(true);

@@ -94,7 +94,6 @@ const DISCOVERABLE_TOOL_NAMES = new Set<string>([
 	"browser",
 	"lsp",
 	"hub",
-	"graphician",
 ]);
 
 /** Device aliases are available only for capabilities enabled in this session. */
