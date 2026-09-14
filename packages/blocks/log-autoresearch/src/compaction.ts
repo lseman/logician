@@ -10,6 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { isBetter } from "./experiment-state.ts";
 import {
 	type ReconstructedJsonlState,
 	type ReconstructedRun,
@@ -152,14 +153,6 @@ function bestRun(
 	return kept.reduce((best, run) =>
 		isBetter(run.metric, best.metric, direction) ? run : best,
 	);
-}
-
-function isBetter(
-	value: number,
-	current: number,
-	direction: "lower" | "higher",
-): boolean {
-	return direction === "lower" ? value < current : value > current;
 }
 
 function readablePath(workDir: string, filePath: string): string {
