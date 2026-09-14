@@ -237,7 +237,7 @@ export const bash: Tool = {
 			return "Error: provide either command or commands, not both.";
 		}
 		if (parsed.commands !== undefined) return executeBatch(parsed, ctx);
-		if (!parsed.command) return "Error: command or commands is required.";
+		if (!parsed.command) return "Error: missing 'command' field. Call bash as {command: \"ls\"} or {commands: [{id: \"a\", command: \"ls\"}]}. Do NOT pass the command as a bare string or in another field name.";
 		const blockedReason = findDestructiveMatch(parsed.command);
 		if (blockedReason) {
 			return {
