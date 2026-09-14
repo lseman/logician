@@ -126,6 +126,41 @@ function applyLineEdits(
 	return { content, linesChanged };
 }
 
+interface HashlinePlan extends FileEdit {
+	original: string;
+	content: string;
+	linesChanged: number;
+}
+
+/**
+ * Parse hashline input and compute the per-file before/after content, without
+ * touching disk. Throws on invalid input, unsupported operations, or a stale
+ * hashline anchor. Shared by the write path (executeHashlineEdit) and the
+ * dry-run path (previewHashlineEdit).
+ */
+function buildHashlinePlans(
+	input: string,
+	store: EditStore,
+	cwd: string,
+	targetPath?: string,
+): HashlinePlan[] {
+	const files = parseDocument(input, cwd, targetPath);
+	return files
+		.map(file => {
+			const original = fs.readFileSync(file.path, "utf8");
+			const stale = store.checkStale(file.path);
+			if (stale) throw new Error(stale);
+			if (hashlineHash(original) !== file.tag) {
+				throw new Error(
+					`Stale hashline anchor for ${file.path}. Read it again before editing.`,
+				);
+			}
+			const result = applyLineEdits(original, file.edits);
+			return { ...file, original, ...result };
+		})
+		.filter(plan => plan.original !== plan.content);
+}
+
 /**
  * Execute hashline edits: parse, validate, and apply file mutations through
  * the mutation session. This is the write path — files are committed atomically.
@@ -142,21 +177,7 @@ export async function executeHashlineEdit(
 	let diff = "";
 	const receipts: HashlineEditResult["receipts"] = [];
 	try {
-		const files = parseDocument(input, cwd, targetPath);
-		const plans = files
-			.map(file => {
-				const original = fs.readFileSync(file.path, "utf8");
-				const stale = store.checkStale(file.path);
-				if (stale) throw new Error(stale);
-				if (hashlineHash(original) !== file.tag) {
-					throw new Error(
-						`Stale hashline anchor for ${file.path}. Read it again before editing.`,
-					);
-				}
-				const result = applyLineEdits(original, file.edits);
-				return { ...file, original, ...result };
-			})
-			.filter(plan => plan.original !== plan.content);
+		const plans = buildHashlinePlans(input, store, cwd, targetPath);
 		if (!plans.length)
 			return {
 				applied: false,
@@ -223,21 +244,7 @@ export async function previewHashlineEdit(
 	let diff = "";
 	const receipts: HashlineEditResult["receipts"] = [];
 	try {
-		const files = parseDocument(input, cwd, targetPath);
-		const plans = files
-			.map(file => {
-				const original = fs.readFileSync(file.path, "utf8");
-				const stale = store.checkStale(file.path);
-				if (stale) throw new Error(stale);
-				if (hashlineHash(original) !== file.tag) {
-					throw new Error(
-						`Stale hashline anchor for ${file.path}. Read it again before editing.`,
-					);
-				}
-				const result = applyLineEdits(original, file.edits);
-				return { ...file, original, ...result };
-			})
-			.filter(plan => plan.original !== plan.content);
+		const plans = buildHashlinePlans(input, store, cwd, targetPath);
 		if (!plans.length)
 			return {
 				applied: false,
