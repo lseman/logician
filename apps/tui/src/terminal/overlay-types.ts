@@ -2,7 +2,7 @@ import type { Component } from "./primitives.ts";
 
 export type OverlaySize = number | `${number}%`;
 
-export interface OverlayMargin {
+interface OverlayMargin {
 	top?: number;
 	right?: number;
 	bottom?: number;

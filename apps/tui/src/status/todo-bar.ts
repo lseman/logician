@@ -25,7 +25,7 @@ export interface TodoPhase {
 	tasks: TodoTask[];
 }
 
-export interface TodoTask {
+interface TodoTask {
 	content: string;
 	status: "pending" | "in_progress" | "completed" | "abandoned";
 	blocker?: string;

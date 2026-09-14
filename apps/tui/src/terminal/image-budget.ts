@@ -5,7 +5,7 @@
 const EMPTY_IDS: readonly number[] = [];
 const EMPTY_TRANSMITS: readonly string[] = [];
 
-export const DEFAULT_MAX_INLINE_IMAGES = 8;
+const DEFAULT_MAX_INLINE_IMAGES = 8;
 
 interface PlacementState {
 	widthPx: number;

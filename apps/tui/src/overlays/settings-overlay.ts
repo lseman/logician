@@ -13,7 +13,7 @@ import { theme } from "../terminal/theme.ts";
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
-export interface SettingOption {
+interface SettingOption {
 	label: string;
 	value: string;
 	current?: boolean;

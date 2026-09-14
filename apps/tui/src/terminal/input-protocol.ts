@@ -43,7 +43,7 @@ export function logInputTrace(
 	}
 }
 
-export interface MousePosition {
+interface MousePosition {
 	column: number;
 	row: number;
 }
