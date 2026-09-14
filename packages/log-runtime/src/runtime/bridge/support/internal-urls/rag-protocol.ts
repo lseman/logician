@@ -14,6 +14,7 @@
 //   write rag://ingest        — '{"path":"doc.pdf"}'
 //   write rag://delete        — '{"docId":"abc123"}'
 
+import type { SearchHit } from "@logician/log-rag";
 import type {
 	InternalResource,
 	InternalUrl,
@@ -44,11 +45,8 @@ export class RagProtocolHandler implements ProtocolHandler {
 	readonly scheme = "rag";
 	readonly immutable = false;
 
-	async resolve(
-		url: InternalUrl,
-	): Promise<InternalResource> {
-		const full =
-			url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
+	async resolve(url: InternalUrl): Promise<InternalResource> {
+		const full = url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
 
 		// rag:// — show usage help
 		if (full === "") {
@@ -75,7 +73,8 @@ export class RagProtocolHandler implements ProtocolHandler {
 		if (full === "list") {
 			return {
 				url: url.href,
-				content: "# RAG\n\nUse `write` to operate on indexed documents.\n\nUse `read rag://` for usage help.",
+				content:
+					"# RAG\n\nUse `write` to operate on indexed documents.\n\nUse `read rag://` for usage help.",
 				contentType: "text/markdown",
 			};
 		}
@@ -90,8 +89,7 @@ export class RagProtocolHandler implements ProtocolHandler {
 		content: string,
 		ctx?: WriteContext,
 	): Promise<string | void> {
-		const full =
-			url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
+		const full = url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
 
 		const args = parseJsonArgs(url, content);
 		const cwd = ctx?.cwd;
@@ -100,7 +98,9 @@ export class RagProtocolHandler implements ProtocolHandler {
 			throw new Error("cwd is required for rag:// operations.");
 		}
 
-		const { getPipeline } = await import("../../../../capabilities/rag/index.ts");
+		const { getPipeline } = await import(
+			"../../../../capabilities/rag/index.ts"
+		);
 		const pipeline = getPipeline(cwd);
 
 		// rag://search — search indexed documents
@@ -110,14 +110,18 @@ export class RagProtocolHandler implements ProtocolHandler {
 			}
 			const k = Number(args.k ?? 5);
 			const results = await pipeline.search(args.query, k);
-			const hits = results.map((h: import("../../../capabilities/rag/index.ts").SearchHit) => ({
+			const hits = results.map((h: SearchHit) => ({
 				id: h.chunk.id,
 				documentId: h.chunk.documentId,
 				text: h.chunk.text.slice(0, 500),
 				score: parseFloat(h.score.toFixed(4)),
 				metadata: h.chunk.metadata,
 			}));
-			return JSON.stringify({ query: args.query, results: hits, totalFound: results.length }, null, 2);
+			return JSON.stringify(
+				{ query: args.query, results: hits, totalFound: results.length },
+				null,
+				2,
+			);
 		}
 
 		// rag://ingest — ingest a document
@@ -126,13 +130,17 @@ export class RagProtocolHandler implements ProtocolHandler {
 				throw new Error("rag://ingest requires {path}.");
 			}
 			const doc = await pipeline.ingestFile(args.path, args.docId);
-			return JSON.stringify({
-				success: true,
-				id: doc.id,
-				filename: doc.filename,
-				chunks: doc.chunks.length,
-				extractedAt: new Date(doc.extractedAt).toISOString(),
-			}, null, 2);
+			return JSON.stringify(
+				{
+					success: true,
+					id: doc.id,
+					filename: doc.filename,
+					chunks: doc.chunks.length,
+					extractedAt: new Date(doc.extractedAt).toISOString(),
+				},
+				null,
+				2,
+			);
 		}
 
 		// rag://delete — delete a document
