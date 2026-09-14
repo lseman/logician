@@ -4,17 +4,13 @@
  * complete system prompt.
  */
 
-import {
-	readdir as readdirAsync,
-	readFile as readFileAsync,
-} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Tool } from "@logician/log-core";
 import type { RuntimeEvent } from "@logician/log-core/events";
-import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import { runPluginBackend } from "../../../adapters/claude-code/plugin-runtime.ts";
 import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
+import { loadPluginCommands } from "../../../capabilities/extensions/extensions.ts";
 import type { LspClientPool } from "../../../capabilities/lsp/lsp-client-pool.ts";
 import type { MemoriamGateway } from "../../../capabilities/memoriam/memoriam-gateway.ts";
 import {
@@ -583,55 +579,4 @@ export class ToolRouter {
 			enabledPluginRoots: this.enabledPluginRoots,
 		};
 	}
-}
-
-/**
- * Claude Code plugin commands (commands/*.md) become user-invocable skills:
- * /plugin:command or /command, never advertised to the model.
- */
-async function loadPluginCommands(
-	plugins: Array<{ name: string; installPath: string }>,
-): Promise<Skill[]> {
-	const out: Skill[] = [];
-	for (const { name: pluginName, installPath } of plugins) {
-		const dir = path.join(installPath, "commands");
-		let entries: string[];
-		try {
-			entries = await readdirAsync(dir);
-		} catch {
-			continue;
-		}
-		for (const entry of entries) {
-			if (!entry.endsWith(".md")) continue;
-			const filePath = path.join(dir, entry);
-			let raw: string;
-			try {
-				raw = await readFileAsync(filePath, "utf8");
-			} catch {
-				continue;
-			}
-			const parsed = parseFrontmatter<Record<string, unknown>>(raw);
-			const frontmatter = parsed.ok ? parsed.value.frontmatter : {};
-			const body = parsed.ok ? parsed.value.body : raw;
-			const cmdName = entry.slice(0, -3);
-			const description =
-				typeof frontmatter.description === "string" &&
-				frontmatter.description.trim()
-					? frontmatter.description
-					: `Command from the ${pluginName} plugin.`;
-			out.push({
-				name: `${pluginName}:${cmdName}`,
-				displayName: cmdName,
-				description,
-				content: body,
-				filePath,
-				baseDir: dir,
-				slashName: `${pluginName}:${cmdName}`,
-				disableModelInvocation: true,
-				aliases: [cmdName],
-				source: "path",
-			});
-		}
-	}
-	return out;
 }

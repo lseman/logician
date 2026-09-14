@@ -7,8 +7,8 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export const EOH_BEGIN = "# EOH-BEGIN";
-export const EOH_END = "# EOH-END";
+const EOH_BEGIN = "# EOH-BEGIN";
+const EOH_END = "# EOH-END";
 
 export interface EohFileTarget {
 	path: string;
@@ -100,7 +100,7 @@ export async function loadEohFile(
 	};
 }
 
-export function renderEohCandidate(
+function renderEohCandidate(
 	target: EohFileTarget,
 	heuristicCode: string,
 ): string {
