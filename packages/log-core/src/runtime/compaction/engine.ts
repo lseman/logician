@@ -12,7 +12,14 @@
 // - Usage metrics: tokensBefore / tokensAfter on compaction results
 
 import { randomUUID } from "node:crypto";
-import { compact as snapcompact, type Archive, type Frame, type FrameConfig, computeFrameTokenOverhead, PRESERVE_KEY } from "./snapcompact.ts";
+import {
+	compact as snapcompact,
+	type Archive,
+	type Frame,
+	type FrameConfig,
+	computeFrameTokenOverhead,
+	PRESERVE_KEY,
+} from "./snapcompact.ts";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AgentMessage,
@@ -24,8 +31,7 @@ import { serializeConversation } from "./serialization.ts";
 // ============================================================================
 // Types
 // ============================================================================
-// ============================================================================
-export interface RemoteCompactionOptions {
+interface RemoteCompactionOptions {
 	/** Provider-specific compaction endpoint. When unset, uses the provider's native endpoint (e.g. /responses/compact for OpenAI). */
 	endpoint?: string;
 	/** Model to use for compaction. Falls back to the current model. */
@@ -43,11 +49,13 @@ export interface RemoteCompactionResult {
 	/** Optional preserve data returned by the provider (e.g. replacement history, compaction items). */
 	preserveData?: Record<string, unknown>;
 	/** Token usage reported by the provider, when available. */
-	usage?: {
-		promptTokens?: number | undefined;
-		completionTokens?: number | undefined;
-		totalTokens?: number | undefined;
-	} | undefined;
+	usage?:
+		| {
+				promptTokens?: number | undefined;
+				completionTokens?: number | undefined;
+				totalTokens?: number | undefined;
+		  }
+		| undefined;
 }
 
 /** Compaction thresholds and retention settings. */
@@ -139,7 +147,9 @@ function estimateCompressableTokens(
 		chars += textContent.length;
 		// Add token overhead for PNG frames stored in snapcompact archive.
 		const branchMsg = msg as { snapcompact?: Record<string, unknown> };
-		const archive = branchMsg.snapcompact as { snapcompact?: { frames?: Array<{ data: string }> } } | undefined;
+		const archive = branchMsg.snapcompact as
+			| { snapcompact?: { frames?: Array<{ data: string }> } }
+			| undefined;
 		const frames = archive?.snapcompact?.frames ?? [];
 		chars += computeFrameTokenOverhead(frames as Frame[]) * 4; // rough char-equiv: 4 chars ≈ 1 token
 	} else {
@@ -476,7 +486,13 @@ export async function compactToFit(
 		remoteSummarizer?: (messages: CompactableMessage[]) => Promise<string>;
 	},
 ): Promise<CompactToFitResult> {
-	const { triggerTokens, keepRecentMessages, settings, summarize, remoteSummarizer } = opts;
+	const {
+		triggerTokens,
+		keepRecentMessages,
+		settings,
+		summarize,
+		remoteSummarizer,
+	} = opts;
 	const force = triggerTokens <= 0;
 
 	// Estimate current tokens
@@ -686,7 +702,9 @@ async function compactToFitFull(
 	messages: CompactableMessage[],
 	settings: CompactionSettings,
 	summarize: CompactionSummarizer | undefined,
-	remoteSummarizer: ((messages: CompactableMessage[]) => Promise<string>) | undefined,
+	remoteSummarizer:
+		| ((messages: CompactableMessage[]) => Promise<string>)
+		| undefined,
 ): Promise<CompactToFitResult> {
 	// Find the cut point using turn-boundary-aware logic
 	const cutPoint = findCutPoint(
@@ -718,8 +736,7 @@ async function compactToFitFull(
 		// Remote (server-side) compaction: delegate to provider's native endpoint.
 		const summary = await remoteSummarizer?.(messagesToSummarize);
 		const fallbackSummary =
-			summary ??
-			generateInlineSummary(messagesToSummarize, settings);
+			summary ?? generateInlineSummary(messagesToSummarize, settings);
 
 		compacted = [
 			{ role: "compactionSummary" as const, content: fallbackSummary },
@@ -728,7 +745,8 @@ async function compactToFitFull(
 		tokensAfter = estimateContextTokens(compacted).tokens;
 	} else if (settings.mode === "snapcompact") {
 		// Snapcompact: local, deterministic bitmap frame rendering with provider-aware sizing.
-		const firstKeptId = messagesToSummarize[messagesToSummarize.length - 1]?.entryId;
+		const firstKeptId =
+			messagesToSummarize[messagesToSummarize.length - 1]?.entryId;
 		const frameConfig = settings.frameOptions;
 		const compactOpts: {
 			maxFrames?: number;
@@ -768,7 +786,10 @@ async function compactToFitFull(
 			)?.[PRESERVE_KEY] as Archive | undefined;
 			if (priorArchive) {
 				compactOpts.previousArchive = priorArchive;
-			} else if (typeof priorSummary.content === "string" && priorSummary.content) {
+			} else if (
+				typeof priorSummary.content === "string" &&
+				priorSummary.content
+			) {
 				compactOpts.previousSummary = priorSummary.content;
 			}
 		}
@@ -809,7 +830,6 @@ async function compactToFitFull(
 		tokensAfter,
 		changed: true,
 	};
-
 }
 
 function extractTouchedFiles(messages: CompactableMessage[]): string[] {
