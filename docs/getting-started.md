@@ -87,6 +87,8 @@ Standard output is machine-readable JSONL; diagnostics go to standard error.
 
 ## Next steps
 
+<!-- EDIT_TOOL_TEST -->
+
 - Follow the [First Session tutorial](/tutorials/first-session).
 - Learn the [configuration layers](/guides/configuration).
 - Add capabilities with [skills](/guides/skills), [plugins](/guides/plugins), or [MCP servers](/guides/mcp).

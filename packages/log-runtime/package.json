@@ -30,6 +30,7 @@
 		"@logician/log-autoresearch": "0.2.0",
 		"@logician/log-core": "0.2.0",
 		"@logician/log-eoh": "0.1.0",
+		"@logician/log-natives": "workspace:*",
 		"@logician/log-rag": "0.2.0",
 		"@logician/log-snapcompact": "workspace:*",
 		"adm-zip": "^0.6.1",

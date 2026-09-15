@@ -1,46 +1,72 @@
 // ── ast-grep integration for structural AST queries ────────────────────────────
-// Wraps the ast-grep CLI to perform AST-aware pattern matching and rewriting.
+// Wraps @logician/log-natives (the pi-ast/ast-grep-core N-API binding) to
+// perform AST-aware pattern matching and rewriting — no external CLI needed.
 //
 // The ast_edit tool uses this to find structural patterns, compute diffs, and
 // produce staged edit proposals.
 
-import { execFile } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
-import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
+// ── Native addon loading ─────────────────────────────────────────────────────
 
-/**
- * Run the ast-grep CLI and parse its JSON output. ast-grep exits with code 1
- * (not 0) whenever a run produces zero matches — same convention as
- * grep/rg — even though stdout still holds a valid `[]`. `execFile`'s
- * promisified form rejects on any non-zero exit, so a plain `await
- * execFileAsync(...)` would surface "no matches" as a thrown error. Recover
- * by parsing `error.stdout` (still populated by Node on a non-zero exit)
- * as JSON; only propagate the error when that doesn't yield a valid result.
- */
-async function runAstGrepCli(bin: string, args: string[]): Promise<AstMatch[]> {
-	let stdout: string;
-	try {
-		stdout = (await execFileAsync(bin, args)).stdout;
-	} catch (error) {
-		const stdoutFromError =
-			error && typeof error === "object" && "stdout" in error
-				? String((error as { stdout: unknown }).stdout ?? "")
-				: "";
-		if (!stdoutFromError.trim()) throw error;
-		try {
-			return JSON.parse(stdoutFromError) as AstMatch[];
-		} catch {
-			throw error;
-		}
+interface NativeAstFindMatch {
+	path: string;
+	text: string;
+	byteStart: number;
+	byteEnd: number;
+	startLine: number;
+	startColumn: number;
+	endLine: number;
+	endColumn: number;
+}
+
+interface NativeAstFindResult {
+	matches: NativeAstFindMatch[];
+	totalMatches: number;
+}
+
+interface NativeAstReplaceChange {
+	path: string;
+	before: string;
+	after: string;
+	byteStart: number;
+	byteEnd: number;
+}
+
+interface NativeAstReplaceResult {
+	changes: NativeAstReplaceChange[];
+}
+
+interface LogNatives {
+	astGrep(options: {
+		patterns: string[];
+		lang?: string;
+		path: string;
+	}): Promise<NativeAstFindResult>;
+	astEdit(options: {
+		rewrites: Record<string, string>;
+		lang?: string;
+		path: string;
+		dryRun: boolean;
+	}): Promise<NativeAstReplaceResult>;
+}
+
+let nativePromise: Promise<LogNatives> | undefined;
+
+/** Load the native addon lazily so a missing/unbuilt build only breaks callers who need it. */
+function loadNative(): Promise<LogNatives> {
+	if (!nativePromise) {
+		nativePromise = import("@logician/log-natives").catch(error => {
+			nativePromise = undefined;
+			throw new Error(
+				`@logician/log-natives addon not available (run \`bun run build\` in packages/log-natives): ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+		}) as Promise<LogNatives>;
 	}
-	if (!stdout.trim()) return [];
-	try {
-		return JSON.parse(stdout) as AstMatch[];
-	} catch {
-		return [];
-	}
+	return nativePromise;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -49,7 +75,7 @@ async function runAstGrepCli(bin: string, args: string[]): Promise<AstMatch[]> {
 export interface AstMatch {
 	/** The matched text. */
 	text: string;
-	/** Byte offset and line/column range. */
+	/** Byte offset and 0-based line/column range. */
 	range: {
 		byteOffset: { start: number; end: number };
 		start: { line: number; column: number };
@@ -57,14 +83,6 @@ export interface AstMatch {
 	};
 	/** File path. */
 	file: string;
-	/** The matched lines. */
-	lines: string;
-	/** Character counts for context. */
-	charCount: { leading: number; trailing: number };
-	/** Replacement text (only present when using --rewrite). */
-	replacement?: string;
-	/** Byte offsets for the replacement. */
-	replacementOffsets?: { start: number; end: number };
 }
 
 /** An AST edit operation. */
@@ -89,38 +107,10 @@ export interface AstEditResult {
 	original: string;
 }
 
-// ── CLI detection ──────────────────────────────────────────────────────────────
-
-const AST_GREP_BINARIES = ["sg", "ast-grep"];
-
-/**
- * Find the ast-grep binary.
- */
-async function findAstGrepBin(): Promise<string | null> {
-	for (const bin of AST_GREP_BINARIES) {
-		try {
-			await execFileAsync(bin, ["--version"]);
-			return bin;
-		} catch {}
-	}
-	return null;
-}
-
-let cachedBin: string | null | undefined;
-
-/**
- * Get the ast-grep binary path, cached.
- */
-async function getAstGrepBin(): Promise<string | null> {
-	if (cachedBin === undefined) {
-		cachedBin = await findAstGrepBin();
-	}
-	return cachedBin;
-}
-
 // ── Language detection ─────────────────────────────────────────────────────────
+// Only used as an explicit override; when omitted, the native binding infers
+// language per file from its extension, including for mixed-language paths.
 
-/** Map file extensions to ast-grep language names. */
 const EXT_TO_LANG: Record<string, string> = {
 	ts: "typescript",
 	tsx: "tsx",
@@ -139,103 +129,45 @@ const EXT_TO_LANG: Record<string, string> = {
 	kt: "kotlin",
 };
 
-/**
- * Detect the ast-grep language for a file path.
- */
-function detectLanguage(filePath: string): string {
+/** Detect the ast-grep language for a file path, for an explicit `language` override. */
+function detectLanguage(filePath: string): string | undefined {
 	const ext = path.extname(filePath).slice(1).toLowerCase();
-	return EXT_TO_LANG[ext] || "typescript";
-}
-
-// ── Query execution ────────────────────────────────────────────────────────────
-
-/**
- * Run ast-grep rewrite and return matches with replacements.
- *
- * Does NOT pass `--no-ignore` — current ast-grep CLI versions (0.4x+) require
- * it to take a FILE_TYPE value (`hidden`/`dot`/`exclude`/`global`/`parent`/
- * `vcs`); passing it bare (as this used to) greedily consumes the first file
- * path as that value and errors out, breaking every call. Omitting it just
- * means normal .gitignore-respecting behavior, same as every other tool here.
- */
-async function runRewriteQuery(
-	bin: string,
-	language: string,
-	pattern: string,
-	rewrite: string,
-	filePaths: string[],
-): Promise<AstMatch[]> {
-	return runAstGrepCli(bin, [
-		"run",
-		"--lang",
-		language,
-		"--pattern",
-		pattern,
-		"--rewrite",
-		rewrite,
-		"--json=compact",
-		...filePaths,
-	]);
+	return EXT_TO_LANG[ext];
 }
 
 /**
- * Run a pure ast-grep query (no --rewrite) and return matches. Separate from
- * runRewriteQuery because the CLI always computes a replacement when
- * --rewrite is passed — a read-only query has no replacement to offer and
- * shouldn't be forced to invent one.
+ * Resolve a native match/change's `path` back to an absolute filesystem path.
+ * The native side reports a "display path": just the basename when the scan
+ * root was a single file, or the path relative to the root when it was a
+ * directory — never the absolute path we originally passed in.
  */
-async function runQuery(
-	bin: string,
-	language: string,
-	pattern: string,
-	filePaths: string[],
-): Promise<AstMatch[]> {
-	return runAstGrepCli(bin, [
-		"run",
-		"--lang",
-		language,
-		"--pattern",
-		pattern,
-		"--json=compact",
-		...filePaths,
-	]);
+function resolveDisplayPath(scanRoot: string, displayPath: string): string {
+	if (path.isAbsolute(displayPath)) return displayPath;
+	return statSync(scanRoot).isFile()
+		? scanRoot
+		: path.resolve(scanRoot, displayPath);
 }
 
-// ── Diff computation ───────────────────────────────────────────────────────────
+// ── Diff application ───────────────────────────────────────────────────────────
 
 /**
- * Compute file edits from ast-grep rewrite matches.
- * Groups matches by file and sorts by byte offset (descending) so replacements
- * can be applied without offset shifts.
+ * Apply a file's edits (byte-offset spans) to its on-disk content and return
+ * the resulting full text. Edits are applied in descending offset order so
+ * earlier spans aren't shifted by later replacements; splicing happens on the
+ * raw UTF-8 bytes since `originalStart`/`originalEnd` are byte offsets, not
+ * UTF-16 code-unit indices.
  */
-function computeFileEdits(matches: AstMatch[]): Array<{
-	file: string;
-	edits: AstEditResult[];
-}> {
-	const fileMap = new Map<string, AstEditResult[]>();
-
-	for (const match of matches) {
-		const origStart = match.range.byteOffset.start;
-		const origEnd = match.range.byteOffset.end;
-		const repl = match.replacement ?? "";
-		const file = match.file;
-
-		const edits = fileMap.get(file) ?? [];
-		fileMap.set(file, edits);
-		edits.push({
-			file,
-			replacement: repl,
-			originalStart: origStart,
-			originalEnd: origEnd,
-			original: match.text,
-		});
+function applyByteEdits(filePath: string, edits: AstEditResult[]): string {
+	let buf = readFileSync(filePath);
+	const sorted = [...edits].sort((a, b) => b.originalStart - a.originalStart);
+	for (const edit of sorted) {
+		buf = Buffer.concat([
+			buf.subarray(0, edit.originalStart),
+			Buffer.from(edit.replacement, "utf8"),
+			buf.subarray(edit.originalEnd),
+		]);
 	}
-
-	return Array.from(fileMap.entries()).map(([file, edits]) => ({
-		file,
-		// Sort descending by originalStart so earlier edits aren't shifted
-		edits: edits.sort((a, b) => b.originalStart - a.originalStart),
-	}));
+	return buf.toString("utf8");
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -248,43 +180,77 @@ export async function executeAstOp(
 	ops: AstOp[],
 	paths: string[],
 ): Promise<Array<{ file: string; edits: AstEditResult[] }>> {
-	const bin = await getAstGrepBin();
-	if (!bin) {
-		throw new Error(
-			"ast-grep CLI not found. Install with: npm install -g @ast-grep/cli",
-		);
+	const native = await loadNative();
+	const rewrites = Object.fromEntries(ops.map(op => [op.pat, op.out]));
+
+	const fileMap = new Map<string, AstEditResult[]>();
+	for (const scanPath of paths) {
+		const lang = detectLanguage(scanPath);
+		const result = await native.astEdit({
+			rewrites,
+			...(lang !== undefined ? { lang } : {}),
+			path: scanPath,
+			dryRun: true,
+		});
+		for (const change of result.changes) {
+			const file = resolveDisplayPath(scanPath, change.path);
+			const edits = fileMap.get(file) ?? [];
+			fileMap.set(file, edits);
+			edits.push({
+				file,
+				replacement: change.after,
+				originalStart: change.byteStart,
+				originalEnd: change.byteEnd,
+				original: change.before,
+			});
+		}
 	}
 
-	// Collect all matches across all operations
-	const allMatches: AstMatch[] = [];
+	return Array.from(fileMap.entries()).map(([file, edits]) => ({
+		file,
+		edits,
+	}));
+}
 
-	for (const op of ops) {
-		// Detect language from first path
-		const lang = detectLanguage(paths[0] ?? "");
-
-		const matches = await runRewriteQuery(bin, lang, op.pat, op.out, paths);
-		allMatches.push(...matches);
-	}
-
-	return computeFileEdits(allMatches);
+/**
+ * Compute the full post-edit content for a file's staged edits, applying
+ * byte-offset splices against the file's current on-disk content.
+ */
+export function applyFileEdits(file: string, edits: AstEditResult[]): string {
+	return applyByteEdits(file, edits);
 }
 
 /**
  * Run a read-only structural query (no rewrite) across the given paths.
- * Language is detected from the first path unless `language` overrides it.
+ * Language is detected from each match's own file unless `language` overrides it.
  */
 export async function queryAstPattern(
 	pattern: string,
 	paths: string[],
 	language?: string,
 ): Promise<AstMatch[]> {
-	const bin = await getAstGrepBin();
-	if (!bin) {
-		throw new Error(
-			"ast-grep CLI not found. Install with: npm install -g @ast-grep/cli",
-		);
-	}
+	const native = await loadNative();
 
-	const lang = language || detectLanguage(paths[0] ?? "");
-	return runQuery(bin, lang, pattern, paths);
+	const matches: AstMatch[] = [];
+	for (const scanPath of paths) {
+		const result = await native.astGrep({
+			patterns: [pattern],
+			...(language !== undefined ? { lang: language } : {}),
+			path: scanPath,
+		});
+		for (const m of result.matches) {
+			matches.push({
+				text: m.text,
+				file: resolveDisplayPath(scanPath, m.path),
+				range: {
+					byteOffset: { start: m.byteStart, end: m.byteEnd },
+					// Native offsets are 1-based; keep this module's contract 0-based,
+					// matching how callers already render it (`line + 1`).
+					start: { line: m.startLine - 1, column: m.startColumn - 1 },
+					end: { line: m.endLine - 1, column: m.endColumn - 1 },
+				},
+			});
+		}
+	}
+	return matches;
 }

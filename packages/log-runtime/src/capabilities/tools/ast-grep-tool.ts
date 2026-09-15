@@ -51,7 +51,7 @@ export const ast_grep: Tool = {
 	hookAliases: ["AstGrep"],
 	description:
 		"Search code structurally with an ast-grep pattern ($A metavariables bind a node, $$$ARGS binds zero-or-more). " +
-		"Read-only — use ast_edit to rewrite. Requires the ast-grep CLI. Output is grouped by file with each match's line range and matched text.",
+		"Read-only — use ast_edit to rewrite. Output is grouped by file with each match's line range and matched text.",
 	promptSnippet: "Search code structurally by AST pattern, not text",
 	promptGuidelines: [
 		"Use ast_grep when syntax shape matters more than exact text (e.g. any call to a function regardless of formatting); use grep for plain text/regex search",

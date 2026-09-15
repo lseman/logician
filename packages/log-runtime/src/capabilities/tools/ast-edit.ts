@@ -18,6 +18,7 @@ import type { Tool } from "@logician/log-core";
 import {
 	type AstEditResult,
 	type AstOp,
+	applyFileEdits,
 	executeAstOp,
 } from "./support/ast-grep.js";
 import { setStagedEdit } from "./support/staged-edits.js";
@@ -47,17 +48,17 @@ function renderEditPreview(file: string, edits: AstEditResult[]): string {
 	return lines.join("\n");
 }
 
-/** Build the staged edit data for xd://resolve. */
+/**
+ * Build the staged edit data for xd://resolve: one entry per file, with the
+ * full post-edit content (all of that file's edits spliced into its current
+ * on-disk text) — xd://resolve overwrites the whole file with `content`, so
+ * this must never be a bare match fragment.
+ */
 function buildStagedFiles(
 	file: string,
 	edits: AstEditResult[],
 ): Array<{ path: string; content: string }> {
-	// For ast_edit, we return file paths and replacements
-	// The resolve handler will apply these to disk
-	return edits.map(edit => ({
-		path: file,
-		content: edit.replacement,
-	}));
+	return [{ path: file, content: applyFileEdits(file, edits) }];
 }
 
 // ── Tool definition ────────────────────────────────────────────────────────────

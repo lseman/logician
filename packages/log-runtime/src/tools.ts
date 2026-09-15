@@ -22,13 +22,7 @@ export {
 	DEFAULT_SEARXNG_URL,
 	type DefaultToolsOptions,
 } from "./capabilities/tools/default-tools.ts";
-export {
-	type ApplyEditsResult,
-	type Edit,
-	edit,
-	fuzzyFindText,
-	normalizeForFuzzyMatch,
-} from "./capabilities/tools/edit-file.ts";
+export { type Edit, edit } from "./capabilities/tools/edit-file.ts";
 export { file_diff } from "./capabilities/tools/file-diff.ts";
 export { git } from "./capabilities/tools/git.ts";
 export { glob } from "./capabilities/tools/glob.ts";

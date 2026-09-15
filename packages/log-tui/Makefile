@@ -13,7 +13,7 @@ binary:
 	@cd $(CURDIR)/../.. && $(BUN) install
 	@mkdir -p dist
 	@rm -f $(TMP_BIN)
-	@cd $(CURDIR)/../.. && node scripts/embed-md.mjs \
+	@cd $(CURDIR)/../.. && node packages/log-tui/scripts/embed-md.mjs \
 		packages/log-runtime/src/runtime/context/system-prompt.md \
 		packages/log-runtime/src/runtime/context/system-prompt-embed.ts \
 		SYSTEM_PROMPT_TEMPLATE
