@@ -140,12 +140,3 @@ export {
 	type CompactToFitResult,
 	type CompactionSummarizer,
 } from "./runtime/compaction/engine.ts";
-export {
-	compact as snapcompact,
-	type Archive,
-	type CompactResult,
-	type Frame,
-	type FrameConfig,
-	type SerializeOptions,
-	PRESERVE_KEY,
-} from "./runtime/compaction/snapcompact.ts";

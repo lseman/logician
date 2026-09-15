@@ -66,7 +66,7 @@
                 <p class="section-copy arch-lede">
                     A TypeScript monorepo arranged as a fan-in: <code>log-core</code> — a lean agent engine
                     with the client protocol built in — sits alone at the bottom with zero internal
-                    dependencies, four capability packages under <code>packages/blocks/</code> sit above it,
+                    dependencies, four capability packages under <code>packages/</code> sit above it,
                     <code>log-runtime</code> composes them all with every optional capability, and the
                     terminal UI pulls it into one running process.
                 </p>
@@ -87,13 +87,13 @@
                 <p class="section-copy">Everything runs locally in a single Node process. No services to
                     orchestrate — packages are TypeScript workspaces, not network boundaries. Four of them —
                     <code>log-autoresearch</code>, <code>log-eoh</code>, <code>log-memory</code>, and
-                    <code>log-rag</code> — live together under <code>packages/blocks/</code>, one folder per
+                    <code>log-rag</code> — live together under <code>packages/</code>, one folder per
                     capability package.</p>
             </div>
 
             <div class="diagram-frame reveal reveal-d1">
                 <img src="logician-architecture.svg"
-                    alt="Logician architecture: seven TypeScript packages in one Node.js process, four of them under packages/blocks, a detailed log-core harness loop, and a gated tool bus connecting external systems." />
+                    alt="Logician architecture: seven TypeScript packages in one Node.js process, four of them under packages, a detailed log-core harness loop, and a gated tool bus connecting external systems." />
             </div>
         </div>
     </section>
@@ -136,13 +136,13 @@
                     the workspace. It's the loop, harness, hooks, compaction, and tool registry, and now
                     also carries the versioned client protocol (<code>system/types/types-protocol</code>)
                     that every runtime and client speaks, since <code>log-protocol</code> merged into it.</li>
-                <li><code>packages/blocks/log-autoresearch</code> and <code>packages/blocks/log-eoh</code>
+                <li><code>packages/log-autoresearch</code> and <code>packages/log-eoh</code>
                     each depend only on <code>log-core</code>, to drive their own experiment/evolution loops.</li>
-                <li><code>packages/blocks/log-memory</code>, <code>packages/blocks/log-rag</code>, and
+                <li><code>packages/log-memory</code>, <code>packages/log-rag</code>, and
                     <code>log-eval</code> stand alone — no internal <code>@logician/*</code> dependencies of
                     their own.</li>
                 <li><code>log-runtime</code> is the composition point: it depends on <code>log-core</code>
-                    and all four <code>packages/blocks/*</code> packages (<code>log-autoresearch</code>,
+                    and all four <code>packages/*</code> packages (<code>log-autoresearch</code>,
                     <code>log-eoh</code>, <code>log-memory</code>, <code>log-rag</code>), and hosts every
                     optional capability (reasoning, delegation, tasks, ask, RAG tools, and more) as one
                     folder each under <code>capabilities/</code>.</li>
@@ -206,7 +206,7 @@
                     <div class="pkg-desc">Composes <code>log-core</code> into a running agent and hosts
                         every optional capability, one folder per capability under <code>capabilities/</code>.
                         The only package that depends on every other feature package, including all four
-                        under <code>packages/blocks/</code>.</div>
+                        under <code>packages/</code>.</div>
                     <ul class="pkg-facts pkg-facts-cols">
                         <li><code>capabilities/reasoning/</code> — SSR, Tree of Thoughts, Graph of Thoughts,
                             Reflexion, Best-of-N, Self-Consistency, Auto-CoT, In-Context CoT, plus a shared
@@ -232,7 +232,7 @@
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
                         <code class="pkg-name">@logician/log-eoh</code>
-                        <span class="pkg-path">(<code>packages/blocks/log-eoh</code>)</span>
+                        <span class="pkg-path">(<code>packages/log-eoh</code>)</span>
                     </div>
                     <div class="pkg-desc">Evolution of Heuristics (arXiv 2401.02051) — a standalone
                         evolutionary optimization engine.</div>
@@ -249,7 +249,7 @@
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
                         <code class="pkg-name">@logician/log-autoresearch</code>
-                        <span class="pkg-path">(<code>packages/blocks/log-autoresearch</code>)</span>
+                        <span class="pkg-path">(<code>packages/log-autoresearch</code>)</span>
                     </div>
                     <div class="pkg-desc">Measured experiment loops: run, evaluate, keep or discard against
                         a baseline.</div>
@@ -264,7 +264,7 @@
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
                         <code class="pkg-name">@logician/log-memory</code>
-                        <span class="pkg-path">(<code>packages/blocks/log-memory</code>)</span>
+                        <span class="pkg-path">(<code>packages/log-memory</code>)</span>
                     </div>
                     <div class="pkg-desc">Persistent, SQLite-backed memory. Stands alone — no internal
                         <code>@logician/*</code> dependencies.</div>
@@ -280,7 +280,7 @@
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
                         <code class="pkg-name">@logician/log-rag</code>
-                        <span class="pkg-path">(<code>packages/blocks/log-rag</code>)</span>
+                        <span class="pkg-path">(<code>packages/log-rag</code>)</span>
                     </div>
                     <div class="pkg-desc">Hybrid retrieval. Stands alone — consumed by
                         <code>log-runtime</code>, not the other way around.</div>

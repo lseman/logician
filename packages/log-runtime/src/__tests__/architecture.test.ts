@@ -20,7 +20,6 @@ async function workspacePackageRoots(workspaceRoot: string): Promise<string[]> {
 	const roots: string[] = [];
 	for (const parent of [
 		path.join(workspaceRoot, "packages"),
-		path.join(workspaceRoot, "packages", "blocks"),
 		path.join(workspaceRoot, "apps"),
 	]) {
 		for (const entry of await readdir(parent, { withFileTypes: true })) {

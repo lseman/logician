@@ -20,7 +20,7 @@ This guide takes you from installation to a verified first turn. Logician needs 
 Use the prebuilt binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/packages/log-tui/install.sh | bash
 ```
 
 Or run from source:

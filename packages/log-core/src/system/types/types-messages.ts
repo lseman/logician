@@ -51,9 +51,7 @@ export type CompactableMessage = {
 // ── Custom message types ──────────────────────────────────────────────────
 
 /** Key under `CompactionSummaryMessage.snapcompact` holding the frame archive.
- * Lives here (not in runtime/compaction/snapcompact.ts) so both the
- * compaction engine (runtime layer) and the LLM message conversion boundary
- * (capabilities layer) can share it without capabilities depending on runtime. */
+ * Also re-exported from @logician/log-snapcompact for external consumers. */
 export const SNAPCOMPACT_PRESERVE_KEY = "snapcompact";
 
 /** Compaction summary text — emitted after context compaction. Field is named

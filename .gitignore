@@ -35,6 +35,9 @@ target/
 rust-cli/target/
 *.rs.bk
 
+# napi-rs compiled addons (platform-specific, built via `bun run build`)
+*.node
+
 # ---------------------------------------------------------------------------
 # 5. Build artifacts (general)
 # ---------------------------------------------------------------------------

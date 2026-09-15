@@ -17,7 +17,7 @@ import {
 	compactToFit,
 	shakeCompaction,
 } from "./engine.ts";
-import type { FrameConfig } from "./snapcompact.ts";
+import type { FrameConfig } from "@logician/log-snapcompact";
 
 export interface CompactionOutcome {
 	changed: boolean;

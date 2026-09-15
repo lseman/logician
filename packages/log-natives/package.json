@@ -1,0 +1,27 @@
+{
+	"name": "@logician/log-natives",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Native N-API bindings for pi-ast/pi-edit (forked from oh-my-pi's pi-natives)",
+	"type": "module",
+	"main": "./index.js",
+	"types": "./index.d.ts",
+	"scripts": {
+		"build": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform --release",
+		"build:debug": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform",
+		"typecheck": "tsc --noEmit"
+	},
+	"napi": {
+		"binaryName": "log-natives",
+		"packageName": "@logician/log-natives",
+		"targets": [
+			"x86_64-unknown-linux-gnu",
+			"aarch64-unknown-linux-gnu",
+			"x86_64-apple-darwin",
+			"aarch64-apple-darwin"
+		]
+	},
+	"devDependencies": {
+		"@napi-rs/cli": "^3"
+	}
+}

@@ -1,0 +1,30 @@
+{
+	"name": "@logician/log-tui",
+	"version": "0.2.0",
+	"private": true,
+	"description": "Terminal TUI layer for Logician",
+	"type": "module",
+	"main": "src/index.ts",
+	"scripts": {
+		"dev": "bun src/index.ts",
+		"start": "bun src/index.ts",
+		"test": "bun test $(find src -name '*.test.ts' -type f -print)",
+		"bench": "tsx src/__tests__/benchmark.ts",
+		"bench:keystroke": "tsx src/__tests__/benchmark-keystroke.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@logician/log-core": "0.2.0",
+		"@logician/log-runtime": "0.2.0",
+		"@logician/log-autoresearch": "0.2.0",
+		"string-width": "^8.2.2"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"@typescript-eslint/eslint-plugin": "^8.65.0",
+		"@typescript-eslint/parser": "^8.65.0",
+		"eslint": "^10.8.0",
+		"tsx": "^4.23.1",
+		"typescript": "^7.0.2"
+	}
+}

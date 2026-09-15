@@ -51,13 +51,13 @@ It works equally well at a local workstation, inside `tmux`, or over SSH—and i
 ### Prebuilt binary
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/packages/log-tui/install.sh | bash
 ```
 
 The installer supports Linux and macOS on `x86_64` and `arm64`. To install a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash -s -- 0.3.0
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/packages/log-tui/install.sh | bash -s -- 0.3.0
 ```
 
 ### From source
@@ -198,7 +198,6 @@ flowchart LR
 |---|---|
 | `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
 | `@logician/log-core` | Provider loop, harness, context engine, thread ledger, hooks, queues, guards, compaction, tools, sessions, and versioned client protocol |
-| `@logician/log-runtime` | Runtime composition: capabilities (delegation, reasoning strategies, tasks, user interaction, tools, memory, LSP, MCP, skills) and orchestration |
 | `memoriam` (`ecosystem/memoriam`) | Standalone Python memory engine — SQLite-backed observations, semantic episodes, consolidation, task-aware recall; embedded via its JSON-lines SDK worker |
 | `@logician/log-rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
 | `@logician/log-autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |
@@ -229,7 +228,7 @@ This separation lets you use an autonomous agent with strict permissions or embe
 ## Development
 
 Reusable TypeScript modules live under `packages/`; executable front ends live
-under `apps/`. The terminal application is in `apps/tui` and consumes the same
+under `apps/`. The terminal application is in `packages/log-tui` and consumes the same
 agent and memory modules available to other hosts.
 
 ```bash

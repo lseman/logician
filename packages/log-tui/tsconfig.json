@@ -1,0 +1,33 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"jsx": "react-jsx",
+		"rootDir": ".",
+		"outDir": "dist",
+		"strict": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"declaration": true,
+		"sourceMap": true,
+		"resolveJsonModule": true,
+		"forceConsistentCasingInFileNames": true,
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
+		"paths": {
+			"@logician/log-core": ["../log-core/src/index.ts"],
+			"@logician/log-core/events": [
+				"../log-core/src/system/types/types-events.ts"
+			],
+			"@logician/log-core/protocol": [
+				"../log-core/src/system/types/types-protocol.ts"
+			]
+		},
+		"types": ["node", "bun-types"],
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true
+	},
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "dist"]
+}

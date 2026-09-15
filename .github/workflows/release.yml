@@ -39,19 +39,19 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build binary
-        working-directory: apps/tui
+        working-directory: packages/log-tui
         run: |
           bun build --target=bun --compile src/index.ts --outfile dist/logician
 
       - name: Create archive
-        working-directory: apps/tui
+        working-directory: packages/log-tui
         run: |
           mkdir -p release
           cp dist/logician release/
           tar -czf logician-linux-x86_64.tar.gz -C release logician
 
       - name: Generate checksum
-        working-directory: apps/tui
+        working-directory: packages/log-tui
         run: |
           sha256sum logician-linux-x86_64.tar.gz > logician-linux-x86_64.tar.gz.sha256
 
@@ -59,8 +59,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            apps/tui/logician-linux-x86_64.tar.gz
-            apps/tui/logician-linux-x86_64.tar.gz.sha256
+            packages/log-tui/logician-linux-x86_64.tar.gz
+            packages/log-tui/logician-linux-x86_64.tar.gz.sha256
           draft: false
           generate_release_notes: true
 
@@ -79,26 +79,26 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build binary
-        working-directory: apps/tui
+        working-directory: packages/log-tui
         run: |
           bun build --target=bun --compile src/index.ts --outfile dist/logician
 
       - name: Create archive
-        working-directory: apps/tui
+        working-directory: packages/log-tui
         run: |
           mkdir -p release
           cp dist/logician release/
           tar -czf logician-darwin-arm64.tar.gz -C release logician
 
       - name: Generate checksum
-        working-directory: apps/tui
+        working-directory: packages/log-tui
         run: shasum -a 256 logician-darwin-arm64.tar.gz > logician-darwin-arm64.tar.gz.sha256
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            apps/tui/logician-darwin-arm64.tar.gz
-            apps/tui/logician-darwin-arm64.tar.gz.sha256
+            packages/log-tui/logician-darwin-arm64.tar.gz
+            packages/log-tui/logician-darwin-arm64.tar.gz.sha256
           draft: false
           generate_release_notes: true

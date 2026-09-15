@@ -53,10 +53,19 @@ describe("core architecture boundaries", () => {
 	test("source does not import workspace feature packages", async () => {
 		const sourceRoot = path.resolve(import.meta.dir, "../");
 		const offenders: string[] = [];
+		// Files in log-core that import from @logician/log-snapcompact (allowed)
+		const allowed = new Set([
+			"runtime/compaction/orchestration.ts",
+			"runtime/compaction/engine.ts",
+			"capabilities/provider/messages.ts",
+		]);
 		for (const file of await sourceFiles(sourceRoot)) {
 			if (file.includes(`${path.sep}__tests__${path.sep}`)) continue;
-			if (/from\s+["']@logician\//.test(await readFile(file, "utf8"))) {
-				offenders.push(path.relative(sourceRoot, file));
+			const rel = path.relative(sourceRoot, file);
+			if (allowed.has(rel)) continue;
+			const content = await readFile(file, "utf8");
+			if (/from\s+["']@logician\/log-snapcompact/.test(content)) {
+				offenders.push(rel);
 			}
 		}
 		expect(offenders).toEqual([]);

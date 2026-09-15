@@ -3,10 +3,10 @@
 	"references": [
 		{ "path": "packages/log-core" },
 		{ "path": "packages/log-eval" },
-		{ "path": "packages/blocks/log-autoresearch" },
-		{ "path": "packages/blocks/log-eoh" },
-		{ "path": "packages/blocks/log-rag" },
+		{ "path": "packages/log-autoresearch" },
+		{ "path": "packages/log-eoh" },
+		{ "path": "packages/log-rag" },
 		{ "path": "packages/log-runtime" },
-		{ "path": "apps/tui" }
+		{ "path": "packages/log-tui" }
 	]
 }

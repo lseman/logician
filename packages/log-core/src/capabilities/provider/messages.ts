@@ -4,12 +4,14 @@ import type {
 	Message,
 } from "../../system/types/types-messages.ts";
 import {
+	SNAPCOMPACT_PRESERVE_KEY,
+} from "@logician/log-snapcompact";
+import {
 	isBashExecution,
 	isBranchSummary,
 	isCompactionSummary,
 	isCustomMessage,
 	isLlmMessage,
-	SNAPCOMPACT_PRESERVE_KEY,
 } from "../../system/types/types-messages.ts";
 
 /** Minimal shape this module needs from a snapcompact `Frame` (see

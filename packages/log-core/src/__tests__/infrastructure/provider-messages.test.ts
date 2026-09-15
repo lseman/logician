@@ -3,7 +3,7 @@ import {
 	convertToChatFormat,
 	convertToLlm,
 } from "../../capabilities/provider/messages.ts";
-import { PRESERVE_KEY } from "../../runtime/compaction/snapcompact.ts";
+import { PRESERVE_KEY } from "@logician/log-snapcompact";
 import type { AgentMessage } from "../../system/types/types-messages.ts";
 
 test("convertToLlm attaches snapcompact frames as images on the compaction summary message", () => {

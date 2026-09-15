@@ -19,7 +19,7 @@ import {
 	type FrameConfig,
 	computeFrameTokenOverhead,
 	PRESERVE_KEY,
-} from "./snapcompact.ts";
+} from "@logician/log-snapcompact";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {
 	AgentMessage,

@@ -2,7 +2,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" role="img"
   aria-labelledby="title description">
   <title id="title">Logician package architecture</title>
-  <desc id="description">Seven TypeScript packages plus a terminal UI app in one Node.js process. log-core is the sole dependency-free foundation, now including the versioned client protocol formerly in log-protocol. packages/blocks/log-autoresearch, log-eoh, log-memory, and log-rag each depend only on log-core (or stand alone). log-runtime is the composition layer: it depends on log-core and all four packages/blocks packages, and hosts every optional capability. apps/tui composes log-core, log-runtime, blocks/log-autoresearch, and blocks/log-memory directly, reaching blocks/log-rag and blocks/log-eoh indirectly through log-runtime. External access flows through the tool bus.</desc>
+  <desc id="description">Seven TypeScript packages plus a terminal UI app in one Node.js process. log-core is the sole dependency-free foundation, now including the versioned client protocol formerly in log-protocol. packages/log-autoresearch, log-eoh, log-memory, and log-rag each depend only on log-core (or stand alone). log-runtime is the composition layer: it depends on log-core and all four packages packages, and hosts every optional capability. apps/tui composes log-core, log-runtime, blocks/log-autoresearch, and blocks/log-memory directly, reaching blocks/log-rag and blocks/log-eoh indirectly through log-runtime. External access flows through the tool bus.</desc>
 
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">

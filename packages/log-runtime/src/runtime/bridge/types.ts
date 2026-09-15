@@ -1,12 +1,11 @@
 import type {
 	AgentConfig,
-	AgentModelConfig,
-	FrameConfig,
 	ThinkingFormat,
 	Tool,
 	TruncationConfig,
 	WebSearchConfig,
 } from "@logician/log-core";
+import type { FrameConfig } from "@logician/log-snapcompact";
 import type {
 	PermissionMode,
 	PermissionRules,

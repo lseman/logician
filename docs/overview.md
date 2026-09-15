@@ -18,7 +18,7 @@ Logician is a local-first coding agent built on a modular architecture. This pag
 
 ```mermaid
 graph TB
-  subgraph TUI["apps/tui"]
+  subgraph TUI["packages/log-tui"]
     A[Terminal UI]
   end
   subgraph Core["log-core"]
@@ -60,7 +60,7 @@ graph TB
 | `log-rag` | Hybrid dense + BM25 retrieval, chunking, reranking, context budgets |
 | `log-autoresearch` | Measured experiment loops — run, evaluate, keep or discard |
 | `log-eval` | Outcome-grounded evaluation runner for agent trials |
-| `tui` | Terminal UI components, engine, layers, state management (`apps/tui`) |
+| `tui` | Terminal UI components, engine, layers, state management (`packages/log-tui`) |
 
 ### Key concepts
 

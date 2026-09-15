@@ -56,7 +56,7 @@ Run a stdio server's configured command directly. For HTTP, verify the URL, `POS
 
 ## The binary does not reflect source changes
 
-Source builds live at `apps/tui/dist/logician`. Run:
+Source builds live at `packages/log-tui/dist/logician`. Run:
 
 ```bash
 make install
@@ -64,4 +64,4 @@ command -v logician
 readlink -f "$(command -v logician)"
 ```
 
-The default install link should resolve to the current checkout's `apps/tui/dist/logician`. Restart running processes after rebuilding.
+The default install link should resolve to the current checkout's `packages/log-tui/dist/logician`. Restart running processes after rebuilding.

@@ -1,0 +1,21 @@
+{
+	"name": "@logician/log-snapcompact",
+	"version": "0.1.0",
+	"description": "Local, deterministic context compaction via bitmap PNG frames",
+	"type": "module",
+	"main": "src/snapcompact.ts",
+	"exports": {
+		".": "./src/snapcompact.ts",
+		"./types": "./src/types.ts"
+	},
+	"scripts": {
+		"test": "bun test $(find src -name '*.test.ts' -type f -print)",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"bun-types": "^1.3.14",
+		"typescript": "^7.0.2"
+	}
+}
