@@ -51,12 +51,7 @@ function _renderPiContent(
 				gutterWidth - 1,
 				" ",
 			);
-			lines.push(
-				theme.bg(
-					"mdCodeBlockBg",
-					`${gutterColor}${numStr}│${RESET}${contentColor}${content}`,
-				),
-			);
+			lines.push(`${gutterColor}${numStr}│${RESET}${contentColor}${content}`);
 		}
 	}
 
@@ -114,12 +109,7 @@ export function renderFileContent(
 				// Extract ANSI spans from highlighted line at the same wrap position
 				let hlContent = extractHlSpan(hlLine, displayLine);
 				if (!hlContent) hlContent = plainColor + displayLine + plainColor;
-				lines.push(
-					theme.bg(
-						"mdCodeBlockBg",
-						`${gutterColor}${numStr}│${RESET}${hlContent}`,
-					),
-				);
+				lines.push(`${gutterColor}${numStr}│${RESET}${hlContent}`);
 			}
 		}
 	} else {
@@ -137,12 +127,7 @@ export function renderFileContent(
 			for (let wi = 0; wi < displayContent.length; wi++) {
 				const content = displayContent[wi];
 				const numStr = String(lineNum).padStart(gutterWidth - 1, " ");
-				lines.push(
-					theme.bg(
-						"mdCodeBlockBg",
-						`${gutterColor}${numStr}│${RESET}${plainColor}${content}`,
-					),
-				);
+				lines.push(`${gutterColor}${numStr}│${RESET}${plainColor}${content}`);
 			}
 		}
 	}

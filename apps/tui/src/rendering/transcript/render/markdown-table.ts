@@ -52,9 +52,11 @@ export function renderMarkdownLines(
 				// Flush code block — use cached highlight when content unchanged
 				const lang = codeBlockLang || null;
 				const renderedCode = cachedHighlight(codeContent, lang);
+				const bar = theme.fg("mdCodeBlockBorder", "│");
 				for (const cl of renderedCode.split("\n")) {
-					lines.push(theme.bg("mdCodeBlockBg", `  ${cl}`));
+					lines.push(`  ${bar} ${cl}`);
 				}
+				lines.push(`  ${theme.fg("mdCodeBlockBorder", "└─")}`);
 
 				codeContent = "";
 				codeBlockLang = null;
@@ -63,10 +65,7 @@ export function renderMarkdownLines(
 				inCodeBlock = true;
 				codeBlockLang = extractLangFromFence(rawLine);
 				lines.push(
-					theme.bg(
-						"mdCodeBlockBg",
-						theme.fg("mdCodeBlockBorder", `  ┌─ ${codeBlockLang || "code"}`),
-					),
+					theme.fg("mdCodeBlockBorder", `  ┌─ ${codeBlockLang || "code"}`),
 				);
 			}
 			continue;
@@ -169,8 +168,9 @@ export function renderMarkdownLines(
 		// Streaming code block — also cached so repeated renders of the
 		// same partial content skip re-highlighting.
 		const renderedCode = cachedHighlight(codeContent, codeBlockLang);
+		const bar = theme.fg("mdCodeBlockBorder", "│");
 		for (const cl of renderedCode.split("\n")) {
-			lines.push(theme.bg("mdCodeBlockBg", `  ${cl}`));
+			lines.push(`  ${bar} ${cl}`);
 		}
 	}
 

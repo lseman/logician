@@ -107,14 +107,16 @@ test("code surfaces survive nested resets and syntax follows theme switches", ()
 	expect(light).not.toBe(dark);
 	expect(light).toContain(theme.fgRaw("jsonKeyword"));
 	expect(light).toContain(theme.fgRaw("jsonString"));
+	expect(light).not.toContain("\x1b[48");
 	const bg = theme.bgRaw("mdCodeBlockBg");
 	const nested = theme.bg(
 		"mdCodeBlockBg",
 		`${theme.fg("text", "first")} second`,
 	);
 	expect(nested).toContain(`\x1b[0m${bg} second`);
+	// Code/file surfaces render with no fill — foreground colors only, so
+	// highlighted syntax sits directly on the terminal's own background.
 	const file = renderFileContent("hello", 80, 1, undefined, true)[0];
-	expect(file.startsWith(bg)).toBe(true);
-	expect(file).toContain(`\x1b[0m${bg}`);
-	expect(file.endsWith("\x1b[0m")).toBe(true);
+	expect(file.startsWith(theme.fgRaw("dim"))).toBe(true);
+	expect(file).not.toContain("\x1b[48");
 });

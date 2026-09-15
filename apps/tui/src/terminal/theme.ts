@@ -292,10 +292,6 @@ export class Theme {
 
 	// ── Convenience helpers ───────────────────────────────────────────────────
 
-	codeBlockBg(text: string): string {
-		return this.bg("mdCodeBlockBg", this.fg("mdCodeBlock", text));
-	}
-
 	thinkingBorderColor(
 		level: "off" | "low" | "medium" | "high" | "xhigh",
 	): string {

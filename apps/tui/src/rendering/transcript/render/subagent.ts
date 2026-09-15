@@ -413,13 +413,13 @@ function renderSubagentActivity(
 			.filter(Boolean)
 			.join(` ${DIM}·${RESET} `);
 		lines.push(
-			theme.bg("mdCodeBlockBg", clampLineToWidth(row, Math.max(20, width))),
+			theme.bg("toolBlockBg", clampLineToWidth(row, Math.max(20, width))),
 		);
 		if (expanded && call.resultPreview) {
 			const result = compactText(call.resultPreview);
 			lines.push(
 				theme.bg(
-					"mdCodeBlockBg",
+					"toolBlockBg",
 					theme.fg(
 						"toolOutput",
 						`  └ ${clampLineToWidth(result, Math.max(16, width - 4))}`,

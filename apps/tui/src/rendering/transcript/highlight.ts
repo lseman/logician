@@ -6,18 +6,20 @@ import {
 } from "@logician/log-runtime/formatting";
 import { type ThemeColor, theme } from "../../terminal/theme.ts";
 
+// Keys are the fixed 256-color codes emitted by DARK_SHEET in
+// log-runtime's syntax-highlighter.ts — keep the two in sync.
 const syntaxColors: Record<string, ThemeColor> = {
-	141: "jsonKeyword",
-	114: "jsonString",
-	245: "muted",
-	179: "jsonNumber",
-	111: "jsonKey",
-	81: "accent",
-	220: "jsonNumber",
-	203: "error",
-	244: "jsonPunctuation",
-	147: "jsonKeyword",
-	208: "jsonNumber",
+	141: "jsonKeyword", // keyword
+	114: "jsonString", // string
+	245: "dim", // comment, doctype, meta, shebang — quieter than punctuation
+	179: "jsonNumber", // number, attribute, symbol
+	111: "jsonKey", // function, property, title, link
+	81: "accent", // class name, type, section
+	220: "text", // built_in, params — plain, not number-colored
+	203: "jsonKeyword", // literal (true/false/null), deletion — reads as a constant, not an error
+	244: "muted", // punctuation — stays legible, distinct from dimmer comments
+	147: "jsonPunctuation", // operator, template expression — structural, not keyword-weight
+	208: "jsonNumber", // regex, subst
 };
 
 function themed(value: string): string {
