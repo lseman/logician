@@ -192,6 +192,8 @@ function renderUnified(
 export interface EditDiffResult {
 	diff: string;
 	firstChangedLine: number | undefined;
+	/** Count of added/removed lines (equal lines don't count). */
+	linesChanged: number;
 }
 
 /**
@@ -206,7 +208,12 @@ export function generateEditDiffs(
 	after: string,
 ): EditDiffResult & { patch: string } {
 	if (before === after) {
-		return { diff: "", firstChangedLine: undefined, patch: "" };
+		return {
+			diff: "",
+			firstChangedLine: undefined,
+			linesChanged: 0,
+			patch: "",
+		};
 	}
 
 	const ops = diffOps(before.split("\n"), after.split("\n"));
@@ -217,18 +224,37 @@ export function generateEditDiffs(
 		ops,
 	);
 
-	// First changed line, numbered in the AFTER content.
+	// First changed line, numbered in the AFTER content. `del` lines don't
+	// exist in the after content, so they don't advance that numbering.
+	// `linesChanged` counts by contiguous change hunk — max(dels, adds) per
+	// hunk, not len(dels) + len(adds) — so a plain 1-line substitution (which
+	// the LCS diff represents as one del + one add) counts as 1 changed line,
+	// not 2.
 	let firstChangedLine: number | undefined;
 	let newLine = 1;
-	for (const op of ops) {
-		if (op.type !== "equal") {
-			firstChangedLine = newLine;
-			break;
+	let linesChanged = 0;
+	let i = 0;
+	while (i < ops.length) {
+		if (ops[i].type === "equal") {
+			newLine++;
+			i++;
+			continue;
 		}
-		newLine++;
+		firstChangedLine ??= newLine;
+		let dels = 0;
+		let adds = 0;
+		while (i < ops.length && ops[i].type !== "equal") {
+			if (ops[i].type === "del") dels++;
+			else {
+				adds++;
+				newLine++;
+			}
+			i++;
+		}
+		linesChanged += Math.max(dels, adds);
 	}
 
-	return { diff, firstChangedLine, patch };
+	return { diff, firstChangedLine, linesChanged, patch };
 }
 
 /** Generate a unified diff between two file states (multi-hunk, 3 context lines). */

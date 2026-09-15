@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import type { ToolContext } from "@logician/log-core";
 import { extractInternalUrlScheme } from "../../../runtime/bridge/support/internal-urls/parse.ts";
@@ -13,18 +12,19 @@ import {
 	formatConflictBlocks,
 	parseConflictBlocks,
 } from "./conflict-resolution.ts";
+import { getNativeEditStore } from "./native-addon.ts";
 import {
 	isSqliteFile,
 	listSqliteTables,
 	readSqliteRow,
 	readSqliteTable,
 } from "./sqlite-resource.ts";
+import { ensureInsideCwd, resolveReadPath } from "./utils/path-utils.ts";
 import {
 	type ContainerSelectorMatch,
 	detectArchiveSelector,
 	detectSqliteSelector,
 } from "./utils/selector-path.ts";
-import { ensureInsideCwd, resolveReadPath } from "./utils/path-utils.ts";
 import { formatSize } from "./utils/truncate.ts";
 
 /**
@@ -195,10 +195,17 @@ export async function readResource(
 	const content = conflictsView
 		? formatConflictBlocks(parseConflictBlocks(rawContent, resolved))
 		: rawContent;
+	// Record this read in the same persistent native EditStore the hashline
+	// edit engine validates `[path#tag]` headers against (it looks tags up
+	// by recorded snapshot, not by recomputing a hash from disk) — the tag
+	// shown here must be the one that store just assigned, not a separately
+	// computed hash that happens to look similar.
+	const store = await getNativeEditStore();
+	const hash = store.recordSnapshot(resolved, rawContent);
 	return {
 		kind: "file",
 		path: resolved,
-		hash: createHash("sha256").update(buffer).digest("hex").slice(0, 4),
+		hash,
 		resource: {
 			url: input,
 			content,

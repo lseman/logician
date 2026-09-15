@@ -275,6 +275,200 @@ export class MutationSession {
 	}
 
 	/**
+	 * Delete a file. Validates path policy and re-verifies `beforeHash`
+	 * against the file's current content before removing it (same staleness
+	 * contract as `apply`).
+	 */
+	async delete(filePath: string, before: string): Promise<MutationResult> {
+		const resolved = filePath.startsWith("/")
+			? filePath
+			: path.resolve(this.#cwd, filePath);
+		ensureInsideCwd(
+			this.#cwd,
+			resolved,
+			this.#policy.allowedPaths,
+			this.#policy.allowAllPaths,
+		);
+
+		const beforeHash = this.#hash(before);
+		const afterHash = this.#hash("");
+
+		if (!fs.existsSync(resolved)) {
+			return {
+				applied: false,
+				changed: false,
+				path: resolved,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 0,
+				diff: "",
+				error: `${resolved} does not exist.`,
+			};
+		}
+		const current = fs.readFileSync(resolved, "utf8");
+		if (this.#hash(current) !== beforeHash) {
+			return {
+				applied: false,
+				changed: true,
+				path: resolved,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 0,
+				diff: "",
+				error: `${resolved} has been modified since it was last read. Read it again before editing.`,
+			};
+		}
+
+		try {
+			await fs.promises.unlink(resolved);
+			this.#store.clearSnapshot(resolved);
+			const normalizedPath = this.#normalizePath(resolved);
+			this.#mutationVersions.set(
+				normalizedPath,
+				(this.#mutationVersions.get(normalizedPath) ?? 0) + 1,
+			);
+			return {
+				applied: true,
+				changed: true,
+				path: resolved,
+				beforeHash,
+				afterHash,
+				linesChanged: current.split("\n").length,
+				filesAffected: 1,
+				diff: "",
+			};
+		} catch (error: unknown) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			return {
+				applied: false,
+				changed: true,
+				path: resolved,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 0,
+				diff: "",
+				error: `Failed to delete ${resolved}: ${errorMessage}`,
+			};
+		}
+	}
+
+	/**
+	 * Move/rename a file. Validates path policy for both endpoints, requires
+	 * the destination to not already exist, and re-verifies `beforeHash`
+	 * against the source's current content before moving it.
+	 */
+	async move(
+		fromPath: string,
+		toPath: string,
+		before: string,
+	): Promise<MutationResult> {
+		const resolvedFrom = fromPath.startsWith("/")
+			? fromPath
+			: path.resolve(this.#cwd, fromPath);
+		const resolvedTo = toPath.startsWith("/")
+			? toPath
+			: path.resolve(this.#cwd, toPath);
+		ensureInsideCwd(
+			this.#cwd,
+			resolvedFrom,
+			this.#policy.allowedPaths,
+			this.#policy.allowAllPaths,
+		);
+		ensureInsideCwd(
+			this.#cwd,
+			resolvedTo,
+			this.#policy.allowedPaths,
+			this.#policy.allowAllPaths,
+		);
+
+		const beforeHash = this.#hash(before);
+		const afterHash = beforeHash;
+
+		if (!fs.existsSync(resolvedFrom)) {
+			return {
+				applied: false,
+				changed: false,
+				path: resolvedFrom,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 0,
+				diff: "",
+				error: `${resolvedFrom} does not exist.`,
+			};
+		}
+		const current = fs.readFileSync(resolvedFrom, "utf8");
+		if (this.#hash(current) !== beforeHash) {
+			return {
+				applied: false,
+				changed: true,
+				path: resolvedFrom,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 0,
+				diff: "",
+				error: `${resolvedFrom} has been modified since it was last read. Read it again before editing.`,
+			};
+		}
+		if (fs.existsSync(resolvedTo)) {
+			return {
+				applied: false,
+				changed: true,
+				path: resolvedTo,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 0,
+				diff: "",
+				error: `${resolvedTo} already exists. Cannot move over an existing file.`,
+			};
+		}
+
+		try {
+			await fs.promises.mkdir(path.dirname(resolvedTo), { recursive: true });
+			await fs.promises.rename(resolvedFrom, resolvedTo);
+			this.#store.clearSnapshot(resolvedFrom);
+			this.#store.clearSnapshot(resolvedTo);
+			for (const resolved of [resolvedFrom, resolvedTo]) {
+				const normalizedPath = this.#normalizePath(resolved);
+				this.#mutationVersions.set(
+					normalizedPath,
+					(this.#mutationVersions.get(normalizedPath) ?? 0) + 1,
+				);
+			}
+			return {
+				applied: true,
+				changed: true,
+				path: resolvedTo,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 1,
+				diff: "",
+			};
+		} catch (error: unknown) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			return {
+				applied: false,
+				changed: true,
+				path: resolvedFrom,
+				beforeHash,
+				afterHash,
+				linesChanged: 0,
+				filesAffected: 0,
+				diff: "",
+				error: `Failed to move ${resolvedFrom} to ${resolvedTo}: ${errorMessage}`,
+			};
+		}
+	}
+
+	/**
 	 * Register a deferred diagnostic event for later injection into the LSP flow.
 	 * Returns a handle that can be used to check staleness.
 	 */

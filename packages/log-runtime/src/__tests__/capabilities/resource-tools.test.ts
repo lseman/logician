@@ -99,7 +99,7 @@ test("file and resource pagination share numbering, but only files have edit anc
 			{ cwd },
 		),
 	);
-	expect(file.content).toMatch(/^\[a.txt#[a-f0-9]{4}\]\n2:two\n3:three/);
+	expect(file.content).toMatch(/^\[a.txt#[a-fA-F0-9]{4}\]\n2:two\n3:three/);
 	expect(virtual.content).toStartWith(
 		"[sample://Mixed:Name/nested?x#y]\n2:two\n3:three",
 	);

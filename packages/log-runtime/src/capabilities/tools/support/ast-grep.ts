@@ -7,67 +7,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
-
-// ── Native addon loading ─────────────────────────────────────────────────────
-
-interface NativeAstFindMatch {
-	path: string;
-	text: string;
-	byteStart: number;
-	byteEnd: number;
-	startLine: number;
-	startColumn: number;
-	endLine: number;
-	endColumn: number;
-}
-
-interface NativeAstFindResult {
-	matches: NativeAstFindMatch[];
-	totalMatches: number;
-}
-
-interface NativeAstReplaceChange {
-	path: string;
-	before: string;
-	after: string;
-	byteStart: number;
-	byteEnd: number;
-}
-
-interface NativeAstReplaceResult {
-	changes: NativeAstReplaceChange[];
-}
-
-interface LogNatives {
-	astGrep(options: {
-		patterns: string[];
-		lang?: string;
-		path: string;
-	}): Promise<NativeAstFindResult>;
-	astEdit(options: {
-		rewrites: Record<string, string>;
-		lang?: string;
-		path: string;
-		dryRun: boolean;
-	}): Promise<NativeAstReplaceResult>;
-}
-
-let nativePromise: Promise<LogNatives> | undefined;
-
-/** Load the native addon lazily so a missing/unbuilt build only breaks callers who need it. */
-function loadNative(): Promise<LogNatives> {
-	if (!nativePromise) {
-		nativePromise = import("@logician/log-natives").catch(error => {
-			nativePromise = undefined;
-			throw new Error(
-				`@logician/log-natives addon not available (run \`bun run build\` in packages/log-natives): ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			);
-		}) as Promise<LogNatives>;
-	}
-	return nativePromise;
-}
+import { loadNative } from "./native-addon.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

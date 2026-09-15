@@ -42,24 +42,19 @@ const SYNTAX_ERROR_MARKERS = [
 ];
 
 /**
- * Pick the line that actually describes the failure. `npx` prints "npm
- * notice ..." hints to stderr before running the command, so the naive
- * "first line" fallback would report a notice instead of an error (or, on
- * newer npm, instead of nothing at all when there's no real error).
+ * Find the line that actually describes a syntax error, if any. `import()`
+ * executes the file, so a non-zero exit or non-empty stderr can just as
+ * easily mean a runtime throw, a missing import, or a loader quirk (e.g. an
+ * unrecognized-case extension) — none of which are syntax regressions this
+ * check should report. Only a line matching a known marker counts; anything
+ * else returns `undefined` (not "some other line", which used to make every
+ * unrelated failure look like a syntax error).
  */
-function relevantErrorLine(stderr: string): string | undefined {
-	const lines = stderr.split("\n");
-	const marked = lines.find(line =>
-		SYNTAX_ERROR_MARKERS.some(marker => line.includes(marker)),
-	);
-	if (marked) return marked.trim();
-	const meaningful = lines.find(
-		line =>
-			line.trim() &&
-			!line.startsWith("npm notice") &&
-			!line.startsWith("npm warn"),
-	);
-	return meaningful?.trim();
+function syntaxErrorLine(stderr: string): string | undefined {
+	return stderr
+		.split("\n")
+		.find(line => SYNTAX_ERROR_MARKERS.some(marker => line.includes(marker)))
+		?.trim();
 }
 
 /**
@@ -83,15 +78,14 @@ export async function checkFileParse(filePath: string): Promise<string | null> {
 			{ timeout: 5000 },
 		);
 
-		if (SYNTAX_ERROR_MARKERS.some(marker => stderr.includes(marker))) {
-			return relevantErrorLine(stderr) ?? "Syntax error";
-		}
-		return null;
+		return syntaxErrorLine(stderr) ?? null;
 	} catch (e: unknown) {
 		const err = e as { stderr?: string; code?: number };
-		// tsx returns non-zero for syntax errors
+		// tsx returns non-zero for syntax errors, but also for runtime throws,
+		// missing imports, and other non-syntax failures triggered by actually
+		// executing the file — only report a match against a known marker.
 		if (err.code !== 0 && err.stderr) {
-			return relevantErrorLine(err.stderr) ?? "Syntax error";
+			return syntaxErrorLine(err.stderr) ?? null;
 		}
 		// File doesn't exist or other error — not a syntax issue
 		return null;
