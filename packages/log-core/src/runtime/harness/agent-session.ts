@@ -862,7 +862,7 @@ export class AgentSession {
 	/** Promote queued steering into the immediate next turn and interrupt the current step. */
 	flushSteeringNow(): number {
 		if (this._phase !== "turn") {
-			throw new HarnessBusyError("flush steering", this._phase, "turn");
+			return 0;
 		}
 		return this.session.flushSteering(() =>
 			this.turn.abort(createSteeringInterruptReason()),

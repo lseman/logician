@@ -20,7 +20,7 @@ the transcript, composer, and current execution state visible.
   COMMAND  bun test packages/log-core
   OUTPUT   42 pass, 0 fail
 
-  COMPOSER             / Enter commands · @ files · Enter send · Ctrl+Enter steer
+  COMPOSER             / Enter commands · @ files · Enter send · Ctrl+E steer
   › Ask Logician…
   ──────────────────────────────────────────────────────────────────────────────
   ● READY │ model │ cwd │ branch │ thinking mode
@@ -37,8 +37,7 @@ command palette and `@` starts file mention completion.
 | Key | Action |
 |---|---|
 | `Enter` | Submit instruction |
-| `Shift+Enter` | Insert a newline |
-| `Ctrl+Enter` | Immediately steer the active turn with the composer text |
+| `Ctrl+E` | Immediately steer the active turn with the composer text |
 | `Esc`, `Esc` | Clear the composer, then safely interrupt the active turn and restore its prompt |
 | `Ctrl+C` | Immediately request interruption |
 | `Ctrl+O` | Expand or collapse all tool results |
@@ -67,8 +66,7 @@ Works with any VT100-compatible terminal:
 ## Input modes
 
 - **Normal** — type instructions naturally
-- **Multi-line** — press `Shift+Enter` for newlines
-- **Steering** — press `Ctrl+Enter` during a turn to interrupt and steer now
+- **Steering** — press `Ctrl+E` during a turn to interrupt and steer now
 - **Paste** — pasted text is processed as a single instruction
 
 ## Streaming output

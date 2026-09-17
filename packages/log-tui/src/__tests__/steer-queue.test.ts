@@ -76,6 +76,6 @@ void test("SteerQueue footer has action hints", () => {
 	queue.setItems(["msg"]);
 	const rendered = plain(queue.render(80).join("\n"));
 	assert.match(rendered, /click to steer/);
-	assert.match(rendered, /Ctrl\+Enter/);
+	assert.match(rendered, /Ctrl\+E/);
 	assert.match(rendered, /Ctrl\+Q/);
 });

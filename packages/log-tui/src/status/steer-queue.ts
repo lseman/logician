@@ -203,7 +203,7 @@ function renderRows(rows: Row[], width: number): string[] {
 	lines.push(
 		pad(
 			clampLineToWidth(
-				`${theme.fg("dim", "click to steer")}  ${theme.fg("dim", "Ctrl+Enter")} ${theme.fg("muted", "steer now")}  ${theme.fg("dim", "Ctrl+Q")} ${theme.fg("muted", "manage")}`,
+				`${theme.fg("dim", "click to steer")}  ${theme.fg("dim", "Ctrl+E")} ${theme.fg("muted", "steer now")}  ${theme.fg("dim", "Ctrl+Q")} ${theme.fg("muted", "manage")}`,
 				width,
 			),
 			width,

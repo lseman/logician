@@ -38,7 +38,7 @@ Text streaming and thinking display are not an audit log of hidden model reasoni
 - `Alt+J`/`Alt+K` moves between tool cards.
 - `Alt+Enter` toggles the focused card.
 - `Ctrl+Shift+T` cycles thinking display mode.
-- `Ctrl+Enter` sends or flushes steering during an active turn.
+- `Ctrl+E` sends or flushes steering during an active turn.
 
 ## Headless stream
 

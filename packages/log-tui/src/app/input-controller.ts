@@ -9,9 +9,9 @@ import { logInputTrace } from "../terminal/input-protocol.ts";
 import { theme } from "../terminal/theme.ts";
 import type { LogicianTUI } from "./tui.ts";
 
-/** Ctrl+Enter encodings emitted by terminals with CSI-u or modifyOtherKeys. */
-export function isCtrlEnter(data: string): boolean {
-	return data === "\x1b[13;5u" || data === "\x1b[27;5;13~";
+/** Ctrl+E encodings emitted by terminals with CSI-u or modifyOtherKeys. */
+export function isCtrlE(data: string): boolean {
+	return data === "\x05" || data === "\x1b[5;5u" || data === "\x1b[27;5;5~";
 }
 
 export function setupInputHandler(ctx: LogicianTUI): void {
@@ -465,9 +465,9 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			return { consume: true };
 		}
 
-		// Ctrl+Enter — submit the composer as immediate steering. With an
+		// Ctrl+E — submit the composer as immediate steering. With an
 		// empty composer, retain the shortcut for flushing an existing queue.
-		if (isCtrlEnter(data)) {
+		if (isCtrlE(data)) {
 			if (ctx.inputBar.submit("steer-now")) {
 				return { consume: true };
 			}

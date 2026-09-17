@@ -34,7 +34,7 @@ Choose a small task with an explicit verification condition:
 Add a regression test for the empty-input case, make the smallest implementation change needed, and run the focused test file.
 ```
 
-Under `ask` permissions, approve or deny each gated operation. You can send corrective steering during the turn with `Ctrl+Enter`.
+Under `ask` permissions, approve or deny each gated operation. You can send corrective steering during the turn with `Ctrl+E`.
 
 ## 4. Review the outcome
 
