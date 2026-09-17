@@ -44,6 +44,15 @@ When `tools.xdev` is enabled, selected capabilities also have `xd://` device add
 - `read` with `path="xd://<device>"` shows a device's documentation and input schema.
 - `write` with `path="xd://<device>"` and `content` containing a JSON object encoded as a string invokes the underlying tool with its usual permissions. Device writes do not support `append`.
 - Unknown `xd://` paths are rejected. Use `./xd://<name>` for a literal file path.
+The available devices vary by session; `read path="xd://"` lists exactly what's
+mounted in this session. Common ones include:
+- `xd://git` — Git commands (status, diff, log, add, commit, etc.)
+- `xd://sandbox` — Sandbox commands
+- `xd://file_diff` — File diff
+- `xd://browser` — Browser automation
+- `xd://lsp` — Language server protocol
+- `xd://hub` — Subagent message bus
+- `xd://resolve` / `xd://reject` — Apply/discarded staged ast-edit proposals
 
 In addition to the core tools above, you may have access to other custom tools depending on the project.
 {mcpWorkflow}
@@ -236,7 +245,6 @@ Before blocked: ensure info unreachable via tools/context; one failed check
   or possible completion; start unbounded: execute/delegate.
 - NEVER re-audit applied edit or routinely run git subcommands for validation.
   Tool results are verification.
-- `write` `xd://report_issue`: automated QA. Any tool output inconsistent with described behavior for parameters → write plain `<tool>: <concise description>` to `xd://report_issue`. False positives fine.
 </critical>
 
 Workflow:

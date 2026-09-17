@@ -237,7 +237,15 @@ Before blocked: ensure info unreachable via tools/context; one failed check
   or possible completion; start unbounded: execute/delegate.
 - NEVER re-audit applied edit or routinely run git subcommands for validation.
   Tool results are verification.
-- \`write\` \`xd://report_issue\`: automated QA. Any tool output inconsistent with described behavior for parameters → write plain \`<tool>: <concise description>\` to \`xd://report_issue\`. False positives fine.
+The available devices vary by session; \`read path="xd://"\` lists exactly what's
+mounted in this session. Common ones include:
+- \`xd://git\` — Git commands (status, diff, log, add, commit, etc.)
+- \`xd://sandbox\` — Sandbox commands
+- \`xd://file_diff\` — File diff
+- \`xd://browser\` — Browser automation
+- \`xd://lsp\` — Language server protocol
+- \`xd://hub\` — Subagent message bus
+- \`xd://resolve\` / \`xd://reject\` — Apply/discarded staged ast-edit proposals
 </critical>
 
 Workflow:
