@@ -10,10 +10,8 @@ use std::{
 use regex::Regex;
 
 use super::{
-	apply::{
-		closest_desired_block, diff_shaped_candidates, is_diff_shaped, locate, normalize_text,
-		parse_pattern,
-	},
+	locate::{closest_desired_block, diff_shaped_candidates, is_diff_shaped, locate},
+	pattern::{normalize_text, parse_pattern},
 	types::{InlineSloppyRegion, Operation, OperationRewrite, SloppySection, markers},
 };
 use crate::error::EditError;

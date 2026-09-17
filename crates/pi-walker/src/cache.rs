@@ -4,14 +4,16 @@ use std::{
 	borrow::Cow,
 	fmt,
 	path::{Path, PathBuf},
-	sync::LazyLock,
+	sync::{Arc, LazyLock},
 	time::{Duration, Instant},
 };
 
 use dashmap::DashMap;
 use rayon::{ThreadPool, prelude::*};
 
-use crate::{CollectedEntries, CollectedEntry, FileType, WalkError, WalkOptions};
+use crate::{CollectedEntries, CollectedEntry, FileType, WalkError};
+use crate::policy::WalkOptions;
+use crate::walk;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct CacheKey {
@@ -119,60 +121,100 @@ pub fn should_parallelize(item_count: usize) -> bool {
 }
 
 /// Run traversal-adjacent work serially or on the centralized walker pool.
+/// Stops early when the operation returns `ParallelWalkControl::Stop`.
 pub fn parallel_for_each<T, E>(
 	items: &[T],
-	operation: impl Fn(&T) -> std::result::Result<(), E> + Send + Sync,
-) -> std::result::Result<(), E>
+	operation: impl Fn(&T) -> std::result::Result<crate::entry::ParallelWalkControl, E> + Send + Sync,
+) -> std::result::Result<crate::entry::ParallelWalkControl, E>
 where
-	T: Sync,
+	T: Sync + Send,
 	E: Send,
 {
 	if !should_parallelize(items.len()) {
-		return items.iter().try_for_each(operation);
+		for item in items {
+			match operation(item)? {
+				crate::entry::ParallelWalkControl::Continue => {},
+				crate::entry::ParallelWalkControl::Stop => return Ok(crate::entry::ParallelWalkControl::Stop),
+			}
+		}
+		Ok(crate::entry::ParallelWalkControl::Continue)
+	} else {
+		let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+		let stop_clone = Arc::clone(&stop);
+		let stop_done = Arc::clone(&stop);
+		let result = with_walk_pool(move || {
+			items.par_iter().try_for_each(|item| {
+				if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+					return Ok::<_, E>(());
+				}
+				match operation(item) {
+					Ok(crate::entry::ParallelWalkControl::Stop) => {
+						stop.store(true, std::sync::atomic::Ordering::Relaxed);
+						Ok(())
+					},
+					Ok(crate::entry::ParallelWalkControl::Continue) => Ok(()),
+					Err(e) => Err(e),
+				}
+			})
+		});
+		if stop_done.load(std::sync::atomic::Ordering::Relaxed) {
+			Ok(crate::entry::ParallelWalkControl::Stop)
+		} else {
+			result.map(|_| crate::entry::ParallelWalkControl::Continue)
+		}
 	}
-	with_walk_pool(|| items.par_iter().try_for_each(operation))
 }
 
 /// Run traversal-adjacent work with per-worker state on the centralized walker
-/// pool.
+/// pool. Stops early when the operation returns `ParallelWalkControl::Stop`.
 pub fn parallel_for_each_init<T, S, E>(
 	items: &[T],
 	init: impl Fn() -> S + Send + Sync,
-	operation: impl Fn(&mut S, &T) -> std::result::Result<(), E> + Send + Sync,
-) -> std::result::Result<(), E>
+	operation: impl Fn(&mut S, &T) -> std::result::Result<crate::entry::ParallelWalkControl, E> + Send + Sync,
+) -> std::result::Result<crate::entry::ParallelWalkControl, E>
 where
-	T: Sync,
-	S: Send,
+	T: Sync + Send,
 	E: Send,
 {
 	if !should_parallelize(items.len()) {
 		let mut state = init();
-		return items
-			.iter()
-			.try_for_each(|item| operation(&mut state, item));
+		for item in items {
+			match operation(&mut state, item)? {
+				crate::entry::ParallelWalkControl::Continue => {},
+				crate::entry::ParallelWalkControl::Stop => return Ok(crate::entry::ParallelWalkControl::Stop),
+			}
+		}
+		Ok(crate::entry::ParallelWalkControl::Continue)
+	} else {
+		let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+		let stop_clone = Arc::clone(&stop);
+		let stop_done = Arc::clone(&stop);
+		let result = with_walk_pool(move || {
+			items.par_iter().try_for_each(|item| {
+				if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+					return Ok::<_, E>(());
+				}
+				let mut state = init();
+				match operation(&mut state, item) {
+					Ok(crate::entry::ParallelWalkControl::Stop) => {
+						stop.store(true, std::sync::atomic::Ordering::Relaxed);
+						Ok(())
+					},
+					Ok(crate::entry::ParallelWalkControl::Continue) => Ok(()),
+					Err(e) => Err(e),
+				}
+			})
+		});
+		if stop_done.load(std::sync::atomic::Ordering::Relaxed) {
+			Ok(crate::entry::ParallelWalkControl::Stop)
+		} else {
+			result.map(|_| crate::entry::ParallelWalkControl::Continue)
+		}
 	}
-	with_walk_pool(|| items.par_iter().try_for_each_init(init, operation))
 }
 
-fn evict_oldest() {
-	if SCAN_CACHE.len() > *MAX_CACHE_ENTRIES
-		&& let Some(oldest_key) = SCAN_CACHE
-			.iter()
-			.min_by_key(|entry| entry.value().created_at)
-			.map(|entry| entry.key().clone())
-	{
-		SCAN_CACHE.remove(&oldest_key);
-	}
-}
-
-fn cache_key(root: &Path, mut options: WalkOptions) -> CacheKey {
-	options.cache = false;
-	CacheKey { root: root.to_path_buf(), options }
-}
-
-/// Normalize a filesystem path to a forward-slash relative string.
-pub fn normalize_relative_path<'a>(root: &Path, path: &'a Path) -> Cow<'a, str> {
-	let relative = path.strip_prefix(root).unwrap_or(path);
+/// Normalizes a relative path for use as a cache key.
+pub fn normalize_relative_path(relative: &Path) -> Cow<'_, str> {
 	if cfg!(windows) {
 		let relative = relative.to_string_lossy();
 		if relative.contains('\\') {
@@ -263,6 +305,25 @@ pub fn resolve_search_path(path: &str) -> Result<PathBuf, WalkError<String>> {
 	Ok(std::fs::canonicalize(&root).unwrap_or(root))
 }
 
+fn cache_key(root: &Path, mut options: WalkOptions) -> CacheKey {
+	options.cache = false;
+	CacheKey {
+		root:    root.to_path_buf(),
+		options,
+	}
+}
+
+fn evict_oldest() {
+	if SCAN_CACHE.len() > *MAX_CACHE_ENTRIES {
+		if let Some(oldest_key) = SCAN_CACHE
+			.iter()
+			.min_by_key(|entry| entry.value().created_at)
+			.map(|entry| entry.key().clone())
+		{
+			SCAN_CACHE.remove(&oldest_key);
+		}
+	}
+}
 fn collect_entries_uncached<H, E>(
 	root: &Path,
 	mut options: WalkOptions,
@@ -273,7 +334,7 @@ where
 	E: fmt::Display,
 {
 	options.cache = false;
-	crate::collect_entries_native(root, options, || heartbeat().map_err(|err| err.to_string()))
+	walk::collect_entries(root, options, || heartbeat().map_err(|err| err.to_string()))
 }
 
 fn get_or_scan<H, E>(

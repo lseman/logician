@@ -3,9 +3,13 @@
 
 pub mod apply;
 pub mod parse;
+pub mod pattern;
+pub mod locate;
+pub mod recovery;
 pub mod types;
 
 pub use types::{InlineSloppyRegion, SloppySection};
+
 
 use self::{
 	apply::{ApplyContext, apply_sloppy},
