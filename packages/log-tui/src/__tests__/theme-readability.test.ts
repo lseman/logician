@@ -48,6 +48,24 @@ function contrast(a: number[], b: number[]): number {
 		y = luminance(b);
 	return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
+function hexToRgb(hex: string): number[] {
+	const c = hex.replace("#", "");
+	return [
+		parseInt(c.slice(0, 2), 16),
+		parseInt(c.slice(2, 4), 16),
+		parseInt(c.slice(4, 6), 16),
+	];
+}
+function resolveVar(
+	value: string,
+	vars: Record<string, string>,
+	visited = new Set<string>(),
+): string {
+	if (value.startsWith("#")) return value;
+	if (visited.has(value)) throw new Error(`Circular variable: ${value}`);
+	visited.add(value);
+	return resolveVar(vars[value], vars, visited);
+}
 
 for (const mode of ["truecolor", "256color"]) {
 	test(`all bundled themes keep text and borders legible in ${mode}`, () => {
@@ -90,6 +108,36 @@ for (const mode of ["truecolor", "256color"]) {
 					expect(
 						contrast(rgb(theme.fgRaw(token)), background),
 						`${json.name}: ${token} on ${surface}`,
+					).toBeGreaterThanOrEqual(2.5);
+				}
+			}
+			// The TUI leaves the terminal's own background unchanged, so text
+			// rendered outside code/tool blocks sits on `canvas` — the theme's
+			// documented stand-in for that background (see themes/README.md).
+			const rawCanvas = (json.vars ?? {}).canvas;
+			if (typeof rawCanvas === "string") {
+				const canvas = hexToRgb(resolveVar(rawCanvas, json.vars ?? {}));
+				for (const token of [
+					"text",
+					"userText",
+					"assistantText",
+					"systemText",
+					"mdHeading",
+					"mdLink",
+					"inlineCode",
+					"muted",
+					"dim",
+					"header",
+				] as ThemeColor[]) {
+					expect(
+						contrast(rgb(theme.fgRaw(token)), canvas),
+						`${json.name}: ${token} on canvas`,
+					).toBeGreaterThanOrEqual(4.5);
+				}
+				for (const token of ["border", "borderMuted"] as ThemeColor[]) {
+					expect(
+						contrast(rgb(theme.fgRaw(token)), canvas),
+						`${json.name}: ${token} on canvas`,
 					).toBeGreaterThanOrEqual(2.5);
 				}
 			}

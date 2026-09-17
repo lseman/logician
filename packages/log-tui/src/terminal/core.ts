@@ -80,6 +80,7 @@ const EMPTY_RENDERER_METRICS: RendererMetrics = {
 };
 
 import { Buffer } from "node:buffer";
+import { theme } from "./theme.ts";
 import { appendFileSync } from "node:fs";
 // ── Terminal input ───────────────────────────────────────────────────────────
 // Keyboard comes from process.stdin in raw mode (pi-style). The bridge child's
@@ -593,9 +594,33 @@ export class TUI extends Container {
 			// Close every state the renderer may have left open, clear the
 			// potentially partial frame, and leave a visible cursor. The next
 			// render starts from an invalidated cache and therefore repaints.
+			// Show the error PROMINENTLY on screen before clearing, so the user can
+			// see exactly what went wrong (especially useful for diagnosing
+			// "everything goes blank" issues during tool rendering).
+			const stackLines =
+				(err as Error).stack
+					?.split("\n")
+					.slice(1, 5)
+					.map(l => l.trim())
+					.join("\n        ") ?? "(no stack)";
+			const tName = (() => { try { return theme.name; } catch { return "not-initialized"; } })();
+			const tMode = (() => { try { return theme.mode; } catch { return "not-initialized"; } })();
+			const errorBanner =
+				`\x1b[?25l` +
+				`\x1b[38;5;196m╔══════════════════════════════════════════════════════════════╗\n` +
+				`\x1b[38;5;196m║\x1b[38;5;203m TUI Render Crash\x1b[38;5;196m                                       ║\n` +
+				`\x1b[38;5;196m╠══════════════════════════════════════════════════════════════╣\n` +
+				`\x1b[38;5;196m║\x1b[38;5;229m Error: \x1b[38;5;220m${msg}\x1b[0m\x1b[38;5;196m                                         ║\n` +
+				`\x1b[38;5;196m╠══════════════════════════════════════════════════════════════╣\n` +
+				`\x1b[38;5;196m║\x1b[38;5;244m Stack (first 3 frames):\x1b[0m\x1b[38;5;196m                                 ║\n` +
+				`\x1b[38;5;196m║\x1b[38;5;244m     ${stackLines.split("\n").join("\x1b[38;5;196m║\x1b[38;5;244m     ")}\x1b[0m\x1b[38;5;196m║\n` +
+				`\x1b[38;5;196m╠══════════════════════════════════════════════════════════════╣\n` +
+				`\x1b[38;5;196m║\x1b[38;5;244m Theme: ${tName}  |  Mode: ${tMode}\x1b[0m\x1b[38;5;196m          ║\n` +
+				`\x1b[38;5;196m╚══════════════════════════════════════════════════════════════╝\n` +
+				`\x1b[?25h`;
+			process.stdout.write(errorBanner);
 			process.stderr.write(
-				"\x1b[?2026l\x1b]8;;\x1b\\\x1b[0m\x1b[2J\x1b[H\x1b[?25h" +
-					`\n\x1b[38;5;203m[TUI render error]\x1b[0m ${msg}\n`,
+				`\x1b[?2026l\x1b]8;;\x1b\\\x1b[2J\x1b[H\x1b[?25h${errorBanner}`,
 			);
 			// eslint-disable-next-line no-console
 			console.error("TUI render crash:", err);
@@ -906,13 +931,12 @@ export class TUI extends Container {
 			frame = renderLayoutFrame(root, layoutWidth, termHeight, () =>
 				this.requestRender(),
 			);
-		} catch (_e: unknown) {
-			frame = renderLayoutFrame(
-				new Spacer(termHeight),
-				layoutWidth,
-				termHeight,
-				() => this.requestRender(),
-			);
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.error("[layout-engine] renderLayoutFrame failed:", e);
+			// Re-throw so the doRender crash handler shows the visible error banner.
+			// This lets the user see exactly what broke instead of a blank screen.
+			throw e;
 		}
 		this.currentLayoutFrame = frame;
 		this._viewportHeight =

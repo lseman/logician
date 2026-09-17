@@ -203,7 +203,7 @@ export function renderInline(text: string, baseColor: string): string {
 			const end = text.indexOf("`", i + 1);
 			if (end !== -1) {
 				out +=
-					theme.fgRaw("mdCode") +
+					theme.fgRaw("inlineCode") +
 					BOLD +
 					"`" +
 					text.slice(i + 1, end) +

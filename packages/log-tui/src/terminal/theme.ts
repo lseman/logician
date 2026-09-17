@@ -35,6 +35,7 @@ export type ThemeColor =
 	| "mdCodeBlockBg"
 	| "mdCodeBlockBorder"
 	| "mdLink"
+	| "inlineCode"
 	| "mdQuote"
 	| "mdListBullet"
 	// Tool display
@@ -422,6 +423,7 @@ function buildThemeFromJson(
 		"mdCodeBlock",
 		"mdCodeBlockBorder",
 		"mdLink",
+		"inlineCode",
 		"mdQuote",
 		"mdListBullet",
 		"toolTitle",
@@ -483,6 +485,16 @@ function buildThemeFromJson(
 		inputBarBorder: "border",
 		bashMode: "warning",
 		pythonMode: "accent",
+		toolTitle: "accent",
+		toolRunning: "warning",
+		toolSuccess: "success",
+		toolError: "error",
+		toolStreaming: "accent",
+		toolOutput: "muted",
+		terminalOutput: "muted",
+		thinkingText: "muted",
+		inlineCode: "accent",
+		mdListBullet: "muted",
 	};
 
 	for (const key of fgKeys) {
