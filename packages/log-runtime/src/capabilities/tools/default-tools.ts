@@ -81,6 +81,7 @@ const CORE_TOOL_NAMES = new Set<string>([
 	"spawn_agents",
 	"web_fetch",
 	"web_search",
+	"git",
 ]);
 
 /**

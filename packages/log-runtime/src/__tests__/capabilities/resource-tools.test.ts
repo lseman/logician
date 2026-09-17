@@ -381,6 +381,12 @@ test("standalone default tools also have a working device catalog", async () => 
 	expect(
 		registry.prepare(deviceCall('{"command":"status"}', "xd://git")).call.name,
 	).toBe("git");
+	// Execute through the full redirect path: write → xd:// → ToolRegistry
+	const result = await registry.execute(
+		call("write", { path: "xd://git", content: '{"command":"status"}' }),
+	);
+	expect(result.isError).toBeFalsy();
+	expect(result.content).toContain("On branch");
 });
 
 async function hasAstGrepCli(): Promise<boolean> {
