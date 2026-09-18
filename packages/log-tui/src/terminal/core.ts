@@ -155,6 +155,7 @@ export class TUI extends Container {
 	private fixedAboveInputComponent: Component | null = null;
 
 	private _showHardwareCursor = true;
+	private _isStreaming = false;
 
 	/** Optional callback invoked before each render pass. */
 	private _onRenderBegin?: () => void;
@@ -179,11 +180,14 @@ export class TUI extends Container {
 		this.requestRender();
 	}
 
-	/** Deprecated no-op. Frame pacing is now a constant 60fps (see class
-	 * comment above). Kept as a public method only so callers don't crash
-	 * when they invoke it — the call is silently ignored. */
-	setIsStreaming(_isStreaming: boolean): void {
-		// no-op: frame pacing is always 60fps
+	/** Hide the hardware cursor during streaming — the software cursor
+	 * (CURSOR_MARKER in the input bar) is the only visible cursor, and having
+	 * both fighting the terminal's blink cycle causes flicker. */
+	setIsStreaming(isStreaming: boolean): void {
+		this._isStreaming = isStreaming;
+		this._showHardwareCursor = !isStreaming;
+		this.previousCursorVisible = null; // force visibility update next frame
+		this.requestRender();
 	}
 
 	get scrollOffset(): number {
@@ -1372,5 +1376,6 @@ export interface TuiHandle {
 	removeOverlay(component: Component): void;
 	bringToFront(component: Component): void;
 	setShowHardwareCursor(enabled: boolean): void;
+	setIsStreaming(isStreaming: boolean): void;
 	sendNotification(title: string, body: string): void;
 }

@@ -273,6 +273,7 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 		case "turn_end": {
 			// Auto-save the completed turn
 			ctx._autoSaveTurn();
+			ctx.tui.setIsStreaming(false);
 			updateGitFooter(ctx);
 			ctx.statusPanel.update({
 				turnCount: ctx.transcript.getTurns().length,
@@ -325,6 +326,7 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 		case "turn_start":
 			ctx.workSurface.startRun();
 			ctx.researchManager.onAgentStart();
+			ctx.tui.setIsStreaming(true);
 			break;
 		case "agent_iteration_start":
 			ctx.workSurface.startTurn();
