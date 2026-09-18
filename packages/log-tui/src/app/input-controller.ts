@@ -14,79 +14,645 @@ export function isCtrlE(data: string): boolean {
 	return data === "\x05" || data === "\x1b[5;5u" || data === "\x1b[27;5;5~";
 }
 
-export function setupInputHandler(ctx: LogicianTUI): void {
-	// ── Choice popup handlers ──────────────────────────────────────
-	const handleChoicePopupSubmit = (): void => {
-		const qid = ctx.choicePopup.getQuestionId();
-		const answers = ctx.choicePopup.getAnswers();
-		if (qid === "__plan_approval__") {
-			ctx.choicePopup.hide();
-			if (ctx.choicePopup.getResponseValue() === "approve") {
-				ctx.planPhase = "executing";
-				ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
-				ctx.transcript.addSystemMessage("Plan approved — executing now.");
-				ctx.statusPanel.update({ phase: "streaming" });
-				void ctx.bridge
-					.sendMessage(
-						"The user approved the plan. Execute the approved plan now. Do not create another plan or ask for approval again.",
-					)
-					.catch(err => ctx.bridge.events.reportError(err));
-			} else {
-				ctx.planPhase = "idle";
-				ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
-				ctx.transcript.addSystemMessage(
-					"Plan rejected — nothing was executed.",
-				);
-			}
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			return;
-		}
-		if (ctx.choicePopupPreview) {
-			ctx.choicePopupPreview = false;
-			ctx.transcript.addSystemMessage(
-				`Ask preview: ${JSON.stringify(answers)}`,
-			);
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+// ── Overlay dispatcher ─────────────────────────────────────────────────────
+
+/**
+ * Dispatch input to a visible overlay. Returns true if consumed.
+ * Overlays are checked in priority order; the first visible one handles the input.
+ */
+function handleOverlayInput(ctx: LogicianTUI, data: string): boolean {
+	const check = <T>(
+		overlay: { isVisibleOverlay(): boolean; handleInput(data: string): T | null },
+		actionHandler: (action: T) => void,
+	): boolean => {
+		if (overlay.isVisibleOverlay()) {
+			const action = overlay.handleInput(data);
+			if (action) actionHandler(action);
 			ctx.tui.requestRender();
-			return;
+			return true;
 		}
-		if (
-			qid &&
-			ctx.bridge.respondToQuestion(qid, ctx.choicePopup.getResponseValue())
-		) {
+		return false;
+	};
+
+	// SessionTree has no action handler — it handles input directly.
+	if (ctx.sessionTree.isVisibleOverlay()) {
+		ctx.sessionTree.handleInput(data);
+		ctx.tui.requestRender();
+		return true;
+	}
+
+	if (check(ctx.pluginManager, a => ctx.handlePluginManagerAction(a))) return true;
+	if (check(ctx.mcpManager, a => ctx.handleMcpManagerAction(a))) return true;
+	if (check(ctx.autoresearchDashboard, a => ctx.handleAutoresearchDashboardAction(a))) return true;
+	if (check(ctx.reasonerSelector, a => ctx.handleReasonerSelectorAction(a))) return true;
+	if (check(ctx.queueManager, a => ctx.handleQueueManagerAction(a))) return true;
+	if (check(ctx.modelSelector, a => ctx.handleModelSelectorAction(a))) return true;
+	if (check(ctx.inferenceModeSelector, a => ctx.handleInferenceModeSelectorAction(a))) return true;
+	if (check(ctx.themeSelector, a => ctx.handleThemeSelectorAction(a))) return true;
+	if (check(ctx.settingsSelector, a => ctx.handleSettingsSelectorAction(a))) return true;
+	if (check(ctx.thinkingLevelSelector, a => ctx.handleThinkingLevelSelectorAction(a))) return true;
+
+	return false;
+}
+
+// ── Autocomplete popup handling ──────────────────────────────────────────────
+
+/**
+ * Handle input for inline autocomplete popups (@-mention, skill://, slash).
+ * Returns true if the popup was visible and the key was consumed.
+ */
+function handleAutocompleteInput(ctx: LogicianTUI, data: string): boolean {
+	// File mention popup: up/down navigation, tab/enter accept, escape dismiss.
+	if (ctx.fileMentionPopup.isVisibleOverlay()) {
+		if (data === "\x1b[A" || data === "\x1bOA") {
+			ctx.fileMentionPopup.moveSelection(-1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\x1b[B" || data === "\x1bOB") {
+			ctx.fileMentionPopup.moveSelection(1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\t" || data === "\r" || data === "\n") {
+			const file = ctx.fileMentionPopup.currentFile();
+			if (file) ctx.inputBar.insertMention(file);
+			ctx.fileMentionPopup.hide();
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\x1b") {
+			ctx.fileMentionPopup.hide();
+			ctx.tui.requestRender();
+			return true;
+		}
+		// Everything else goes to the input bar; onChange re-syncs the popup.
+		return true;
+	}
+
+	// Skill popup: same pattern as file mention.
+	if (ctx.skillPopup.isVisibleOverlay()) {
+		if (data === "\x1b[A" || data === "\x1bOA") {
+			ctx.skillPopup.moveSelection(-1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\x1b[B" || data === "\x1bOB") {
+			ctx.skillPopup.moveSelection(1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\t" || data === "\r" || data === "\n") {
+			const name = ctx.skillPopup.currentSkill();
+			if (name) ctx.inputBar.insertSkill(name);
+			ctx.skillPopup.hide();
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\x1b") {
+			ctx.skillPopup.hide();
+			ctx.tui.requestRender();
+			return true;
+		}
+		return true;
+	}
+
+	// Slash popup: up/down navigation, tab complete, escape dismiss/stop loop,
+	// enter accept command and fall through to input bar.
+	if (ctx.slashPopup.isVisibleOverlay()) {
+		if (data === "\x1b[A" || data === "\x1bOA") {
+			ctx.slashPopup.moveSelection(-1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\x1b[B" || data === "\x1bOB") {
+			ctx.slashPopup.moveSelection(1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\t") {
+			const cmd = ctx.slashPopup.currentCommand();
+			if (cmd) {
+				ctx.inputBar.valueText = `${cmd} `;
+				ctx.tui.requestRender();
+			}
+			return true;
+		}
+		if (data === "\x1b") {
+			ctx.slashPopup.hide();
+			ctx.inputBar.handleInput(data);
+			if (ctx.loopActive) {
+				ctx.loopManager.stop();
+				ctx.loopActive = false;
+				ctx.transcript.addSystemMessage("Loop stopped (Esc).");
+				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			}
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\r" || data === "\n") {
+			const cmd = ctx.slashPopup.currentCommand();
+			if (cmd && ctx.inputBar.valueText.trim() !== cmd) {
+				if (/^\/\S+\s+\S+/.test(cmd)) {
+					ctx.inputBar.valueText = cmd;
+				} else {
+					const typedArgs = ctx.inputBar.valueText.replace(/^\/\S*\s*/, "");
+					ctx.inputBar.valueText = typedArgs ? `${cmd} ${typedArgs}` : cmd;
+				}
+			}
+			ctx.slashPopup.hide();
+			return false; // fall through to input bar submission
+		}
+		return true; // typing/backspace goes to input bar
+	}
+
+	return false;
+}
+
+// ── Key bindings ─────────────────────────────────────────────────────────────
+
+/** Handle special key bindings. Returns true if consumed. */
+function handleKeyBinding(ctx: LogicianTUI, data: string): boolean {
+	// Ctrl+H — thinking level selector
+	if (data === "\x08") {
+		ctx.openThinkingLevelSelector();
+		return true;
+	}
+	// Ctrl+L — model selector
+	if (data === "\x0c") {
+		ctx.openModelSelector();
+		return true;
+	}
+	// Ctrl+G — jump to file from working set
+	if (data === "\x07") {
+		const files = ctx.workSurface.getWorkingSet();
+		if (files.length === 0) {
+			ctx.notify("Working set is empty.", "info");
+			return true;
+		}
+		if (ctx.inputBar.getActiveMentionQuery() === null) {
+			ctx.inputBar.valueText = `${ctx.inputBar.valueText}@`;
+		}
+		ctx.fileMentionPopup.setFiles(files);
+		ctx.fileMentionPopup.setQuery("");
+		ctx.fileMentionPopup.show();
+		ctx.tui.requestRender();
+		return true;
+	}
+	// Ctrl+O — toggle tool expansion
+	if (data === "\x0f") {
+		const expanded = ctx.transcriptDisplay.toggleToolsExpanded();
+		ctx.statusPanel.update({
+			phase: expanded ? "tools expanded" : "tools collapsed",
+		});
+		ctx.tui.requestRender();
+		return true;
+	}
+	// Alt+J/K — tool card navigation; Alt+Enter — toggle focused tool
+	if (data === "\x1bj" || data === "\x1bk") {
+		const position = ctx.transcriptDisplay.focusTool(
+			data === "\x1bj" ? 1 : -1,
+		);
+		if (position) {
+			ctx.notify(`Tool ${position.index}/${position.total}`, "info");
+			ctx.tui.requestRender();
+		}
+		return true;
+	}
+	if (data === "\x1b\r" || data === "\x1b\n") {
+		const expanded = ctx.transcriptDisplay.toggleFocusedTool();
+		if (expanded !== null) {
+			ctx.notify(expanded ? "Tool expanded" : "Tool collapsed", "info");
+			ctx.tui.requestRender();
+		}
+		return true;
+	}
+	// Ctrl+Shift+T — cycle thinking display mode
+	if (data === "\x14") {
+		ctx.transcript.cycleThinkingDisplayMode();
+		ctx.transcriptDisplay.setThinkingMode(ctx.transcript.getThinkingDisplayMode());
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		ctx.tui.requestRender();
+		return true;
+	}
+	// Ctrl+S — session tree
+	if (data === "\x13") {
+		ctx.openSessionTree();
+		return true;
+	}
+	// Ctrl+Q — queue manager
+	if (data === "\x11") {
+		ctx.openQueueManager();
+		return true;
+	}
+	// Ctrl+K — cycle sandbox mode
+	if (data === "\x0b") {
+		const mode = ctx.bridge.cycleSandboxMode();
+		ctx.statusPanel.update({ sandboxMode: mode });
+		ctx.tui.requestRender();
+		return true;
+	}
+	// Ctrl+P — toggle plan mode
+	if (data === "\x10") {
+		const next = ctx.togglePlanMode();
+		ctx.notify(next === "plan" ? "Mode: plan" : "Mode: act", "success");
+		ctx.tui.requestRender();
+		return true;
+	}
+	// Ctrl+E — steering flush
+	if (isCtrlE(data)) {
+		if (ctx.inputBar.submit("steer-now")) return true;
+		const count = ctx.bridge.flushSteeringNow();
+		if (count > 0) {
 			ctx.transcript.addSystemMessage(
-				`Questions answered: ${Object.keys(answers).length}`,
+				`Flushed ${count} steering message${count === 1 ? "" : "s"} to the active turn.`,
 			);
+		} else {
+			ctx.transcript.addSystemMessage("No queued steering messages to flush.");
 		}
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 		ctx.tui.requestRender();
-	};
+		return true;
+	}
+	// Ctrl+M — inference mode selector
+	if (
+		data === "\x1bm" ||
+		data === "\x1bM" ||
+		data === "\x1b[109;5u" ||
+		data === "\x1b[109;6u"
+	) {
+		ctx.openInferenceModeSelector();
+		return true;
+	}
+	// Ctrl+I — cycle execution mode
+	if (data === "\x1b[105;5u" || data === "\x1b[105;6u") {
+		const next = ctx.cycleExecutionProfile();
+		ctx.notify(
+			`Execution mode: ${next === "autonomous" ? "auto" : "minimal"}`,
+			"success",
+		);
+		ctx.tui.requestRender();
+		return true;
+	}
+	// Ctrl+A — autoresearch dashboard
+	if (data === "\x1b[97;4u" || data === "\x01") {
+		ctx.openAutoresearchDashboard();
+		return true;
+	}
 
-	const handleChoicePopupDismiss = (): void => {
-		if (ctx.choicePopupPreview) {
-			ctx.choicePopupPreview = false;
-			ctx.tui.requestRender();
-			return;
-		}
-		const qid = ctx.choicePopup.getQuestionId();
-		if (qid === "__plan_approval__") {
-			ctx.choicePopup.hide();
+	return false;
+}
+
+// ── Choice popup helpers ─────────────────────────────────────────────────────
+
+function handleChoicePopupSubmit(ctx: LogicianTUI): void {
+	const qid = ctx.choicePopup.getQuestionId();
+	const answers = ctx.choicePopup.getAnswers();
+
+	if (qid === "__plan_approval__") {
+		ctx.choicePopup.hide();
+		if (ctx.choicePopup.getResponseValue() === "approve") {
+			ctx.planPhase = "executing";
+			ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
+			ctx.transcript.addSystemMessage("Plan approved — executing now.");
+			ctx.statusPanel.update({ phase: "streaming" });
+			void ctx.bridge
+				.sendMessage(
+					"The user approved the plan. Execute the approved plan now. Do not create another plan or ask for approval again.",
+				)
+				.catch(err => ctx.bridge.events.reportError(err));
+		} else {
 			ctx.planPhase = "idle";
 			ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
-			ctx.transcript.addSystemMessage(
-				"Plan approval dismissed — nothing was executed.",
-			);
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			return;
-		}
-		if (qid) {
-			ctx.bridge.respondToQuestion(qid, "__dismissed__");
-			ctx.transcript.addSystemMessage("Question dismissed.");
+			ctx.transcript.addSystemMessage("Plan rejected — nothing was executed.");
 		}
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-		ctx.tui.requestRender();
-	};
+		return;
+	}
 
+	if (ctx.choicePopupPreview) {
+		ctx.choicePopupPreview = false;
+		ctx.transcript.addSystemMessage(`Ask preview: ${JSON.stringify(answers)}`);
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		ctx.tui.requestRender();
+		return;
+	}
+
+	if (qid && ctx.bridge.respondToQuestion(qid, ctx.choicePopup.getResponseValue())) {
+		ctx.transcript.addSystemMessage(
+			`Questions answered: ${Object.keys(answers).length}`,
+		);
+	}
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+	ctx.tui.requestRender();
+}
+
+function handleChoicePopupDismiss(ctx: LogicianTUI): void {
+	if (ctx.choicePopupPreview) {
+		ctx.choicePopupPreview = false;
+		ctx.tui.requestRender();
+		return;
+	}
+
+	const qid = ctx.choicePopup.getQuestionId();
+	if (qid === "__plan_approval__") {
+		ctx.choicePopup.hide();
+		ctx.planPhase = "idle";
+		ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
+		ctx.transcript.addSystemMessage("Plan approval dismissed — nothing was executed.");
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		return;
+	}
+
+	if (qid) {
+		ctx.bridge.respondToQuestion(qid, "__dismissed__");
+		ctx.transcript.addSystemMessage("Question dismissed.");
+	}
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+	ctx.tui.requestRender();
+}
+
+// ── Permission popup handler ─────────────────────────────────────────────────
+
+function handlePermissionPopupInput(
+	ctx: LogicianTUI,
+	action: { type: string; choice?: { value: string } } | null,
+): void {
+	if (!action) return;
+	if (action.type === "close") {
+		ctx.pendingPermission = null;
+		ctx.transcript.addSystemMessage("Permission request dismissed.");
+	} else {
+		const value = action.choice?.value;
+		if (!value) return;
+		const decision =
+			value === "y" || value === "yes" || value === "allow"
+				? "allow"
+				: value === "a" || value === "always"
+					? "always"
+					: "deny";
+		ctx.bridge.respondToPermission(
+			ctx.pendingPermission?.toolCallId ?? "",
+			decision,
+		);
+		ctx.transcript.addSystemMessage(
+			`Permission ${decision}: ${ctx.pendingPermission?.toolName ?? "unknown"}`,
+		);
+	}
+	ctx.pendingPermission = null;
+	ctx.permissionPopup.hide();
+	ctx.tui.removeOverlay(ctx.permissionPopup);
+	ctx.statusPanel.update({ phase: action.type !== "close" ? "streaming" : "ready" });
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+}
+
+// ── Submit handler ───────────────────────────────────────────────────────────
+
+function handleInputSubmit(ctx: LogicianTUI, text: string, intent: string): void {
+	// Pending permission answer takes priority.
+	if (ctx.pendingPermission) {
+		const answer = text.trim().toLowerCase();
+		const decision =
+			answer === "y" || answer === "yes" || answer === "allow"
+				? "allow"
+				: answer === "a" || answer === "always"
+					? "always"
+					: "deny";
+		ctx.bridge.respondToPermission(ctx.pendingPermission.toolCallId, decision);
+		ctx.transcript.addSystemMessage(`Permission ${decision}: ${ctx.pendingPermission.toolName}`);
+		ctx.pendingPermission = null;
+		ctx.statusPanel.update({ phase: "streaming" });
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		ctx.tui.requestRender();
+		return;
+	}
+
+	ctx.inputBar.pushHistory(text);
+
+	// Bash: `!command` or `!!command` (exclude from context).
+	if (text.startsWith("!")) {
+		const excludeFromContext = text.startsWith("!!");
+		const command = excludeFromContext ? text.slice(2) : text.slice(1);
+		if (command.trim()) {
+			executeBashCommand(ctx, command.trim(), excludeFromContext);
+			return;
+		}
+	}
+
+	// Python: `$code` or `$$code`.
+	if (text.startsWith("$")) {
+		const trimmed = text.trimStart();
+		const prefixLength = pythonCommandPrefixLength(trimmed);
+		if (
+			prefixLength > 0 &&
+			!looksLikePastedShellPrompt(trimmed.slice(prefixLength).trim())
+		) {
+			const excludeFromContext = prefixLength === 2;
+			const code = trimmed.slice(prefixLength).trim();
+			if (code) {
+				executePythonCommand(ctx, code, excludeFromContext);
+				return;
+			}
+		}
+	}
+
+	// Slash commands.
+	if (text.startsWith("/")) {
+		handleSlashCommand(ctx, text);
+		return;
+	}
+
+	// Steering or new turn.
+	if (ctx.bridge.isActive()) {
+		handleSteering(ctx, text, intent);
+		return;
+	}
+
+	// Start a new turn.
+	startNewTurn(ctx, text);
+}
+
+function executeBashCommand(ctx: LogicianTUI, command: string, excludeFromContext: boolean): void {
+	ctx.statusPanel.update({ phase: "bash" });
+	ctx.statusPanel.startAnimation();
+	ctx.tui.renderNow();
+	setImmediate(async () => {
+		try {
+			const output = await ctx.bridge.executeBashCommand(command);
+			ctx.transcript.addSystemMessage(
+				`!${excludeFromContext ? "!" : ""}${command}: exit ${output.exitCode}\n${output.output}`,
+			);
+		} catch (err) {
+			ctx.transcript.addSystemMessage(
+				`!${excludeFromContext ? "!" : ""}${command}: Error: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		} finally {
+			ctx.statusPanel.update({ phase: "ready" });
+			ctx.tui.requestRender();
+		}
+	});
+}
+
+function executePythonCommand(ctx: LogicianTUI, code: string, excludeFromContext: boolean): void {
+	ctx.statusPanel.update({ phase: "python" });
+	ctx.statusPanel.startAnimation();
+	ctx.tui.renderNow();
+	setImmediate(async () => {
+		try {
+			const result = await ctx.bridge.executePythonCommand(code);
+			ctx.transcript.addSystemMessage(
+				`$$${excludeFromContext ? "" : "$"}${code}: ${result.error ? `Error: ${result.error}` : `Output:\n${result.output}`}`,
+			);
+		} catch (err) {
+			ctx.transcript.addSystemMessage(
+				`$$${excludeFromContext ? "" : "$"}${code}: Error: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		} finally {
+			ctx.statusPanel.update({ phase: "ready" });
+			ctx.tui.requestRender();
+		}
+	});
+}
+
+function handleSlashCommand(ctx: LogicianTUI, text: string): void {
+	const parts = text.trim().split(/\s+/);
+	const cmdName = parts[0]?.toLowerCase() ?? "";
+	const args = parts.slice(1).join(" ");
+	const allCmds = ctx.slashPopup.getCommands() as SlashCommandDef[];
+	const match = allCmds?.find(
+		(c: SlashCommandDef) => c.command.toLowerCase() === cmdName,
+	);
+
+	if (match) {
+		ctx.slashPopup.submitRaw(text.trim());
+		return;
+	}
+
+	// Unknown command — skill invocation?
+	if (ctx.bridge.invokeSkill(cmdName.slice(1), args)) {
+		ctx.transcript.addTurn(text.trim());
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		ctx.statusPanel.update({ phase: "streaming" });
+		ctx.statusPanel.startAnimation();
+		ctx.tui.requestRender();
+		return;
+	}
+
+	// Unknown command — suggest corrections.
+	ctx.transcript.addTurn(text.trim());
+	const suggestions = filterSlashCommands(allCmds, cmdName, 3).map(
+		command => command.command,
+	);
+	ctx.transcript.addSystemMessage(
+		`Unknown command: ${cmdName}.` +
+			(suggestions.length > 0
+				? ` Did you mean ${suggestions.join(", ")}?`
+				: "") +
+			" Use /help to list available commands.",
+	);
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+	ctx.tui.requestRender();
+}
+
+function handleSteering(ctx: LogicianTUI, text: string, intent: string): void {
+	const preview = oneLineSteerPreview(text);
+	const label =
+		intent === "steer-now"
+			? `Steering now: ${preview}`
+			: `Steering queued: ${preview}`;
+	ctx.notify(label, "info");
+	try {
+		if (intent === "steer-now") {
+			ctx.bridge.steerNow(text);
+		} else {
+			ctx.bridge.steerQueue(text);
+		}
+	} catch (err) {
+		ctx.bridge.events.reportError(err as Error);
+	}
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+	ctx.tui.requestRender(false, true);
+}
+
+function startNewTurn(ctx: LogicianTUI, text: string): void {
+	ctx.transcript.addTurn(text);
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+	ctx.turnState = beginPendingTurn(ctx.turnState);
+	ctx.workSurface.setPhase(ctx.turnState.phase);
+	ctx.statusPanel.update({ phase: "thinking" });
+	ctx.statusPanel.startAnimation();
+	ctx.tui.renderNow();
+
+	const prompt =
+		ctx.workflowMode === "plan"
+			? `[PLAN MODE]\nFirst investigate using read-only tools and produce a concrete implementation plan. Do not modify files or execute mutating commands. End after presenting the plan and wait for explicit user approval.\n\nUser request:\n${text}`
+			: text;
+
+	if (ctx.workflowMode === "plan") {
+		ctx.planPhase = "planning";
+		ctx.bridge.setPermissionMode("plan");
+	}
+
+	setImmediate(() => {
+		void ctx.bridge
+			.sendMessage(prompt)
+			.catch(err => ctx.bridge.events.reportError(err));
+	});
+}
+
+// ── Change handler ───────────────────────────────────────────────────────────
+
+function handleInputChange(ctx: LogicianTUI, text: string): void {
+	const isCommandPrefix = text.startsWith("/");
+	if (isCommandPrefix) {
+		ctx.slashPopup.setQuery(text);
+		if (ctx.slashPopup.hasMatches()) {
+			if (!ctx.slashPopup.isVisibleOverlay()) ctx.slashPopup.show();
+		} else {
+			ctx.slashPopup.hide();
+		}
+	} else if (ctx.slashPopup.isVisibleOverlay()) {
+		ctx.slashPopup.hide();
+	}
+
+	const mentionQuery = ctx.inputBar.getActiveMentionQuery();
+	if (mentionQuery !== null) {
+		void ctx.updateFileMentionPopup(mentionQuery);
+	} else if (ctx.fileMentionPopup.isVisibleOverlay()) {
+		ctx.fileMentionPopup.hide();
+	} else {
+		const skillQuery = ctx.inputBar.getActiveSkillQuery();
+		if (skillQuery !== null) {
+			void ctx.updateSkillPopup(skillQuery);
+		} else if (ctx.skillPopup.isVisibleOverlay()) {
+			ctx.skillPopup.hide();
+		}
+	}
+
+	// Update input bar mode color for bash (!) and python ($) prefixes.
+	const trimmed = text.trimStart();
+	if (trimmed.startsWith("!")) {
+		ctx.inputBar.modeColor = theme.fgRaw("bashMode");
+	} else if (trimmed.startsWith("$")) {
+		const prefixLen = pythonCommandPrefixLength(trimmed);
+		if (
+			prefixLen > 0 &&
+			!looksLikePastedShellPrompt(trimmed.slice(prefixLen).trim())
+		) {
+			ctx.inputBar.modeColor = theme.fgRaw("pythonMode");
+		} else {
+			ctx.inputBar.modeColor = null;
+		}
+	} else {
+		ctx.inputBar.modeColor = null;
+	}
+
+	ctx.tui.requestRender();
+}
+
+// ── Main input handler ───────────────────────────────────────────────────────
+
+export function setupInputHandler(ctx: LogicianTUI): void {
 	// Global input listener
 	ctx.tui.addInputListener((data: string) => {
 		if (data === "\x03" || data === "\x1b") {
@@ -96,690 +662,81 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 				phase: ctx.turnState.phase,
 			});
 		}
-		// Raw-mode Ctrl+C is a byte, not necessarily SIGINT. Interrupt active work;
-		// while idle, preserve the conventional Ctrl+C exit behavior.
+
+		// Raw-mode Ctrl+C: interrupt active work; exit if idle.
 		if (data === "\x03") {
 			if (ctx.hasActiveTurn()) void ctx.cancelActiveTurn();
 			else ctx.requestExit();
 			return { consume: true };
 		}
 
-		// Match pi's active-run behavior: one Escape interrupts immediately,
-		// regardless of focus or overlays. When idle, let the normal overlay and
-		// focused-composer routes handle Escape for dismiss/clear semantics.
+		// Escape: interrupt active run; otherwise let overlays/focus routes handle it.
 		if (data === "\x1b" && ctx.hasActiveTurn()) {
 			void ctx.cancelActiveTurn();
 			return { consume: true };
 		}
 
-		if (ctx.pluginManager.isVisibleOverlay()) {
-			const action = ctx.pluginManager.handleInput(data);
-			if (action) {
-				ctx.handlePluginManagerAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.mcpManager.isVisibleOverlay()) {
-			const action = ctx.mcpManager.handleInput(data);
-			if (action) {
-				ctx.handleMcpManagerAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.autoresearchDashboard.isVisibleOverlay()) {
-			const action = ctx.autoresearchDashboard.handleInput(data);
-			if (action) {
-				ctx.handleAutoresearchDashboardAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.reasonerSelector.isVisibleOverlay()) {
-			const action = ctx.reasonerSelector.handleInput(data);
-			if (action) {
-				ctx.handleReasonerSelectorAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.queueManager.isVisibleOverlay()) {
-			const action = ctx.queueManager.handleInput(data);
-			if (action) {
-				ctx.handleQueueManagerAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.sessionTree.isVisibleOverlay()) {
-			ctx.sessionTree.handleInput(data);
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.modelSelector.isVisibleOverlay()) {
-			const action = ctx.modelSelector.handleInput(data);
-			if (action) {
-				ctx.handleModelSelectorAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.inferenceModeSelector.isVisibleOverlay()) {
-			const action = ctx.inferenceModeSelector.handleInput(data);
-			if (action) {
-				ctx.handleInferenceModeSelectorAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.themeSelector.isVisibleOverlay()) {
-			const action = ctx.themeSelector.handleInput(data);
-			if (action) {
-				ctx.handleThemeSelectorAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.settingsSelector.isVisibleOverlay()) {
-			const action = ctx.settingsSelector.handleInput(data);
-			if (action) {
-				ctx.handleSettingsSelectorAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-		if (ctx.thinkingLevelSelector.isVisibleOverlay()) {
-			const action = ctx.thinkingLevelSelector.handleInput(data);
-			if (action) {
-				ctx.handleThinkingLevelSelectorAction(action);
-			}
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
+		// 1. Overlay dispatch (plugin, mcp, dashboard, selectors, etc.)
+		if (handleOverlayInput(ctx, data)) return { consume: true };
 
-		// ChoicePopup — agent Q&A popup
+		// 2. Choice popup
 		if (ctx.choicePopup.isVisibleOverlay()) {
 			const action = ctx.choicePopup.handleInput(data);
 			if (action) {
-				if (action.type === "submit") {
-					handleChoicePopupSubmit();
-				} else {
-					handleChoicePopupDismiss();
-				}
+				if (action.type === "submit") handleChoicePopupSubmit(ctx);
+				else handleChoicePopupDismiss(ctx);
 				ctx.tui.removeOverlay(ctx.choicePopup);
 			}
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
 
-		// PermissionPopup — tool permission overlay
+		// 3. Permission popup
 		if (ctx.permissionPopup.isVisibleOverlay()) {
 			const action = ctx.permissionPopup.handleInput(data);
 			if (action) {
-				if (action.type === "close") {
-					ctx.pendingPermission = null;
-					ctx.transcript.addSystemMessage("Permission request dismissed.");
-				} else {
-					ctx.bridge.respondToPermission(
-						ctx.pendingPermission?.toolCallId ?? "",
-						action.choice.value,
-					);
-					ctx.transcript.addSystemMessage(
-						`Permission ${action.choice.value}: ${ctx.pendingPermission?.toolName ?? "unknown"}`,
-					);
-				}
-				ctx.pendingPermission = null;
-				ctx.permissionPopup.hide();
-				ctx.tui.removeOverlay(ctx.permissionPopup);
-				if (action.type !== "close") {
-					ctx.statusPanel.update({ phase: "streaming" });
-				} else {
-					ctx.statusPanel.update({ phase: "ready" });
-				}
-				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+				handlePermissionPopupInput(ctx, action);
 			}
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
 
-		// Inline @-mention autocomplete: same pattern as the slash popup below —
-		// the input bar keeps focus, we only intercept nav/accept keys.
-		if (ctx.fileMentionPopup.isVisibleOverlay()) {
-			if (data === "\x1b[A" || data === "\x1bOA") {
-				ctx.fileMentionPopup.moveSelection(-1);
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			if (data === "\x1b[B" || data === "\x1bOB") {
-				ctx.fileMentionPopup.moveSelection(1);
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			if (data === "\t" || data === "\r" || data === "\n") {
-				const file = ctx.fileMentionPopup.currentFile();
-				if (file) {
-					ctx.inputBar.insertMention(file);
-				}
-				ctx.fileMentionPopup.hide();
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			if (data === "\x1b") {
-				ctx.fileMentionPopup.hide();
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			// Everything else (typing, backspace, etc.) goes to the input bar; the
-			// onChange hook re-syncs the popup query afterwards.
-		}
-
-		// Inline skill:// autocomplete: same pattern as @-mention — input bar
-		// keeps focus, we only intercept nav/accept keys.
-		if (ctx.skillPopup.isVisibleOverlay()) {
-			if (data === "\x1b[A" || data === "\x1bOA") {
-				ctx.skillPopup.moveSelection(-1);
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			if (data === "\x1b[B" || data === "\x1bOB") {
-				ctx.skillPopup.moveSelection(1);
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			if (data === "\t" || data === "\r" || data === "\n") {
-				const name = ctx.skillPopup.currentSkill();
-				if (name) {
-					ctx.inputBar.insertSkill(name);
-				}
-				ctx.skillPopup.hide();
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			if (data === "\x1b") {
-				ctx.skillPopup.hide();
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			// Everything else goes to the input bar; onChange re-syncs.
-		}
-
-		// input bar keeps focus and ordinary typing flows through to it. We only
-		// intercept the navigation/accept keys here.
-		if (ctx.slashPopup.isVisibleOverlay()) {
-			// Up / Down — move highlight
-			if (data === "\x1b[A" || data === "\x1bOA") {
-				ctx.slashPopup.moveSelection(-1);
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			if (data === "\x1b[B" || data === "\x1bOB") {
-				ctx.slashPopup.moveSelection(1);
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			// Tab — complete input to the highlighted command
-			if (data === "\t") {
-				const cmd = ctx.slashPopup.currentCommand();
-				if (cmd) {
-					ctx.inputBar.valueText = `${cmd} `;
-					ctx.tui.requestRender();
-				}
-				return { consume: true };
-			}
-			// Escape — dismiss the menu, clear/arm the composer, and stop an
-			// active loop. A following Escape cancels the active model turn.
-			if (data === "\x1b") {
-				ctx.slashPopup.hide();
-				// Let the composer consume the first Escape too: it clears the
-				// slash draft and arms the second Escape for turn cancellation.
-				ctx.inputBar.handleInput(data);
-				if (ctx.loopActive) {
-					ctx.loopManager.stop();
-					ctx.loopActive = false;
-					ctx.transcript.addSystemMessage("Loop stopped (Esc).");
-					ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-					ctx.tui.requestRender();
-				}
-				ctx.tui.requestRender();
-				return { consume: true };
-			}
-			// Enter — accept highlighted command (submit it directly)
-			if (data === "\r" || data === "\n") {
-				const cmd = ctx.slashPopup.currentCommand();
-				if (cmd && ctx.inputBar.valueText.trim() !== cmd) {
-					// If the typed text isn't already an exact command, accept the
-					// highlighted one (carrying over any args the user typed).
-					if (/^\/\S+\s+\S+/.test(cmd)) {
-						ctx.inputBar.valueText = cmd;
-					} else {
-						const typedArgs = ctx.inputBar.valueText.replace(/^\/\S*\s*/, "");
-						ctx.inputBar.valueText = typedArgs ? `${cmd} ${typedArgs}` : cmd;
-					}
-				}
-				ctx.slashPopup.hide();
-				// Fall through to the input bar so it submits the value.
-				return { consume: false };
-			}
-			// Everything else (typing, backspace, etc.) goes to the input bar; the
-			// onChange hook re-syncs the popup query afterwards.
-		}
-
-		// Ctrl+H — open thinking level selector
-		if (data === "\x08") {
-			ctx.openThinkingLevelSelector();
+		// 4. Autocomplete popups (file, skill, slash)
+		if (handleAutocompleteInput(ctx, data)) {
 			return { consume: true };
 		}
 
-		// Ctrl+L — open model selector
-		if (data === "\x0c") {
-			ctx.openModelSelector();
-			return { consume: true };
-		}
+		// 5. Key bindings
+		if (handleKeyBinding(ctx, data)) return { consume: true };
 
-		// Ctrl+G — jump to a file from the current working set (files touched
-		// this session), inserting it as an @-mention in the composer.
-		if (data === "\x07") {
-			const files = ctx.workSurface.getWorkingSet();
-			if (files.length === 0) {
-				ctx.notify("Working set is empty.", "info");
-				return { consume: true };
-			}
-			if (ctx.inputBar.getActiveMentionQuery() === null) {
-				ctx.inputBar.valueText = `${ctx.inputBar.valueText}@`;
-			}
-			ctx.fileMentionPopup.setFiles(files);
-			ctx.fileMentionPopup.setQuery("");
-			ctx.fileMentionPopup.show();
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-
-		// Ctrl+O — expand/collapse tool execution details
-		if (data === "\x0f") {
-			const expanded = ctx.transcriptDisplay.toggleToolsExpanded();
-			ctx.statusPanel.update({
-				phase: expanded ? "tools expanded" : "tools collapsed",
-			});
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-
-		// Alt+J / Alt+K — move between tool cards. Alt+Enter toggles only the
-		// focused card, providing keyboard parity with mouse clicks.
-		if (data === "\x1bj" || data === "\x1bk") {
-			const position = ctx.transcriptDisplay.focusTool(
-				data === "\x1bj" ? 1 : -1,
-			);
-			if (position) {
-				ctx.notify(`Tool ${position.index}/${position.total}`, "info");
-				ctx.tui.requestRender();
-			}
-			return { consume: true };
-		}
-		if (data === "\x1b\r" || data === "\x1b\n") {
-			const expanded = ctx.transcriptDisplay.toggleFocusedTool();
-			if (expanded !== null) {
-				ctx.notify(expanded ? "Tool expanded" : "Tool collapsed", "info");
-				ctx.tui.requestRender();
-			}
-			return { consume: true };
-		}
-
-		// Ctrl+Shift+T — cycle thinking display mode
-		if (data === "\x14") {
-			ctx.transcript.cycleThinkingDisplayMode();
-			ctx.transcriptDisplay.setThinkingMode(
-				ctx.transcript.getThinkingDisplayMode(),
-			);
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-
-		// Ctrl+S — open session tree
-		if (data === "\x13") {
-			ctx.openSessionTree();
-			return { consume: true };
-		}
-
-		// Ctrl+Q — open the interactive message queue manager
-		if (data === "\x11") {
-			ctx.openQueueManager();
-			return { consume: true };
-		}
-
-		// Ctrl+K — cycle sandbox mode (off / code / full)
-		if (data === "\x0b") {
-			const mode = ctx.bridge.cycleSandboxMode();
-			ctx.statusPanel.update({ sandboxMode: mode });
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-
-		// Ctrl+P — toggle plan mode (plan ↔ act)
-		if (data === "\x10") {
-			const next = ctx.togglePlanMode();
-			ctx.notify(next === "plan" ? "Mode: plan" : "Mode: act", "success");
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-
-		// Ctrl+E — submit the composer as immediate steering. With an
-		// empty composer, retain the shortcut for flushing an existing queue.
-		if (isCtrlE(data)) {
-			if (ctx.inputBar.submit("steer-now")) {
-				return { consume: true };
-			}
-			const count = ctx.bridge.flushSteeringNow();
-			if (count > 0) {
-				ctx.transcript.addSystemMessage(
-					`Flushed ${count} steering message${count === 1 ? "" : "s"} to the active turn.`,
-				);
-			} else {
-				ctx.transcript.addSystemMessage(
-					"No queued steering messages to flush.",
-				);
-			}
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-
-		// Ctrl+M — open inference-mode selector (replaces old cycle behavior).
-		// Requires CSI-u because legacy terminals encode it like Enter.
-		// Alt+M remains the portable fallback.
-		if (
-			data === "\x1bm" ||
-			data === "\x1bM" ||
-			data === "\x1b[109;5u" ||
-			data === "\x1b[109;6u"
-		) {
-			ctx.openInferenceModeSelector();
-			return { consume: true };
-		}
-
-		// Ctrl+I — cycle execution mode (auto ↔ minimal)
-		if (data === "\x1b[105;5u" || data === "\x1b[105;6u") {
-			const next = ctx.cycleExecutionProfile();
-			ctx.notify(
-				`Execution mode: ${next === "autonomous" ? "auto" : "minimal"}`,
-				"success",
-			);
-			ctx.tui.requestRender();
-			return { consume: true };
-		}
-
-		// Ctrl+A — open the autoresearch fullscreen dashboard.
-		if (data === "\x1b[97;4u" || data === "\x01") {
-			ctx.openAutoresearchDashboard();
-			return { consume: true };
-		}
-
-		// Ctrl+Backspace in input bar is handled by InputBar directly
+		// 6. Ctrl+Backspace handled by InputBar directly
 		return { consume: false };
 	});
 
-	// Live slash autocomplete: show/hide + filter the popup as the input text
-	// changes. Commands with declared subcommands continue offering matches after
-	// the first space (for example, `/mcp li` offers `/mcp list`).
-	ctx.inputBar.onChange = (text: string) => {
-		const isCommandPrefix = text.startsWith("/");
-		if (isCommandPrefix) {
-			ctx.slashPopup.setQuery(text);
-			if (ctx.slashPopup.hasMatches()) {
-				if (!ctx.slashPopup.isVisibleOverlay()) ctx.slashPopup.show();
-			} else {
-				ctx.slashPopup.hide();
-			}
-		} else if (ctx.slashPopup.isVisibleOverlay()) {
-			ctx.slashPopup.hide();
-		}
+	// Live slash autocomplete and mode color updates
+	ctx.inputBar.onChange = (text: string) => handleInputChange(ctx, text);
 
-		const mentionQuery = ctx.inputBar.getActiveMentionQuery();
-		if (mentionQuery !== null) {
-			void ctx.updateFileMentionPopup(mentionQuery);
-		} else if (ctx.fileMentionPopup.isVisibleOverlay()) {
-			ctx.fileMentionPopup.hide();
-		} else {
-			// Check for skill:// prefix
-			const skillQuery = ctx.inputBar.getActiveSkillQuery();
-			if (skillQuery !== null) {
-				void ctx.updateSkillPopup(skillQuery);
-			} else if (ctx.skillPopup.isVisibleOverlay()) {
-				ctx.skillPopup.hide();
-			}
-		}
-		// Update input bar mode color for bash (!) and python ($) prefixes.
-		const trimmed = text.trimStart();
-		if (trimmed.startsWith("!")) {
-			ctx.inputBar.modeColor = theme.fgRaw("bashMode");
-		} else if (trimmed.startsWith("$")) {
-			const prefixLen = pythonCommandPrefixLength(trimmed);
-			if (
-				prefixLen > 0 &&
-				!looksLikePastedShellPrompt(trimmed.slice(prefixLen).trim())
-			) {
-				ctx.inputBar.modeColor = theme.fgRaw("pythonMode");
-			} else {
-				ctx.inputBar.modeColor = null;
-			}
-		} else {
-			ctx.inputBar.modeColor = null;
-		}
+	// Input bar submission
+	ctx.inputBar.onSubmit = (text: string, intent: string) => handleInputSubmit(ctx, text, intent);
 
-		ctx.tui.requestRender();
-	};
-
-	// Input bar handler
-	ctx.inputBar.onSubmit = (text: string, intent) => {
-		// A pending permission request captures the next submission:
-		// y/a/n (or allow/always/deny) answers it instead of becoming a message.
-		if (ctx.pendingPermission) {
-			const answer = text.trim().toLowerCase();
-			const decision =
-				answer === "y" || answer === "yes" || answer === "allow"
-					? "allow"
-					: answer === "a" || answer === "always"
-						? "always"
-						: "deny";
-			ctx.bridge.respondToPermission(
-				ctx.pendingPermission.toolCallId,
-				decision,
-			);
-			ctx.transcript.addSystemMessage(
-				`Permission ${decision}: ${ctx.pendingPermission.toolName}`,
-			);
-			ctx.pendingPermission = null;
-			ctx.statusPanel.update({ phase: "streaming" });
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			ctx.tui.requestRender();
-			return;
-		}
-
-		// Always push to history (both slash and regular messages)
-		ctx.inputBar.pushHistory(text);
-
-		// User bash: `!command` or `!!command`.
-		// `!` = execute without adding to LLM context
-		// `!!` = execute and exclude from LLM context (same as `!` but double-bang)
-		if (text.startsWith("!")) {
-			const excludeFromContext = text.startsWith("!!");
-			const command = excludeFromContext ? text.slice(2) : text.slice(1);
-			if (command.trim()) {
-				ctx.statusPanel.update({ phase: "bash" });
-				ctx.statusPanel.startAnimation();
-				ctx.tui.renderNow();
-				setImmediate(async () => {
-					try {
-						const output = await ctx.bridge.executeBashCommand(command.trim());
-						ctx.transcript.addSystemMessage(
-							`!${excludeFromContext ? "!" : ""}${command}: exit ${output.exitCode}\n${output.output}`,
-						);
-					} catch (err) {
-						ctx.transcript.addSystemMessage(
-							`!${excludeFromContext ? "!" : ""}${command}: Error: ${err instanceof Error ? err.message : String(err)}`,
-						);
-					} finally {
-						ctx.statusPanel.update({ phase: "ready" });
-						ctx.tui.requestRender();
-					}
-				});
-				return;
-			}
-		}
-
-		// User python: `$code` or `$$code`.
-		// `$` = execute Python code (single `$` with space: `$ print("hello")`)
-		// `$$` = execute and exclude from context (double `$` with space: `$$ import os`)
-		// Shell-style variables like `$HOME` are not triggered (requires space after `$`).
-		// Pasted shell prompts like `$cd foo` are not triggered (command+no-space check).
-		if (text.startsWith("$")) {
-			const trimmed = text.trimStart();
-			const prefixLength = pythonCommandPrefixLength(trimmed);
-			if (
-				prefixLength > 0 &&
-				!looksLikePastedShellPrompt(trimmed.slice(prefixLength).trim())
-			) {
-				const excludeFromContext = prefixLength === 2;
-				const code = trimmed.slice(prefixLength).trim();
-				if (code) {
-					ctx.statusPanel.update({ phase: "python" });
-					ctx.statusPanel.startAnimation();
-					ctx.tui.renderNow();
-					setImmediate(async () => {
-						try {
-							const result = await ctx.bridge.executePythonCommand(code);
-							ctx.transcript.addSystemMessage(
-								`$$${excludeFromContext ? "" : "$"}${code}: ${result.error ? `Error: ${result.error}` : `Output:\n${result.output}`}`,
-							);
-						} catch (err) {
-							ctx.transcript.addSystemMessage(
-								`$$${excludeFromContext ? "" : "$"}${code}: Error: ${err instanceof Error ? err.message : String(err)}`,
-							);
-						} finally {
-							ctx.statusPanel.update({ phase: "ready" });
-							ctx.tui.requestRender();
-						}
-					});
-					return;
-				}
-			}
-		}
-
-		// Check for slash commands
-		if (text.startsWith("/")) {
-			const parts = text.trim().split(/\s+/);
-			const cmdName = parts[0].toLowerCase();
-			const args = parts.slice(1).join(" ");
-			const allCmds = ctx.slashPopup.getCommands() as SlashCommandDef[];
-			const match = allCmds?.find(
-				(c: SlashCommandDef) => c.command.toLowerCase() === cmdName,
-			);
-
-			if (match) {
-				ctx.slashPopup.submitRaw(text.trim());
-				return;
-			}
-
-			// Unknown command — a skill invocation? (/<skill-name> args)
-			if (ctx.bridge.invokeSkill(cmdName.slice(1), args)) {
-				ctx.transcript.addTurn(text.trim());
-				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-				ctx.statusPanel.update({ phase: "streaming" });
-				ctx.statusPanel.startAnimation();
-				ctx.tui.requestRender();
-				return;
-			}
-
-			// Unknown command — do not silently turn a typo into an agent prompt.
-			ctx.transcript.addTurn(text.trim());
-			const suggestions = filterSlashCommands(allCmds, cmdName, 3).map(
-				command => command.command,
-			);
-			ctx.transcript.addSystemMessage(
-				`Unknown command: ${cmdName}.` +
-					(suggestions.length > 0
-						? ` Did you mean ${suggestions.join(", ")}?`
-						: "") +
-					" Use /help to list available commands.",
-			);
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			ctx.tui.requestRender();
-			return;
-		}
-
-		// While a turn is running, a plain message steers it instead of
-		// starting a new run. It shows in the queue widget immediately, but
-		// only appears as a "YOU" line in the transcript once the runtime
-		// actually consumes it (a `steered` RuntimeEvent derived from the
-		// core message_end event) — not at submit time, so it lands exactly
-		// where it took effect instead of jumping ahead of the queue.
-		if (ctx.bridge.isActive()) {
-			const preview = oneLineSteerPreview(text);
-			const label =
-				intent === "steer-now"
-					? `Steering now: ${preview}`
-					: `Steering queued: ${preview}`;
-			ctx.notify(label, "info");
-			// Queue synchronously. In particular, Ctrl+Enter must abort the active
-			// provider call before this input callback yields; deferring this with
-			// setImmediate made "steer now" behave like ordinary queued steering
-			// under a busy event loop and delayed the queue_update frame.
-			try {
-				if (intent === "steer-now") {
-					ctx.bridge.steerNow(text);
-				} else {
-					ctx.bridge.steerQueue(text);
-				}
-			} catch (err) {
-				ctx.bridge.events.reportError(err as Error);
-			}
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			ctx.tui.requestRender(false, true);
-			return;
-		}
-
-		ctx.transcript.addTurn(text);
-		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-		ctx.turnState = beginPendingTurn(ctx.turnState);
-		ctx.workSurface.setPhase(ctx.turnState.phase);
-		ctx.statusPanel.update({ phase: "thinking" });
-		ctx.statusPanel.startAnimation();
-		// Commit the acknowledgement before scheduling bridge work. A queued
-		// zero-delay render is not sufficient here: from an input callback,
-		// setImmediate can run before that timer and synchronous context preparation
-		// would leave the previous READY frame visible.
-		ctx.tui.renderNow();
-		const prompt =
-			ctx.workflowMode === "plan"
-				? `[PLAN MODE]\nFirst investigate using read-only tools and produce a concrete implementation plan. Do not modify files or execute mutating commands. End after presenting the plan and wait for explicit user approval.\n\nUser request:\n${text}`
-				: text;
-		if (ctx.workflowMode === "plan") {
-			ctx.planPhase = "planning";
-			ctx.bridge.setPermissionMode("plan");
-		}
-		setImmediate(() => {
-			void ctx.bridge
-				.sendMessage(prompt)
-				.catch(err => ctx.bridge.events.reportError(err));
-		});
-	};
-
+	// Cancel handler
 	ctx.inputBar.onCancel = () => {
 		void ctx.cancelActiveTurn();
 	};
 }
+
+// ── Utility helpers ──────────────────────────────────────────────────────────
 
 /** Collapse whitespace and cap length for a one-line steer toast preview. */
 function oneLineSteerPreview(text: string, maxLength = 60): string {
 	const flat = text.replace(/\s+/g, " ").trim();
 	return flat.length > maxLength ? `${flat.slice(0, maxLength)}…` : flat;
 }
-// ── Python command prefix detection ──────────────────────────────────────────
 
-// OMP-style `$code` / `$$code` prefix detection.
-// Returns 0 (not a python command), 1 (single `$`), or 2 (double `$$`).
+/**
+ * OMP-style `$code` / `$$code` prefix detection.
+ * Returns 0 (not a python command), 1 (single `$`), or 2 (double `$$`).
+ */
 function pythonCommandPrefixLength(trimmedText: string): 0 | 1 | 2 {
 	if (trimmedText.charCodeAt(0) !== 36 /* $ */) return 0;
 	if (trimmedText.charCodeAt(1) === 123 /* { */) return 0;
@@ -805,3 +762,4 @@ function looksLikePastedShellPrompt(code: string): boolean {
 		SHELL_PROMPT_OPERATOR_RE.test(firstLine)
 	);
 }
+// ── End of input controller ──────────────────────────────────────────────────
