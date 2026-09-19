@@ -6,7 +6,11 @@
 // the result as compact text frames.
 //
 // This replaces the LLM-based `generateCompactionSummary` path with a
-// zero-latency, zero-cost local compaction.
+// zero-latency, zero-cost local compaction. Frame rasterization and PNG
+// encoding happen in native code (@logician/log-natives' renderSnapcompactPng,
+// ported from oh-my-pi's crates/pi-natives/src/snapcompact.rs).
+
+import { renderSnapcompactPng, snapcompactSupportedChars } from "@logician/log-natives";
 
 /** Key under `CompactionSummaryMessage.snapcompact` holding the frame archive. */
 export const SNAPCOMPACT_PRESERVE_KEY = "snapcompact";
@@ -320,6 +324,27 @@ export function stripDimMarkers(text: string): string {
 	return text.replace(DIM_MARKERS, "");
 }
 
+/**
+ * Characters `FRAME_FONT` can actually render, queried once from the native
+ * rasterizer's real glyph table (lazy — no native call until text needs
+ * normalizing). Probes Latin-1 Supplement + Latin Extended-A/B + IPA
+ * Extensions, which covers accented Latin scripts; anything outside that
+ * range still falls through to the NFKD/emoji/box-drawing folds below.
+ */
+let fontRenderableChars: ReadonlySet<string> | undefined;
+
+function isRenderableByFrameFont(ch: string): boolean {
+	if (!fontRenderableChars) {
+		let candidates = "";
+		for (let cp = 0x20; cp <= 0x2ee; cp++) {
+			if (cp === 0x7f) continue;
+			candidates += String.fromCodePoint(cp);
+		}
+		fontRenderableChars = new Set(snapcompactSupportedChars(FRAME_FONT, candidates));
+	}
+	return fontRenderableChars.has(ch);
+}
+
 /** Normalize text for bitmap rendering: fold Unicode, collapse whitespace,
  *  replace newlines with block glyphs, drop unrenderable characters. */
 export function normalizeText(text: string): string {
@@ -343,10 +368,14 @@ export function normalizeText(text: string): string {
 			continue;
 		}
 
-		// FONT_DATA only covers ASCII 32-126; Latin-1 supplement (0xa0-0xff)
-		// is NOT directly renderable and must fall through to NFKD folding
-		// below, or every accented character silently renders as a blank cell.
+		// Ask the native font's real glyph table (Latin-1/Extended-A/B/IPA)
+		// instead of assuming ASCII-only, so accented Latin text like é/ñ/ü
+		// prints intact instead of NFKD-decomposing.
 		if (cp >= 0x20 && cp < 0x7f) {
+			out.push(ch);
+			continue;
+		}
+		if (isRenderableByFrameFont(ch)) {
 			out.push(ch);
 			continue;
 		}
@@ -521,293 +550,21 @@ function renderResultBlock(
 }
 
 // ============================================================================
-// Minimal PNG Encoder (Bun zlib, no dependencies)
+// Native rendering (@logician/log-natives, ported from oh-my-pi's
+// pi-natives/src/snapcompact.rs)
 // ============================================================================
 
-/** Create a PNG file from raw RGBA pixel data. */
-function makePng(
-	width: number,
-	height: number,
-	pixels: Uint8Array,
-): Uint8Array {
-	const sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+/** Frame font: 8px-wide X.org BDF glyphs, plain black ink on white. */
+const FRAME_FONT = "8x13";
+const FRAME_CELL_WIDTH = 8;
 
-	function makeChunk(
-		type: string,
-		data: Uint8Array<ArrayBufferLike>,
-	): Uint8Array {
-		const len = new Uint8Array(4);
-		len[0] = 0;
-		len[1] = 0;
-		len[2] = 0;
-		len[3] = 0;
-		len[3] = data.length & 0xff;
-		len[2] = (data.length >> 8) & 0xff;
-		len[1] = (data.length >> 16) & 0xff;
-		len[0] = (data.length >> 24) & 0xff;
-		const typeBytes = new Uint8Array([
-			...type.split("").map(c => c.charCodeAt(0)),
-		]);
-		const crc = new Uint8Array(4);
-		crc[0] = len[0]!;
-		crc[1] = len[1]!;
-		crc[2] = len[2]!;
-		crc[3] = len[3]!;
-		for (let i = 0; i < typeBytes.length; i++) crc[i] ^= typeBytes[i]!;
-		for (let i = 0; i < data.length; i++) crc[i & 3] ^= data[i]!;
-		const table = new Uint32Array(256);
-		for (let i = 0; i < 256; i++) {
-			let c = i;
-			for (let j = 0; j < 8; j++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0);
-			table[i] = c >>> 0;
-		}
-		let crcVal = 0xffffffff;
-		for (let i = 0; i < data.length; i++)
-			crcVal = table[(crcVal ^ data[i]!) & 0xff]! ^ (crcVal >>> 8);
-		crcVal ^= 0xffffffff;
-		crc[0] = (crcVal >> 24) & 0xff;
-		crc[1] = (crcVal >> 16) & 0xff;
-		crc[2] = (crcVal >> 8) & 0xff;
-		crc[3] = crcVal & 0xff;
-		const out = new Uint8Array(4 + 4 + data.length + 4);
-		out.set(len, 0);
-		out.set(typeBytes, 4);
-		out.set(data as Uint8Array, 8);
-		out.set(crc, 8 + data.length);
-		return out;
-	}
-
-	function makeIhdr(): Uint8Array {
-		const b = new ArrayBuffer(13);
-		const v = new DataView(b);
-		v.setInt32(0, width, false);
-		v.setInt32(4, height, false);
-		v.setUint8(8, 8); // bit depth
-		v.setUint8(9, 6); // color type: RGBA
-		v.setUint8(10, 0); // compression
-		v.setUint8(11, 0); // filter
-		v.setUint8(12, 0); // interlace
-		return new Uint8Array(b);
-	}
-
-	function makeIdat(raw: Uint8Array): Uint8Array {
-		// @ts-expect-error Bun.deflateSync returns Uint8Array<ArrayBufferLike> but runtime uses ArrayBuffer
-		const compressed = Bun.deflateSync(raw, { level: 9 });
-		return makeChunk("IDAT", compressed);
-	}
-
-	const scanlines = new Uint8Array(height * (1 + width * 4));
-	for (let y = 0; y < height; y++) {
-		const rowOff = y * (1 + width * 4);
-		scanlines[rowOff] = 0; // filter: none
-		const srcOff = y * width * 4;
-		scanlines.set(pixels.subarray(srcOff, srcOff + width * 4), rowOff + 1);
-	}
-
-	const ihdrData = makeIhdr();
-	const ihdr = makeChunk("IHDR", ihdrData);
-	const idat = makeIdat(scanlines);
-	const end = makeChunk("IEND", new Uint8Array(0));
-	const total = sig.length + ihdr.length + idat.length + end.length;
-	const result = new Uint8Array(total);
-	let off = 0;
-	result.set(sig, off);
-	off += sig.length;
-	result.set(ihdr, off);
-	off += ihdr.length;
-	result.set(idat, off);
-	off += idat.length;
-	result.set(end, off);
-	return result;
-}
-
-/** Convert raw RGBA to base64. */
-function toBase64(data: Uint8Array): string {
-	let binary = "";
-	for (let i = 0; i < data.length; i += 8192) {
-		const chunk = data.subarray(i, i + 8192);
-		for (let j = 0; j < chunk.length; j++)
-			binary += String.fromCharCode(chunk[j]!);
-	}
-	return btoa(binary);
-}
-// ============================================================================
-/** 8×16 bitmap font for standard ASCII (32–126). Each char = 16 rows × 1 byte. */
-const FONT_BYTES_PER_CHAR = 16;
-const FONT_WIDTH = 8;
-const FONT_HEIGHT = 16;
-
-/** Compact bitmap font data: 95 printable ASCII chars, 16 bytes each. */
-const FONT_DATA = new Uint8Array([
-	// Space (32)
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	// Exclamation (33)
-	0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 0,
-	// Double quote (34)
-	0, 0, 48, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	// Hash (35)
-	0, 68, 68, 124, 68, 68, 68, 0, 68, 68, 124, 68, 68, 68, 0, 0,
-	// Dollar (36)
-	0, 56, 100, 100, 24, 24, 34, 34, 4, 24, 102, 100, 100, 56, 0, 0,
-	// Percent (37)
-	0, 0, 66, 35, 21, 12, 18, 36, 0, 0, 36, 18, 12, 21, 35, 66,
-	// Ampersand (38)
-	0, 24, 36, 68, 72, 72, 100, 100, 24, 24, 96, 68, 68, 34, 24, 0,
-	// Apostrophe (39)
-	0, 0, 0, 0, 0, 16, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	// Left paren (40)
-	0, 2, 4, 8, 16, 16, 16, 8, 4, 2, 0, 0, 0, 0, 0, 0,
-	// Right paren (41)
-	0, 32, 16, 8, 4, 4, 4, 8, 16, 32, 0, 0, 0, 0, 0, 0,
-	// Asterisk (42)
-	0, 0, 0, 18, 68, 34, 18, 64, 18, 34, 68, 18, 0, 0, 0, 0,
-	// Plus (43)
-	0, 0, 0, 0, 0, 16, 16, 124, 16, 16, 0, 0, 0, 0, 0, 0,
-	// Comma (44)
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 16,
-	// Minus (45)
-	0, 0, 0, 0, 0, 0, 0, 0, 124, 0, 0, 0, 0, 0, 0, 0,
-	// Period (46)
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 64,
-	// Forward slash (47)
-	1, 1, 2, 2, 4, 4, 8, 8, 16, 16, 32, 32, 64, 64, 0, 0,
-	// Digits 0-9 (48-57)
-	0, 56, 102, 195, 195, 195, 195, 195, 195, 195, 195, 102, 56, 0, 0, 0, 0, 0, 0,
-	0, 16, 48, 16, 16, 16, 16, 16, 16, 16, 60, 0, 0, 0, 56, 102, 6, 12, 24, 48,
-	96, 96, 96, 192, 192, 254, 0, 0, 0, 0, 56, 102, 6, 12, 24, 6, 6, 6, 6, 12,
-	102, 120, 0, 0, 0, 0, 6, 14, 30, 54, 102, 102, 102, 254, 6, 6, 6, 6, 0, 0, 0,
-	0, 126, 96, 96, 96, 120, 6, 6, 6, 102, 102, 56, 0, 0, 0, 0, 0, 56, 102, 96,
-	96, 124, 102, 102, 102, 102, 102, 102, 56, 0, 0, 0, 0, 126, 6, 12, 24, 48, 48,
-	64, 64, 64, 64, 64, 64, 0, 0, 0, 0, 56, 102, 102, 102, 56, 102, 102, 102, 102,
-	102, 102, 56, 0, 0, 0, 0, 56, 102, 102, 102, 60, 6, 6, 6, 6, 102, 102, 56, 0,
-	0, 0,
-	// Punctuation (58-64)
-	0, 0, 0, 0, 0, 64, 64, 0, 0, 0, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 64, 0,
-	0, 0, 0, 0, 0, 0, 12, 16, 0, 0, 0, 0, 6, 12, 24, 48, 96, 48, 24, 12, 6, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 124, 0, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96, 48,
-	24, 12, 12, 24, 48, 96, 0, 0, 0, 0, 0, 56, 102, 6, 12, 24, 48, 64, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 56, 102, 211, 211, 211, 247, 211, 211, 211, 203, 102, 56, 0, 0,
-	// Letters A-H (65-72)
-	0, 0, 56, 102, 102, 102, 102, 126, 102, 102, 102, 102, 102, 0, 0, 0, 0, 0,
-	124, 98, 98, 98, 124, 98, 98, 98, 98, 98, 124, 0, 0, 0, 0, 0, 60, 98, 96, 96,
-	96, 96, 96, 96, 96, 98, 60, 0, 0, 0, 0, 0, 120, 100, 98, 98, 98, 98, 98, 98,
-	98, 100, 120, 0, 0, 0, 0, 0, 126, 96, 96, 96, 120, 96, 96, 96, 96, 96, 126, 0,
-	0, 0, 0, 0, 126, 96, 96, 96, 120, 96, 96, 96, 96, 96, 96, 0, 0, 0, 0, 0, 60,
-	98, 96, 96, 96, 112, 98, 98, 98, 98, 60, 0, 0, 0, 0, 0, 102, 102, 102, 102,
-	126, 102, 102, 102, 102, 102, 102, 0, 0, 0,
-	// Letters I-P (73-80)
-	0, 0, 24, 8, 8, 8, 8, 8, 8, 8, 8, 8, 24, 0, 0, 0, 0, 0, 24, 8, 8, 8, 8, 8, 8,
-	8, 8, 8, 120, 0, 0, 0, 0, 0, 102, 102, 98, 98, 120, 112, 98, 98, 98, 102, 102,
-	0, 0, 0, 0, 0, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 126, 0, 0, 0, 0, 0,
-	102, 102, 118, 118, 126, 110, 110, 102, 102, 102, 102, 0, 0, 0, 0, 0, 102,
-	102, 102, 102, 110, 110, 118, 118, 102, 102, 102, 0, 0, 0, 0, 0, 56, 102, 195,
-	195, 195, 195, 195, 195, 195, 195, 102, 56, 0, 0, 0, 0, 124, 98, 98, 98, 98,
-	124, 96, 96, 96, 96, 96, 0, 0, 0,
-	// Letters Q-Z (81-90)
-	0, 0, 56, 102, 195, 195, 195, 195, 195, 195, 195, 195, 102, 56, 2, 4, 0, 0,
-	124, 98, 98, 98, 98, 124, 98, 98, 102, 102, 98, 0, 0, 0, 0, 0, 60, 98, 96, 96,
-	56, 6, 6, 96, 96, 98, 60, 0, 0, 0, 0, 0, 126, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0,
-	0, 0, 0, 0, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 56, 0, 0, 0, 0,
-	0, 98, 98, 98, 98, 98, 98, 54, 54, 26, 26, 12, 0, 0, 0, 0, 0, 102, 102, 102,
-	102, 102, 102, 102, 110, 110, 118, 118, 0, 0, 0, 0, 0, 102, 102, 58, 58, 20,
-	20, 58, 58, 102, 102, 102, 0, 0, 0, 0, 0, 102, 102, 102, 58, 20, 20, 8, 8, 8,
-	8, 8, 0, 0, 0, 0, 0, 126, 6, 12, 24, 48, 96, 96, 96, 96, 96, 126, 0, 0, 0,
-	// Brackets + symbols (91-96)
-	0, 0, 62, 32, 32, 32, 32, 62, 32, 32, 32, 32, 62, 0, 0, 0, 0, 0, 64, 64, 32,
-	32, 16, 16, 8, 8, 4, 4, 2, 2, 0, 0, 0, 0, 62, 2, 2, 2, 2, 62, 2, 2, 2, 2, 62,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 66, 36, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 48, 24, 8, 0, 0, 0, 0, 0,
-	0,
-	// Lowercase a-f (97-102)
-	0, 0, 0, 0, 0, 0, 56, 6, 62, 6, 6, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96,
-	120, 100, 100, 100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 32, 32, 32, 36, 36,
-	24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 36, 36, 36, 60, 36, 24, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 56, 36, 32, 124, 36, 36, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48, 8, 60,
-	34, 2, 2, 4, 0, 0, 0,
-	// Lowercase g-m (103-109)
-	0, 0, 0, 0, 0, 0, 24, 36, 36, 60, 36, 36, 24, 6, 18, 8, 0, 0, 0, 0, 0, 0, 96,
-	96, 96, 100, 100, 100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 16, 56, 0, 16, 16,
-	16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 16, 56, 0, 16, 16, 16, 16, 16, 8, 0, 0, 0,
-	0, 0, 0, 96, 96, 96, 100, 104, 112, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 16,
-	16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 116, 124, 108, 100,
-	100, 0, 0, 0,
-	// Lowercase n-t (110-116)
-	0, 0, 0, 0, 0, 0, 96, 96, 100, 100, 100, 100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	56, 36, 32, 32, 32, 36, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96, 120, 100, 100,
-	100, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 36, 36, 36, 60, 36, 36, 6, 2, 2, 0,
-	0, 0, 0, 0, 0, 96, 96, 100, 100, 96, 96, 96, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56,
-	32, 56, 4, 4, 32, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 8, 60, 8, 8, 16, 8, 0, 0,
-	0,
-	// Lowercase u-z (117-122)
-	0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 100, 100, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	98, 98, 98, 98, 54, 54, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102, 102, 102, 102,
-	102, 110, 54, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102, 102, 58, 20, 58, 102, 102, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 102, 102, 102, 54, 54, 24, 24, 32, 32, 16, 0, 0, 0, 0, 0,
-	0, 124, 6, 12, 24, 48, 96, 124, 0, 0, 0,
-	// Final symbols (123-126)
-	0, 0, 6, 8, 16, 32, 32, 60, 32, 32, 16, 8, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48, 16, 8, 8, 16, 60, 8, 8, 16, 32, 24, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 84, 40, 0,
-]);
-
-/** ASCII index → row bytes offset in FONT_DATA. */
-function fontOffset(code: number): number {
-	return (code - 32) * FONT_BYTES_PER_CHAR;
-}
-
-/** Rasterize text → RGBA Uint8Array (white bg, black text). */
-function rasterizeText(
-	text: string,
-	frameWidth: number,
-	frameHeight: number,
-): Uint8Array {
-	const width = frameWidth * FONT_WIDTH;
-	const height = frameHeight * FONT_HEIGHT;
-	const rgba = new Uint8Array(width * height * 4);
-	const maxRows = Math.min(text.length, frameHeight);
-	let row = 0;
-	let col = 0;
-	for (let ci = 0; ci < text.length && row < maxRows; ci++) {
-		const ch = text[ci] ?? "";
-		const code = ch.charCodeAt(0);
-		if (code === 10 || code === 13) {
-			if (code === 10) {
-				row++;
-				col = 0;
-			}
-			continue;
-		}
-		if (code < 32 || code === 127) continue;
-		const off = fontOffset(code);
-		const rowStart = (row * FONT_HEIGHT + col * FONT_WIDTH) * 4;
-		for (let r = 0; r < FONT_HEIGHT; r++) {
-			const byte = FONT_DATA[off + r];
-			if (!byte) continue;
-			const y = rowStart + r * width * 4;
-			for (let bit = 0; bit < FONT_WIDTH; bit++) {
-				if (byte & (1 << (7 - bit))) {
-					const px = y + bit * 4;
-					rgba[px] = 0;
-					rgba[px + 1] = 0;
-					rgba[px + 2] = 0;
-					rgba[px + 3] = 255;
-				}
-			}
-		}
-		col++;
-		if (col >= frameWidth) {
-			col = 0;
-			row++;
-		}
-	}
-	return rgba;
-}
-
-/** Render a single text frame page → base64 PNG. */
-function renderFramePng(pageText: string, cols: number, rows: number): string {
-	const rgba = rasterizeText(pageText, cols, rows);
-	const pngBytes = makePng(cols * FONT_WIDTH, rows * FONT_HEIGHT, rgba);
-	return toBase64(pngBytes);
+/** Render a single text frame page -> base64 PNG via the native rasterizer. */
+async function renderFramePng(pageText: string, cols: number): Promise<string> {
+	return renderSnapcompactPng(pageText, {
+		size: cols * FRAME_CELL_WIDTH,
+		font: FRAME_FONT,
+		variant: "bw",
+	});
 }
 
 // ============================================================================
@@ -975,28 +732,28 @@ export async function compact(
 	const totalChars = frameChars + textChars;
 
 	// Build frames from the planned pages.
-	const renderPng =
-		options?.render ??
-		(typeof Bun !== "undefined" && typeof Bun.deflateSync === "function");
-	const frames: Frame[] = layout.framePages.map(pageText => {
-		const clean = pageText.replace(DIM_MARKERS, "");
-		const rendered = Math.min(clean.length, cols * rows);
-		let data = "";
-		if (renderPng) {
-			try {
-				data = renderFramePng(pageText, cols, rows);
-			} catch {
-				// Fall back to text-only rendering.
+	const renderPng = options?.render ?? true;
+	const frames: Frame[] = await Promise.all(
+		layout.framePages.map(async pageText => {
+			const clean = pageText.replace(DIM_MARKERS, "");
+			const rendered = Math.min(clean.length, cols * rows);
+			let data = "";
+			if (renderPng) {
+				try {
+					data = await renderFramePng(pageText, cols);
+				} catch {
+					// Fall back to text-only rendering.
+				}
 			}
-		}
-		return {
-			data,
-			cols,
-			rows,
-			chars: rendered,
-			font: "8x16",
-		};
-	});
+			return {
+				data,
+				cols,
+				rows,
+				chars: rendered,
+				font: FRAME_FONT,
+			};
+		}),
+	);
 
 	// Estimate tokens (rough: ~4 chars per token for English).
 	const estimatedTokens = Math.ceil(totalChars / 4);

@@ -1,10 +1,10 @@
 import type { Message } from "@logician/log-core";
 import {
-	estimateChatPayloadTokens,
-	estimateTokens,
+	estimateChatPayloadTokensHeuristic,
+	estimateTokensHeuristic,
 } from "@logician/log-core/runtime";
 
-type ToolDefinitions = Parameters<typeof estimateChatPayloadTokens>[1];
+type ToolDefinitions = Parameters<typeof estimateChatPayloadTokensHeuristic>[1];
 
 export interface ContextSource {
 	name: string;
@@ -25,14 +25,19 @@ export interface ContextInspectionInput {
 	toolDefinitions: ToolDefinitions;
 }
 
-/** Formats and measures the exact context zones shown by runtime inspection. */
+/**
+ * Formats and measures the context zones shown by runtime inspection, using
+ * the heuristic estimator (not the exact native tokenizer) since this is a
+ * synchronous, frequently-refreshed status view — see
+ * `estimateChatPayloadTokensHeuristic`'s doc comment.
+ */
 export function inspectContext(
 	input: ContextInspectionInput,
 ): ContextInspection {
 	const { messages, systemPrompt, memoryContext, toolDefinitions } = input;
 	const tokens =
-		estimateChatPayloadTokens(messages, toolDefinitions) +
-		estimateTokens(memoryContext);
+		estimateChatPayloadTokensHeuristic(messages, toolDefinitions) +
+		estimateTokensHeuristic(memoryContext);
 	const sources = contextSources(input);
 	const sourceLines = sources.map(
 		zone =>
@@ -81,14 +86,16 @@ export function inspectContext(
 	};
 }
 
-export function contextSources(input: ContextInspectionInput): ContextSource[] {
+export function contextSources(
+	input: ContextInspectionInput,
+): ContextSource[] {
 	const { messages, systemPrompt, memoryContext, toolDefinitions } = input;
 	const conversation = messages.filter(message => message.role !== "tool");
 	const toolEvidence = messages.filter(message => message.role === "tool");
 	return [
 		{
 			name: "Base instructions",
-			tokens: estimateTokens(systemPrompt),
+			tokens: estimateTokensHeuristic(systemPrompt),
 			detail: "system zone",
 		},
 		{
@@ -98,22 +105,26 @@ export function contextSources(input: ContextInspectionInput): ContextSource[] {
 		},
 		{
 			name: "Tool definitions",
-			tokens: estimateChatPayloadTokens([], toolDefinitions),
+			tokens: estimateChatPayloadTokensHeuristic([], toolDefinitions),
 			detail: `${toolDefinitions?.length ?? 0} tools`,
 		},
 		{
 			name: "Retrieved memory",
-			tokens: estimateTokens(memoryContext),
+			tokens: estimateTokensHeuristic(memoryContext),
 			detail: memoryContext ? "request-time compact index" : "none retrieved",
 		},
 		{
 			name: "Conversation",
-			tokens: conversation.length ? estimateChatPayloadTokens(conversation) : 0,
+			tokens: conversation.length
+				? estimateChatPayloadTokensHeuristic(conversation)
+				: 0,
 			detail: `${conversation.length} messages`,
 		},
 		{
 			name: "Tool evidence",
-			tokens: toolEvidence.length ? estimateChatPayloadTokens(toolEvidence) : 0,
+			tokens: toolEvidence.length
+				? estimateChatPayloadTokensHeuristic(toolEvidence)
+				: 0,
 			detail: `${toolEvidence.length} results`,
 		},
 	].filter(zone => zone.tokens > 0 || zone.name === "Conversation");

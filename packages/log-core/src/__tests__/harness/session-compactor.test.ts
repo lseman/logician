@@ -28,14 +28,14 @@ function dependencies(
 		beforeCompact: async () => undefined,
 		afterCompact: async () => {},
 		persistCompaction: () => {},
-		estimateTokens: () => 50_000,
+		estimateTokens: async () => 50_000,
 		emit: () => {},
 		...overrides,
 	};
 }
 
 describe("SessionCompactor", () => {
-	test("records durable summary metadata through its interface", () => {
+	test("records durable summary metadata through its interface", async () => {
 		const persisted: Array<{
 			summary: string;
 			tokensBefore: number;
@@ -48,7 +48,7 @@ describe("SessionCompactor", () => {
 			}),
 		);
 
-		compactor.recordCompaction(
+		await compactor.recordCompaction(
 			[
 				{
 					role: "compactionSummary",
@@ -60,7 +60,7 @@ describe("SessionCompactor", () => {
 					entryId: "entry-kept",
 				} as Message & { entryId: string },
 			],
-			12_345,
+			Promise.resolve(12_345),
 		);
 
 		expect(persisted).toEqual([

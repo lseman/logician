@@ -13,6 +13,7 @@ import {
 	isCustomMessage,
 	isLlmMessage,
 } from "../../system/types/types-messages.ts";
+import { loadNativeTokenizer } from "./native-tokenizer.ts";
 
 /** Minimal shape this module needs from a snapcompact `Frame` (see
  * runtime/compaction/snapcompact.ts) — duck-typed to avoid a capabilities ->
@@ -257,9 +258,27 @@ export function convertToChatFormat(
 		});
 }
 
-export function estimateTokens(text: string): number {
+/**
+ * Count tokens in `text` using the native BPE tokenizer (o200k_base) when
+ * the native addon is built, falling back to a content-type heuristic
+ * otherwise. Async because loading the native addon is async; every caller
+ * in the estimateTokens chain propagates that.
+ */
+export async function estimateTokens(text: string): Promise<number> {
 	if (!text || text.length === 0) return 0;
 
+	const native = await loadNativeTokenizer();
+	if (native) return native.countTokens(text);
+
+	return estimateTokensHeuristic(text);
+}
+
+/**
+ * Content-type heuristic used when the native tokenizer isn't available, and
+ * directly by synchronous callers (status bar, live inspection views) that
+ * need an instant estimate more than an exact count.
+ */
+export function estimateTokensHeuristic(text: string): number {
 	// ── Detect content type and apply appropriate tokenizer ──────────────
 
 	// JSON-heavy content (tool definitions, API responses, structured data)
@@ -382,11 +401,28 @@ function estimateNaturalLanguageTokens(text: string): number {
 
 // All token estimates use the same basis (serialized chat payload) so that
 // budgets and compaction before/after deltas are directly comparable.
-export function estimateChatPayloadTokens(
+export async function estimateChatPayloadTokens(
+	messages: Message[],
+	tools?: Record<string, unknown>[],
+): Promise<number> {
+	return estimateTokens(
+		JSON.stringify({
+			messages: convertToChatFormat(messages),
+			tools: tools || [],
+		}),
+	);
+}
+
+/**
+ * Synchronous, heuristic-only counterpart to {@link estimateChatPayloadTokens}
+ * for status-bar/live-inspection callers that need an instant estimate on
+ * every UI refresh rather than an exact, native-tokenizer count.
+ */
+export function estimateChatPayloadTokensHeuristic(
 	messages: Message[],
 	tools?: Record<string, unknown>[],
 ): number {
-	return estimateTokens(
+	return estimateTokensHeuristic(
 		JSON.stringify({
 			messages: convertToChatFormat(messages),
 			tools: tools || [],

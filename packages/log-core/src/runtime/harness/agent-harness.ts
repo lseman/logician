@@ -549,7 +549,7 @@ async function runAgentLoopInternal(
 			// omit it. Estimate the serialized conversation as a reliable fallback
 			// so context usage never remains stuck at zero.
 			const contextTokens = Math.max(
-				estimateChatPayloadTokens(messages, registry.toToolDefinitions()),
+				await estimateChatPayloadTokens(messages, registry.toToolDefinitions()),
 				response?.usage?.totalTokens ?? 0,
 			);
 			await emit({

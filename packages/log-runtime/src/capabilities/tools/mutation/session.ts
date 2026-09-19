@@ -195,7 +195,7 @@ export class MutationSession {
 					afterHash,
 					linesChanged,
 					filesAffected: 0,
-					diff: generateEditDiffs(resolved, proposal.before, proposal.after)
+					diff: (await generateEditDiffs(resolved, proposal.before, proposal.after))
 						.diff,
 					error: `${resolved} already exists. Cannot create new file.`,
 				};
@@ -215,7 +215,7 @@ export class MutationSession {
 						afterHash,
 						linesChanged,
 						filesAffected: 0,
-						diff: generateEditDiffs(resolved, proposal.before, proposal.after)
+						diff: (await generateEditDiffs(resolved, proposal.before, proposal.after))
 							.diff,
 						error: `${resolved} has been modified since it was last read. Read it again before editing.`,
 					};
@@ -241,10 +241,8 @@ export class MutationSession {
 				(this.#mutationVersions.get(normalizedPath) ?? 0) + 1,
 			);
 
-			const diff = generateEditDiffs(
-				resolved,
-				proposal.before,
-				proposal.after,
+			const diff = (
+				await generateEditDiffs(resolved, proposal.before, proposal.after)
 			).diff;
 
 			return {
@@ -268,7 +266,7 @@ export class MutationSession {
 				afterHash,
 				linesChanged,
 				filesAffected: 0,
-				diff: generateEditDiffs(resolved, proposal.before, proposal.after).diff,
+				diff: (await generateEditDiffs(resolved, proposal.before, proposal.after)).diff,
 				error: `Failed to write ${resolved}: ${errorMessage}`,
 			};
 		}

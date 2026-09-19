@@ -157,7 +157,7 @@ async function runNativeReplaceEdit(
 		}
 
 		return {
-			diff: generateEditDiffs(resolved, baseContent, newContent).diff,
+			diff: (await generateEditDiffs(resolved, baseContent, newContent)).diff,
 			baseContent,
 			newContent,
 			mutation: mutationReceipt(mutationResult),
@@ -297,10 +297,8 @@ async function runNativeHashlineEdit(
 					receipts.push(mutationReceipt(removed));
 					if (removed.error) throw new Error(removed.error);
 					filesAffected += created.filesAffected + removed.filesAffected;
-					linesChanged += generateEditDiffs(
-						request.moveTo,
-						before,
-						after,
+					linesChanged += (
+						await generateEditDiffs(request.moveTo, before, after)
 					).linesChanged;
 					return { written: after };
 				}
@@ -320,10 +318,8 @@ async function runNativeHashlineEdit(
 				receipts.push(mutationReceipt(result));
 				if (result.error) throw new Error(result.error);
 				filesAffected += result.filesAffected;
-				linesChanged += generateEditDiffs(
-					request.path,
-					before,
-					after,
+				linesChanged += (
+					await generateEditDiffs(request.path, before, after)
 				).linesChanged;
 				return { written: after };
 			},

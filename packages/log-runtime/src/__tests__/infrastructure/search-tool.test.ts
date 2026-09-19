@@ -33,15 +33,18 @@ void rgTest(
 );
 
 void rgTest(
-	"grep reports ripgrep pattern errors instead of no matches",
+	"grep falls back to a literal match for a malformed regex instead of erroring",
 	async () => {
+		// Native grep's build_matcher() treats an unparseable pattern as a
+		// literal string rather than failing the whole search (grep.rs's
+		// "final fallback"). "[" isn't in the file, so this is a no-match,
+		// not an error — an intentional upstream reliability tradeoff.
 		const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
 		writeFileSync(join(cwd, "notes.txt"), "alpha\n", "utf8");
 
 		const result = await grep.execute({ pattern: "[" }, { cwd });
 		const content = typeof result === "string" ? result : result.content;
-		assert.match(content, /^Error: /);
-		assert.notEqual(content, "No matches found.");
+		assert.equal(content, "No matches found.");
 	},
 );
 
@@ -116,4 +119,173 @@ void test("grep rejects a directory-shaped resource that has no backing sourcePa
 	const result = await grepTool.execute({ pattern: "x", path: "listing://" }, {});
 	const content = typeof result === "string" ? result : result.content;
 	assert.match(content, /^Error: grep cannot recurse/);
+});
+
+// ── skip parameter ──────────────────────────────────────────────────────────
+void rgTest("grep skip skips the first N matches", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"alpha\nfirst needle\nbeta\nsecond needle\ngamma\n",
+		"utf8",
+	);
+	const result = await grep.execute(
+		{ pattern: "needle", path: join(cwd, "notes.txt"), limit: 1, skip: 1 },
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	assert.match(content, /second needle/);
+	assert.doesNotMatch(content, /first needle/);
+});
+
+void rgTest("grep skip with zero skip returns all matches", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"alpha\nneedle\nbeta\nneedle\ngamma\n",
+		"utf8",
+	);
+	const result = await grep.execute(
+		{ pattern: "needle", path: join(cwd, "notes.txt"), skip: 0 },
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	const lines = content.split("\n").filter(l => l.includes("needle"));
+	assert.equal(lines.length, 2);
+});
+
+// ── case sensitivity ────────────────────────────────────────────────────────
+void rgTest("grep case:true is case-sensitive", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"Alpha\nALPHA\nalpha\n",
+		"utf8",
+	);
+	const result = await grep.execute(
+		{ pattern: "Alpha", path: join(cwd, "notes.txt"), case: true },
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	assert.match(content, /1: Alpha/);
+	assert.doesNotMatch(content, /ALPHA/);
+	assert.doesNotMatch(content, /3: alpha/);
+});
+
+void rgTest("grep case:false is case-insensitive", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"Alpha\nALPHA\nalpha\n",
+		"utf8",
+	);
+	const result = await grep.execute(
+		{ pattern: "alpha", path: join(cwd, "notes.txt"), case: false },
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	const lines = content.split("\n").filter(l => /: (Alpha|ALPHA|alpha)/.test(l));
+	assert.equal(lines.length, 3);
+});
+
+void rgTest("grep case takes priority over ignoreCase", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"Alpha\nALPHA\nalpha\n",
+		"utf8",
+	);
+	// case:true overrides ignoreCase:true
+	const result = await grep.execute(
+		{ pattern: "alpha", path: join(cwd, "notes.txt"), case: true, ignoreCase: true },
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	const lines = content.split("\n").filter(l => /: alpha/.test(l));
+	assert.equal(lines.length, 1);
+	assert.match(content, /3: alpha/);
+});
+
+// ── cross-line patterns ────────────────────────────────────────────────────
+void rgTest("grep detects cross-line patterns via literal \\n", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"hello\nworld\nfoo\n",
+		"utf8",
+	);
+	const result = await grep.execute(
+		{ pattern: "hello\\nworld", path: join(cwd, "notes.txt") },
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	assert.doesNotMatch(content, /No matches/);
+});
+
+// ── semicolon-delimited paths ──────────────────────────────────────────────
+void rgTest("grep supports semicolon-delimited multiple paths", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(join(cwd, "a.txt"), "from A\n", "utf8");
+	writeFileSync(join(cwd, "b.txt"), "from B\n", "utf8");
+	const result = await grep.execute(
+		{ pattern: "from", path: join(cwd, "a.txt") + ";" + join(cwd, "b.txt") },
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	assert.match(content, /a\.txt/);
+	assert.match(content, /b\.txt/);
+});
+
+// ── line-range selector ────────────────────────────────────────────────────
+void rgTest("grep filters by file:LINE1-LINE2 selector", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"line one\nline two\nneedle here\nline four\nline five\n",
+		"utf8",
+	);
+	const result = await grep.execute(
+		{
+			pattern: "needle",
+			path: join(cwd, "notes.txt") + ":1-2",
+		},
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	assert.match(content, /No matches/);
+});
+
+void rgTest("grep line-range selector returns match when in range", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+	writeFileSync(
+		join(cwd, "notes.txt"),
+		"line one\nneedle here\nline three\n",
+		"utf8",
+	);
+	const result = await grep.execute(
+		{
+			pattern: "needle",
+			path: join(cwd, "notes.txt") + ":2-2",
+		},
+		{ cwd },
+	);
+	const content = typeof result === "string" ? result : result.content;
+	assert.match(content, /needle/);
+});
+
+// ── prepareArguments ───────────────────────────────────────────────────────
+void test("grep prepareArguments passes through skip and case", () => {
+	const args = grep.prepareArguments?.({
+		pattern: "test",
+		skip: 5,
+		case: false,
+	}) ?? {};
+	assert.equal(args.pattern, "test");
+	assert.equal(args.skip, 5);
+	assert.equal(args.case, false);
+});
+
+void test("grep prepareArguments defaults skip to 0", () => {
+	const args = grep.prepareArguments?.({ pattern: "test" }) ?? {};
+	assert.equal(args.skip, 0);
 });

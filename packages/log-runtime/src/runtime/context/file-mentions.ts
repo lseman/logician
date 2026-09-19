@@ -1,16 +1,12 @@
 // ── File mention listing ────────────────────────────────────────────────────
 // Lists project files for @-mention autocomplete in the TUI input bar.
-// Uses fd (falls back to rg --files); same tools as the find tool, but returns
-// a plain array capped at a small limit since callers filter client-side.
+// Uses @logician/log-natives' native glob() engine (pi-walker-backed) instead
+// of shelling out to fd/rg; returns a plain array capped at a small limit
+// since callers filter client-side.
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { ensureTool } from "../../capabilities/tools/external-tools.ts";
-
-const execFileAsync = promisify(execFile);
+import { loadNative } from "../../capabilities/tools/support/native-addon.ts";
 
 const DEFAULT_LIMIT = 5000;
-const EXEC_TIMEOUT_MS = 3000;
 
 let cache: { cwd: string; files: string[]; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 15000;
@@ -35,41 +31,21 @@ export async function listProjectFiles(
 }
 
 async function fetchFiles(cwd: string, limit: number): Promise<string[]> {
-	const fdPath = await ensureTool("fd");
-	if (fdPath) {
-		try {
-			const { stdout } = await execFileAsync(
-				fdPath,
-				[
-					"--type",
-					"f",
-					"--color=never",
-					"--hidden",
-					"--no-require-git",
-					"--max-results",
-					String(limit),
-				],
-				{ cwd, timeout: EXEC_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
-			);
-			return stdout.split("\n").filter(Boolean);
-		} catch {
-			// fall through to rg
-		}
+	try {
+		const native = await loadNative();
+		const result = await native.glob(
+			{
+				pattern: "**/*",
+				path: cwd,
+				fileType: native.FileType.File,
+				hidden: true,
+				gitignore: true,
+				maxResults: limit,
+			},
+			null,
+		);
+		return result.matches.map(match => match.path);
+	} catch {
+		return [];
 	}
-
-	const rgPath = await ensureTool("rg");
-	if (rgPath) {
-		try {
-			const { stdout } = await execFileAsync(rgPath, ["--files", "--hidden"], {
-				cwd,
-				timeout: EXEC_TIMEOUT_MS,
-				maxBuffer: 4 * 1024 * 1024,
-			});
-			return stdout.split("\n").filter(Boolean).slice(0, limit);
-		} catch {
-			return [];
-		}
-	}
-
-	return [];
 }

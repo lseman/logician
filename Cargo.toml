@@ -75,13 +75,17 @@ pi-walker = { path = "crates/pi-walker" }
 # ── Shared third-party deps ──────────────────────────────────────────────────
 anyhow = "1.0"
 async-trait = "0.1"
+base64 = "0.23"
 dashmap = "6.1"
+fancy-regex = "0.16"
 flume = "0.11"
+fontdue = { version = "0.9", default-features = false }
 globset = "0.4"
 heapless = "0.9"
 ignore = "0.4"
 inferno = { version = "0.12", default-features = false }
 libc = "0.2"
+png = "0.18"
 napi = { version = "3", features = ["napi10", "tokio_rt", "tokio_time"] }
 napi-build = "2"
 napi-derive = "3"
@@ -93,9 +97,15 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 smallvec = { version = "1.15.1", features = ["serde", "write", "union", "const_new"] }
 thiserror = "2"
+tiktoken-rs = "0.11"
 tokio = { version = "1", features = ["full"] }
+grep-matcher = "0.1"
+grep-pcre2 = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
 xutf = "1.4"
 xxhash-rust = { version = "0.8", features = ["xxh64", "xxh32"] }
+zstd = "0.13"
 windows-sys = { version = "0.61", features = [
 	"Wdk_Storage_FileSystem",
 	"Win32_Foundation",

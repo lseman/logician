@@ -5,7 +5,9 @@ export {
 	createToolResultMessage,
 	createUserMessage,
 	estimateChatPayloadTokens,
+	estimateChatPayloadTokensHeuristic,
 	estimateTokens,
+	estimateTokensHeuristic,
 } from "./capabilities/provider/messages.ts";
 export {
 	type CustomSessionEntry,

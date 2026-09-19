@@ -25,10 +25,10 @@ void test("conversation serialization tolerates null and malformed content", () 
 	);
 });
 
-void test("context estimates include tool definition overhead", () => {
+void test("context estimates include tool definition overhead", async () => {
 	const messages = [createUserMessage("hello")];
-	const withoutTools = estimateChatPayloadTokens(messages);
-	const withTools = estimateChatPayloadTokens(messages, [
+	const withoutTools = await estimateChatPayloadTokens(messages);
+	const withTools = await estimateChatPayloadTokens(messages, [
 		{
 			type: "function",
 			function: {

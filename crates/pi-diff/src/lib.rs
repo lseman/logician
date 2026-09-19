@@ -16,7 +16,7 @@ pub use lines::{
 	concat_tokens_u16, diff_lines_u16, line_changes_str, line_runs_str, line_runs_u16, line_tokens_str,
 	line_tokens_u16, LF,
 };
-pub use myers::{build_changes, intern, Change, Run};
+pub use myers::{build_changes, intern, myers_diff, Change, Run};
 pub use unified::{structured_patch_hunks_from_runs_u16, structured_patch_hunks_u16, Hunk};
 pub use words::diff_words_u16;
 

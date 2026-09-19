@@ -155,13 +155,13 @@ export async function runCompaction(
 }
 
 /** Whether auto-compaction should fire given current settings + message history. */
-export function shouldAutoCompact(
+export async function shouldAutoCompact(
 	settings: CompactionSettings,
 	messages: Message[],
-): boolean {
+): Promise<boolean> {
 	if (!settings.enabled) return false;
 	const contextWindow = settings.contextWindow ?? 128000;
 	const threshold = contextWindow - (settings.reserveTokens ?? 16384);
-	const currentTokens = estimateChatPayloadTokens(messages);
+	const currentTokens = await estimateChatPayloadTokens(messages);
 	return currentTokens > threshold;
 }

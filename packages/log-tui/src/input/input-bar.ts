@@ -69,10 +69,7 @@ export class InputBar implements Component, Focusable {
 	private historyUnsaved: string | null = null;
 	private _prompt: string | undefined;
 	private get _promptResolved(): string {
-		if (this._prompt === undefined) {
-			this._prompt = `  ${theme.fg("prompt", "")}${BOLD}› ${RESET}`;
-		}
-		return this._prompt;
+		return this._prompt ?? `  ${theme.fgRaw("prompt")}${BOLD}› ${RESET}`;
 	}
 	private _placeholder = "Ask Logician…";
 	private maxHistory = 100;
@@ -90,6 +87,7 @@ export class InputBar implements Component, Focusable {
 	// Rendering cache
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
+	private cachedColors = "";
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
@@ -662,11 +660,27 @@ export class InputBar implements Component, Focusable {
 	}
 
 	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedLines !== null) {
+		const colors = (
+			[
+				"prompt",
+				"inputText",
+				"inputPlaceholder",
+				"bashMode",
+				"pythonMode",
+			] as const
+		)
+			.map(color => theme.fgRaw(color))
+			.join("");
+		if (
+			width === this.cachedWidth &&
+			this.cachedLines !== null &&
+			colors === this.cachedColors
+		) {
 			return this.cachedLines;
 		}
 
 		this.cachedWidth = width;
+		this.cachedColors = colors;
 		const prompt = this._promptResolved;
 		const promptWidth = visibleWidth(prompt);
 		const contentWidth = Math.max(1, width - promptWidth - 2);
@@ -709,21 +723,17 @@ export class InputBar implements Component, Focusable {
 
 		// Build the line
 		const color = isPlaceholder
-			? theme.fg("inputPlaceholder", "")
-			: (this._modeColor ?? theme.fg("inputText", ""));
+			? theme.fgRaw("inputPlaceholder")
+			: this._inputColor;
 		const rawLine =
 			prompt +
-			(viewport.leftClipped
-				? `${theme.fg("inputPlaceholder", "")}‹${RESET}`
-				: "") +
+			(viewport.leftClipped ? theme.fg("inputPlaceholder", "‹") : "") +
 			color +
 			beforeCursor +
 			cursorChar +
 			afterCursor +
 			"\x1b[0m" +
-			(viewport.rightClipped
-				? `${theme.fg("inputPlaceholder", "")}›${RESET}`
-				: "");
+			(viewport.rightClipped ? theme.fg("inputPlaceholder", "›") : "");
 
 		// Calculate visible width (strip CURSOR_MARKER for measurement)
 		const cleanLine = rawLine.replace(CURSOR_MARKER, "");
@@ -799,7 +809,9 @@ export class InputBar implements Component, Focusable {
 			const raw =
 				prefix +
 				theme.fg("inputPlaceholder", leftMarker) +
-				theme.fg("inputText", body) +
+				this._inputColor +
+				body +
+				RESET +
 				theme.fg("inputPlaceholder", rightMarker) +
 				RESET;
 			const clean = raw.replace(CURSOR_MARKER, "");
@@ -807,6 +819,13 @@ export class InputBar implements Component, Focusable {
 		}
 
 		return rows;
+	}
+
+	private get _inputColor(): string {
+		if (this._modeColor && theme.hasColor(this._modeColor)) {
+			return theme.fgRaw(this._modeColor);
+		}
+		return this._modeColor ?? theme.fgRaw("inputText");
 	}
 
 	private _inputViewport(

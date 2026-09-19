@@ -2,8 +2,11 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { InputBar } from "../input/input-bar.ts";
+import { Separator } from "../rendering/separator.ts";
 import { renderFileContent } from "../rendering/transcript/render/content.ts";
 import { renderMarkdownLines } from "../rendering/transcript/render/markdown-table.ts";
+import { CURSOR_MARKER } from "../terminal/core.ts";
 import { initTheme, type ThemeColor, theme } from "../terminal/theme.ts";
 
 const home = process.env.HOME;
@@ -128,19 +131,67 @@ for (const mode of ["truecolor", "256color"]) {
 					"muted",
 					"dim",
 					"header",
+					"prompt",
+					"inputText",
+					"inputPlaceholder",
+					"userLabel",
 				] as ThemeColor[]) {
 					expect(
 						contrast(rgb(theme.fgRaw(token)), canvas),
 						`${json.name}: ${token} on canvas`,
 					).toBeGreaterThanOrEqual(4.5);
 				}
-				for (const token of ["border", "borderMuted"] as ThemeColor[]) {
+				for (const token of [
+					"border",
+					"borderMuted",
+					"inputBarBorder",
+				] as ThemeColor[]) {
 					expect(
 						contrast(rgb(theme.fgRaw(token)), canvas),
 						`${json.name}: ${token} on canvas`,
 					).toBeGreaterThanOrEqual(2.5);
 				}
 			}
+		}
+	});
+}
+
+test("existing composer and dividers recolor at the same width after a theme switch", () => {
+	process.env.COLORTERM = "truecolor";
+	initTheme("dark");
+	const input = new InputBar();
+	const border = new Separator("inputBarBorder");
+	const divider = new Separator();
+	const before = [input.render(80), border.render(80), divider.render(80)];
+	initTheme("light");
+	const after = [
+		input.render(80),
+		border.render(80),
+		divider.render(80),
+	] as const;
+	for (let i = 0; i < before.length; i++)
+		expect(after[i]).not.toEqual(before[i]);
+	expect(after[0][0]).toContain(`${theme.fgRaw("prompt")}\x1b[1m`);
+	expect(after[0][0]).toContain(
+		`${theme.fgRaw("inputPlaceholder")}${CURSOR_MARKER}Ask`,
+	);
+	expect(after[1][0]).toStartWith(theme.fgRaw("inputBarBorder"));
+	expect(input.render(80)).toBe(after[0]);
+});
+
+for (const mode of ["bashMode", "pythonMode"] as const) {
+	test(`${mode} follows theme switches in single and multiline input`, () => {
+		process.env.COLORTERM = "truecolor";
+		const input = new InputBar();
+		input.modeColor = mode;
+		for (const value of ["command", "first\nsecond"]) {
+			initTheme("dark");
+			input.valueText = value;
+			const before = input.render(80);
+			initTheme("light");
+			const after = input.render(80);
+			expect(after).not.toEqual(before);
+			for (const line of after) expect(line).toContain(theme.fgRaw(mode));
 		}
 	});
 }

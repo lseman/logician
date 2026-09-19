@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { ContextEngine } from "../../system/context/context-engine.ts";
 
 describe("ContextEngine", () => {
-	test("deduplicates contributions and attributes their usage", () => {
-		const engine = new ContextEngine(messages => messages.length * 10);
-		const snapshot = engine.assemble({
+	test("deduplicates contributions and attributes their usage", async () => {
+		const engine = new ContextEngine(async messages => messages.length * 10);
+		const snapshot = await engine.assemble({
 			history: [{ role: "user", content: "existing" }],
 			contributions: [
 				{
@@ -25,9 +25,9 @@ describe("ContextEngine", () => {
 		]);
 	});
 
-	test("uses priority for system-prompt overrides and injected budgets", () => {
-		const engine = new ContextEngine(messages => messages.length * 10);
-		const snapshot = engine.assemble({
+	test("uses priority for system-prompt overrides and injected budgets", async () => {
+		const engine = new ContextEngine(async messages => messages.length * 10);
+		const snapshot = await engine.assemble({
 			history: [],
 			baseSystemPrompt: "base",
 			maxInjectedTokens: 10,

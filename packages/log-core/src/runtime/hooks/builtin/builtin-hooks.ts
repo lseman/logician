@@ -278,7 +278,10 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				deps.emitEvent?.({
 					type: "compaction",
 					reason: "threshold",
-					tokensBefore: estimateChatPayloadTokens(messages, deps.toolDefs()),
+					tokensBefore: await estimateChatPayloadTokens(
+						messages,
+						deps.toolDefs(),
+					),
 					tokensAfter: result.tokensAfter,
 				});
 				const tasks = taskLedger.snapshot();

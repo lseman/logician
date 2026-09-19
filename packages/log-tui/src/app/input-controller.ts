@@ -6,7 +6,6 @@ import {
 } from "@logician/log-runtime/commands";
 import { beginPendingTurn } from "../state/turn-state.ts";
 import { logInputTrace } from "../terminal/input-protocol.ts";
-import { theme } from "../terminal/theme.ts";
 import type { LogicianTUI } from "./tui.ts";
 
 /** Ctrl+E encodings emitted by terminals with CSI-u or modifyOtherKeys. */
@@ -87,7 +86,7 @@ function handleAutocompleteInput(ctx: LogicianTUI, data: string): boolean {
 			return true;
 		}
 		// Everything else goes to the input bar; onChange re-syncs the popup.
-		return true;
+		return false;
 	}
 
 	// Skill popup: same pattern as file mention.
@@ -114,7 +113,7 @@ function handleAutocompleteInput(ctx: LogicianTUI, data: string): boolean {
 			ctx.tui.requestRender();
 			return true;
 		}
-		return true;
+		return false;
 	}
 
 	// Slash popup: up/down navigation, tab complete, escape dismiss/stop loop,
@@ -163,7 +162,7 @@ function handleAutocompleteInput(ctx: LogicianTUI, data: string): boolean {
 			ctx.slashPopup.hide();
 			return false; // fall through to input bar submission
 		}
-		return true; // typing/backspace goes to input bar
+		return false; // Editing keys reach the input bar; onChange updates matches.
 	}
 
 	return false;
@@ -632,14 +631,14 @@ function handleInputChange(ctx: LogicianTUI, text: string): void {
 	// Update input bar mode color for bash (!) and python ($) prefixes.
 	const trimmed = text.trimStart();
 	if (trimmed.startsWith("!")) {
-		ctx.inputBar.modeColor = theme.fgRaw("bashMode");
+		ctx.inputBar.modeColor = "bashMode";
 	} else if (trimmed.startsWith("$")) {
 		const prefixLen = pythonCommandPrefixLength(trimmed);
 		if (
 			prefixLen > 0 &&
 			!looksLikePastedShellPrompt(trimmed.slice(prefixLen).trim())
 		) {
-			ctx.inputBar.modeColor = theme.fgRaw("pythonMode");
+			ctx.inputBar.modeColor = "pythonMode";
 		} else {
 			ctx.inputBar.modeColor = null;
 		}

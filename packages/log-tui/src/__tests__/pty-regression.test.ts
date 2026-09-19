@@ -102,6 +102,39 @@ import { runInPty, screenFromPtyResult } from "../testing/pty-harness.ts";
 const repoRoot = path.resolve(import.meta.dirname, "../../../..");
 const bun = process.execPath;
 const entry = path.join(repoRoot, "packages", "log-tui", "src", "index.ts");
+void test("slash autocomplete allows continued typing and backspace", async () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-slash-"));
+	const result = await runInPty({
+		command: bun,
+		args: ["run", entry],
+		cwd: repoRoot,
+		env: {
+			HOME: home,
+			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
+			LOGICIAN_MCP: "0",
+			LOGICIAN_HOOKS: "0",
+			LOGICIAN_MODEL: "test-model",
+		},
+		actions: [
+			{ afterMs: 500, send: "/" },
+			{ afterMs: 150, send: "t" },
+			{ afterMs: 150, send: "h" },
+			{ afterMs: 150, send: "e" },
+			{ afterMs: 150, send: "m" },
+			{ afterMs: 150, send: "\x7f" },
+			{ afterMs: 150, send: "m" },
+			{ afterMs: 150, send: "e" },
+		],
+		timeoutMs: 2_000,
+		columns: 120,
+		rows: 32,
+	});
+	const screen = screenFromPtyResult(result, 120, 32).text();
+	assert.match(screen, /› \/theme/);
+	assert.doesNotMatch(result.output, /TypeError|TUI render error/);
+});
+
 void test("raw Ctrl+C exits an idle TUI", async () => {
 	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-interrupt-"));
 	const themeDir = path.join(home, ".logician", "themes");

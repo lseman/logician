@@ -75,10 +75,10 @@
 		"levelHigh": "purple",
 		"levelXhigh": "pink",
 		"separator": "borderMuted",
-		"prompt": "pink",
+		"prompt": "yellow",
 		"inputText": "fg",
 		"inputPlaceholder": "fgMuted",
-		"inputBarBorder": "pink",
+		"inputBarBorder": "yellow",
 		"selected": "blue",
 		"header": "fg",
 		"active": "green",
@@ -93,6 +93,6 @@
 		"memoryCount": "fgMuted",
 		"bashMode": "orange",
 		"pythonMode": "yellow",
-		"userLabel": "pink"
+		"userLabel": "yellow"
 	}
 }

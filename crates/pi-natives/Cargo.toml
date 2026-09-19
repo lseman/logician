@@ -14,7 +14,9 @@ workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 ast-grep-core.workspace = true
+base64.workspace = true
 flume.workspace = true
+fontdue.workspace = true
 globset.workspace = true
 heapless.workspace = true
 inferno.workspace = true
@@ -22,10 +24,28 @@ napi.workspace = true
 napi-derive.workspace = true
 parking_lot.workspace = true
 pi-ast.workspace = true
+pi-diff.workspace = true
 pi-edit.workspace = true
 pi-walker.workspace = true
+regex.workspace = true
 smallvec.workspace = true
+grep-matcher.workspace = true
+grep-pcre2.workspace = true
+grep-regex.workspace = true
+grep-searcher.workspace = true
+ignore.workspace = true
+png.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+xutf.workspace = true
+zstd.workspace = true
 
 [build-dependencies]
 napi-build.workspace = true
+
+[dev-dependencies]
+fancy-regex.workspace = true
+libc.workspace = true
+tiktoken-rs.workspace = true

@@ -7,24 +7,23 @@
 // - Bare file (no glob chars) → short-circuits to that one path.
 // - Path containing glob chars (*, ?, [, ], {, }) → split into the longest
 //   glob-char-free prefix as the search root and the remainder as the
-//   fd pattern, e.g. "src/**/*.ts" → root "src", pattern "**/*.ts".
+//   glob pattern, e.g. "src/**/*.ts" → root "src", pattern "**/*.ts".
 //
-// Uses fd (falls back to rg --files, same as the former find tool) —
-// directories are suffixed with "/" in fd's own default output, so no
-// separate per-entry stat pass is needed the way list_files used to do.
+// Uses @logician/log-natives' native glob() engine (pi-walker-backed, ported
+// from oh-my-pi) instead of shelling out to fd/rg — directories come back
+// tagged with a file type, so they're suffixed with "/" here rather than via
+// a separate per-entry stat pass the way list_files used to do.
 
 import { existsSync, statSync } from "node:fs";
-import { spawn } from "node:child_process";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import type { Tool } from "@logician/log-core";
-import { ensureTool } from "./external-tools.ts";
 import { ensureInsideCwd, resolvePath } from "./support/utils/path-utils.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	formatSize,
 	truncateHead,
 } from "./support/utils/truncate.ts";
+import { loadNative } from "./support/native-addon.ts";
 
 const DEFAULT_LIMIT = 1000;
 const GLOB_CHARS_RE = /[*?[\]{}]/;
@@ -116,168 +115,38 @@ export const glob: Tool = {
 			pattern = "**/*";
 		}
 
-		// Resolve fd path before entering the Promise so errors surface cleanly.
-		const fdPath = await ensureTool("fd");
-		if (!fdPath) {
-			return resolveFallback(pattern, searchPath, limit, ctx.signal);
+		if (ctx.signal?.aborted) return "Error: Command aborted";
+
+		const native = await loadNative();
+		let result: Awaited<ReturnType<typeof native.glob>>;
+		try {
+			result = await native.glob(
+				{ pattern, path: searchPath, hidden: true, gitignore: true, maxResults: limit },
+				null,
+			);
+		} catch (err) {
+			return `Error: ${err instanceof Error ? err.message : String(err)}`;
 		}
 
-		return new Promise<string>(resolve => {
-			if (ctx.signal?.aborted) {
-				resolve("Error: Command aborted");
-				return;
-			}
+		if (result.matches.length === 0) return "No files found matching pattern.";
 
-			// Build fd args. --no-require-git applies .gitignore semantics outside git repos.
-			// --full-path needed for path-containing patterns like 'src/**/*.ts' or '**/*'.
-			const fdArgs: string[] = [
-				"--glob",
-				"--color=never",
-				"--hidden",
-				"--no-require-git",
-				"--max-results",
-				String(limit),
-			];
+		const lines = result.matches.map(match =>
+			match.fileType === native.FileType.Dir ? `${match.path}/` : match.path,
+		);
 
-			let effectivePattern = pattern;
-			if (pattern.includes("/")) {
-				fdArgs.push("--full-path");
-				if (
-					!pattern.startsWith("/") &&
-					!pattern.startsWith("**/") &&
-					pattern !== "**"
-				) {
-					effectivePattern = `**/${pattern}`;
-				}
-			}
-
-			fdArgs.push("--", effectivePattern, searchPath);
-
-			const child = spawn(fdPath, fdArgs, {
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			const rl = createInterface({ input: child.stdout });
-			let stderr = "";
-			const lines: string[] = [];
-			let killedDueToLimit = false;
-
-			const onAbort = () => {
-				if (!child.killed) child.kill();
-			};
-			ctx.signal?.addEventListener("abort", onAbort, { once: true });
-
-			child.stderr?.on("data", (chunk: Buffer) => {
-				stderr += chunk.toString();
-			});
-
-			rl.on("line", line => {
-				if (line) lines.push(line);
-				if (lines.length >= limit && !killedDueToLimit) {
-					killedDueToLimit = true;
-					child.kill();
-				}
-			});
-
-			child.on("error", err => {
-				ctx.signal?.removeEventListener("abort", onAbort);
-				rl.close();
-				resolve(`Error: Failed to run fd: ${err.message}`);
-			});
-
-			child.on("close", code => {
-				ctx.signal?.removeEventListener("abort", onAbort);
-				rl.close();
-
-				if (ctx.signal?.aborted) {
-					resolve("Error: Command aborted");
-					return;
-				}
-
-				if (lines.length === 0) {
-					if (!killedDueToLimit && code !== 0 && code !== 1) {
-						const msg = stderr.trim() || `fd exited with code ${code}`;
-						resolve(`Error: ${msg}`);
-					} else {
-						resolve("No files found matching pattern.");
-					}
-					return;
-				}
-
-				// Relativize paths
-				const relativized = lines
-					.map(raw => {
-						const line = raw.replace(/\r$/, "").trim();
-						if (!line) return null;
-						const hadSlash = line.endsWith("/") || line.endsWith("\\");
-						let rel = line.startsWith(searchPath)
-							? line.slice(searchPath.length + 1)
-							: path.relative(searchPath, line);
-						if (hadSlash && !rel.endsWith("/")) rel += "/";
-						return toPosixPath(rel);
-					})
-					.filter(Boolean) as string[];
-
-				const limitReached = killedDueToLimit || relativized.length >= limit;
-				const rawOutput = relativized.join("\n");
-				const t = truncateHead(rawOutput, {
-					maxLines: Number.MAX_SAFE_INTEGER,
-				});
-				let out = t.content;
-				const notices: string[] = [];
-				if (limitReached) {
-					notices.push(
-						`${limit} results limit reached. Use limit=${limit * 2} or refine pattern`,
-					);
-				}
-				if (t.truncated)
-					notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
-				if (notices.length) out += `\n\n[${notices.join(". ")}]`;
-				resolve(out);
-			});
-		});
+		const limitReached = lines.length >= limit;
+		const rawOutput = lines.join("\n");
+		const t = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+		let out = t.content;
+		const notices: string[] = [];
+		if (limitReached) {
+			notices.push(
+				`${limit} results limit reached. Use limit=${limit * 2} or refine pattern`,
+			);
+		}
+		if (t.truncated)
+			notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+		if (notices.length) out += `\n\n[${notices.join(". ")}]`;
+		return out;
 	},
 };
-
-/** Fallback: use rg --files when fd is not installed. */
-async function resolveFallback(
-	pattern: string,
-	searchPath: string,
-	limit: number,
-	signal?: AbortSignal,
-): Promise<string> {
-	const rgPath = await ensureTool("rg");
-	if (!rgPath) return "Error: Neither fd nor rg (ripgrep) is installed.";
-	const { execFile } = await import("node:child_process");
-	const { promisify } = await import("node:util");
-	const execFileAsync = promisify(execFile);
-	try {
-		const { stdout } = await execFileAsync(
-			rgPath,
-			["--files", "--hidden", "-g", pattern, searchPath],
-			{
-				timeout: 10000,
-				maxBuffer: 1024 * 1024,
-				signal,
-				killSignal: "SIGKILL" as const,
-			},
-		);
-		const all = stdout.split("\n").filter(Boolean);
-		if (all.length === 0) return "No files found matching pattern.";
-		const limited = all.slice(0, limit);
-		const t = truncateHead(limited.join("\n"), {
-			maxLines: Number.MAX_SAFE_INTEGER,
-		});
-		let out = t.content;
-		if (all.length > limit)
-			out += `\n\n[${limit} results limit reached. Use limit=${limit * 2} or refine pattern]`;
-		if (t.truncated)
-			out += `\n\n[${formatSize(DEFAULT_MAX_BYTES)} limit reached]`;
-		return out;
-	} catch (err: unknown) {
-		const e = err as { name?: string; code?: number | string; stderr?: string };
-		if (e.name === "AbortError" || e.code === "ABORT_ERR")
-			return "Error: Command aborted";
-		if (e.code === 1) return "No files found matching pattern.";
-		return `Error: ${e.stderr || String(err)}`;
-	}
-}

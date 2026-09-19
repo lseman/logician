@@ -40,10 +40,12 @@ function fingerprint(message: Message): string {
 /** Curates model-visible context and reports exactly which sources were included. */
 export class ContextEngine {
 	constructor(
-		private readonly estimateTokens: (messages: readonly Message[]) => number,
+		private readonly estimateTokens: (
+			messages: readonly Message[],
+		) => Promise<number>,
 	) {}
 
-	assemble(request: ContextAssemblyRequest): ContextSnapshot {
+	async assemble(request: ContextAssemblyRequest): Promise<ContextSnapshot> {
 		const messages = request.history.map(message => ({ ...message }));
 		const seen = new Set(messages.map(fingerprint));
 		const sources: ContextSourceUsage[] = [];
@@ -58,7 +60,7 @@ export class ContextEngine {
 			const unique = (contribution.messages ?? [])
 				.filter(message => !seen.has(fingerprint(message)))
 				.map(message => ({ ...message }));
-			const estimatedTokens = this.estimateTokens(unique);
+			const estimatedTokens = await this.estimateTokens(unique);
 			const included =
 				request.maxInjectedTokens === undefined ||
 				injectedTokens + estimatedTokens <= request.maxInjectedTokens;

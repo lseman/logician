@@ -1,106 +1,15 @@
 // ── Diff Utilities ─────────────────────────────────────────────────────────────
-// Line-level diff and unified-patch generation for the edit / write
-// tools. Uses an LCS-based line diff so disjoint changes produce separate
-// hunks — a naive common-prefix/suffix diff renders everything between the
-// first and last change as removed+re-added, which reads as "the whole file
-// changed" for multi-edits and replaceAll.
+// Line-level diff and unified-patch generation for the edit / write tools.
+// Backed by @logician/log-natives' native structuredPatchHunks() (a Myers
+// diff, ported from oh-my-pi's pi-diff) instead of a hand-rolled JS LCS, so
+// disjoint changes still produce separate hunks — a naive common-prefix/suffix
+// diff renders everything between the first and last change as removed+re-added,
+// which reads as "the whole file changed" for multi-edits and replaceAll.
 
 import * as path from "node:path";
+import { loadNative, type NativeModule } from "../native-addon.ts";
 
-// ============================================================================
-// Line diff (LCS)
-// ============================================================================
-
-interface DiffOp {
-	type: "equal" | "del" | "add";
-	line: string;
-}
-
-// Above this many DP cells, fall back to the cheap prefix/suffix diff rather
-// than risk memory/CPU blowups on pathological inputs.
-const MAX_LCS_CELLS = 4_000_000;
-
-/**
- * Diff two line arrays into equal/del/add operations. Trims the common
- * prefix/suffix first (typical edits leave a small middle), then runs an LCS
- * over the remainder. Falls back to a whole-block replace when the middle is
- * too large for the DP table.
- */
-function diffOps(before: string[], after: string[]): DiffOp[] {
-	let prefix = 0;
-	while (
-		prefix < before.length &&
-		prefix < after.length &&
-		before[prefix] === after[prefix]
-	) {
-		prefix++;
-	}
-	let suffix = 0;
-	while (
-		suffix < before.length - prefix &&
-		suffix < after.length - prefix &&
-		before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
-	) {
-		suffix++;
-	}
-
-	const a = before.slice(prefix, before.length - suffix);
-	const b = after.slice(prefix, after.length - suffix);
-
-	const ops: DiffOp[] = [];
-	for (let i = 0; i < prefix; i++) ops.push({ type: "equal", line: before[i] });
-	ops.push(...diffMiddle(a, b));
-	for (let i = before.length - suffix; i < before.length; i++) {
-		ops.push({ type: "equal", line: before[i] });
-	}
-	return ops;
-}
-
-function diffMiddle(a: string[], b: string[]): DiffOp[] {
-	if (a.length === 0 && b.length === 0) return [];
-	if (a.length === 0) return b.map(line => ({ type: "add" as const, line }));
-	if (b.length === 0) return a.map(line => ({ type: "del" as const, line }));
-
-	// Fallback: whole-block replace when LCS would be too expensive.
-	if (a.length * b.length > MAX_LCS_CELLS) {
-		return [
-			...a.map(line => ({ type: "del" as const, line })),
-			...b.map(line => ({ type: "add" as const, line })),
-		];
-	}
-
-	// LCS lengths table (rows a, cols b), then backtrack into ops.
-	const cols = b.length + 1;
-	const table = new Int32Array((a.length + 1) * cols);
-	for (let i = a.length - 1; i >= 0; i--) {
-		for (let j = b.length - 1; j >= 0; j--) {
-			table[i * cols + j] =
-				a[i] === b[j]
-					? table[(i + 1) * cols + j + 1] + 1
-					: Math.max(table[(i + 1) * cols + j], table[i * cols + j + 1]);
-		}
-	}
-
-	const ops: DiffOp[] = [];
-	let i = 0;
-	let j = 0;
-	while (i < a.length && j < b.length) {
-		if (a[i] === b[j]) {
-			ops.push({ type: "equal", line: a[i] });
-			i++;
-			j++;
-		} else if (table[(i + 1) * cols + j] >= table[i * cols + j + 1]) {
-			ops.push({ type: "del", line: a[i] });
-			i++;
-		} else {
-			ops.push({ type: "add", line: b[j] });
-			j++;
-		}
-	}
-	for (; i < a.length; i++) ops.push({ type: "del", line: a[i] });
-	for (; j < b.length; j++) ops.push({ type: "add", line: b[j] });
-	return ops;
-}
+type PatchHunk = Awaited<ReturnType<NativeModule["structuredPatchHunks"]>>[number];
 
 // ============================================================================
 // Unified format
@@ -108,81 +17,71 @@ function diffMiddle(a: string[], b: string[]): DiffOp[] {
 
 const CONTEXT_LINES = 3;
 
-/** Render diff ops as unified hunks with headers. */
-function renderUnified(
+/** Render precomputed hunks as unified diff text with headers. */
+function renderUnifiedFromHunks(
 	beforeLabel: string,
 	afterLabel: string,
-	ops: DiffOp[],
+	hunks: PatchHunk[],
 ): string {
-	// Identify changed-op indices; group into hunks when gaps exceed 2*context.
-	const changed: number[] = [];
-	for (let i = 0; i < ops.length; i++) {
-		if (ops[i].type !== "equal") changed.push(i);
-	}
-	if (changed.length === 0) return "";
-
-	interface Hunk {
-		start: number; // first op index (inclusive)
-		end: number; // last op index (inclusive)
-	}
-	const hunks: Hunk[] = [];
-	let current: Hunk = {
-		start: Math.max(0, changed[0] - CONTEXT_LINES),
-		end: Math.min(ops.length - 1, changed[0] + CONTEXT_LINES),
-	};
-	for (let c = 1; c < changed.length; c++) {
-		const start = Math.max(0, changed[c] - CONTEXT_LINES);
-		if (start <= current.end + 1) {
-			current.end = Math.min(ops.length - 1, changed[c] + CONTEXT_LINES);
-		} else {
-			hunks.push(current);
-			current = {
-				start,
-				end: Math.min(ops.length - 1, changed[c] + CONTEXT_LINES),
-			};
-		}
-	}
-	hunks.push(current);
-
+	if (hunks.length === 0) return "";
 	const out = [`--- ${beforeLabel}`, `+++ ${afterLabel}`];
-	// Track line numbers: oldLine/newLine are 1-based positions of the NEXT op.
-	let oldLine = 1;
-	let newLine = 1;
-	let opIndex = 0;
 	for (const hunk of hunks) {
-		// Advance counters over ops before the hunk.
-		for (; opIndex < hunk.start; opIndex++) {
-			const op = ops[opIndex];
-			if (op.type !== "add") oldLine++;
-			if (op.type !== "del") newLine++;
-		}
-		const oldStart = oldLine;
-		const newStart = newLine;
-		let oldCount = 0;
-		let newCount = 0;
-		const body: string[] = [];
-		for (; opIndex <= hunk.end; opIndex++) {
-			const op = ops[opIndex];
-			if (op.type === "equal") {
-				body.push(` ${op.line}`);
-				oldCount++;
-				newCount++;
-				oldLine++;
-				newLine++;
-			} else if (op.type === "del") {
-				body.push(`-${op.line}`);
-				oldCount++;
-				oldLine++;
-			} else {
-				body.push(`+${op.line}`);
-				newCount++;
-				newLine++;
-			}
-		}
-		out.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
-		out.push(...body);
+		out.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+		out.push(...hunk.lines);
 	}
 	return out.join("\n");
+}
+
+const NO_NEWLINE_MARKER = "\\ No newline at end of file";
+
+/**
+ * Derive `firstChangedLine`/`linesChanged` from the same hunks used to render
+ * the diff text, so both come from a single native diff call per edit.
+ * `linesChanged` counts by contiguous change run — max(dels, adds) per run,
+ * not len(dels) + len(adds) — so a plain 1-line substitution (one removed
+ * line + one added line) counts as 1 changed line, not 2.
+ */
+function changeMetricsFromHunks(
+	hunks: PatchHunk[],
+): { firstChangedLine: number | undefined; linesChanged: number } {
+	let firstChangedLine: number | undefined;
+	let linesChanged = 0;
+	for (const hunk of hunks) {
+		let newLine = hunk.newStart;
+		const lines = hunk.lines;
+		let i = 0;
+		while (i < lines.length) {
+			const line = lines[i] ?? "";
+			if (line.startsWith(NO_NEWLINE_MARKER)) {
+				i++;
+				continue;
+			}
+			if (line.startsWith(" ")) {
+				newLine++;
+				i++;
+				continue;
+			}
+			firstChangedLine ??= newLine;
+			let dels = 0;
+			let adds = 0;
+			while (i < lines.length) {
+				const l = lines[i] ?? "";
+				if (l.startsWith(NO_NEWLINE_MARKER)) {
+					i++;
+					continue;
+				}
+				if (l.startsWith(" ")) break;
+				if (l.startsWith("-")) dels++;
+				else {
+					adds++;
+					newLine++;
+				}
+				i++;
+			}
+			linesChanged += Math.max(dels, adds);
+		}
+	}
+	return { firstChangedLine, linesChanged };
 }
 
 // ============================================================================
@@ -197,16 +96,16 @@ export interface EditDiffResult {
 }
 
 /**
- * Generate the display diff and the unified patch from a single LCS pass.
- * Both formats are derived from the same before/after pair on every
- * edit call, so computing diffOps once and rendering it twice avoids
- * doubling the O(a*b) LCS cost for no benefit.
+ * Generate the display diff and the unified patch from a single native
+ * structuredPatchHunks() call. Both formats, plus the change metrics, are
+ * derived from the same hunks on every edit call, so computing them once
+ * avoids doubling the native diff cost for no benefit.
  */
-export function generateEditDiffs(
+export async function generateEditDiffs(
 	filePath: string,
 	before: string,
 	after: string,
-): EditDiffResult & { patch: string } {
+): Promise<EditDiffResult & { patch: string }> {
 	if (before === after) {
 		return {
 			diff: "",
@@ -216,61 +115,31 @@ export function generateEditDiffs(
 		};
 	}
 
-	const ops = diffOps(before.split("\n"), after.split("\n"));
-	const diff = renderUnified("a/edit", "b/edit", ops);
-	const patch = renderUnified(
+	const native = await loadNative();
+	const hunks = native.structuredPatchHunks(before, after, CONTEXT_LINES);
+	const diff = renderUnifiedFromHunks("a/edit", "b/edit", hunks);
+	const patch = renderUnifiedFromHunks(
 		`a/${path.basename(filePath)}`,
 		`b/${path.basename(filePath)}`,
-		ops,
+		hunks,
 	);
-
-	// First changed line, numbered in the AFTER content. `del` lines don't
-	// exist in the after content, so they don't advance that numbering.
-	// `linesChanged` counts by contiguous change hunk — max(dels, adds) per
-	// hunk, not len(dels) + len(adds) — so a plain 1-line substitution (which
-	// the LCS diff represents as one del + one add) counts as 1 changed line,
-	// not 2.
-	let firstChangedLine: number | undefined;
-	let newLine = 1;
-	let linesChanged = 0;
-	let i = 0;
-	while (i < ops.length) {
-		if (ops[i].type === "equal") {
-			newLine++;
-			i++;
-			continue;
-		}
-		firstChangedLine ??= newLine;
-		let dels = 0;
-		let adds = 0;
-		while (i < ops.length && ops[i].type !== "equal") {
-			if (ops[i].type === "del") dels++;
-			else {
-				adds++;
-				newLine++;
-			}
-			i++;
-		}
-		linesChanged += Math.max(dels, adds);
-	}
+	const { firstChangedLine, linesChanged } = changeMetricsFromHunks(hunks);
 
 	return { diff, firstChangedLine, linesChanged, patch };
 }
 
 /** Generate a unified diff between two file states (multi-hunk, 3 context lines). */
-export function syntheticUnifiedDiff(
+export async function syntheticUnifiedDiff(
 	filePath: string,
 	before: string | null,
 	after: string,
-): string {
+): Promise<string> {
 	const beforeLabel =
 		before === null ? "/dev/null" : `a/${path.basename(filePath)}`;
 	const afterLabel = `b/${path.basename(filePath)}`;
-	const ops: DiffOp[] =
-		before === null
-			? after.split("\n").map(line => ({ type: "add" as const, line }))
-			: diffOps(before.split("\n"), after.split("\n"));
-	return renderUnified(beforeLabel, afterLabel, ops);
+	const native = await loadNative();
+	const hunks = native.structuredPatchHunks(before ?? "", after, CONTEXT_LINES);
+	return renderUnifiedFromHunks(beforeLabel, afterLabel, hunks);
 }
 
 /** Summarize a diff for display when it's too large. */

@@ -173,7 +173,9 @@ export class ConversationSession {
 		if (!this.currentSession) return null;
 		const tokensSaved = await this.currentSession.compact(mode);
 		if (tokensSaved === null) return null;
-		const tokensAfter = estimateChatPayloadTokens(this.currentSession.messages);
+		const tokensAfter = await estimateChatPayloadTokens(
+			this.currentSession.messages,
+		);
 		const tokensBefore = tokensAfter + tokensSaved;
 		this.dependencies.emit({
 			type: "compaction",

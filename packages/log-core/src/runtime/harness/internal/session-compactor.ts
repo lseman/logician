@@ -33,7 +33,7 @@ export interface SessionCompactorDependencies {
 		tokensBefore: number,
 		firstKeptEntryId?: string,
 	) => void;
-	estimateTokens: () => number;
+	estimateTokens: () => Promise<number>;
 	emit: (event: {
 		type: "compaction";
 		reason: CompactionReason;
@@ -74,11 +74,16 @@ export class SessionCompactor {
 		this.settings = { ...this.settings, enabled };
 	}
 
-	shouldCompact(messages: Message[] = this.dependencies.history()): boolean {
+	shouldCompact(
+		messages: Message[] = this.dependencies.history(),
+	): Promise<boolean> {
 		return shouldAutoCompact(this.settings, messages);
 	}
 
-	recordCompaction(messages: Message[], tokensBefore: number): void {
+	async recordCompaction(
+		messages: Message[],
+		tokensBefore: Promise<number>,
+	): Promise<void> {
 		const summary = messages.find(
 			message => String(message.role) === "compactionSummary",
 		)?.content;
@@ -91,7 +96,7 @@ export class SessionCompactor {
 			)?.entryId;
 		this.dependencies.persistCompaction(
 			summary,
-			tokensBefore,
+			await tokensBefore,
 			firstKeptEntryId,
 		);
 	}
@@ -121,8 +126,8 @@ export class SessionCompactor {
 		};
 
 		try {
-			const before = this.dependencies.estimateTokens();
-			if (!force && !this.shouldCompact(messages)) {
+			const before = await this.dependencies.estimateTokens();
+			if (!force && !(await this.shouldCompact(messages))) {
 				return await finishUnchanged(before);
 			}
 
@@ -183,7 +188,10 @@ export class SessionCompactor {
 				return await finishUnchanged(before);
 			}
 
-			this.recordCompaction(toMessages(result.messages), before);
+			await this.recordCompaction(
+				toMessages(result.messages),
+				Promise.resolve(before),
+			);
 			await emitPostCompact();
 			await this.dependencies.extensionRunner()?.emit({
 				type: "session_compact",

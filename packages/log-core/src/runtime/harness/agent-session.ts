@@ -568,7 +568,7 @@ export class AgentSession {
 				},
 				onContextCompacted: messages => {
 					onContextCompacted(messages);
-					this.compactor.recordCompaction(
+					void this.compactor.recordCompaction(
 						messages,
 						this.estimatePayloadTokens(),
 					);
@@ -637,7 +637,7 @@ export class AgentSession {
 				.map(message => createUserMessage(message.content));
 			if (nextTurnMessages.length > 0) this.emitQueueChange();
 
-			const assembled = this.contextController.buildContext({
+			const assembled = await this.contextController.buildContext({
 				// Queued user guidance is control-plane input, not optional retrieved
 				// context. Keep it outside the adaptive budget and learning policy.
 				history: [...initialMessages, ...nextTurnMessages],
@@ -1259,7 +1259,7 @@ export class AgentSession {
 
 	// ── Improved token estimation using serialized payload ─────────────────
 
-	private estimatePayloadTokens(): number {
+	private estimatePayloadTokens(): Promise<number> {
 		return estimateChatPayloadTokens(
 			this.messages,
 			this.idleTools?.toToolDefinitions?.(),

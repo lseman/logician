@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { AdaptiveContextController } from "../../system/context/adaptive-context-controller.ts";
 
-const estimate = (messages: readonly unknown[]) => messages.length * 10;
+const estimate = async (messages: readonly unknown[]) => messages.length * 10;
 
 describe("AdaptiveContextController", () => {
-	test("packs relevant context at message granularity within the budget", () => {
+	test("packs relevant context at message granularity within the budget", async () => {
 		const controller = new AdaptiveContextController(estimate);
-		const plan = controller.buildContext({
+		const plan = await controller.buildContext({
 			history: [{ role: "user", content: "fix authentication" }],
 			objective: "fix the authentication token validator",
 			maxInjectedTokens: 20,
@@ -40,7 +40,7 @@ describe("AdaptiveContextController", () => {
 		});
 	});
 
-	test("learns from outcomes while preserving declared priority", () => {
+	test("learns from outcomes while preserving declared priority", async () => {
 		const controller = new AdaptiveContextController(estimate, {
 			learningRate: 1,
 			learningWeight: 4,
@@ -55,7 +55,7 @@ describe("AdaptiveContextController", () => {
 				messages: [{ role: "system" as const, content: "graph" }],
 			},
 		];
-		const first = controller.buildContext({
+		const first = await controller.buildContext({
 			history: [],
 			maxInjectedTokens: 10,
 			contributions,
@@ -63,7 +63,7 @@ describe("AdaptiveContextController", () => {
 		expect(first.sources[0]?.source).toBe("memory");
 		expect(controller.recordOutcome(first.id, { success: false })).toBe(true);
 
-		const second = controller.buildContext({
+		const second = await controller.buildContext({
 			history: [],
 			maxInjectedTokens: 10,
 			contributions,
@@ -73,10 +73,10 @@ describe("AdaptiveContextController", () => {
 		expect(controller.recordOutcome(second.id, { success: true })).toBe(false);
 	});
 
-	test("deduplicates history and credits explicitly useful sources", () => {
+	test("deduplicates history and credits explicitly useful sources", async () => {
 		const controller = new AdaptiveContextController(estimate);
 		const existing = { role: "user" as const, content: "same" };
-		const plan = controller.buildContext({
+		const plan = await controller.buildContext({
 			history: [existing],
 			contributions: [
 				{ source: "memory", messages: [existing] },
@@ -93,7 +93,7 @@ describe("AdaptiveContextController", () => {
 		).toBe(true);
 	});
 
-	test("persists learning and applies task-specific source utility", () => {
+	test("persists learning and applies task-specific source utility", async () => {
 		let persisted:
 			| ReturnType<AdaptiveContextController["exportState"]>
 			| undefined;
@@ -114,7 +114,7 @@ describe("AdaptiveContextController", () => {
 				messages: [{ role: "system" as const, content: "repository map" }],
 			},
 		];
-		const training = controller.buildContext({
+		const training = await controller.buildContext({
 			history: [],
 			objective: "repair authentication middleware",
 			maxInjectedTokens: 20,
@@ -134,7 +134,7 @@ describe("AdaptiveContextController", () => {
 			learningWeight: 10,
 			initialState: persisted,
 		});
-		const plan = restored.buildContext({
+		const plan = await restored.buildContext({
 			history: [],
 			objective: "authentication failure",
 			maxInjectedTokens: 10,

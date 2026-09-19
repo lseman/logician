@@ -5,6 +5,13 @@ colors, input border, and separate code and tool surfaces. Light themes use dark
 ink on pale surfaces; dark themes retain their namesake palette with readable
 secondary text and visible borders.
 
+The composer uses `inputBarBorder` for both horizontal rules, `prompt` for the
+prompt glyph, and `inputText` / `inputPlaceholder` for its content. Bundled
+palettes coordinate the rules, prompt, and `userLabel` with a signature accent.
+These colors update immediately when switching themes, including Bash/Python
+mode colors in multiline input. Custom themes can set each token independently;
+`inputBarBorder` falls back to `border` when omitted.
+
 `canvas` records the intended terminal background. The TUI leaves the terminal's
 main background unchanged. Code blocks use `canvasInset`; tool cards use
 `canvasSubtle`. For the intended appearance, match your terminal background to

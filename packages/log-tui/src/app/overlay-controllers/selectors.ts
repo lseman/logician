@@ -234,7 +234,7 @@ export function handleThemeSelectorAction(
 export function setThemeByName(name: string): boolean {
 	const available = getAvailableThemes();
 	if (!available.includes(name)) return false;
-	setTheme(name);
+	if (!setTheme(name)) return false;
 	saveConfigField("theme", name);
 	return true;
 }

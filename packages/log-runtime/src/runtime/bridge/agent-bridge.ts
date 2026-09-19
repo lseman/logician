@@ -6,7 +6,7 @@ import type { RuntimeEvent } from "@logician/log-core/events";
 import type { PermissionMode } from "@logician/log-core/permissions";
 import type { AbortResult, SessionStore } from "@logician/log-core/runtime";
 import {
-	estimateChatPayloadTokens,
+	estimateChatPayloadTokensHeuristic,
 	type ToolRegistry,
 } from "@logician/log-core/runtime";
 import type { AgentSession } from "@logician/log-core/session";
@@ -1192,7 +1192,7 @@ export class AgentRuntime {
 	private measureContextTokens(): number {
 		const messages = this.getMessages();
 		const toolDefinitions = this.getTools().toToolDefinitions();
-		return estimateChatPayloadTokens(messages, toolDefinitions);
+		return estimateChatPayloadTokensHeuristic(messages, toolDefinitions);
 	}
 
 	private publishContextUsage(): void {

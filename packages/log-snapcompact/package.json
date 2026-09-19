@@ -12,7 +12,9 @@
 		"test": "bun test $(find src -name '*.test.ts' -type f -print)",
 		"typecheck": "tsc --noEmit"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"@logician/log-natives": "workspace:*"
+	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",
 		"bun-types": "^1.3.14",

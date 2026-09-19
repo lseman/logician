@@ -146,19 +146,22 @@ describe("snapcompact", () => {
 			expect(result).toContain("|");
 		});
 
-		it("folds Latin-1 accented characters to their ASCII base instead of a font-unrenderable char", () => {
-			// FONT_DATA only covers ASCII 32-126: é/ñ/ü must decompose to their
-			// base letter (NFKD strips the combining accent), not pass through
-			// raw — the raw code point renders as a blank cell (silent data loss).
+		it("keeps Latin-1 accented characters intact when the native font can render them", () => {
+			// The native "8x13" font's real glyph table (queried via
+			// snapcompactSupportedChars) covers Latin-1 Supplement, so é/ñ/ü
+			// print as themselves instead of NFKD-decomposing to their base
+			// letter — decomposition is now reserved for characters the font
+			// genuinely cannot render.
 			const result = normalizeText("café niño über");
-			expect(result).toBe("cafe nino uber");
+			expect(result).toBe("café niño über");
 		});
 
-		it("folds unrenderable Latin-1 symbols with no ASCII decomposition to a visible placeholder", () => {
-			// ± and ° have no NFKD decomposition and are outside ASCII 32-126;
-			// they must become a visible "?" rather than silently vanishing.
+		it("keeps renderable Latin-1 symbols intact instead of folding them to a placeholder", () => {
+			// ± and ° have no NFKD decomposition, but the native font can
+			// render both directly, so they pass through unchanged rather
+			// than becoming "?".
 			const result = normalizeText("± 5% at 20°");
-			expect(result).toBe("? 5% at 20?");
+			expect(result).toBe("± 5% at 20°");
 		});
 	});
 

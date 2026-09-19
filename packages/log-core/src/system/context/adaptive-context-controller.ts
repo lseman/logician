@@ -112,7 +112,9 @@ export class AdaptiveContextController {
 		| undefined;
 
 	constructor(
-		private readonly estimateTokens: (messages: readonly Message[]) => number,
+		private readonly estimateTokens: (
+			messages: readonly Message[],
+		) => Promise<number>,
 		options: AdaptiveContextControllerOptions = {},
 	) {
 		this.learningWeight = options.learningWeight ?? 2;
@@ -121,7 +123,9 @@ export class AdaptiveContextController {
 		if (options.initialState) this.importState(options.initialState);
 	}
 
-	buildContext(request: AdaptiveContextRequest): AdaptiveContextPlan {
+	async buildContext(
+		request: AdaptiveContextRequest,
+	): Promise<AdaptiveContextPlan> {
 		const messages = request.history.map(message => ({ ...message }));
 		const seen = new Set(messages.map(fingerprint));
 		const objective = words(request.objective ?? "");
@@ -143,7 +147,7 @@ export class AdaptiveContextController {
 				.map(message => ({ ...message }));
 			const selected: Message[] = [];
 			for (const message of unique) {
-				const tokens = this.estimateTokens([message]);
+				const tokens = await this.estimateTokens([message]);
 				if (used + tokens > budgetLimit) continue;
 				selected.push(message);
 				used += tokens;
@@ -152,7 +156,7 @@ export class AdaptiveContextController {
 			sources.push({
 				source: contribution.source,
 				messages: selected.length,
-				estimatedTokens: this.estimateTokens(selected),
+				estimatedTokens: await this.estimateTokens(selected),
 				included,
 			});
 			if (!included) continue;
