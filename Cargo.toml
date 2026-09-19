@@ -1,12 +1,14 @@
 [workspace]
+resolver = "3"
 members = [
 	"crates/pi-ast",
 	"crates/pi-diff",
 	"crates/pi-edit",
 	"crates/pi-natives",
+	"crates/snapcompact",
 	"crates/pi-walker",
 ]
-resolver = "3"
+exclude = ["ecosystem/graphician/graphician-native"]
 
 [workspace.package]
 version = "0.1.0"
@@ -69,7 +71,9 @@ too_many_lines = "allow"
 # ── Internal (this workspace's own crates) ──────────────────────────────────
 pi-ast = { path = "crates/pi-ast" }
 pi-diff = { path = "crates/pi-diff" }
+pi-natives = { path = "crates/pi-natives" }
 pi-edit = { path = "crates/pi-edit" }
+snapcompact = { path = "crates/snapcompact" }
 pi-walker = { path = "crates/pi-walker" }
 
 # ── Shared third-party deps ──────────────────────────────────────────────────

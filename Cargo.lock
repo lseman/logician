@@ -1358,6 +1358,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "snapcompact"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "fancy-regex 0.16.2",
+ "fontdue",
+ "heapless",
+ "inferno",
+ "libc",
+ "napi",
+ "napi-derive",
+ "parking_lot",
+ "png",
+ "serde",
+ "smallvec",
+ "tiktoken-rs",
+ "tokio",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

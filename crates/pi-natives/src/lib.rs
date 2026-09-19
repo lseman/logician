@@ -23,6 +23,7 @@ mod glob_util;
 mod iofs;
 mod js;
 mod prof;
+#[path = "../../snapcompact/src/snapcompact.rs"]
 pub mod snapcompact;
 mod task;
 pub mod tokens;

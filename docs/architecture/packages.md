@@ -4,7 +4,7 @@ Nine workspace packages arranged in three architectural layers.
 
 ```
 Layer 1 — Foundation
-├── log-natives      N-API: pi-ast, pi-edit, pi-grep, pi-walker, pi-diff, pi-snapcompact, pi-tokens
+├── log-natives      N-API: pi-ast, pi-edit, pi-grep, pi-walker, pi-diff, snapcompact, pi-tokens
 ├── log-snapcompact  Bitmap PNG frame compaction (native rasterizer)
 ├── log-autoresearch Autonomous experiment loop (run → measure → keep/discard)
 ├── log-eoh          Evolution of Heuristics — session logic, persistence, dashboard
@@ -61,7 +61,7 @@ Layer 3 — Application
 
 | Package | Scope |
 |---|---|
-| `@logician/log-natives` | N-API bindings wrapping the `pi-natives` Rust crate: `pi-ast` + `pi-edit` (structural search/rewrite, streaming edits), `pi-grep` (PCRE2-backed file search), `pi-walker` (native glob, replaces `fd`/`rg --files`), `pi-diff` (unified diff engine), `pi-snapcompact` (bitmap PNG frame rasterizer), `pi-tokens` (token counting), plus fuzzy-find and file-descriptor utilities. Platform-specific `*.node` binary built via napi-rs. |
+| `@logician/log-natives` | N-API bindings wrapping the `pi-natives` Rust crate: `pi-ast` + `pi-edit` (structural search/rewrite, streaming edits), `pi-grep` (PCRE2-backed file search), `pi-walker` (native glob, replaces `fd`/`rg --files`), `pi-diff` (unified diff engine), `snapcompact` (bitmap PNG frame rasterizer), `pi-tokens` (token counting), plus fuzzy-find and file-descriptor utilities. Platform-specific `*.node` binary built via napi-rs. |
 | `@logician/log-snapcompact` | Local, deterministic context compaction via bitmap PNG frames. Frame rasterization and PNG encoding are delegated to native code (`@logician/log-natives`' `renderSnapcompactPng`). Supports accented Latin characters via native font glyph table queries. Zero external runtime dependencies. |
 | `@logician/log-autoresearch` | Autonomous experiment loop — run, measure, keep or discard. Ported from `pi-autoresearch`. Provides hooks, paths, JSONL helpers, compaction, and shortcuts for the research agent workflow. |
 | `@logician/log-eoh` | Evolution of Heuristics (EoH, arXiv 2401.02051). Session logic, persistence, compaction, hooks, engine, evaluator, LLM integration, population management, and prompts. |

@@ -51,7 +51,7 @@ use fontdue::{Font as TtfFace, FontSettings, Metrics};
 use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 
-use crate::{js, task};
+use super::{js, task};
 
 /// Upper bound on the frame edge: a hard stop against absurd allocations
 /// (`size * size` pixel buffer), far above the 2576px production frame.
