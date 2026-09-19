@@ -10,10 +10,6 @@
 
 mod cancel;
 mod crash_handler;
-#[allow(
-	dead_code,
-	reason = "get_work_profile is the N-API export wired in pi-natives' cdylib; its query surface is dead in this standalone crate but kept whole to match the pi-natives twin"
-)]
 mod prof;
 pub mod js;
 pub mod task;
@@ -22,4 +18,5 @@ pub mod snapcompact;
 #[cfg(test)]
 mod testing;
 
+pub use prof::{get_work_profile, WorkProfile};
 pub use snapcompact::*;

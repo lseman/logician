@@ -962,28 +962,6 @@ export interface PatchHunk {
 }
 
 /**
- * Render one snapcompact frame on a libuv worker: print pre-normalized text
- * onto a `size`-wide bitmap and encode it as PNG.
- *
- * The bitmap height hugs the rows the text actually occupies
- * (`usedRows * lineRepeat * cellHeight`), so a partially filled frame never
- * pays for blank padding rows. The glyph grid holds `floor(size/cellWidth) *
- * floor(size/cellHeight/lineRepeat)` characters; input beyond that is ignored.
- * Native-cell bitmap-font shapes encode as indexed PNG; stretched bitmap-font
- * shapes (target cell != font cell) encode as RGB. TrueType shapes encode RGB
- * directly from grayscale coverage.
- * `stretch: false` pins bitmap fonts to the indexed path, printing
- * natural-size glyphs on the requested cell box; `columns: 2` flows
- * pre-wrapped newline-separated lines down two newspaper columns.
- * `U+000E`/`U+000F` in `text` toggle dim-gray ink spans without occupying a
- * cell.
- * Returns a promise for the PNG encoded as base64, created as a one-byte
- * (Latin-1) JS string straight from native code — no `Uint8Array` hop or
- * JS-side re-encode.
- */
-export declare function renderSnapcompactPng(text: string, options: SnapcompactRenderOptions): Promise<string>
-
-/**
  * Search content for a pattern (one-shot, compiles pattern each time).
  * For repeated searches with the same pattern, use [`grep`] with file filters.
  *
@@ -1031,6 +1009,49 @@ export interface SearchResult {
   /** Error message, if any. */
   error?: string
 }
+
+/**
+ * Unified-diff hunks with jsdiff
+ * `structuredPatch(_, _, oldText, newText, _, _, { context }).hunks`
+ * semantics. `context` defaults to 4 like jsdiff.
+ */
+export declare function structuredPatchHunks(oldText: string, newText: string, context?: number | undefined | null): Array<PatchHunk>
+
+/** Profiling results returned to JavaScript. */
+export interface WorkProfile {
+  /** Folded stack format for flamegraph tools. */
+  folded: string
+  /** Markdown summary of profiling results. */
+  summary: string
+  /** SVG flamegraph (if generation succeeded). */
+  svg?: string
+  /** Total profiled duration in milliseconds. */
+  totalMs: number
+  /** Number of samples collected. */
+  sampleCount: number
+}
+
+/**
+ * Render one snapcompact frame on a libuv worker: print pre-normalized text
+ * onto a `size`-wide bitmap and encode it as PNG.
+ *
+ * The bitmap height hugs the rows the text actually occupies
+ * (`usedRows * lineRepeat * cellHeight`), so a partially filled frame never
+ * pays for blank padding rows. The glyph grid holds `floor(size/cellWidth) *
+ * floor(size/cellHeight/lineRepeat)` characters; input beyond that is ignored.
+ * Native-cell bitmap-font shapes encode as indexed PNG; stretched bitmap-font
+ * shapes (target cell != font cell) encode as RGB. TrueType shapes encode RGB
+ * directly from grayscale coverage.
+ * `stretch: false` pins bitmap fonts to the indexed path, printing
+ * natural-size glyphs on the requested cell box; `columns: 2` flows
+ * pre-wrapped newline-separated lines down two newspaper columns.
+ * `U+000E`/`U+000F` in `text` toggle dim-gray ink spans without occupying a
+ * cell.
+ * Returns a promise for the PNG encoded as base64, created as a one-byte
+ * (Latin-1) JS string straight from native code — no `Uint8Array` hop or
+ * JS-side re-encode.
+ */
+export declare function renderSnapcompactPng(text: string, options: SnapcompactRenderOptions): Promise<string>
 
 /** Shape options for one snapcompact frame. */
 export interface SnapcompactRenderOptions {
@@ -1085,24 +1106,3 @@ export interface SnapcompactRenderOptions {
  * considered renderable because they are interpreted outside font lookup.
  */
 export declare function snapcompactSupportedChars(font: string, chars: string): string
-
-/**
- * Unified-diff hunks with jsdiff
- * `structuredPatch(_, _, oldText, newText, _, _, { context }).hunks`
- * semantics. `context` defaults to 4 like jsdiff.
- */
-export declare function structuredPatchHunks(oldText: string, newText: string, context?: number | undefined | null): Array<PatchHunk>
-
-/** Profiling results returned to JavaScript. */
-export interface WorkProfile {
-  /** Folded stack format for flamegraph tools. */
-  folded: string
-  /** Markdown summary of profiling results. */
-  summary: string
-  /** SVG flamegraph (if generation succeeded). */
-  svg?: string
-  /** Total profiled duration in milliseconds. */
-  totalMs: number
-  /** Number of samples collected. */
-  sampleCount: number
-}

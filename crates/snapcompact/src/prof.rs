@@ -5,7 +5,6 @@
 
 use std::{cell::RefCell, cmp::Reverse, collections::HashMap, sync::LazyLock, time::Instant};
 
-use napi_derive::napi;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 
@@ -112,8 +111,7 @@ pub fn profile_region(region: &'static str) -> ProfileGuard {
 // Work Profile Results
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Profiling results returned to JavaScript.
-#[napi(object)]
+/// Profiling results for a work-profile query.
 #[derive(Clone)]
 pub struct WorkProfile {
 	/// Folded stack format for flamegraph tools.
@@ -214,14 +212,13 @@ fn generate_svg(folded: &str) -> Option<String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// N-API Exports
+// Work Profile Query
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Get work profile data from the last N seconds.
 ///
 /// Always-on profiling - no need to start/stop. Just call this to get
 /// recent activity.
-#[napi]
 pub fn get_work_profile(last_seconds: f64) -> WorkProfile {
 	let window_us = (last_seconds * 1_000_000.0) as u64;
 	let now_us = PROCESS_START.elapsed().as_micros() as u64;
