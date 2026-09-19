@@ -32,10 +32,7 @@ mod pretoken;
 mod scan;
 mod tables;
 mod utf;
-pub use self::{
-	bpe::RankTable,
-	utf::{Cursor, Unit, Utf},
-};
+pub use self::utf::{Unit, Utf};
 
 /// A tokenizer family. Copy-cheap; all state is in lazily-initialized
 /// process-wide tables (first use pays one zstd decode of ~0.5–1 MB).

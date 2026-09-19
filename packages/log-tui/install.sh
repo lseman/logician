@@ -191,9 +191,13 @@ fi
 
 if [ -n "$checksum_file" ] && [ -f "$checksum_file" ]; then
   expected_hash="$(awk '{print $1}' "$checksum_file" 2>/dev/null)"
-  actual_hash="$(sha256sum "$tmp_dir/${asset_name}.tar.gz" | awk '{print $1}')"
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual_hash="$(sha256sum "$tmp_dir/${asset_name}.tar.gz" | awk '{print $1}')"
+  else
+    actual_hash="$(shasum -a 256 "$tmp_dir/${asset_name}.tar.gz" | awk '{print $1}')"
+  fi
   if [ "$expected_hash" = "$actual_hash" ]; then
-    ok "Checksum verified (${C_BOLD}${actual_hash:0:12}...${C_RESET})"
+    ok "Checksum verified (${C_BOLD}$(printf '%.12s' "$actual_hash")...${C_RESET})"
   else
     fail "Checksum mismatch! Expected ${C_BOLD}${expected_hash}${C_RESET}, got ${C_BOLD}${actual_hash}${C_RESET}."
   fi
@@ -223,19 +227,14 @@ if ! tar -xzf "$tmp_dir/${asset_name}.tar.gz" -C "$INSTALL_APP_DIR"; then
 fi
 ok "Extracted archive"
 
-# Bun --compile produces a single binary; find it
-binary=""
-for f in "$INSTALL_APP_DIR/logician-${resolved_version}"/*; do
-  [ -f "$f" ] && binary="$f" && break
-done
-
-if [ -z "$binary" ]; then
+binary="$INSTALL_APP_DIR/logician-${resolved_version}/logician"
+if [ ! -f "$binary" ]; then
   fail "No binary found in archive."
 fi
 
-verbose "Copying binary to ${INSTALL_BIN_DIR}/logician"
-cp "$binary" "$INSTALL_BIN_DIR/logician"
-chmod 0755 "$INSTALL_BIN_DIR/logician"
+verbose "Linking binary to ${INSTALL_BIN_DIR}/logician"
+chmod 0755 "$binary"
+ln -sfn "$binary" "$INSTALL_BIN_DIR/logician"
 ok "Binary installed to ${C_BOLD}${INSTALL_BIN_DIR}/logician${C_RESET}"
 
 # ── PATH setup ───────────────────────────────────────────────────────────────

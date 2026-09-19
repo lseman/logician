@@ -547,11 +547,30 @@ export function getAvailableThemes(): string[] {
 	return themes.sort();
 }
 
-function loadTheme(name: string): Theme {
+export function getThemePath(name: string): string {
 	const userPath = join(getThemesDir(), `${name}.json`);
-	const path = existsSync(userPath)
+	return existsSync(userPath)
 		? userPath
 		: join(BUNDLED_THEMES_DIR, `${name}.json`);
+}
+
+export function inspectTheme(name: string): {
+	name: string;
+	path: string;
+	mode: string;
+	inputBarBorder: string;
+} {
+	const loaded = loadTheme(name);
+	return {
+		name: loaded.name,
+		path: getThemePath(name),
+		mode: loaded.mode,
+		inputBarBorder: loaded.fgRaw("inputBarBorder"),
+	};
+}
+
+function loadTheme(name: string): Theme {
+	const path = getThemePath(name);
 	if (!existsSync(path)) {
 		throw new Error(
 			`Theme not found: ${name} (looked in ${getThemesDir()} and ${BUNDLED_THEMES_DIR})`,

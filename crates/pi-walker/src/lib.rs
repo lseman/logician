@@ -5,6 +5,12 @@
 //! use for globbing, grep candidate discovery, AST scans, and shell builtins.
 //! The crate exposes plain Rust types, visitor interfaces, cache policy, and a
 //! caller-supplied heartbeat so consumers do not inherit N-API dependencies.
+#![allow(
+	dead_code,
+	reason = "ported wholesale from oh-my-pi; some of this shared fast-path/cache \
+	surface (scan caching, native metadata collection) is only consumed by modules \
+	(shell builtins, ...) this fork doesn't include"
+)]
 
 mod cache;
 mod entry;

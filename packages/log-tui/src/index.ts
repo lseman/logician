@@ -49,6 +49,7 @@ import {
 	resolveTrustInfo,
 	TrustStore,
 } from "@logician/log-runtime/trust";
+import { formatInstallation, inspectInstallation } from "./app/doctor.ts";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
 import { LogicianTUI } from "./app/tui.ts";
 import {
@@ -164,13 +165,23 @@ async function main(): Promise<void> {
 		return;
 	}
 	if (args[0] === "doctor" || args.includes("--doctor")) {
-		const report = await buildDoctorReport(cwd);
+		const base = await buildDoctorReport(cwd);
+		const report = {
+			...base,
+			installation: inspectInstallation(base.configuredTheme),
+		};
 		process.stdout.write(
 			args.includes("--json")
 				? `${JSON.stringify(report, null, 2)}\n`
-				: `${formatDoctorReport(report)}\n`,
+				: `${formatDoctorReport(report)}\n${formatInstallation(report.installation)}\n`,
 		);
-		process.exitCode = report.config.valid && report.workspace.present ? 0 : 1;
+		process.exitCode =
+			report.config.valid &&
+			report.workspace.present &&
+			report.native.healthy &&
+			report.installation.theme.valid
+				? 0
+				: 1;
 		return;
 	}
 	// Detect terminal mode

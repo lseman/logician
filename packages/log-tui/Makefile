@@ -11,14 +11,16 @@ build: binary
 binary:
 	@test -x "$(BUN)" || { echo "bun is required to build $(BIN)"; exit 1; }
 	@cd $(CURDIR)/../.. && $(BUN) install
+	@cd $(CURDIR)/../log-natives && $(BUN) run build
 	@mkdir -p dist
 	@rm -f $(TMP_BIN)
 	@cd $(CURDIR)/../.. && node packages/log-tui/scripts/embed-md.mjs \
 		packages/log-runtime/src/runtime/context/system-prompt.md \
 		packages/log-runtime/src/runtime/context/system-prompt-embed.ts \
 		SYSTEM_PROMPT_TEMPLATE
-	$(BUN) build --target=bun --compile $(ENTRY) --outfile $(TMP_BIN)
-	@cp -r themes dist/themes
+	$(BUN) build --target=bun --compile --define 'LOGICIAN_BUILD_REVISION="$(shell git rev-parse HEAD)"' $(ENTRY) --outfile $(TMP_BIN)
+	@mkdir -p dist/themes
+	@cp -R themes/. dist/themes/
 	@mv -f $(TMP_BIN) $(BIN)
 	@echo "Built $(abspath $(BIN))"
 

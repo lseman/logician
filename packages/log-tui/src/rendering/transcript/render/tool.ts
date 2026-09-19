@@ -400,10 +400,6 @@ export function renderTool(
 			lines.push(blockLine(borderColor, line, width));
 		}
 	}
-	// Add block footer for expanded tools.
-	if (expanded && !subagent) {
-		lines.push(blockLine(borderColor, "", width));
-	}
 	return finish();
 }
 
@@ -563,12 +559,7 @@ function collapsedToolPreview(
 	contentWidth: number,
 ): string[] {
 	const detailLines = toolDetailLines(ctx, tool, contentWidth, false);
-	const stripped = detailLines.map(line => stripAnsi(line));
-	// Trim trailing empty lines for a cleaner tail display
-	while (stripped.length > 0 && stripped[stripped.length - 1] === "") {
-		stripped.pop();
-	}
-	return stripped.slice(-COLLAPSED_PREVIEW_LINES);
+	return detailLines.slice(-COLLAPSED_PREVIEW_LINES);
 }
 
 function renderPostEditDiagnostics(
@@ -716,6 +707,10 @@ function toolDetailLines(
 		lines.push(`${DIM}waiting for result...${RESET}`);
 	}
 
+	// Preserve internal spacing and styling, without empty rows above the footer.
+	while (lines.length > 0 && stripAnsi(lines.at(-1) ?? "").trim() === "") {
+		lines.pop();
+	}
 	return lines;
 }
 

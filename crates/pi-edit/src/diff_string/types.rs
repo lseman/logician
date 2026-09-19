@@ -1,6 +1,6 @@
 //! Shared types and constants for diff rendering.
 
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::sync::LazyLock;
 
 use regex::Regex;
 
@@ -69,9 +69,6 @@ pub struct DiffHunk {
 // ---------------------------------------------------------------------------
 
 pub(super) const DIFF_GAP_ROW: &str = "";
-pub(super) const EOF_MARKER: &str = "*** End of File";
-pub(super) const CHANGE_CONTEXT_MARKER: &str = "@@ ";
-pub(super) const EMPTY_CHANGE_CONTEXT_MARKER: &str = "@@";
 pub(super) const MULTI_FILE_MARKERS: [&str; 4] =
 	["*** Update File:", "*** Add File:", "*** Delete File:", "diff --git "];
 pub(super) const DIFF_METADATA_PREFIXES: [&str; 15] = [

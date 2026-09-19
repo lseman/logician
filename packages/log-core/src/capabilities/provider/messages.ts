@@ -259,23 +259,22 @@ export function convertToChatFormat(
 }
 
 /**
- * Count tokens in `text` using the native BPE tokenizer (o200k_base) when
- * the native addon is built, falling back to a content-type heuristic
- * otherwise. Async because loading the native addon is async; every caller
- * in the estimateTokens chain propagates that.
+ * Count tokens in `text` using the native BPE tokenizer (o200k_base).
+ * Async because loading the native addon is async; every caller in the
+ * estimateTokens chain propagates that. Throws if the native addon isn't
+ * built — see native-tokenizer.ts. For a synchronous, approximate count
+ * (status bar, live inspection views), use estimateTokensHeuristic directly.
  */
 export async function estimateTokens(text: string): Promise<number> {
 	if (!text || text.length === 0) return 0;
 
 	const native = await loadNativeTokenizer();
-	if (native) return native.countTokens(text);
-
-	return estimateTokensHeuristic(text);
+	return native.countTokens(text);
 }
 
 /**
- * Content-type heuristic used when the native tokenizer isn't available, and
- * directly by synchronous callers (status bar, live inspection views) that
+ * Content-type heuristic for synchronous callers (status bar, live
+ * inspection views) that need an instant estimate and can't await the
  * need an instant estimate more than an exact count.
  */
 export function estimateTokensHeuristic(text: string): number {

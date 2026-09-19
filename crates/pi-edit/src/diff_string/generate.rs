@@ -6,7 +6,7 @@ use pi_ast::block::{EnclosingBoundaryOptions, LineRange, enclosing_block_boundar
 
 use crate::diff_string::types::{BlockContextSource, DiffOutput};
 
-use super::types::{DEFAULT_ADDED_RUN_CONTEXT_LINES, DIFF_GAP_ROW};
+use super::types::DIFF_GAP_ROW;
 
 // ---------------------------------------------------------------------------
 // Diff prefix / row helpers

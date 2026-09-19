@@ -4,12 +4,12 @@
 
 use super::parse::{operation_payload, parse_operations};
 use super::recovery::{align_boundary_echoes, duplicate_collapse_span, expand_full_line_deletion, frame_line_insertion, fnv_payload, locate_with_recovery, no_op_error, positional_rewrite_segments, prepare_inline, reconcile_overlap, render_rewrite, resolve_references, rewrite_proves_whole_span, rewrite_selection_spans, snap_line_insertion_offset};
-use super::types::{ATOMICITY_NOTICE, Candidate, Operation, OperationRewrite, ParsedPattern, PatternToken, PlannedEdit, markers::GAP};
+use super::types::{ATOMICITY_NOTICE, OperationRewrite, PatternToken, PlannedEdit};
 pub use super::pattern::normalize_text;
 use super::locate::line_number_at;
 use crate::{error::EditError, store::EditStore};
 use std::{
-	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+	collections::{BTreeMap, HashSet},
 	path::Path,
 };
 

@@ -7,7 +7,7 @@
 	"main": "./index.js",
 	"types": "./index.d.ts",
 	"scripts": {
-		"build": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform --release",
+		"build": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform --release -- --locked",
 		"build:debug": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform",
 		"typecheck": "tsc --noEmit"
 	},

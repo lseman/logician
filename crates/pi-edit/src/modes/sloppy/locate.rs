@@ -2,7 +2,7 @@
 //!
 //! Port of `packages/coding-agent/src/edit/sloppy.ts` lines 2417–4198.
 
-use super::types::{Candidate, CandidateResult, NormalizedText, Occurrence, Operation, OperationRewrite, ParsedPattern, PatternToken, SelectionPair, MAX_CANDIDATES, MAX_COMBINATIONS, markers::{GAP, SELECT_CLOSE, SELECT_DIVIDER, SELECT_OPEN}};
+use super::types::{Candidate, CandidateResult, NormalizedText, Occurrence, Operation, OperationRewrite, ParsedPattern, PatternToken, MAX_CANDIDATES, MAX_COMBINATIONS, markers::{GAP, SELECT_CLOSE, SELECT_DIVIDER, SELECT_OPEN}};
 use super::parse::{has_marker_lines, missing_unmarked_lines, operation_payload};
 use super::pattern::normalize_text;
 use crate::error::EditError;

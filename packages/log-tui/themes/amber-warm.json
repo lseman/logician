@@ -21,7 +21,7 @@
 		"reasoning": "#ae9e8a"
 	},
 	"colors": {
-		"accent": "blue",
+		"accent": "orange",
 		"success": "green",
 		"error": "red",
 		"warning": "orange",
@@ -74,10 +74,10 @@
 		"levelHigh": "purple",
 		"levelXhigh": "pink",
 		"separator": "borderMuted",
-		"prompt": "yellow",
+		"prompt": "orange",
 		"inputText": "fg",
 		"inputPlaceholder": "fgMuted",
-		"inputBarBorder": "yellow",
+		"inputBarBorder": "orange",
 		"selected": "blue",
 		"header": "fg",
 		"active": "green",
@@ -90,7 +90,7 @@
 		"memoryId": "blueMuted",
 		"memoryContent": "fgMuted",
 		"memoryCount": "fgMuted",
-		"userLabel": "yellow",
+		"userLabel": "orange",
 		"toolBlockBg": "canvasSubtle",
 		"bashMode": "orange",
 		"pythonMode": "yellow"

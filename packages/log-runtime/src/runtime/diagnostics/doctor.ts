@@ -5,9 +5,12 @@ import path from "node:path";
 import { loadSkills } from "../../capabilities/skills/loader.ts";
 import { getToolPath } from "../../capabilities/tools/external-tools.ts";
 import { resolveRuntimeConfig } from "../configuration/runtime-config.ts";
+import { inspectNative } from "./native.ts";
 
 export interface DoctorReport {
 	version: string;
+	native: Awaited<ReturnType<typeof inspectNative>>;
+	configuredTheme: string;
 	workspace: {
 		path: string;
 		present: boolean;
@@ -130,6 +133,8 @@ export async function buildDoctorReport(
 
 	return {
 		version: "0.2.0",
+		native: await inspectNative(),
+		configuredTheme: config.theme || environment.LOGICIAN_THEME || "dark",
 		workspace: { path: workspacePath, present, readable, writable },
 		config: {
 			path: loaded?.configPath ?? null,
@@ -195,6 +200,12 @@ export function formatDoctorReport(report: DoctorReport): string {
 
 	// Version
 	lines.push(`  \x1b[1mVersion\x1b[0m  ${dim(`v${report.version}`)}`);
+	lines.push("", `  Native addon: ${tag(report.native.healthy)}`);
+	for (const path of report.native.paths) lines.push(`    ${path}`);
+	for (const [name, available] of Object.entries(report.native.capabilities)) {
+		lines.push(`    ${name}: ${available ? "available" : "missing"}`);
+	}
+	if (report.native.error) lines.push(`    ${report.native.error}`);
 
 	// Workspace
 	const wsOk = report.workspace.present && report.workspace.readable;
