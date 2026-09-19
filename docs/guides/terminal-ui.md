@@ -68,6 +68,10 @@ Works with any VT100-compatible terminal:
 - **Normal** — type instructions naturally
 - **Steering** — press `Ctrl+E` during a turn to interrupt and steer now
 - **Paste** — pasted text is processed as a single instruction
+- **Bash** (`$` prefix) — input bar highlights in bash mode color
+- **Python** (`$` with Python prompt) — input bar highlights in Python mode color
+
+The input bar uses theme-aware color caching: mode colors, placeholder text, and clipping indicators are re-rendered only when the theme or width changes, reducing flicker during rapid typing.
 
 ## Streaming output
 

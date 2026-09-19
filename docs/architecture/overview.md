@@ -12,7 +12,7 @@ Logician is a TypeScript monorepo whose packages form a layered runtime.
 ```mermaid
 graph LR
   subgraph Presentation
-    A["@logician/tui"]
+    A["@logician/log-tui"]
   end
   subgraph Runtime
     C["@logician/log-core"]
@@ -24,9 +24,9 @@ graph LR
     E["log-autoresearch + log-eval"]
   end
   A --> C
+  A --> D
   D --> C
   D --> H
-  A --> D
   D --> M
   D --> E
   C --> L[LLM Backend]

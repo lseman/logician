@@ -4,8 +4,8 @@ Nine workspace packages arranged in three architectural layers.
 
 ```
 Layer 1 — Foundation
-├── log-natives      N-API bindings for pi-ast / pi-edit (forked from oh-my-pi)
-├── log-snapcompact  Bitmap PNG frame context compaction
+├── log-natives      N-API: pi-ast, pi-edit, pi-grep, pi-walker, pi-diff, pi-snapcompact, pi-tokens
+├── log-snapcompact  Bitmap PNG frame compaction (native rasterizer)
 ├── log-autoresearch Autonomous experiment loop (run → measure → keep/discard)
 ├── log-eoh          Evolution of Heuristics — session logic, persistence, dashboard
 ├── log-rag          Hybrid search: dense + BM25, cross-encoder reranking, query rewriting
@@ -61,8 +61,8 @@ Layer 3 — Application
 
 | Package | Scope |
 |---|---|
-| `@logician/log-natives` | N-API bindings wrapping the `pi-natives` Rust crate (`pi-ast` + `pi-edit`) for structural search/rewrite and streaming edit operations. Platform-specific `*.node` binary built via napi-rs. |
-| `@logician/log-snapcompact` | Local, deterministic context compaction via bitmap PNG frames. Zero external runtime dependencies. |
+| `@logician/log-natives` | N-API bindings wrapping the `pi-natives` Rust crate: `pi-ast` + `pi-edit` (structural search/rewrite, streaming edits), `pi-grep` (PCRE2-backed file search), `pi-walker` (native glob, replaces `fd`/`rg --files`), `pi-diff` (unified diff engine), `pi-snapcompact` (bitmap PNG frame rasterizer), `pi-tokens` (token counting), plus fuzzy-find and file-descriptor utilities. Platform-specific `*.node` binary built via napi-rs. |
+| `@logician/log-snapcompact` | Local, deterministic context compaction via bitmap PNG frames. Frame rasterization and PNG encoding are delegated to native code (`@logician/log-natives`' `renderSnapcompactPng`). Supports accented Latin characters via native font glyph table queries. Zero external runtime dependencies. |
 | `@logician/log-autoresearch` | Autonomous experiment loop — run, measure, keep or discard. Ported from `pi-autoresearch`. Provides hooks, paths, JSONL helpers, compaction, and shortcuts for the research agent workflow. |
 | `@logician/log-eoh` | Evolution of Heuristics (EoH, arXiv 2401.02051). Session logic, persistence, compaction, hooks, engine, evaluator, LLM integration, population management, and prompts. |
 | `@logician/log-rag` | SOTA retrieval-augmented generation: hybrid search (dense + BM25), smart chunking, cross-encoder reranking, query rewriting, context management. |
@@ -78,7 +78,7 @@ Layer 3 — Application
 
 | Package | Scope |
 |---|---|
-| `@logician/log-runtime` | Logician runtime composition — the full application facade (`AgentRuntime`). Combines `log-core` with tools, skills, commands, MCP, memory, plugins, Claude Code adapters, EoH, configuration, and transcript state. Exports 16+ subpaths (`./application`, `./commands`, `./skills`, `./tools`, `./trust`, `./sessions`, etc.). |
+| `@logician/log-runtime` | Logician runtime composition — the full application facade (`AgentRuntime`). Combines `log-core` with tools, skills, commands, MCP, memory, plugins, Claude Code adapters, EoH, configuration, and transcript state. Exports 16+ subpaths (`./application`, `./commands`, `./skills`, `./tools`, `./trust`, `./sessions`, etc.). Built-in tools use native engines where available: `grep` uses the PCRE2-backed native engine (with `rg` fallback for multi-path/cross-line), `glob` uses the native `pi-walker` engine (no `fd`/`rg` dependency), `diff` uses the native unified diff engine. |
 | `@logician/log-tui` | Terminal UI layer. Differential rendering engine, flex layout, input controller (vi-style), overlays (choice popup, settings, session tree, research dashboard), image protocol (kitty graphics), status/tail bars, work surface management. Depends on `log-autoresearch`, `log-core`, `log-runtime`. |
 
 ## Subpath exports

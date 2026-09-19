@@ -49,7 +49,7 @@ stateDiagram-v2
 
 ## Compaction and durability
 
-Compaction changes the context sent to the model, not the historical record shown to the user. Summaries, usage metadata, and the active journal path are persisted so later recovery uses the same logical conversation state.
+Compaction changes the context sent to the model, not the historical record shown to the user. Token estimation and the `shouldAutoCompact` gate are now async (`Promise<boolean>`) to support native token counting. Summaries, usage metadata, and the active journal path are persisted so later recovery uses the same logical conversation state.
 
 JSONL is the source of truth because it is portable, inspectable, and naturally
 append-oriented. If Logician adds a SQLite session index, it should remain a

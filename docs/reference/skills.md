@@ -50,7 +50,7 @@ const { skills, diagnostics } = await loadSkills([
 ])
 ```
 
-Missing roots are skipped. Discovery is recursive, honors `.gitignore`, `.ignore`, and `.fdignore`, and deduplicates resolved file paths.
+Missing roots are skipped. Discovery is recursive, honors `.gitignore` and `.ignore`, and deduplicates resolved file paths.
 
 ## Find and format skills
 

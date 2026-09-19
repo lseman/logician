@@ -13,7 +13,7 @@ This guide takes you from installation to a verified first turn. Logician needs 
 |---|---|
 | Runtime | Bun `>=1.3.14` for source builds; prebuilt binaries include the runtime |
 | Model endpoint | An OpenAI-compatible chat-completions API |
-| Search helpers | `rg` and `fd` are optional but recommended |
+| Search helpers | `rg` is optional but recommended (used for multi-path grep and cross-line patterns) |
 
 ## Install
 
