@@ -28,16 +28,25 @@ import { compactToFit, toMessages } from "../compaction/engine.ts";
 import { selectAdaptiveMode } from "./adaptive-mode.ts";
 import { applyHeaderPatch } from "./callbacks.ts";
 import type { AgentLoopConfig } from "./config.ts";
+import {
+	type PrefixDivergence,
+	PrefixStabilityTracker,
+} from "./prefix-stability.ts";
 import { buildProviderRequestOptions } from "./provider-options.ts";
 import { buildStreamingCallbacks } from "./provider-streaming.ts";
 
 export interface ProviderTurnState {
 	/** Last emitted adaptive-mode selection key, so repeats don't re-emit `inference_mode_selected`. */
 	lastAdaptiveSelection: string;
+	/** Prompt-prefix stability across this run's provider requests. */
+	prefixStability: PrefixStabilityTracker;
 }
 
 export function createProviderTurnState(): ProviderTurnState {
-	return { lastAdaptiveSelection: "" };
+	return {
+		lastAdaptiveSelection: "",
+		prefixStability: new PrefixStabilityTracker(),
+	};
 }
 
 interface ProviderTurnOutcome {
@@ -52,6 +61,8 @@ export type ProviderTurnResult =
 			response: Awaited<ReturnType<LLMBackend["generate"]>>;
 			messages: Message[];
 			contextWasCompacted: boolean;
+			/** How this request's payload prefix compared to the previous one. */
+			prefixStability?: PrefixDivergence | undefined;
 	  }
 	| { kind: "finish"; outcome: ProviderTurnOutcome };
 
@@ -106,6 +117,10 @@ export async function requestAssistantTurn(
 	let presentationMessages = input.presentationMessages;
 	let contextWasCompacted = input.contextWasCompacted;
 	let activeRetryAttempt = 0;
+	// Resolved once per turn: the registry is fixed for the duration of the
+	// turn, and the same definitions feed both the request options and the
+	// prefix-stability digest below.
+	const toolDefinitions = input.registry.toToolDefinitions();
 
 	while (true) {
 		// Provider callbacks are synchronous by contract, while our event sink
@@ -124,6 +139,12 @@ export async function requestAssistantTurn(
 		// useful dialogue and pollute future turns with safety metadata.
 		const filteredLlmMessages = filterProviderReplayMessages(llmMessages);
 		const chatMessages = convertToChatFormat(filteredLlmMessages);
+		// Record this request's prefix against the previous one before it
+		// goes out — the report rides back on the response result.
+		const prefixStability = state.prefixStability.record(
+			chatMessages,
+			toolDefinitions,
+		);
 
 		let requestHeaders = config.streamOptions?.headers;
 		let requestTimeoutMs =
@@ -183,7 +204,7 @@ export async function requestAssistantTurn(
 				? getInferenceMode(effectiveMode)
 				: undefined;
 			const requestOptions = buildProviderRequestOptions({
-				toolDefinitions: input.registry.toToolDefinitions(),
+				toolDefinitions,
 				settings: input.settings,
 				config,
 				requestHeaders: requestHeaders as Record<string, string>,
@@ -211,7 +232,13 @@ export async function requestAssistantTurn(
 					success: true,
 				});
 			}
-			return { kind: "response", response, messages, contextWasCompacted };
+			return {
+				kind: "response",
+				response,
+				messages,
+				contextWasCompacted,
+				prefixStability,
+			};
 		} catch (llmError) {
 			// Cancellation wins over provider error classification. Some provider
 			// clients replace an AbortSignal cancellation with a generic Error;

@@ -12,7 +12,10 @@ const SSE = [
 /** Run one generate() call and return the JSON body sent to the server. */
 async function captureRequestBody(
 	backend: OpenAIBackend,
-	options?: { thinkingLevel?: "off" | "low" | "medium" | "high" | "xhigh" },
+	options?: {
+		thinkingLevel?: "off" | "low" | "medium" | "high" | "xhigh";
+		cacheRetention?: string;
+	},
 ): Promise<Record<string, unknown>> {
 	let captured: Record<string, unknown> | undefined;
 	const originalFetch = globalThis.fetch;
@@ -121,4 +124,19 @@ void test("withModel and withEndpoint preserve thinkingFormat", async () => {
 		});
 		assert.equal(body.enable_thinking, false, "clone must keep qwen format");
 	}
+});
+
+void test("cache retention hint is forwarded to the request body", async () => {
+	const backend = new OpenAIBackend({
+		baseUrl: "http://test.local",
+		model: "qwen3",
+		thinkingFormat: "qwen",
+	});
+	const withRetention = await captureRequestBody(backend, {
+		cacheRetention: "25h",
+	});
+	assert.equal(withRetention.prompt_cache_retention, "25h");
+
+	const without = await captureRequestBody(backend);
+	assert.equal("prompt_cache_retention" in without, false);
 });

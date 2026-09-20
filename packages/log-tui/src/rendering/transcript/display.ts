@@ -829,19 +829,29 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					lines.push(
 						padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`),
 					);
-			} else if (/^\[continuation-nudge:/i.test(content)) {
-				// Render continuation nudges as NOTICE blocks instead of "YOU" messages.
-				// The nudge text contains a reason tag like [continuation-nudge:length]
-				// that is extracted and displayed as an accent-colored reason.
-				const reasonMatch = /^\[continuation-nudge:(?<reason>[^\]]+)\]/i.exec(
+		} else if (
+			/^\[continuation-nudge:/i.test(content) ||
+			/^\[loop-redirect:/i.test(content)
+		) {
+			// Render harness-injected guard messages (continuation nudges,
+			// loop redirects) as NOTICE blocks instead of "YOU" messages.
+			// The leading tag like [continuation-nudge:length] or
+			// [loop-redirect:batch_loop] is extracted and displayed as an
+			// accent-colored reason.
+			const tagMatch =
+				/^\[(?<prefix>continuation-nudge|loop-redirect):(?<reason>[^\]]+)\]/i.exec(
 					content,
 				);
-				const reason = reasonMatch
-					? reasonMatch.groups?.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_")
-					: "";
-				const label = reason
-					? `Guard: continuation_${reason}`
-					: "Guard: continuation";
+			const prefix = tagMatch?.groups?.prefix ?? "";
+			const reason = tagMatch?.groups?.reason
+				? tagMatch.groups.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_")
+				: "";
+			const label =
+				prefix === "loop-redirect"
+					? `Guard: ${reason || "loop"}`
+					: reason
+						? `Guard: continuation_${reason}`
+						: "Guard: continuation";
 				const n = { level: "warn" as const, label, text: content };
 				const icon = "⚠";
 				const levelColor = theme.fgRaw("warning");
@@ -853,9 +863,10 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				const firstLineBody = bodyLines[0] ?? "";
 				const continuationLines = bodyLines.slice(1);
 				// Extract the reason from the nudge text for accent coloring.
-				const reasonTagMatch = /^\[continuation-nudge:[^\]]+\]/i.exec(
-					firstLineBody,
-				);
+				const reasonTagMatch =
+					/^\[(?:continuation-nudge|loop-redirect):[^\]]+\]/i.exec(
+						firstLineBody,
+					);
 				let renderedFirst: string;
 				if (reasonTagMatch) {
 					const reasonTag = reasonTagMatch[0];

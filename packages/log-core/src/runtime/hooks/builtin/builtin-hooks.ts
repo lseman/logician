@@ -16,7 +16,11 @@ import {
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
 } from "../../../capabilities/session/file-checkpoints.ts";
-import type { LoopDetector } from "../../../control/guards/loop-detector.ts";
+import {
+	renderLoopRedirectMessage,
+	type LoopDetector,
+	type RepeatedToolCallDetection,
+} from "../../../control/guards/loop-detector.ts";
 import { decideAutonomousContinuation } from "../../../control/policy/autonomy-policy.ts";
 import { resolveExecutionPolicy } from "../../../control/policy/execution-policy.ts";
 import { HarnessInterventionController } from "../../../control/policy/intervention-controller.ts";
@@ -324,8 +328,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const compactionPrepareNext = hooks.prepareNextTurn;
 	hooks.prepareNextTurn = async (ctx, signal) => {
 		// Only fire when there were tool calls this turn.
+		let detection: RepeatedToolCallDetection | null = null;
 		if (batchCalls.length > 0 && loopDetector) {
-			const detection = loopDetector.recordTurn(batchCalls, batchResults);
+			detection = loopDetector.recordTurn(batchCalls, batchResults);
 			batchCalls.length = 0;
 			batchResults.length = 0;
 			if (detection) {
@@ -335,13 +340,29 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					detector: "tool_call_guard",
 					message:
 						`Model produced an identical tool-call batch ` +
-						`${detection.count} times in a row (threshold: 5). ` +
-						`Change your approach.`,
+						`${detection.count} times in a row. Change your ` +
+						`approach; a corrective note has been added to the ` +
+						`conversation.`,
 					iteration: ctx.iteration,
 				});
 			}
 		}
-		return compactionPrepareNext?.(ctx, signal);
+		const prepared = await compactionPrepareNext?.(ctx, signal);
+		if (!detection) return prepared;
+		// Inject the corrective redirect so the model changes approach on the
+		// next turn instead of repeating the batch until the pre-execution
+		// call blocker trips.
+		const base = prepared?.messages ?? ctx.messages;
+		return {
+			messages: [
+				...base,
+				{
+					role: "user" as const,
+					content: renderLoopRedirectMessage(detection),
+					timestamp: Date.now(),
+				},
+			],
+		};
 	};
 
 	if (progress) {

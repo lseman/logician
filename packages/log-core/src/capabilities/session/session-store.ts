@@ -330,6 +330,9 @@ export class SessionStore {
 	private pendingJournalBytes = 0;
 	private metaDirty = false;
 	private flushTimer: NodeJS.Timeout | null = null;
+	/** Cached append handle — one open per flush burst, not one per entry.
+	 * Released at every flush so a file replaced between bursts is picked up. */
+	private journalFd: number | null = null;
 
 	constructor(
 		private readonly sessionId: string,
@@ -498,7 +501,6 @@ export class SessionStore {
 	}
 
 	appendEntry(entry: SessionEntry): void {
-		mkdirSync(dirname(this.filePath), { recursive: true });
 		if (!entry.parentId) {
 			entry.parentId = this.activeLeafId;
 		}
@@ -526,13 +528,32 @@ export class SessionStore {
 	 */
 	flush(): void {
 		this.cancelFlushTimer();
-		if (this.pendingJournalBytes > 0 && existsSync(this.filePath)) {
-			this.syncFile(this.filePath);
+		if (this.pendingJournalBytes > 0) {
+			if (this.journalFd !== null) {
+				// Fsync through the cached append handle — no open/close.
+				fsyncSync(this.journalFd);
+				// Release the handle so the next burst re-opens the file:
+				// a file deleted or replaced between flushes is picked up by
+				// the next append instead of writing into a stale inode
+				// (writes through an open fd to an unlinked file succeed).
+				this.dropJournalFd();
+			} else if (existsSync(this.filePath)) {
+				this.syncFile(this.filePath);
+			}
 		}
 		this.pendingJournalBytes = 0;
 		if (this.metaDirty) {
 			this.updateMeta();
 		}
+	}
+
+	/**
+	 * Flush pending journal bytes and metadata, then release the cached
+	 * append handle. Idempotent; safe to call repeatedly.
+	 */
+	close(): void {
+		this.flush();
+		this.dropJournalFd();
 	}
 
 	/** Load all messages from the session file. */
@@ -671,6 +692,7 @@ export class SessionStore {
 	/** Remove the session directory and its conversation data. */
 	clear(): void {
 		this.cancelFlushTimer();
+		this.dropJournalFd();
 		this.pendingJournalBytes = 0;
 		this.metaDirty = false;
 		if (existsSync(this.dir)) {
@@ -746,6 +768,8 @@ export class SessionStore {
 				.map(entry => JSON.stringify(entry satisfies MessageSessionEntry))
 				.join("\n")}\n`,
 		);
+		// flush() (first line) has already released the append handle, so the
+		// atomic rewrite below cannot orphan a cached fd on the old inode.
 		this.activeLeafId = entries.at(-1)?.id;
 		this.lastActivity = Date.now();
 		this.updateMeta();
@@ -779,15 +803,42 @@ export class SessionStore {
 
 	private appendJournalEntry(entry: SessionEntry): void {
 		const line = `${JSON.stringify(entry)}\n`;
-		const descriptor = openSync(this.filePath, "a", 0o600);
+		let fd: number;
 		try {
-			appendFileSync(descriptor, line, "utf8");
-		} finally {
-			closeSync(descriptor);
+			fd = this.openJournalFd();
+			appendFileSync(fd, line, "utf8");
+		} catch (error) {
+			// The journal's directory may have been removed from under the
+			// cached handle (open() throws ENOENT when the directory is
+			// gone). Rebuild it and retry once; any other failure is real.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			this.dropJournalFd();
+			mkdirSync(dirname(this.filePath), { recursive: true });
+			fd = this.openJournalFd();
+			appendFileSync(fd, line, "utf8");
 		}
 		// The write is synchronous (process-crash durable); the fsync is
 		// coalesced into a burst by the caller.
 		this.pendingJournalBytes += Buffer.byteLength(line);
+	}
+
+	/** Lazily open (and cache) the journal's append handle. */
+	private openJournalFd(): number {
+		if (this.journalFd !== null) return this.journalFd;
+		this.journalFd = openSync(this.filePath, "a", 0o600);
+		return this.journalFd;
+	}
+
+	/** Close the cached journal handle, if any. Idempotent. */
+	private dropJournalFd(): void {
+		if (this.journalFd === null) return;
+		const fd = this.journalFd;
+		this.journalFd = null;
+		try {
+			closeSync(fd);
+		} catch {
+			// Already closed (e.g. the process is tearing down); nothing to do.
+		}
 	}
 
 	private scheduleFlush(): void {

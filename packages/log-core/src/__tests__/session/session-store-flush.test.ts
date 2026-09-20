@@ -1,6 +1,6 @@
 import { test, vi } from "bun:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionStore } from "../../capabilities/session/session-store.ts";
@@ -99,4 +99,67 @@ test("truncate settles coalesced state before rewriting", () => {
 		["m3", "m4"],
 	);
 	assert.equal(store.getMeta().messageCount, 2);
+});
+
+test("appends after truncate land in the rewritten journal file", () => {
+	// truncate() replaces the journal via an atomic rename, which swaps the
+	// file's inode. A cached append handle would keep writing to the old
+	// (now unlinked) inode, silently losing entries — so truncate must drop
+	// the handle and the next append must open the new file.
+	const dir = mkdtempSync(join(tmpdir(), "logician-flush-"));
+	const store = new SessionStore("flush-trunc-append", {
+		baseDir: dir,
+		flushDelayMs: NEAR_NEVER_MS,
+	});
+	for (let i = 0; i < 5; i++) store.append(msg(`m${i}`));
+	store.truncate(2);
+	store.append(msg("after-truncate"));
+	store.flush();
+	assert.deepEqual(
+		store.load().map(m => m.content),
+		["m3", "m4", "after-truncate"],
+	);
+	// A fresh instance reads the on-disk file, not the in-memory tree.
+	const reloaded = new SessionStore("flush-trunc-append", { baseDir: dir });
+	assert.deepEqual(
+		reloaded.load().map(m => m.content),
+		["m3", "m4", "after-truncate"],
+	);
+});
+
+test("append recreates the journal when its directory was removed", () => {
+	const dir = mkdtempSync(join(tmpdir(), "logician-flush-"));
+	const store = new SessionStore("flush-rmdir", {
+		baseDir: dir,
+		flushDelayMs: NEAR_NEVER_MS,
+	});
+	store.append(msg("before"));
+	store.flush();
+	rmSync(store.dirPath, { recursive: true, force: true });
+	// The cached handle is stale; the next append must rebuild the directory
+	// and file (ENOENT retry path) instead of throwing or writing nowhere.
+	store.append(msg("after"));
+	store.flush();
+	const reloaded = new SessionStore("flush-rmdir", { baseDir: dir });
+	assert.deepEqual(
+		reloaded.load().map(m => m.content),
+		["after"],
+	);
+});
+
+test("close flushes pending bytes so a reloaded store sees them", () => {
+	const dir = mkdtempSync(join(tmpdir(), "logician-flush-"));
+	const store = new SessionStore("flush-close", {
+		baseDir: dir,
+		flushDelayMs: NEAR_NEVER_MS,
+	});
+	store.append(msg("a"));
+	store.append(msg("b"));
+	store.close();
+	const reloaded = new SessionStore("flush-close", { baseDir: dir });
+	assert.deepEqual(
+		reloaded.load().map(m => m.content),
+		["a", "b"],
+	);
+	assert.equal(reloaded.getMeta().messageCount, 2);
 });

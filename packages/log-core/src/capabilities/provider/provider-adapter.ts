@@ -17,6 +17,9 @@ export interface ProviderRequestContext {
 	stop?: string[] | undefined;
 	thinkingLevel: ThinkingLevel;
 	thinkingFormat?: ThinkingFormat | undefined;
+	/** Provider cache retention hint (e.g. "in_memory", "25h") — forwarded to
+	 *  providers whose wire format accepts it; the provider validates values. */
+	cacheRetention?: string | undefined;
 }
 
 /**
@@ -57,6 +60,9 @@ export class OpenAIChatCompletionsAdapter implements ProviderAdapter {
 			}),
 			...(context.repetitionPenalty !== undefined && {
 				repetition_penalty: context.repetitionPenalty,
+			}),
+			...(context.cacheRetention !== undefined && {
+				prompt_cache_retention: context.cacheRetention,
 			}),
 			...(context.tools?.length && { tools: context.tools }),
 		};

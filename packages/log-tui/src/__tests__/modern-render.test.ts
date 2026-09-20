@@ -871,6 +871,42 @@ void test("a steered continuation-nudge chunk renders as NOTICE, not YOU", () =>
 	assert.doesNotMatch(output, /YOU ‹[^\n]*continuation-nudge/);
 });
 
+void test("a loop-redirect chunk renders as NOTICE, not YOU", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([
+		{
+			id: "loop-redirect",
+			userMessage: { type: "user", content: "Fix the failing tests." },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: false,
+				chunks: [
+					{
+						seq: 0,
+						type: "content",
+						contentText: "Working on it.",
+						isComplete: true,
+					},
+					{
+						seq: 1,
+						type: "user",
+						contentText:
+							"[loop-redirect:batch_loop] You called `read` 5 consecutive " +
+							"times with identical arguments: `{\"path\":\"a.txt\"}`. " +
+							"Stop repeating this call.",
+						isComplete: true,
+					},
+				],
+			},
+			isComplete: false,
+		},
+	]);
+	const output = plain(display.render(100).join("\n"));
+
+	assert.match(output, /⚠ NOTICE Guard: batch_loop/);
+	assert.doesNotMatch(output, /YOU ‹[^\n]*loop-redirect/);
+});
+
 void test("a steered plain-text chunk still renders as an ordinary YOU line", () => {
 	const display = new TranscriptDisplay();
 	display.setTurns([

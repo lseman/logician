@@ -15,6 +15,8 @@ export interface TrajectorySummary {
 	continuations: number;
 	interventions: number;
 	compactions: number;
+	/** Provider requests whose payload prefix diverged from the previous one. */
+	prefixDivergences: number;
 	verificationPassed?: boolean | undefined;
 }
 
@@ -45,6 +47,7 @@ export function summarizeTrajectory(
 		continuations: 0,
 		interventions: 0,
 		compactions: 0,
+		prefixDivergences: 0,
 	};
 	for (const event of events) {
 		if (event.type === "turn_start") summary.turns++;
@@ -58,6 +61,8 @@ export function summarizeTrajectory(
 			if (event.kind === "continuation") summary.continuations++;
 			if (event.kind === "compaction") summary.compactions++;
 		}
+		if (event.type === "context_update" && event.prefixStable === false)
+			summary.prefixDivergences++;
 		if (event.type === "acceptance_complete")
 			summary.verificationPassed = event.status === "passed";
 		if (event.type === "agent_end") summary.status = event.status;

@@ -10,6 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Tool, ToolResult } from "@logician/log-core";
 import { formatSize, truncateHead } from "./support/utils/truncate.ts";
+import { GraphicianWorker } from "./graphician-worker.ts";
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_DB = "graphician.db";
@@ -22,6 +23,41 @@ const bundledGraphicianRoot = path.resolve(
 const indexRefreshes = new Map<string, Promise<string | null>>();
 const indexRefreshedAt = new Map<string, number>();
 const cliDialects = new Map<string, Promise<"direct" | "agent">>();
+const workers = new Map<string, GraphicianWorker>();
+const workerFailedAt = new Map<string, number>();
+const WORKER_RETRY_AFTER_MS = 60_000;
+
+/** Attempt the worker for a binary (60 s cooldown after a failure). */
+function workerUsable(binary: string): boolean {
+	const failedAt = workerFailedAt.get(binary);
+	if (failedAt === undefined) return true;
+	return Date.now() - failedAt > WORKER_RETRY_AFTER_MS;
+}
+
+function getWorker(binary: string): GraphicianWorker {
+	let worker = workers.get(binary);
+	if (!worker) {
+		worker = new GraphicianWorker({ binary });
+		workers.set(binary, worker);
+		registerWorkerExitCleanup();
+	}
+	return worker;
+}
+
+let workerExitHookRegistered = false;
+function registerWorkerExitCleanup(): void {
+	if (workerExitHookRegistered) return;
+	workerExitHookRegistered = true;
+	process.on("exit", () => {
+		for (const worker of workers.values()) worker.close();
+	});
+}
+
+/** Shared cooldown gate for index refreshes (worker and CLI paths). */
+function refreshDue(dbPath: string): boolean {
+	const lastRefresh = indexRefreshedAt.get(dbPath) ?? 0;
+	return Date.now() - lastRefresh >= INDEX_REFRESH_INTERVAL_MS;
+}
 
 function resolveGraphicianDb(cwd: string): string {
 	// Check for --db flag in environment or common locations
@@ -125,8 +161,7 @@ async function refreshIndex(
 	cwd: string,
 	signal?: AbortSignal,
 ): Promise<string | null> {
-	const lastRefresh = indexRefreshedAt.get(dbPath) ?? 0;
-	if (Date.now() - lastRefresh < INDEX_REFRESH_INTERVAL_MS) return null;
+	if (!refreshDue(dbPath)) return null;
 	const existing = indexRefreshes.get(dbPath);
 	if (existing) return existing;
 	const pending = (async () => {
@@ -176,6 +211,36 @@ function parseOutput(raw: string): string {
 		// Not JSON, return as-is
 		return trimmed;
 	}
+}
+
+/** Merge convenience fields and the params field into CLI parameters. */
+function buildCliParams(args: Record<string, unknown>): Record<string, unknown> {
+	const cliParams: Record<string, unknown> = {};
+	if (args.target) cliParams.target = String(args.target);
+	if (args.base) cliParams.base = String(args.base);
+	if (args.max_hops) cliParams.max_hops = Number(args.max_hops);
+	if (args.max_depth) cliParams.max_depth = Number(args.max_depth);
+	if (args.token_budget) cliParams.token_budget = Number(args.token_budget);
+	if (args.limit) cliParams.limit = Number(args.limit);
+	if (args.direction) cliParams.direction = String(args.direction);
+	if (args.algorithm) cliParams.algorithm = String(args.algorithm);
+	// Merge any additional params provided as a JSON string or object
+	if (args.params) {
+		if (typeof args.params === "string") {
+			try {
+				Object.assign(cliParams, JSON.parse(args.params));
+			} catch {
+				// If it's not valid JSON, pass as-is
+				cliParams._raw = args.params;
+			}
+		} else if (
+			typeof args.params === "object" &&
+			!Array.isArray(args.params)
+		) {
+			Object.assign(cliParams, args.params);
+		}
+	}
+	return cliParams;
 }
 
 export const graphician: Tool = {
@@ -313,49 +378,82 @@ export const graphician: Tool = {
 			].join("\n");
 		}
 
-		const dbPath = resolveGraphicianDb(ctx.cwd || ".");
+		const cwd = ctx.cwd || ".";
+		const dbPath = resolveGraphicianDb(cwd);
 		const target = args.target ? String(args.target) : "";
+		const cliParams = buildCliParams(args);
 
-		// Build params object for the CLI
-		const cliParams: Record<string, unknown> = {};
-		if (target) cliParams.target = target;
-		if (args.base) cliParams.base = String(args.base);
-		if (args.max_hops) cliParams.max_hops = Number(args.max_hops);
-		if (args.max_depth) cliParams.max_depth = Number(args.max_depth);
-		if (args.token_budget) cliParams.token_budget = Number(args.token_budget);
-		if (args.limit) cliParams.limit = Number(args.limit);
-		if (args.direction) cliParams.direction = String(args.direction);
-		if (args.algorithm) cliParams.algorithm = String(args.algorithm);
-
-		// Merge any additional params from the params field
-		if (args.params) {
-			if (typeof args.params === "string") {
-				try {
-					const extra = JSON.parse(args.params);
-					Object.assign(cliParams, extra);
-				} catch {
-					// If it's not valid JSON, pass as-is
-					cliParams._raw = args.params;
+		// Fast path: the persistent worker answers queries in-process and
+		// runs index refreshes in a background child process, so a query
+		// never blocks on a rebuild. Any worker failure falls back to the
+		// per-call CLI spawn below.
+		if (workerUsable(graphicianPath)) {
+			try {
+				const worker = getWorker(graphicianPath);
+				if (refreshDue(dbPath)) {
+					// Claim the cooldown up front: the worker dedupes
+					// concurrent refreshes, and a fallback path running
+					// inside this window skips its blocking refresh.
+					indexRefreshedAt.set(dbPath, Date.now());
+					void worker.refresh(dbPath, cwd).catch(() => {});
 				}
-			} else if (
-				typeof args.params === "object" &&
-				!Array.isArray(args.params)
-			) {
-				Object.assign(cliParams, args.params);
+				const { result, build } = await worker.query(
+					dbPath,
+					operation,
+					cliParams,
+				);
+				workerFailedAt.delete(graphicianPath);
+				const parsed = parseOutput(JSON.stringify(result, null, 2));
+				const truncated = truncateHead(parsed, { maxBytes: 50 * 1024 });
+				let content = truncated.content;
+				const notices: string[] = [];
+				if (build.state === "running")
+					notices.push(
+						"index refresh in progress; results may be slightly stale",
+					);
+				if (
+					build.state === "idle" &&
+					build.lastExit !== null &&
+					build.lastExit !== 0
+				)
+					notices.push(
+						`index refresh failed: ${
+							build.lastOutput?.slice(-300) || `exit ${build.lastExit}`
+						}`,
+					);
+				if (truncated.truncated)
+					notices.push(`${formatSize(truncated.maxBytes)} limit reached`);
+				if (notices.length) content += `\n\n[${notices.join(". ")}]`;
+				return {
+					content,
+					details: {
+						operation,
+						target,
+						db: dbPath,
+						binary: graphicianPath,
+						transport: "worker",
+						indexFresh: !notices.some(n =>
+							n.startsWith("index refresh failed"),
+						),
+					},
+				};
+			} catch {
+				workerFailedAt.set(graphicianPath, Date.now());
 			}
 		}
 
-		// Build or incrementally refresh the workspace graph before querying. Calls
-		// within a short burst share one refresh and queries remain bounded.
+		// Slow path (fallback): build or incrementally refresh the workspace
+		// graph before querying. Calls within a short burst share one refresh
+		// and queries remain bounded.
 		const refreshWarning = await refreshIndex(
 			graphicianPath,
 			dbPath,
-			ctx.cwd || ".",
+			cwd,
 			ctx.signal,
 		);
 		if (ctx.signal?.aborted) return "Error: Command aborted";
 
-		const dialect = await detectCliDialect(graphicianPath, ctx.cwd || ".");
+		const dialect = await detectCliDialect(graphicianPath, cwd);
 		const paramsJson = JSON.stringify(cliParams);
 		const cliArgs = [
 			"--db",
@@ -367,7 +465,7 @@ export const graphician: Tool = {
 			paramsJson,
 		];
 		const query = await runGraphician(graphicianPath, cliArgs, {
-			cwd: ctx.cwd || ".",
+			cwd,
 			signal: ctx.signal,
 			timeoutMs: 30_000,
 		});
@@ -395,6 +493,7 @@ export const graphician: Tool = {
 				db: dbPath,
 				binary: graphicianPath,
 				dialect,
+				transport: "cli",
 				indexFresh: !refreshWarning,
 			},
 		};

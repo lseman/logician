@@ -351,6 +351,41 @@ void test("runAgentLoop estimates context usage when provider usage is absent", 
 	);
 });
 
+void test("context_update reports prompt-prefix stability across provider requests", async () => {
+	const backend = new FakeBackend([
+		() => ({
+			content: "Reading now.",
+			toolCalls: [{ id: "c1", name: "noop", arguments: "{}" }],
+			stopReason: "stop" as const,
+		}),
+		() => textResponse("done"),
+	]);
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("do the thing")],
+		{
+			...makeConfig({ maxIterations: 4, contextWindowTokens: 4096 }),
+			backend,
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	const updates = events.filter(event => event.type === "context_update");
+	assert.equal(updates.length, 2);
+	// The first request seeds the baseline: nothing to diverge from.
+	assert.equal(updates[0]?.prefixStable, true);
+	assert.equal(updates[0]?.prefixDivergedAt, 0);
+	assert.equal(updates[0]?.prefixRewritten, false);
+	// The second request is pure append-only growth of the transcript, so
+	// the entire previous payload is a byte-identical prefix — the previous
+	// prompt-cache/KV prefix is still warm.
+	assert.equal(updates[1]?.prefixStable, true);
+	assert.equal(updates[1]?.prefixDivergedAt, 2);
+	assert.equal(updates[1]?.prefixRewritten, false);
+});
+
 void test("runAgentLoop propagates provider cache reads through context_update", async () => {
 	const backend = new FakeBackend([
 		() => ({

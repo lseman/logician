@@ -368,3 +368,26 @@ export class LoopDetector {
 		this.#failPathCounts.clear();
 	}
 }
+
+/**
+ * Renders the corrective user message injected after a batch loop is
+ * detected (OMP-style loop redirect). The `[loop-redirect:<cause>]` prefix
+ * follows the `[continuation-nudge:<reason>]` convention so the TUI renders
+ * it as a NOTICE block on transcript replay instead of a "YOU" bubble.
+ */
+export function renderLoopRedirectMessage(
+	detection: RepeatedToolCallDetection,
+): string {
+	const result =
+		detection.resultSummary.length > 0
+			? detection.resultSummary
+			: "(no text result)";
+	return (
+		`[loop-redirect:batch_loop] You called \`${detection.toolName}\` ` +
+		`${detection.count} consecutive times with identical arguments: ` +
+		`\`${detection.argumentsSummary}\`. ` +
+		`Last result (truncated): \`${result}\`. ` +
+		`Stop repeating this call. Change the arguments, use a different tool, ` +
+		`or summarize your findings and yield if the work is complete.`
+	);
+}

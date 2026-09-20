@@ -11,6 +11,7 @@ import {
 	COMPACTION_COOLDOWN_TURNS,
 	rewriteCommandWithRtk,
 } from "../../runtime/hooks/builtin/builtin-hooks.ts";
+import type { Message } from "../../system/types/types-messages.ts";
 
 // Capture the real PATH once at module load so cleanup always restores the
 // true original value, even when other tests mutate process.env.PATH.
@@ -320,4 +321,116 @@ void test("intervention escalation persists across rebuilds when the controller 
 	assert.equal(interventionEvents.length, 2);
 	assert.equal(interventionEvents[0]?.attempt, 1);
 	assert.equal(interventionEvents[1]?.attempt, 2);
+});
+
+// ── Batch-loop redirect: detection must inject a corrective message the
+// model actually sees, not just a TUI event ───────────────────────────────
+
+void test("batch-loop detection injects a corrective redirect message for the next turn", async () => {
+	const events: Array<{ type: string; kind?: string; cause?: string }> = [];
+	const hooks = buildBuiltinHooks({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			executionProfile: "autonomous",
+			guardsEnabled: true,
+			proactiveCompactionEnabled: false,
+		},
+		contextWindowTokens: () => 4096,
+		toolDefs: () => [],
+		loopDetector: new LoopDetector({ batchThreshold: 2 }),
+		emitEvent: e => events.push(e as never),
+	});
+
+	const call = { id: "1", name: "read", arguments: '{"path":"a.txt"}' };
+	const args = { path: "a.txt" };
+	const transcript = [{ role: "user" as const, content: "do it" }];
+	// One harness loop iteration: the turn's tool call, then prepareNextTurn
+	// (which runs after every turn and clears the batch accumulator).
+	const runTurn = async (iteration: number, messages: Message[]) => {
+		await hooks.beforeToolCall?.({ toolCall: call, args, iteration });
+		await hooks.afterToolCall?.({
+			toolCall: call,
+			args,
+			result: "line A",
+			isError: false,
+			iteration,
+		});
+		return hooks.prepareNextTurn?.({
+			messages,
+			iteration: iteration + 1,
+			hadToolCalls: true,
+		});
+	};
+
+	// Two identical tool-call batches in a row trips the batch threshold.
+	const afterTurn1 = await runTurn(1, transcript);
+	assert.equal(afterTurn1, undefined, "no redirect below the threshold");
+	const result = await runTurn(2, transcript);
+
+	// The corrective user message is appended — the model sees it next turn.
+	assert.ok(result, "prepareNextTurn must return prepared messages");
+	assert.equal(result.messages.length, transcript.length + 1);
+	const injected = result.messages.at(-1)!;
+	assert.equal(injected.role, "user");
+	assert.match(String(injected.content), /^\[loop-redirect:batch_loop\]/);
+	assert.match(String(injected.content), /`read`/);
+	assert.match(String(injected.content), /a\.txt/);
+
+	// The intervention event still fires for the TUI.
+	const intervention = events.find(
+		e => e.type === "harness_intervention" && e.kind === "loop",
+	);
+	assert.ok(intervention, "loop intervention event expected");
+	assert.equal(intervention.cause, "batch-loop");
+
+	// A third identical batch must NOT re-inject: detection fires exactly
+	// once per episode (at the threshold), never on every subsequent turn.
+	const again = await runTurn(3, result.messages);
+	assert.equal(again, undefined, "no second redirect in the same episode");
+});
+
+void test("changed batches and tool-less turns do not inject a loop redirect", async () => {
+	const hooks = buildBuiltinHooks({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			executionProfile: "autonomous",
+			guardsEnabled: true,
+			proactiveCompactionEnabled: false,
+		},
+		contextWindowTokens: () => 4096,
+		toolDefs: () => [],
+		loopDetector: new LoopDetector({ batchThreshold: 2 }),
+	});
+
+	const transcript = [{ role: "user" as const, content: "do it" }];
+
+	// Turn 1: read a.txt. Turn 2: read b.txt — different batch, no loop.
+	// prepareNextTurn interleaves, as in the harness.
+	for (const [id, p] of [["1", "a.txt"], ["2", "b.txt"]] as const) {
+		const call = { id, name: "read", arguments: `{"path":"${p}"}` };
+		await hooks.beforeToolCall?.({ toolCall: call, args: { path: p }, iteration: 1 });
+		await hooks.afterToolCall?.({
+			toolCall: call,
+			args: { path: p },
+			result: "ok",
+			isError: false,
+			iteration: 1,
+		});
+		const result = await hooks.prepareNextTurn?.({
+			messages: transcript,
+			iteration: 2,
+			hadToolCalls: true,
+		});
+		assert.equal(result, undefined, "changed batch must not redirect");
+	}
+
+	// A turn with no tool calls never records a batch.
+	const plain = await hooks.prepareNextTurn?.({
+		messages: transcript,
+		iteration: 3,
+		hadToolCalls: false,
+	});
+	assert.equal(plain, undefined);
 });

@@ -496,6 +496,7 @@ export class OpenAIBackend implements LLMBackend {
 			callbacks = {},
 			headers: extraHeaders,
 			timeoutMs,
+			cacheRetention,
 			transformPayload,
 		} = options;
 		const {
@@ -526,6 +527,7 @@ export class OpenAIBackend implements LLMBackend {
 			stop: this.stop,
 			thinkingLevel: effectiveLevel,
 			thinkingFormat: this.thinkingFormat,
+			cacheRetention,
 		});
 
 		// Let a provider-payload hook inspect/rewrite the final body.

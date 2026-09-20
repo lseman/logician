@@ -30,6 +30,13 @@ void test("trajectory summary measures outcomes and autonomous friction", () => 
 			source: "rule",
 		},
 		{ type: "acceptance_complete", status: "failed" },
+		{
+			type: "context_update",
+			tokens: 100,
+			prefixStable: false,
+			prefixDivergedAt: 1,
+		},
+		{ type: "context_update", tokens: 200, prefixStable: true },
 		{ type: "agent_end", messages: [], status: "failed" },
 	] satisfies AgentEvent[];
 	assert.deepEqual(summarizeTrajectory(events), {
@@ -41,6 +48,7 @@ void test("trajectory summary measures outcomes and autonomous friction", () => 
 		continuations: 0,
 		interventions: 0,
 		compactions: 0,
+		prefixDivergences: 1,
 		verificationPassed: false,
 	});
 });

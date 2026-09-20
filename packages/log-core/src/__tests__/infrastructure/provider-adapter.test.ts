@@ -24,3 +24,25 @@ test("chat-completions adapter owns endpoint and provider-specific payload", () 
 		stream: true,
 	});
 });
+
+test("chat-completions adapter forwards the cache retention hint", () => {
+	const adapter = new OpenAIChatCompletionsAdapter();
+	const withRetention = adapter.buildPayload({
+		model: "model",
+		messages: [{ role: "user", content: "hello" }],
+		temperature: 0.2,
+		maxTokens: 2048,
+		thinkingLevel: "off",
+		cacheRetention: "25h",
+	});
+	expect(withRetention).toMatchObject({ prompt_cache_retention: "25h" });
+
+	const without = adapter.buildPayload({
+		model: "model",
+		messages: [{ role: "user", content: "hello" }],
+		temperature: 0.2,
+		maxTokens: 2048,
+		thinkingLevel: "off",
+	});
+	expect(without).not.toHaveProperty("prompt_cache_retention");
+});

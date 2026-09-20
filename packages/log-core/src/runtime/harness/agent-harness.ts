@@ -560,6 +560,9 @@ async function runAgentLoopInternal(
 				cachedTokens: response?.usage?.cachedTokens ?? null,
 				promptTokens: response?.usage?.promptTokens ?? null,
 				completionTokens: response?.usage?.completionTokens ?? null,
+				prefixStable: turnResult.prefixStability?.stable,
+				prefixDivergedAt: turnResult.prefixStability?.divergedAt,
+				prefixRewritten: turnResult.prefixStability?.rewritten,
 			});
 			if (config.contextWindowTokens) {
 				const budgetResult = outputGuard?.processResponse(
