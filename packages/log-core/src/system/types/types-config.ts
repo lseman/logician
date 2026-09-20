@@ -295,6 +295,17 @@ export interface AgentModelConfig {
 	model: string;
 	/** Optional per-model baseUrl override for cycling between endpoints. */
 	url?: string;
+	/**
+	 * Optional per-model context window (tokens). When set, compaction
+	 * thresholds and context reporting follow this value while the model is
+	 * active, instead of the global `contextWindowTokens`.
+	 */
+	contextWindow?: number;
+	/**
+	 * Optional per-model max output tokens. When set, provider requests for
+	 * this model use it instead of the global `maxTokens`.
+	 */
+	maxTokens?: number;
 }
 
 export interface AgentConfig {

@@ -13,12 +13,16 @@ import type {
 	ThinkingLevel,
 } from "../../system/types/types-config.ts";
 import type { AgentHooks } from "../../system/types/types-messages.ts";
+import { resolveModelMaxTokens } from "../harness/live/model.ts";
 import type { AgentLoopConfig } from "./config.ts";
 
 export interface ProviderOptionsContext {
 	toolDefinitions: Record<string, unknown>[];
 	settings: AgentSettings;
-	config: Pick<AgentLoopConfig, "maxTokens" | "model" | "temperature">;
+	config: Pick<
+		AgentLoopConfig,
+		"maxTokens" | "model" | "models" | "temperature"
+	>;
 	requestHeaders: Record<string, string>;
 	requestTimeoutMs: number;
 	requestMaxRetries: number;
@@ -61,7 +65,9 @@ export function buildProviderRequestOptions(
 	const options: GenerateOptions = {
 		tools: toolDefinitions,
 		...(effectiveTemp !== undefined && { temperature: effectiveTemp }),
-		maxTokens: config.maxTokens ?? 4096,
+		maxTokens:
+			resolveModelMaxTokens(config.models, config.model, config.maxTokens) ??
+			4096,
 		...(modeParams?.top_p !== undefined && { topP: modeParams.top_p }),
 		...(modeParams?.top_k !== undefined && { topK: modeParams.top_k }),
 		...(modeParams?.min_p !== undefined && { minP: modeParams.min_p }),

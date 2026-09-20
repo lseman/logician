@@ -582,7 +582,7 @@ function loadTheme(name: string): Theme {
 }
 
 export function initTheme(name?: string): void {
-	const themeName = name || process.env.LOGICIAN_THEME || "dark";
+	const themeName = name || "dark";
 	try {
 		const t = loadTheme(themeName);
 		setGlobalTheme(t);

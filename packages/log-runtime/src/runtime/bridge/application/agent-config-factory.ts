@@ -4,7 +4,7 @@ import type {
 	Tool,
 	WebSearchConfig,
 } from "@logician/log-core";
-import { envNumber, eventLogPathFor } from "../environment.ts";
+import { eventLogPathFor } from "../environment.ts";
 import type { AgentBridgeOptions } from "../types.ts";
 
 export interface AgentConfigFactoryOptions {
@@ -43,12 +43,8 @@ export function createAgentConfig(
 		thinkingLevel: bridge.thinkingLevel ?? "off",
 		inferenceMode: bridge.inferenceMode ?? "none",
 		toolExecution: bridge.toolExecution ?? "parallel",
-		contextWindowTokens:
-			envNumber("LOGICIAN_CONTEXT_WINDOW") ||
-			envNumber("LOGICIAN_CTX_SIZE") ||
-			bridge.contextWindowTokens,
-		runtimeHooksEnabled:
-			bridge.runtimeHooksEnabled ?? process.env.LOGICIAN_HOOKS !== "0",
+		contextWindowTokens: bridge.contextWindowTokens,
+		runtimeHooksEnabled: bridge.runtimeHooksEnabled ?? true,
 		hookSessionId: options.sessionId,
 		hookTranscriptPath: options.transcriptPath,
 		eventLogPath: eventLogPathFor(options.transcriptPath),

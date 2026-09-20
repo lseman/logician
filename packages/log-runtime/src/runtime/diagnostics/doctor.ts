@@ -134,7 +134,7 @@ export async function buildDoctorReport(
 	return {
 		version: "0.2.0",
 		native: await inspectNative(),
-		configuredTheme: config.theme || environment.LOGICIAN_THEME || "dark",
+		configuredTheme: config.theme || "dark",
 		workspace: { path: workspacePath, present, readable, writable },
 		config: {
 			path: loaded?.configPath ?? null,
@@ -165,7 +165,7 @@ export async function buildDoctorReport(
 			mode: loaded?.bridge.permissions?.mode ?? "acceptEdits",
 		},
 		diagnostics: {
-			postEditEnabled: environment.LOGICIAN_POST_EDIT_DIAGNOSTICS !== "0",
+			postEditEnabled: loaded?.bridge.postEditDiagnostics ?? true,
 		},
 		sandbox: {
 			enforced: false,

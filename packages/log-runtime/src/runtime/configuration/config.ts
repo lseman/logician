@@ -151,12 +151,31 @@ export function validateConfig(
 					((item as AgentModelConfig).name.trim() ||
 						(item as AgentModelConfig).model.trim())
 				) {
-					const m = item as AgentModelConfig;
-					parsed.push({
+					const m = item as Record<string, unknown> & AgentModelConfig;
+					const entry: AgentModelConfig = {
 						name: m.name.trim(),
 						model: m.model.trim(),
 						url: typeof m.url === "string" ? m.url.trim() : m.url,
-					});
+					};
+					if (m.contextWindow !== undefined) {
+						const cw = configNumber(m.contextWindow);
+						if (cw !== undefined && cw > 0) entry.contextWindow = cw;
+						else
+							warn(
+								warnings,
+								`"models" entry "${m.model}" has invalid contextWindow; ignored.`,
+							);
+					}
+					if (m.maxTokens !== undefined) {
+						const mt = configNumber(m.maxTokens);
+						if (mt !== undefined && mt > 0) entry.maxTokens = mt;
+						else
+							warn(
+								warnings,
+								`"models" entry "${m.model}" has invalid maxTokens; ignored.`,
+							);
+					}
+					parsed.push(entry);
 				} else {
 					warn(
 						warnings,
@@ -165,7 +184,10 @@ export function validateConfig(
 				}
 			}
 		} else {
-			warn(warnings, '"models" must be an array of { name, model, url? }.');
+			warn(
+				warnings,
+				'"models" must be an array of { name, model, url?, contextWindow?, maxTokens? }.',
+			);
 		}
 		if (parsed.length > 0) {
 			cfg.models = parsed as LogicianTuiConfig["models"];

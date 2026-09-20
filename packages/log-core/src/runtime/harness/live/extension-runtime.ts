@@ -20,6 +20,7 @@ import type {
 import { buildBuiltinHooks } from "../../hooks/builtin/builtin-hooks.ts";
 import { extensionHooks, runControlHooks } from "../../hooks/contracts.ts";
 import { HookBus } from "../../hooks/hook-bus.ts";
+import { resolveModelContextWindow } from "./model.ts";
 
 export interface ExtensionRuntimeDeps {
 	getExtensionRunner: () => ExtensionRunner | undefined;
@@ -157,7 +158,12 @@ export function withExtensionRuntime(
 	const controlBus = new HookBus(policyTelemetry);
 	const builtinHooks = buildBuiltinHooks({
 		config,
-		contextWindowTokens: () => config.contextWindowTokens,
+		contextWindowTokens: () =>
+			resolveModelContextWindow(
+				config.models,
+				config.model,
+				config.contextWindowTokens,
+			),
 		toolDefs: () => tools as unknown as Record<string, unknown>[],
 		loopDetector: deps.loopDetector,
 		emitEvent: (event: { type: string; [key: string]: unknown }) => {

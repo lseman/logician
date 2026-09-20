@@ -23,6 +23,31 @@ export function resolveModelUrl(
 	const found = models?.find(m => m.model === modelName);
 	return found?.url ?? defaultBaseUrl;
 }
+/**
+ * Resolve the effective context window for the active model: the per-model
+ * cap when configured for that model, otherwise the global setting.
+ */
+export function resolveModelContextWindow(
+	models: AgentModelConfig[] | undefined,
+	activeModel: string | undefined,
+	globalContextWindow: number | undefined,
+): number | undefined {
+	const entry = models?.find(m => m.model === activeModel);
+	return entry?.contextWindow ?? globalContextWindow;
+}
+
+/**
+ * Resolve the effective max output tokens for the active model: the
+ * per-model cap when configured for that model, otherwise the global setting.
+ */
+export function resolveModelMaxTokens(
+	models: AgentModelConfig[] | undefined,
+	activeModel: string | undefined,
+	globalMaxTokens: number | undefined,
+): number | undefined {
+	const entry = models?.find(m => m.model === activeModel);
+	return entry?.maxTokens ?? globalMaxTokens;
+}
 
 export interface CycleModelResult {
 	/** False when there's nothing to cycle to (no configured models, or ring collapses to one entry) — harness should return the current model as-is without emitting events. */

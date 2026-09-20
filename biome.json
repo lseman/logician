@@ -10,7 +10,8 @@
 			"**",
 			"!**/dist",
 			"!**/node_modules",
-			"!packages/log-natives/index.js"
+			"!packages/log-natives/index.js",
+			"!packages/log-natives/index.d.ts"
 		]
 	},
 	"formatter": {

@@ -17,9 +17,9 @@ import {
 	type WorkspaceSnapshot,
 } from "../../../capabilities/session/file-checkpoints.ts";
 import {
-	renderLoopRedirectMessage,
 	type LoopDetector,
 	type RepeatedToolCallDetection,
+	renderLoopRedirectMessage,
 } from "../../../control/guards/loop-detector.ts";
 import { decideAutonomousContinuation } from "../../../control/policy/autonomy-policy.ts";
 import { resolveExecutionPolicy } from "../../../control/policy/execution-policy.ts";

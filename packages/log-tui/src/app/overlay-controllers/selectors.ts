@@ -158,7 +158,9 @@ export function openModelSelector(ctx: OverlayHandlersCtx): void {
 		id: option.key,
 		name: option.name,
 		active: option.active,
-		url: `${option.model} · ${option.url}`,
+		url: option.contextWindow
+			? `${option.model} · ${option.url} · ${Math.round(option.contextWindow / 1000)}k ctx`
+			: `${option.model} · ${option.url}`,
 	}));
 	openListSelector(
 		ctx,

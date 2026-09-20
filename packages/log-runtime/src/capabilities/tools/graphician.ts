@@ -9,8 +9,8 @@ import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Tool, ToolResult } from "@logician/log-core";
-import { formatSize, truncateHead } from "./support/utils/truncate.ts";
 import { GraphicianWorker } from "./graphician-worker.ts";
+import { formatSize, truncateHead } from "./support/utils/truncate.ts";
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_DB = "graphician.db";
@@ -214,7 +214,9 @@ function parseOutput(raw: string): string {
 }
 
 /** Merge convenience fields and the params field into CLI parameters. */
-function buildCliParams(args: Record<string, unknown>): Record<string, unknown> {
+function buildCliParams(
+	args: Record<string, unknown>,
+): Record<string, unknown> {
 	const cliParams: Record<string, unknown> = {};
 	if (args.target) cliParams.target = String(args.target);
 	if (args.base) cliParams.base = String(args.base);
@@ -233,10 +235,7 @@ function buildCliParams(args: Record<string, unknown>): Record<string, unknown> 
 				// If it's not valid JSON, pass as-is
 				cliParams._raw = args.params;
 			}
-		} else if (
-			typeof args.params === "object" &&
-			!Array.isArray(args.params)
-		) {
+		} else if (typeof args.params === "object" && !Array.isArray(args.params)) {
 			Object.assign(cliParams, args.params);
 		}
 	}

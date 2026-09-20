@@ -7,6 +7,8 @@ export interface ModelOption {
 	model: string;
 	url: string;
 	active: boolean;
+	/** Per-model context window cap (tokens), when configured. */
+	contextWindow?: number | undefined;
 }
 
 /** Model selection and endpoint changes for a live runtime. */
@@ -52,6 +54,7 @@ export class ModelSelector {
 				model: option.model,
 				url,
 				active: option.model === this.current() && url === this.baseUrl(),
+				contextWindow: option.contextWindow,
 			};
 		});
 	}

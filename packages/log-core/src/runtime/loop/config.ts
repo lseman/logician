@@ -26,6 +26,7 @@ type AgentLoopOptions = Pick<
 	| "maxTokens"
 	| "maxTotalTokens"
 	| "model"
+	| "models"
 	| "onPermissionRequest"
 	| "onQuestionRequest"
 	| "permissions"

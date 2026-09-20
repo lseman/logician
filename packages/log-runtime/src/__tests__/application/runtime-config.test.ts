@@ -100,6 +100,63 @@ void test("runtime resolver applies shared environment precedence", () => {
 	});
 });
 
+void test("runtime resolver applies environment overrides for config-only keys", () => {
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_THEME: "gruvbox",
+		LOGICIAN_SYSTEM_PROMPT: "env system prompt",
+		LOGICIAN_POST_EDIT_DIAGNOSTICS: "0",
+	});
+
+	assert.equal(resolved.source.theme, "gruvbox");
+	assert.equal(resolved.source.systemPrompt, "env system prompt");
+	assert.equal(resolved.bridge.systemPrompt, "env system prompt");
+	assert.equal(resolved.bridge.postEditDiagnostics, false);
+	assert.equal(resolved.warnings.length, 0);
+});
+
+void test("runtime resolver lets environment win over configured values", () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-config-"));
+	writeFileSync(
+		path.join(cwd, ".logician.json"),
+		JSON.stringify({
+			theme: "dark",
+			systemPrompt: "from config",
+			postEditDiagnostics: true,
+			contextWindowTokens: 100_000,
+		}),
+		"utf8",
+	);
+
+	const resolved = resolveRuntimeConfig(cwd, {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_THEME: "solarized",
+		LOGICIAN_SYSTEM_PROMPT: "from env",
+		LOGICIAN_POST_EDIT_DIAGNOSTICS: "0",
+		LOGICIAN_CONTEXT_WINDOW: "200000",
+	});
+
+	assert.equal(resolved.source.theme, "solarized");
+	assert.equal(resolved.bridge.systemPrompt, "from env");
+	assert.equal(resolved.bridge.postEditDiagnostics, false);
+	assert.equal(resolved.bridge.contextWindowTokens, 200_000);
+	assert.equal(resolved.warnings.length, 0);
+});
+
+void test("runtime resolver rejects uncoercible environment values with warnings", () => {
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_CONTEXT_WINDOW: "not-a-number",
+		LOGICIAN_HOOKS: "banana",
+	});
+
+	// Config value stands for both keys.
+	assert.equal(resolved.bridge.runtimeHooksEnabled, true);
+	assert.equal(resolved.warnings.length, 2);
+	assert.ok(resolved.warnings.some(w => w.includes("contextWindowTokens")));
+	assert.ok(resolved.warnings.some(w => w.includes("hooks")));
+});
+
 void test("reasoners are disabled by default", () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-defaults-"));
 	const resolved = resolveRuntimeConfig(cwd, {});

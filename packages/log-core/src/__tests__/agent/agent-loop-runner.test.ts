@@ -815,6 +815,147 @@ void test("runAgentLoop applies configured stop policies when idle", async () =>
 	);
 });
 
+const repetitiveText = "The quick brown fox jumps over the lazy dog. ".repeat(
+	15,
+);
+
+void test("runAgentLoop nudges once on text stagnation then recovers", async () => {
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => textResponse(repetitiveText),
+		messages => {
+			assert.match(String(messages.at(-1)?.content), /^\[stagnation-nudge\]/);
+			return textResponse("Changed strategy and verified the result.");
+		},
+	]);
+	const newMessages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig({ maxIterations: 5 }),
+			backend,
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	assert.equal(backend.calls, 2);
+	assert.ok(
+		newMessages.some(
+			m =>
+				m.role === "user" && String(m.content).startsWith("[stagnation-nudge]"),
+		),
+	);
+	assert.ok(
+		events.some(
+			event =>
+				event.type === "harness_intervention" &&
+				event.kind === "loop" &&
+				event.cause === "text_stagnation",
+		),
+	);
+	const end = events.find(event => event.type === "agent_end");
+	assert.equal(end?.status, "completed");
+});
+
+void test("runAgentLoop blocks on a second text stagnation hit", async () => {
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => textResponse(repetitiveText),
+		() => textResponse(repetitiveText),
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig({ maxIterations: 5 }),
+			backend,
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	assert.equal(backend.calls, 2);
+	const end = events.find(event => event.type === "agent_end");
+	assert.equal(end?.status, "blocked");
+	assert.match(end?.summary ?? "", /text stagnation/);
+});
+
+void test("runAgentLoop counts a stagnation hit while tools are landing, blocks on the next", async () => {
+	const echo: Tool = {
+		name: "echo",
+		description: "echo",
+		parameters: { type: "object", properties: {} },
+		execute: async () => "ok",
+	};
+	const withTools = (id: string) => ({
+		content: repetitiveText,
+		toolCalls: [{ id, name: "echo", arguments: "{}" }],
+		stopReason: "stop" as const,
+	});
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => withTools("t1"),
+		() => withTools("t2"),
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [echo] },
+		[user("prompt")],
+		{
+			...makeConfig({ maxIterations: 5, tools: [echo] }),
+			backend,
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	assert.equal(backend.calls, 2);
+	const end = events.find(event => event.type === "agent_end");
+	assert.equal(end?.status, "blocked");
+	assert.ok(
+		events.some(
+			event =>
+				event.type === "harness_intervention" &&
+				String(event.evidence?.summary ?? "").includes("tools were running"),
+		),
+	);
+});
+
+void test("runAgentLoop reports the per-model context window in context_update", async () => {
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => ({
+			content: "done",
+			toolCalls: [],
+			stopReason: "stop" as const,
+			usage: { totalTokens: 100, promptTokens: 80, completionTokens: 20 },
+		}),
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig({
+				model: "llama-local",
+				models: [
+					{
+						name: "Local",
+						model: "llama-local",
+						contextWindow: 32_000,
+					},
+				],
+				contextWindowTokens: 128_000,
+			}),
+			backend,
+		},
+		event => {
+			events.push(event);
+		},
+	);
+	const ctx = events.find(event => event.type === "context_update");
+	assert.equal(ctx?.maxTokens, 32_000);
+});
+
 void test("runAgentLoop schedules stop-policy continuation messages", async () => {
 	let policyCalls = 0;
 	const newMessages = await runAgentLoop(

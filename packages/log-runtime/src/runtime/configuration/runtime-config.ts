@@ -9,6 +9,7 @@ import {
 	loadGlobalLogicianConfig,
 	loadLogicianConfig,
 } from "./config-store.ts";
+import { applyEnvOverrides } from "./env-overrides.ts";
 
 export interface ResolvedRuntimeConfig {
 	configPath?: string;
@@ -90,25 +91,30 @@ export function resolveRuntimeConfig(
 					config: mergeRuntimeConfigLayers(global.config, project.config),
 					warnings: [...global.warnings, ...project.warnings],
 				};
-	const config = loaded.config;
+	// Resolution chain: defaults < global < project < env. Env values are
+	// coerced against the settings schema; bad values warn and leave the
+	// config value standing.
+	const envApplied = applyEnvOverrides(
+		loaded.config as unknown as Record<string, unknown>,
+		environment,
+	);
+	const config = envApplied.config as unknown as LogicianTuiConfig;
 
 	return {
 		configPath: loaded.path,
-		warnings: loaded.warnings,
+		warnings: [...loaded.warnings, ...envApplied.warnings],
 		source: config,
 		bridge: {
 			configPath: loaded.path,
 			baseUrl:
-				environment.LOGICIAN_LLM_URL ||
 				configString(config.baseUrl) ||
 				configString(config.llmUrl) ||
 				"http://127.0.0.1:8080",
-			model: environment.LOGICIAN_MODEL || configString(config.model) || "",
+			model: configString(config.model) ?? "",
 			legroom: config.legroom,
 			memoriam: config.memoriam,
 			models: config.models,
-			systemPrompt:
-				environment.LOGICIAN_SYSTEM_PROMPT || configString(config.systemPrompt),
+			systemPrompt: configString(config.systemPrompt),
 			chatTemplate: configString(config.chatTemplate),
 			temperature: configNumber(config.temperature),
 			maxTokens: configNumber(config.maxTokens),
@@ -122,14 +128,9 @@ export function resolveRuntimeConfig(
 					? "sequential"
 					: "parallel",
 			contextWindowTokens:
-				configNumber(environment.LOGICIAN_CONTEXT_WINDOW) ||
-				configNumber(environment.LOGICIAN_CTX_SIZE) ||
 				configNumber(config.contextWindowTokens) ||
 				configNumber(config.contextWindow),
-			runtimeHooksEnabled:
-				environment.LOGICIAN_HOOKS !== undefined
-					? environment.LOGICIAN_HOOKS !== "0"
-					: configBool(config.hooks),
+			runtimeHooksEnabled: configBool(config.hooks),
 			webSearch: config.webSearch
 				? {
 						baseUrl: configString(config.webSearch.baseUrl),
@@ -166,10 +167,7 @@ export function resolveRuntimeConfig(
 			turnTimeoutMs: configNumber(config.turnTimeoutMs),
 			cacheSize: configNumber(config.cacheSize),
 			cacheTtlMs: configNumber(config.cacheTtlMs),
-			reasoner:
-				environment.LOGICIAN_REASONER ||
-				configString(config.reasoner) ||
-				"none",
+			reasoner: configString(config.reasoner) || "none",
 			reasonerConfig: config.reasonerConfig,
 			cwd: config.cwd ?? cwd,
 			allowedPaths: config.allowedPaths,

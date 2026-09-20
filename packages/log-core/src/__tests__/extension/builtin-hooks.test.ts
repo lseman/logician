@@ -408,9 +408,16 @@ void test("changed batches and tool-less turns do not inject a loop redirect", a
 
 	// Turn 1: read a.txt. Turn 2: read b.txt — different batch, no loop.
 	// prepareNextTurn interleaves, as in the harness.
-	for (const [id, p] of [["1", "a.txt"], ["2", "b.txt"]] as const) {
+	for (const [id, p] of [
+		["1", "a.txt"],
+		["2", "b.txt"],
+	] as const) {
 		const call = { id, name: "read", arguments: `{"path":"${p}"}` };
-		await hooks.beforeToolCall?.({ toolCall: call, args: { path: p }, iteration: 1 });
+		await hooks.beforeToolCall?.({
+			toolCall: call,
+			args: { path: p },
+			iteration: 1,
+		});
 		await hooks.afterToolCall?.({
 			toolCall: call,
 			args: { path: p },

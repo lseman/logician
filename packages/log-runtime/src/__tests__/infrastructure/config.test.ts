@@ -96,6 +96,35 @@ void test("validateConfig accepts only named model entries", () => {
 	assert.ok(warnings.some(w => w.includes('"models" entry invalid')));
 });
 
+void test("validateConfig keeps valid per-model capability caps and drops invalid ones", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig(
+		{
+			models: [
+				{
+					name: "Local",
+					model: "llama-local",
+					contextWindow: 32_000,
+					maxTokens: 1024,
+				},
+				{ name: "Bad", model: "broken", contextWindow: -5, maxTokens: "huge" },
+			],
+		},
+		warnings,
+	);
+	assert.equal(cfg.models?.length, 2);
+	assert.equal(cfg.models?.[0]?.name, "Local");
+	assert.equal(cfg.models?.[0]?.contextWindow, 32_000);
+	assert.equal(cfg.models?.[0]?.maxTokens, 1024);
+	assert.equal(cfg.models?.[1]?.name, "Bad");
+	assert.equal(cfg.models?.[1]?.contextWindow, undefined);
+	assert.equal(cfg.models?.[1]?.maxTokens, undefined);
+	assert.ok(
+		warnings.some(w => w.includes('"broken" has invalid contextWindow')),
+	);
+	assert.ok(warnings.some(w => w.includes('"broken" has invalid maxTokens')));
+});
+
 void test("validateConfig rejects the removed named-object models format", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig(

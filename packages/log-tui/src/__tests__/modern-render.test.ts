@@ -892,7 +892,7 @@ void test("a loop-redirect chunk renders as NOTICE, not YOU", () => {
 						type: "user",
 						contentText:
 							"[loop-redirect:batch_loop] You called `read` 5 consecutive " +
-							"times with identical arguments: `{\"path\":\"a.txt\"}`. " +
+							'times with identical arguments: `{"path":"a.txt"}`. ' +
 							"Stop repeating this call.",
 						isComplete: true,
 					},

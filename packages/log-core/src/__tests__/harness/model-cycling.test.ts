@@ -2,7 +2,11 @@ import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import { AgentSession } from "../../runtime/harness/agent-session.ts";
-import { clampThinkingLevel } from "../../runtime/harness/live/model.ts";
+import {
+	clampThinkingLevel,
+	resolveModelContextWindow,
+	resolveModelMaxTokens,
+} from "../../runtime/harness/live/model.ts";
 import type { AgentEvent } from "../../system/types/types-messages.ts";
 
 class FakeBackend implements LLMBackend {
@@ -108,6 +112,50 @@ describe("Model cycling", () => {
 		h.models.cycle("forward");
 		assert.strictEqual(h.models.model, "qwen");
 		assert.strictEqual(h.models.baseUrl, "http://192.168.1.225:8080");
+	});
+});
+
+// ── Model capability caps ────────────────────────────────────────────────────
+
+describe("Model capability caps", () => {
+	const models = [
+		{
+			name: "Local",
+			model: "llama-local",
+			contextWindow: 32_000,
+			maxTokens: 1024,
+		},
+		{ name: "Big", model: "big-model", contextWindow: 1_000_000 },
+		{ name: "Plain", model: "plain" },
+	];
+
+	it("resolves the per-model context window for the active model", () => {
+		assert.equal(
+			resolveModelContextWindow(models, "llama-local", 128_000),
+			32_000,
+		);
+		assert.equal(
+			resolveModelContextWindow(models, "big-model", 128_000),
+			1_000_000,
+		);
+	});
+
+	it("falls back to the global window for models without a cap", () => {
+		assert.equal(resolveModelContextWindow(models, "plain", 128_000), 128_000);
+		assert.equal(
+			resolveModelContextWindow(models, "unknown-model", 128_000),
+			128_000,
+		);
+		assert.equal(
+			resolveModelContextWindow(undefined, "plain", 128_000),
+			128_000,
+		);
+	});
+
+	it("resolves per-model max tokens with a global fallback", () => {
+		assert.equal(resolveModelMaxTokens(models, "llama-local", 4096), 1024);
+		assert.equal(resolveModelMaxTokens(models, "plain", 4096), 4096);
+		assert.equal(resolveModelMaxTokens(undefined, "plain", 4096), 4096);
 	});
 });
 

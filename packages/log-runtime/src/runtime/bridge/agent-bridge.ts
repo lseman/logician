@@ -233,10 +233,7 @@ export class AgentRuntime {
 		this.projectTrusted = opts.projectTrusted === true;
 		this.configPath = opts.configPath ?? null;
 		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
-		const postEditDiagnosticsEnabled =
-			process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS === "0"
-				? false
-				: opts.postEditDiagnostics !== false;
+		const postEditDiagnosticsEnabled = opts.postEditDiagnostics !== false;
 		this.legroom = new LegroomGateway(opts.legroom ?? {});
 		this.memoriam = new MemoriamGateway(opts.memoriam ?? {});
 

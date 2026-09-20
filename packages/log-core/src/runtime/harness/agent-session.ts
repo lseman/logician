@@ -78,6 +78,10 @@ import {
 	withExtensionRuntime as withExtensionRuntimeHelper,
 } from "./live/extension-runtime.ts";
 import {
+	resolveModelContextWindow,
+	resolveModelMaxTokens,
+} from "./live/model.ts";
+import {
 	assertIdlePhase,
 	assertPhaseTransition,
 	HarnessBusyError,
@@ -1109,8 +1113,16 @@ export class AgentSession {
 				current,
 				{
 					customInstructions: options?.customInstructions,
-					contextWindowTokens: this.config.contextWindowTokens,
-					maxTokens: this.config.maxTokens,
+					contextWindowTokens: resolveModelContextWindow(
+						this.config.models,
+						this.config.model,
+						this.config.contextWindowTokens,
+					),
+					maxTokens: resolveModelMaxTokens(
+						this.config.models,
+						this.config.model,
+						this.config.maxTokens,
+					),
 					thinkingLevel: this.config.thinkingLevel,
 				},
 			);

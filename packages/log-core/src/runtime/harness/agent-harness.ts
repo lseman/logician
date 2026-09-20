@@ -65,6 +65,7 @@ import {
 	createProviderTurnState,
 	requestAssistantTurn,
 } from "../loop/provider-turn.ts";
+import { resolveModelContextWindow } from "./live/model.ts";
 
 // A steering interrupt cancels the in-flight provider call to redirect the
 // run, not to stop it — the harness auto-continues with the queued steering
@@ -87,6 +88,20 @@ function isSteeringInterrupt(signal: AbortSignal | undefined): boolean {
 		signal?.aborted === true &&
 		signal.reason instanceof Error &&
 		signal.reason.name === STEERING_INTERRUPT_NAME
+	);
+}
+
+/**
+ * Strategy-change nudge injected on the first text-stagnation hit. The run
+ * gets one bounded recovery turn; a second hit blocks (see the loop below).
+ */
+function formatStagnationNudge(hit: string): string {
+	return (
+		"[stagnation-nudge] The harness detected that your last response repeats " +
+		`prior content without new progress (${hit}). Do not restate the same ` +
+		"analysis. Change strategy and take a concrete next step: run a tool, " +
+		"make an edit, or state a decision and proceed. If the task is already " +
+		"complete, say so in one explicit sentence."
 	);
 }
 
@@ -170,6 +185,7 @@ async function runAgentLoopInternal(
 	let iteration = 0;
 	let performedToolWork = false;
 	let toolFailures = 0;
+	let stagnationNudges = 0;
 	const adaptiveObjective = taskObjectiveFromMessages([
 		...context.messages,
 		...prompts,
@@ -423,20 +439,58 @@ async function runAgentLoopInternal(
 				if (assistantText.length > 200) {
 					const loopHit = textLoopDetector.check(assistantText);
 					if (loopHit) {
-						await intervene({
-							kind: "loop",
-							cause: "text_stagnation",
-							detector: "text_loop_detector",
-							message: `Text stagnation detected: ${loopHit}`,
-							iteration,
-							action: "change_strategy",
-						});
-						return finish({
-							status: "blocked",
-							summary:
-								"Agent entered a text stagnation loop — repeating content without progress.",
-							source: "runtime",
-						});
+						// Bounded recovery: the first text-only hit injects one
+						// strategy-change nudge (same escalation pattern as the
+						// soft-tool manager); a second hit blocks the run. A first
+						// hit while tool calls are landing is counted only — the
+						// run is making work progress, so the batch runs as usual
+						// and the next text hit blocks.
+						stagnationNudges++;
+						textLoopDetector.reset();
+						const hasToolWork = toolCalls.length > 0;
+						if (stagnationNudges > 1) {
+							await intervene({
+								kind: "loop",
+								cause: "text_stagnation",
+								detector: "text_loop_detector",
+								message: `Text stagnation detected: ${loopHit}`,
+								iteration,
+								action: "change_strategy",
+							});
+							return finish({
+								status: "blocked",
+								summary:
+									"Agent entered a text stagnation loop — repeating content without progress.",
+								source: "runtime",
+							});
+						}
+						if (hasToolWork) {
+							await intervene({
+								kind: "loop",
+								cause: "text_stagnation",
+								detector: "text_loop_detector",
+								message: `Text stagnation detected while tools were running: ${loopHit}`,
+								iteration,
+								action: "change_strategy",
+							});
+						} else {
+							await intervene({
+								kind: "loop",
+								cause: "text_stagnation",
+								detector: "text_loop_detector",
+								message: `Text stagnation detected: ${loopHit}; strategy-change nudge injected.`,
+								iteration,
+								action: "change_strategy",
+							});
+							pendingMessages = [
+								{
+									role: "user",
+									content: formatStagnationNudge(loopHit),
+									timestamp: Date.now(),
+								},
+							];
+							continue;
+						}
 					}
 				}
 			} else {
@@ -553,10 +607,18 @@ async function runAgentLoopInternal(
 							registry.toToolDefinitions(),
 							tokenEncoding,
 						);
+			// The effective window follows the active model: the per-model cap
+			// when configured for it (model cycling mutates config mid-run),
+			// otherwise the global setting.
+			const effectiveContextWindow = resolveModelContextWindow(
+				config.models,
+				config.model,
+				config.contextWindowTokens,
+			);
 			await emit({
 				type: "context_update",
 				tokens: contextTokens,
-				maxTokens: config.contextWindowTokens,
+				maxTokens: effectiveContextWindow,
 				cachedTokens: response?.usage?.cachedTokens ?? null,
 				promptTokens: response?.usage?.promptTokens ?? null,
 				completionTokens: response?.usage?.completionTokens ?? null,
@@ -564,10 +626,10 @@ async function runAgentLoopInternal(
 				prefixDivergedAt: turnResult.prefixStability?.divergedAt,
 				prefixRewritten: turnResult.prefixStability?.rewritten,
 			});
-			if (config.contextWindowTokens) {
+			if (effectiveContextWindow) {
 				const budgetResult = outputGuard?.processResponse(
 					contextTokens,
-					config.contextWindowTokens,
+					effectiveContextWindow,
 				);
 				// budget_exhausted is a harder threshold than proactive compaction's
 				// (95% vs 80%) — if we're here, proactive compaction already failed
@@ -579,7 +641,7 @@ async function runAgentLoopInternal(
 						messages as CompactableMessage[],
 						{
 							triggerTokens: 0,
-							targetTokens: Math.floor(config.contextWindowTokens * 0.75),
+							targetTokens: Math.floor(effectiveContextWindow * 0.75),
 						},
 					);
 					if (compacted.changed) {
@@ -589,7 +651,7 @@ async function runAgentLoopInternal(
 						await emit({
 							type: "context_update",
 							tokens: compacted.tokensAfter,
-							maxTokens: config.contextWindowTokens,
+							maxTokens: effectiveContextWindow,
 							compacted: true,
 						});
 						await intervene({

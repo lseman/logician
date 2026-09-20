@@ -829,29 +829,29 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					lines.push(
 						padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`),
 					);
-		} else if (
-			/^\[continuation-nudge:/i.test(content) ||
-			/^\[loop-redirect:/i.test(content)
-		) {
-			// Render harness-injected guard messages (continuation nudges,
-			// loop redirects) as NOTICE blocks instead of "YOU" messages.
-			// The leading tag like [continuation-nudge:length] or
-			// [loop-redirect:batch_loop] is extracted and displayed as an
-			// accent-colored reason.
-			const tagMatch =
-				/^\[(?<prefix>continuation-nudge|loop-redirect):(?<reason>[^\]]+)\]/i.exec(
-					content,
-				);
-			const prefix = tagMatch?.groups?.prefix ?? "";
-			const reason = tagMatch?.groups?.reason
-				? tagMatch.groups.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_")
-				: "";
-			const label =
-				prefix === "loop-redirect"
-					? `Guard: ${reason || "loop"}`
-					: reason
-						? `Guard: continuation_${reason}`
-						: "Guard: continuation";
+			} else if (
+				/^\[continuation-nudge:/i.test(content) ||
+				/^\[loop-redirect:/i.test(content)
+			) {
+				// Render harness-injected guard messages (continuation nudges,
+				// loop redirects) as NOTICE blocks instead of "YOU" messages.
+				// The leading tag like [continuation-nudge:length] or
+				// [loop-redirect:batch_loop] is extracted and displayed as an
+				// accent-colored reason.
+				const tagMatch =
+					/^\[(?<prefix>continuation-nudge|loop-redirect):(?<reason>[^\]]+)\]/i.exec(
+						content,
+					);
+				const prefix = tagMatch?.groups?.prefix ?? "";
+				const reason = tagMatch?.groups?.reason
+					? tagMatch.groups.reason.toLowerCase().replace(/[^a-z0-9_]/g, "_")
+					: "";
+				const label =
+					prefix === "loop-redirect"
+						? `Guard: ${reason || "loop"}`
+						: reason
+							? `Guard: continuation_${reason}`
+							: "Guard: continuation";
 				const n = { level: "warn" as const, label, text: content };
 				const icon = "⚠";
 				const levelColor = theme.fgRaw("warning");
