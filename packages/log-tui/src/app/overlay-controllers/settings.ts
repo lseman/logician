@@ -1,13 +1,10 @@
 // ── Settings selector controller ───────────────────────────────────────────
-
 import {
+	getEnumValues,
 	saveConfigField,
 	saveConfigNestedField,
 } from "@logician/log-runtime/configuration";
-import type {
-	SettingDef,
-	SettingsSelectorAction,
-} from "../../overlays/settings-overlay.ts";
+import type { SettingsSelectorAction } from "../../overlays/settings-overlay.ts";
 import {
 	applyThinkingLevel,
 	setExecutionProfile,
@@ -16,6 +13,7 @@ import {
 } from "../inference-settings.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
 import { openModelSelector } from "./selectors.ts";
+import { buildSettingsDefs } from "./settings-defs.ts";
 
 // ── Settings selector ───────────────────────────────────────────────────
 
@@ -24,378 +22,7 @@ export async function openSettingsSelector(
 ): Promise<void> {
 	try {
 		const data = ctx.bridge.getSettingsData();
-		const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-		const settings: SettingDef[] = [
-			{
-				tab: "Model",
-				name: "Model",
-				section: "Model",
-				currentValue: data.model,
-				description: "LLM model to use",
-				options: [{ label: data.model, value: data.model, current: true }],
-			},
-			{
-				tab: "Model",
-				name: "Temperature",
-				section: "Sampling",
-				currentValue: String(data.temperature),
-				description: "Sampling temperature (0–2)",
-				options: [0.0, 0.3, 0.5, 0.7, 1.0].map(v => ({
-					label: String(v),
-					value: String(v),
-					current: Math.abs(data.temperature - v) < 0.001,
-				})),
-			},
-			{
-				tab: "Model",
-				name: "Max tokens",
-				section: "Response limits",
-				currentValue: String(data.maxTokens),
-				description: "Maximum response tokens",
-				options: [1024, 2048, 4096, 8192, 16384].map(v => ({
-					label: String(v),
-					value: String(v),
-					current: data.maxTokens === v,
-				})),
-			},
-			{
-				tab: "Model",
-				name: "Max iterations",
-				section: "Response limits",
-				currentValue: String(data.maxIterations),
-				description: "Maximum tool-use iterations per turn",
-				options: [10, 20, 30, 50, 100].map(v => ({
-					label: String(v),
-					value: String(v),
-					current: data.maxIterations === v,
-				})),
-			},
-			{
-				tab: "Model",
-				name: "Thinking level",
-				section: "Reasoning",
-				currentValue: data.thinkingLevel,
-				description: "Depth of reasoning before responding",
-				options: thinkingLevels.map(v => ({
-					label: v.charAt(0).toUpperCase() + v.slice(1),
-					value: v,
-					current: data.thinkingLevel === v,
-				})),
-			},
-			{
-				tab: "Behavior",
-				name: "Workflow mode",
-				section: "Workflow",
-				currentValue: ctx.workflowMode,
-				description: "Act with tools or produce a read-only plan",
-				options: [
-					{ label: "Act", value: "act", current: ctx.workflowMode === "act" },
-					{
-						label: "Plan",
-						value: "plan",
-						current: ctx.workflowMode === "plan",
-					},
-				],
-			},
-			{
-				tab: "Behavior",
-				name: "Guards",
-				section: "Safety",
-				currentValue: data.guardMode,
-				description: "Loop guards: auto uses safe defaults; off disables all",
-				options: [
-					{
-						label: "Auto",
-						value: "auto",
-						current: data.guardMode === "auto",
-					},
-					{
-						label: "on",
-						value: "on",
-						current: data.guardMode === "on",
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "off",
-						current: data.guardMode === "off",
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Behavior",
-				name: "Compaction",
-				section: "Context",
-				currentValue: data.proactiveCompactionEnabled ? "on" : "off",
-				description: "Auto-compact context to save tokens",
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: data.proactiveCompactionEnabled,
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "false",
-						current: !data.proactiveCompactionEnabled,
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Model",
-				name: "Inference mode",
-				section: "Sampling",
-				currentValue: data.inferenceMode,
-				description: "Pre-defined sampling parameter set (Alt+M to cycle)",
-				options: [
-					{
-						label: "Auto",
-						value: "auto",
-						current: data.inferenceMode === "auto",
-					},
-					{
-						label: "Provider defaults",
-						value: "none",
-						current: data.inferenceMode === "none",
-					},
-					{
-						label: "Think General",
-						value: "thinking-general",
-						current: data.inferenceMode === "thinking-general",
-					},
-					{
-						label: "Think Code",
-						value: "thinking-coding",
-						current: data.inferenceMode === "thinking-coding",
-					},
-					{
-						label: "Instruct",
-						value: "instruct-general",
-						current: data.inferenceMode === "instruct-general",
-					},
-					{
-						label: "Reason",
-						value: "instruct-reasoning",
-						current: data.inferenceMode === "instruct-reasoning",
-					},
-					{
-						label: "Code",
-						value: "instruct-coding",
-						current: data.inferenceMode === "instruct-coding",
-					},
-					{
-						label: "Exact",
-						value: "deterministic",
-						current: data.inferenceMode === "deterministic",
-					},
-					{
-						label: "Creative",
-						value: "creative",
-						current: data.inferenceMode === "creative",
-					},
-					{
-						label: "Analyze",
-						value: "analytical",
-						current: data.inferenceMode === "analytical",
-					},
-				],
-			},
-			{
-				tab: "Tools",
-				name: "Post-edit diagnostics",
-				section: "Editing",
-				currentValue: data.postEditDiagnostics ? "on" : "off",
-				description: "Check edited files against the project",
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: data.postEditDiagnostics,
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "false",
-						current: !data.postEditDiagnostics,
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Tools",
-				name: "RTK CLI proxy",
-				section: "Command output",
-				currentValue: data.rtkProxyEnabled ? "on" : "off",
-				description:
-					"Prefix all bash commands with `rtk` for 60-90% output compression",
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: data.rtkProxyEnabled,
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "false",
-						current: !data.rtkProxyEnabled,
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Tools",
-				name: "Legroom SDK",
-				section: "Integrations",
-				currentValue: data.legroomEnabled ? "on" : "off",
-				description:
-					"Compress outbound context through the local Legroom worker",
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: data.legroomEnabled,
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "false",
-						current: !data.legroomEnabled,
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Tools",
-				name: "Memoriam SDK",
-				section: "Integrations",
-				currentValue: data.memoriamEnabled ? "on" : "off",
-				description:
-					"Retrieve memory context for every turn (SQLite-backed store)",
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: data.memoriamEnabled,
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "false",
-						current: !data.memoriamEnabled,
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Tools",
-				name: "Graphician",
-				section: "Integrations",
-				currentValue: data.graphicianEnabled ? "on" : "off",
-				description:
-					"Expose the Graphician code-graph tool for semantic repository analysis",
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: data.graphicianEnabled,
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "false",
-						current: !data.graphicianEnabled,
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Tools",
-				name: "fffgrep",
-				section: "Integrations",
-				currentValue: data.fffgrepEnabled ? "on" : "off",
-				description: "Prefer the fff indexed MCP grep tool over local grep",
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: data.fffgrepEnabled,
-						toggleOn: true,
-					},
-					{
-						label: "off",
-						value: "false",
-						current: !data.fffgrepEnabled,
-						toggleOn: false,
-					},
-				],
-			},
-			{
-				tab: "Behavior",
-				name: "Execution policy",
-				section: "Workflow",
-				currentValue: data.executionProfile,
-				description:
-					"Auto continues bounded work; minimal performs one direct pass",
-				options: [
-					{
-						label: "Auto",
-						value: "autonomous",
-						current: data.executionProfile === "autonomous",
-					},
-					{
-						label: "minimal",
-						value: "minimal",
-						current: data.executionProfile === "minimal",
-					},
-				],
-			},
-			...[
-				[
-					"Duplicate-call guard",
-					data.duplicateGuardEnabled,
-					"Block repeated identical tool calls",
-				],
-				[
-					"Failure-loop guard",
-					data.failureGuardEnabled,
-					"Block repeated equivalent tool failures",
-				],
-				[
-					"Continuation",
-					data.continuationEnabled,
-					"Continue bounded unfinished autonomous work",
-				],
-				[
-					"Auto-compact on full context",
-					data.autoRetryEnabled,
-					"Compact and retry automatically when context fills up",
-				],
-				[
-					"Budget early-stop",
-					data.progressStopEnabled,
-					"Stop when useful token growth flattens",
-				],
-			].map(([name, enabled, description]) => ({
-				name: String(name),
-				tab: "Guards",
-				section: "Loop protection",
-				currentValue: enabled ? "on" : "off",
-				description: String(description),
-				options: [
-					{
-						label: "on",
-						value: "true",
-						current: Boolean(enabled),
-						toggleOn: true,
-					},
-					{ label: "off", value: "false", current: !enabled, toggleOn: false },
-				],
-			})),
-		];
+		const settings = buildSettingsDefs(data, ctx.workflowMode);
 		ctx.tui.setShowHardwareCursor(false);
 		ctx.settingsSelector.setSettings(settings);
 		ctx.settingsSelector.show();
@@ -433,8 +60,8 @@ export function handleSettingsSelectorAction(
 		openModelSelector(ctx);
 		return;
 	}
-	if (action.type !== "change") return;
-	// action.type === "change"
+	if (action.type !== "change" && action.type !== "confirm") return;
+	// action.type === "change" | "confirm"
 	const { settingName, value } = action;
 	ctx.settingsSelector.setMessage(`Applying ${settingName}...`);
 	ctx.tui.requestRender();
@@ -551,18 +178,7 @@ export function handleSettingsSelectorAction(
 			break;
 		}
 		case "inference mode": {
-			const valid = [
-				"auto",
-				"none",
-				"thinking-general",
-				"thinking-coding",
-				"instruct-general",
-				"instruct-reasoning",
-				"instruct-coding",
-				"deterministic",
-				"creative",
-				"analytical",
-			];
+			const valid = getEnumValues("inferenceMode") ?? [];
 			if (!valid.includes(value)) {
 				ctx.notify(
 					`Invalid inference mode: ${value}. Valid: ${valid.join(", ")}`,

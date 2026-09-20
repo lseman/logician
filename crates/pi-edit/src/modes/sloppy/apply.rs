@@ -23,13 +23,6 @@ pub struct ApplyContext<'a> {
 	pub canonical: &'a Path,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MatchMode {
-	Raw,
-	Normalized,
-	Fuzzy,
-}
-
 /// Drop the `*** SM:PUT` ellipses that re-emit `*** SM:FIND`'s open edges. An
 /// edge gap captured nothing, so re-emitting it writes nothing; a whole-line
 /// edge `…` takes the newline joining it to the rest of the rewrite with it.

@@ -11,6 +11,12 @@ import {
 	type TruncationConfig,
 } from "@logician/log-core";
 import { getReasonerIds } from "../../capabilities/reasoning/index.ts";
+import {
+	getEnumValues,
+	getKnownConfigKeys,
+	getNestedKeys,
+	getSettingSpec,
+} from "./settings-schema.ts";
 
 /** Validated configuration with warnings collected during load. */
 export interface ResolvedLogicianConfig {
@@ -19,106 +25,23 @@ export interface ResolvedLogicianConfig {
 	warnings: string[];
 }
 
-/** Known config keys for unknown-field detection. */
-const KNOWN_KEYS = new Set([
-	"baseUrl",
-	"llmUrl",
-	"model",
-	"models",
-	"theme",
-	"systemPrompt",
-	"chatTemplate",
-	"temperature",
-	"maxTokens",
-	"maxIterations",
-	"thinkingLevel",
-	"thinkingFormat",
-	"executionProfile",
-	"autoRetryEnabled",
-	"maxRetries",
-	"retryBaseDelayMs",
-	"turnTimeoutMs",
-	"cacheSize",
-	"cacheTtlMs",
-	"toolExecution",
-	"contextWindow",
-	"contextWindowTokens",
-	"hooks",
-	"mcp",
-	"mcpServers",
-	"webSearch",
-	"permissionMode",
-	"workflowMode",
-	"permissions",
-	"steeringInterrupt",
-	"maxTotalTokens",
-	"guardsEnabled",
-	"duplicateGuardEnabled",
-	"failureGuardEnabled",
-	"duplicateToolThreshold",
-	"toolFailureLoopThreshold",
-	"progressStopEnabled",
-	"continuationEnabled",
-	"verifiedStopEnabled",
-	"postEditDiagnostics",
-	"lsp",
-	"compaction",
-	"plugins",
-	"inferenceMode",
-	"allowedPaths",
-	"allowAllPaths",
-	"rtkProxyEnabled",
-	"graphicianEnabled",
-	"fffgrepEnabled",
-	"maxParallelAgents",
-	"cwd",
-	"truncation",
-	"todoEnabled",
-	"transcriptMaxTurns",
-	"transcriptMaxRenderedLines",
-	"memoriam",
-	"legroom",
-	"reasoner",
-	"reasonerConfig",
-]);
-const TOOLS_KEYS = new Set(["xdev"]);
-const COMPACTION_KEYS = new Set([
-	"enabled",
-	"reserveTokens",
-	"keepRecentTokens",
-]);
-const TRUNCATION_KEYS = new Set([
-	"toolResultMaxChars",
-	"maxLines",
-	"grepLineMaxChars",
-	"subagentResultMaxChars",
-	"compactionSummaryMaxChars",
-	"microCompactMaxChars",
-	"transcriptMessageMaxChars",
-]);
-const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(["tool", "assistant", "default"]);
-
-const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
+/**
+ * Known config keys for unknown-field detection. Derived from the schema
+ * registry (settings-schema.ts) so the two can't drift apart.
+ */
+const KNOWN_KEYS = new Set(getKnownConfigKeys());
+const TOOLS_KEYS = new Set(getNestedKeys("tools"));
+const COMPACTION_KEYS = new Set(getNestedKeys("compaction"));
+const TRUNCATION_KEYS = new Set(getNestedKeys("truncation"));
+const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(
+	getNestedKeys("truncation.microCompactMaxChars"),
+);
+const WEB_SEARCH_KEYS = new Set(getNestedKeys("webSearch"));
 /** Sourced from the reasoner registry itself so this can't drift from the real set. */
 const REASONER_IDS = new Set(getReasonerIds());
-const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
-const LEGROOM_KEYS = new Set([
-	"mode",
-	"python",
-	"args",
-	"failOpen",
-	"timeoutMs",
-	"config",
-]);
-
-const MEMORIAM_KEYS = new Set([
-	"mode",
-	"python",
-	"args",
-	"failOpen",
-	"timeoutMs",
-	"config",
-]);
+const PERMISSIONS_KEYS = new Set(getNestedKeys("permissions"));
+const LEGROOM_KEYS = new Set(getNestedKeys("legroom"));
+const MEMORIAM_KEYS = new Set(getNestedKeys("memoriam"));
 
 /** Validate a URL string (non-empty, starts with http:// or https://). */
 function isValidUrl(v: unknown): boolean {
@@ -205,10 +128,11 @@ export function validateConfig(
 	copyStrings(obj, cfg, ["model", "theme", "systemPrompt", "chatTemplate"]);
 	if (obj.executionProfile !== undefined) {
 		const profile = configString(obj.executionProfile);
-		if (profile === "autonomous" || profile === "minimal") {
-			cfg.executionProfile = profile;
+		const valid = getEnumValues("executionProfile") ?? [];
+		if (valid.includes(profile ?? "")) {
+			cfg.executionProfile = profile as LogicianTuiConfig["executionProfile"];
 		} else {
-			warn(warnings, '"executionProfile" must be one of: autonomous, minimal.');
+			warn(warnings, `"executionProfile" must be one of: ${valid.join(", ")}.`);
 		}
 	}
 
@@ -312,7 +236,8 @@ export function validateConfig(
 	// Enum fields.
 	if (obj.toolExecution !== undefined) {
 		const te = configString(obj.toolExecution);
-		if (te !== "sequential" && te !== "parallel") {
+		const valid = getEnumValues("toolExecution") ?? [];
+		if (!valid.includes(te ?? "")) {
 			warn(
 				warnings,
 				`"toolExecution" must be "sequential" or "parallel", got: "${te}".`,
@@ -323,7 +248,7 @@ export function validateConfig(
 	}
 	if (obj.permissionMode !== undefined) {
 		const pm = configString(obj.permissionMode);
-		const validModes = ["acceptAll", "acceptEdits", "ask", "plan"];
+		const validModes = getEnumValues("permissionMode") ?? [];
 		if (!validModes.includes(pm ?? "")) {
 			warn(warnings, `"permissionMode" invalid, got: "${pm}".`);
 		} else {
@@ -332,26 +257,20 @@ export function validateConfig(
 	}
 	if (obj.workflowMode !== undefined) {
 		const mode = configString(obj.workflowMode);
-		if (mode === "act" || mode === "plan") cfg.workflowMode = mode;
-		else warn(warnings, '"workflowMode" must be one of: act, plan.');
+		const valid = getEnumValues("workflowMode") ?? [];
+		if (valid.includes(mode ?? "")) cfg.workflowMode = mode as "act" | "plan";
+		else warn(warnings, `"workflowMode" must be one of: ${valid.join(", ")}.`);
 	}
 
-	copyBooleans(obj, cfg, {
-		hooks: undefined,
-		steeringInterrupt: undefined,
-		guardsEnabled: undefined,
-		duplicateGuardEnabled: true,
-		failureGuardEnabled: undefined,
-		progressStopEnabled: undefined,
-		continuationEnabled: true,
-		verifiedStopEnabled: undefined,
-		postEditDiagnostics: true,
-		autoRetryEnabled: true,
-		rtkProxyEnabled: undefined,
-		graphicianEnabled: true,
-		fffgrepEnabled: true,
-		todoEnabled: false,
-	});
+	// Boolean defaults come from the schema registry so the UI, docs, and
+	// validation share one source of truth.
+	const booleanDefaults: Readonly<Record<string, boolean | undefined>> =
+		Object.fromEntries(
+			getKnownConfigKeys()
+				.filter(key => getSettingSpec(key)?.type === "boolean")
+				.map(key => [key, getSettingSpec(key)?.default as boolean | undefined]),
+		);
+	copyBooleans(obj, cfg, booleanDefaults);
 
 	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
 	if (obj.inferenceMode !== undefined) {
@@ -407,16 +326,20 @@ export function validateConfig(
 	}
 	copyNumbers(obj, cfg, ["transcriptMaxTurns", "transcriptMaxRenderedLines"]);
 
-	for (const [key, minimum, inclusive] of [
-		["maxRetries", 0, true],
-		["retryBaseDelayMs", 0, true],
-		["turnTimeoutMs", 0, false],
-		["cacheSize", 0, false],
-		["cacheTtlMs", 0, false],
-		["duplicateToolThreshold", 0, true],
-		["toolFailureLoopThreshold", 0, true],
-		["maxParallelAgents", 0, false],
+	// Numeric keys validated as "must be >= 0" (or "> 0") with ignore-on-
+	// violation. Ranges come from the schema registry.
+	for (const key of [
+		"maxRetries",
+		"retryBaseDelayMs",
+		"turnTimeoutMs",
+		"cacheSize",
+		"cacheTtlMs",
+		"duplicateToolThreshold",
+		"toolFailureLoopThreshold",
+		"maxParallelAgents",
 	] as const) {
+		const minimum = getSettingSpec(key)?.min ?? 0;
+		const inclusive = getSettingSpec(key)?.minExclusive !== true;
 		const source = obj;
 		if (source[key] === undefined) continue;
 		const value = configNumber(source[key]);
@@ -453,11 +376,6 @@ export function validateConfig(
 		} else {
 			warn(warnings, '"allowedPaths" must be an array.');
 		}
-	}
-
-	// allowAllPaths: when true, skip CWD/allowedPaths enforcement.
-	if (obj.allowAllPaths !== undefined) {
-		cfg.allowAllPaths = configBool(obj.allowAllPaths);
 	}
 
 	// cwd: explicit project root.
@@ -563,8 +481,9 @@ export function validateConfig(
 					warn(warnings, `Unknown legroom key: "${key}".`);
 			}
 			const mode = configString(value.mode);
-			if (mode !== undefined && mode !== "off" && mode !== "sdk") {
-				warn(warnings, '"legroom.mode" must be one of: off, sdk.');
+			const modes = getEnumValues("legroom.mode") ?? [];
+			if (mode !== undefined && !modes.includes(mode)) {
+				warn(warnings, `"legroom.mode" must be one of: ${modes.join(", ")}.`);
 			} else {
 				const args = Array.isArray(value.args)
 					? value.args.filter(
@@ -617,8 +536,9 @@ export function validateConfig(
 					warn(warnings, `Unknown memoriam key: "${key}".`);
 			}
 			const mode = configString(value.mode);
-			if (mode !== undefined && mode !== "off" && mode !== "sdk") {
-				warn(warnings, '"memoriam.mode" must be one of: off, sdk.');
+			const modes = getEnumValues("memoriam.mode") ?? [];
+			if (mode !== undefined && !modes.includes(mode)) {
+				warn(warnings, `"memoriam.mode" must be one of: ${modes.join(", ")}.`);
 			} else {
 				const args = Array.isArray(value.args)
 					? value.args.filter(

@@ -2143,53 +2143,6 @@ pub fn search(content: Either<JsString, Uint8Array>, options: SearchOptions) -> 
 	}
 }
 
-/// Quick check if content matches a pattern.
-///
-/// # Arguments
-/// - `content`: `Uint8Array`/`Buffer` (zero-copy) or `string` (UTF-8).
-/// - `pattern`: `Uint8Array`/`Buffer` (zero-copy) or `string` (UTF-8).
-/// - `ignore_case`: Case-insensitive matching.
-/// - `multiline`: Enable multiline regex mode.
-///
-/// # Returns
-/// True if any match exists; false on no match.
-#[napi]
-pub fn has_match(
-	content: Either<JsString, Uint8Array>,
-	pattern: Either<JsString, Uint8Array>,
-	ignore_case: Option<bool>,
-	multiline: Option<bool>,
-) -> Result<bool> {
-	// Hold JsStringUtf8 on the stack and borrow - no copy
-	let content_utf8;
-	let content_slice: &[u8] = match &content {
-		Either::A(js_str) => {
-			content_utf8 = js_str.into_utf8()?;
-			content_utf8.as_slice()
-		},
-		Either::B(buf) => buf.as_ref(),
-	};
-
-	let pattern_utf8;
-	let pattern_string;
-	let pattern_ref: &str = match &pattern {
-		Either::A(js_str) => {
-			pattern_utf8 = js_str.into_utf8()?;
-			pattern_utf8.as_str()?
-		},
-		Either::B(buf) => {
-			pattern_string = std::str::from_utf8(buf.as_ref())
-				.map_err(|err| Error::from_reason(format!("Invalid UTF-8 in pattern: {err}")))?
-				.to_owned();
-			&pattern_string
-		},
-	};
-
-	let matcher =
-		build_matcher(pattern_ref, ignore_case.unwrap_or(false), multiline.unwrap_or(false))?;
-	Ok(matcher.is_match(content_slice).unwrap_or(false))
-}
-
 /// Search files for a regex pattern.
 ///
 /// # Arguments

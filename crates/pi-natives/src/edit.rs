@@ -9,9 +9,8 @@
 //! callback (LSP writethrough / ACP bridge stay in TypeScript).
 //!
 //! [`EditStore`] holds the session-wide snapshot/clipboard/no-op state that
-//! read-side tools populate. The remaining exports are pure helpers used by
-//! the TypeScript tool shell (matcher projection, prompts, hashline display
-//! formatting, notebook decoding).
+//! read-side tools populate. `edit_description` provides the mode prompt
+//! markdown for the TypeScript tool shell.
 
 use std::{
 	path::{Path, PathBuf},
@@ -29,22 +28,15 @@ use napi::{
 use napi_derive::napi;
 use pi_edit::{
 	EditError, EditMode, EditResult, PathPolicy, Session,
-	diff_string::{BlockContextSource, generate_diff_string},
-	modes::{hashline, sloppy},
 	path_policy::canonical_key,
 	session::{ApplyRequest, EditWriter, PreviewBatch, SessionConfig, WriteRequest, WriteResponse},
 	store,
-	stream_json::snapshot_from_text,
 	text::normalize_to_lf,
 };
 
 fn parse_mode(mode: &str) -> Result<EditMode> {
 	EditMode::parse(mode)
 		.ok_or_else(|| napi::Error::from_reason(format!("Unknown edit mode: {mode}")))
-}
-
-fn reason(err: impl std::fmt::Display) -> napi::Error {
-	napi::Error::from_reason(err.to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -569,84 +561,9 @@ async fn preview_pump(shared: Arc<Shared>, rx: flume::Receiver<()>, on_preview: 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Pure helpers
+// Mode metadata
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// `(path, added-lines digest)` for stream matchers.
-#[napi(object)]
-pub struct EditMatcherEntry {
-	pub path:   String,
-	pub digest: String,
-}
-
-/// A destructive file operation a payload declares.
-#[napi(object)]
-pub struct EditFileOpIntent {
-	/// `delete` | `move`.
-	pub kind: String,
-	pub path: String,
-	pub to:   Option<String>,
-}
-
-/// Static projection of a payload: target paths, per-file digests, and
-/// delete/move intents.
-#[napi(object)]
-pub struct EditInspection {
-	pub paths:    Vec<String>,
-	pub entries:  Vec<EditMatcherEntry>,
-	pub file_ops: Vec<EditFileOpIntent>,
-}
-
-/// Inspect `argsJson` (the JSON-serialized, possibly partial tool args)
-/// without touching the filesystem.
-#[napi]
-pub fn edit_inspect(mode: String, args_json: String) -> Result<EditInspection> {
-	let mode = parse_mode(&mode)?;
-	let snapshot = snapshot_from_text(&args_json, false, true);
-	let engine = pi_edit::modes::engine_for(mode, true, 0.95, false);
-	let inspection = engine.inspect(&snapshot);
-	Ok(EditInspection {
-		paths:    inspection.paths,
-		entries:  inspection
-			.entries
-			.into_iter()
-			.map(|(path, digest)| EditMatcherEntry { path, digest })
-			.collect(),
-		file_ops: inspection
-			.file_ops
-			.into_iter()
-			.map(|op| match op {
-				pi_edit::FileOpIntent::Delete { path } => {
-					EditFileOpIntent { kind: "delete".into(), path, to: None }
-				},
-				pi_edit::FileOpIntent::Move { from, to } => {
-					EditFileOpIntent { kind: "move".into(), path: from, to: Some(to) }
-				},
-			})
-			.collect(),
-	})
-}
-
-/// Numbered unified diff plus the first changed line.
-#[napi(object)]
-pub struct EditDiffResult {
-	pub diff:               String,
-	pub first_changed_line: Option<u32>,
-}
-
-/// Numbered unified diff between two texts (`generateDiffString`).
-#[napi]
-pub fn edit_diff_string(
-	old_text: String,
-	new_text: String,
-	path: Option<String>,
-) -> EditDiffResult {
-	let output = generate_diff_string(&old_text, &new_text, None, &BlockContextSource {
-		path: path.as_deref(),
-		lang: None,
-	});
-	EditDiffResult { diff: output.diff, first_changed_line: output.first_changed_line }
-}
 
 /// Tool description markdown for `mode`.
 #[napi]
@@ -654,121 +571,3 @@ pub fn edit_description(mode: String) -> Result<String> {
 	Ok(pi_edit::description(parse_mode(&mode)?).to_owned())
 }
 
-/// Lark grammar for `mode`, when it has a custom wire format.
-#[napi]
-pub fn edit_grammar(mode: String) -> Result<Option<String>> {
-	Ok(pi_edit::grammar(parse_mode(&mode)?).map(str::to_owned))
-}
-
-/// Auto-generated-file guard: the rejection message when `absolutePath`
-/// (displayed as `displayPath`) must not be edited, else null. Missing or
-/// unreadable files are editable.
-#[napi]
-pub fn edit_auto_generated_message(absolute_path: String, display_path: String) -> Option<String> {
-	let policy = PathPolicy {
-		cwd:                  PathBuf::new(),
-		home_dir:             PathBuf::new(),
-		local_sandbox_root:   None,
-		vault_roots:          None,
-		plan_active:          false,
-		block_auto_generated: true,
-	};
-	let mut head = [0u8; 1024];
-	let read = std::fs::File::open(&absolute_path)
-		.and_then(|mut file| {
-			use std::io::Read;
-			let mut total = 0;
-			loop {
-				let n = file.read(&mut head[total..])?;
-				if n == 0 {
-					break;
-				}
-				total += n;
-				if total == head.len() {
-					break;
-				}
-			}
-			Ok(total)
-		})
-		.ok()?;
-	policy.auto_generated_message(&display_path, &head[..read])
-}
-
-/// One stray sloppy payload region inside prose (UTF-16 offsets).
-#[napi(object)]
-pub struct InlineSloppyRegion {
-	pub start:   u32,
-	pub end:     u32,
-	pub payload: String,
-}
-
-/// Locate `*** SM:EDIT path` payloads the model emitted as plain text.
-#[napi]
-pub fn extract_inline_sloppy_regions(text: String) -> Vec<InlineSloppyRegion> {
-	sloppy::parse::extract_inline_sloppy_regions(&text)
-		.into_iter()
-		.map(|r| InlineSloppyRegion {
-			start:   r.start as u32,
-			end:     r.end as u32,
-			payload: r.payload,
-		})
-		.collect()
-}
-
-/// 4-hex hashline content tag for `text`.
-#[napi]
-pub fn hashline_file_hash(text: String) -> String {
-	let (_, body) = pi_edit::text::strip_bom(&text);
-	store::file_hash(&normalize_to_lf(body))
-}
-
-/// `[path#TAG]` section header.
-#[napi]
-pub fn hashline_format_header(path: String, tag: String) -> String {
-	hashline::format::format_hashline_header(&path, &tag)
-}
-
-/// `N:line` numbered display rows starting at `startLine` (default 1).
-#[napi]
-pub fn hashline_format_numbered_lines(text: String, start_line: Option<u32>) -> String {
-	hashline::format::format_numbered_lines(&text, start_line.unwrap_or(1))
-}
-
-/// Strip hashline display prefixes (`N:` / `+N:` …) from pasted rows.
-#[napi]
-pub fn hashline_strip_prefixes(lines: Vec<String>) -> Vec<String> {
-	hashline::prefixes::strip_hashline_prefixes(&lines)
-}
-
-/// Whether a row is a truncation notice emitted by `read`.
-#[napi]
-pub fn hashline_is_read_truncation_notice(line: String) -> bool {
-	hashline::prefixes::is_read_truncation_notice(&line)
-}
-
-/// Count of one canonical hashline op header shape in a payload.
-#[napi(object)]
-pub struct HashlineOpCount {
-	pub label: String,
-	pub count: u32,
-}
-
-/// Count canonical hashline op header shapes (`PUT N.=M:`, `CUT N*`, …) in
-/// a payload; empty when it carries no hashline ops.
-#[napi]
-pub fn hashline_count_ops(input: String) -> Vec<HashlineOpCount> {
-	let mut counts: Vec<HashlineOpCount> = Vec::new();
-	for label in hashline::tokenizer::op_labels(&input) {
-		match counts.iter_mut().find(|entry| entry.label == label) {
-			Some(entry) => entry.count += 1,
-			None => counts.push(HashlineOpCount { label, count: 1 }),
-		}
-	}
-	counts
-}
-
-/// Decode notebook JSON into the editable cell-marker text.
-#[napi]
-pub fn notebook_to_editable_text(json: String, display_path: String) -> Result<String> {
-	pi_edit::notebook::notebook_to_editable_text(&json, &display_path).map_err(reason)
-}

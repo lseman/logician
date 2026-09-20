@@ -1,10 +1,13 @@
 # @logician/log-natives
 
 TypeScript-facing native addon wrapping the `pi-natives` Rust crate
-(`crates/pi-natives`), which ports `ast.rs` and `edit.rs` — the N-API
-bindings for `pi-ast` (ast-grep-powered structural search/rewrite) and
-`pi-edit` (the streaming edit engine) — from oh-my-pi's own `pi-natives`
-crate. See `crates/README.md` for fork provenance.
+(`crates/pi-natives`), which ports the N-API bindings for `pi-ast`
+(ast-grep-powered structural search/rewrite), `pi-edit` (the streaming edit
+engine), filesystem search (`pi-walker`-backed glob, regex grep, fuzzy
+find), token counting, and bash output minimization (`pi-minimize`) from
+oh-my-pi's own `pi-natives` crate; the snapcompact frame renderer registers
+into the same module from its standalone crate. See `crates/README.md` for
+fork provenance.
 
 ## Build
 
@@ -21,9 +24,9 @@ types without needing a Rust toolchain.
 ## Usage
 
 ```ts
-import { astMatch, editDiffString } from "@logician/log-natives";
+import { astMatch, diffLines } from "@logician/log-natives";
 
-const diff = editDiffString("a\n", "b\n", "file.txt");
+const diff = diffLines("a\n", "b\n");
 const matches = await astMatch({
 	source: "function greet(name) { return `hi ${name}`; }",
 	lang: "javascript",
@@ -31,5 +34,6 @@ const matches = await astMatch({
 });
 ```
 
-Nothing in the rest of the workspace depends on this package yet — it's
-wired up (builds, loads, callable from Bun) but not consumed anywhere.
+Consumers: `log-core` (token counting), `log-snapcompact` (frame
+rendering), and `log-runtime` (grep/glob/fuzzy tools, the hashline edit
+engine, ast-grep tools, bash output minimization).

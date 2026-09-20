@@ -4,6 +4,7 @@
 	"production|lint/style/noNonNullAssertion": 1,
 	"production|lint/suspicious/noAssignInExpressions": 1,
 	"production|lint/suspicious/noConfusingVoidType": 3,
+	"production|lint/suspicious/noConstEnum": 4,
 	"production|lint/suspicious/noControlCharactersInRegex": 4,
 	"production|lint/suspicious/noImplicitAnyLet": 1,
 	"production|lint/suspicious/useIterableCallbackReturn": 2,

@@ -2,15 +2,11 @@
 //!
 //! # Overview
 //! Runs CPU-bound or blocking Rust work on libuv's thread pool via napi's
-//! `Task` trait, with profiling and cancellation support.
+//! `Task` trait, with cancellation support.
 //!
 //! # Cancellation
 //! Pass a `CancelToken` to blocking tasks. Work must check
 //! `CancelToken::heartbeat()` periodically to respect cancellation.
-//!
-//! # Profiling
-//! Samples are always collected into a circular buffer. Call
-//! `get_work_profile()` to retrieve the last N seconds of data.
 //!
 //! # Usage
 //! ```ignore
@@ -27,14 +23,11 @@
 //! }
 //! ```
 
-use std::{
-	future::Future,
-	panic::{AssertUnwindSafe, catch_unwind},
-};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use napi::{Env, Error, Result, Status, Task, bindgen_prelude::*};
 
-use crate::{cancel as core_cancel, prof::profile_region};
+use crate::cancel as core_cancel;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cancellation
@@ -169,7 +162,6 @@ where
 	type Output = T;
 
 	fn compute(&mut self) -> Result<Self::Output> {
-		let _guard = profile_region(self.tag);
 		let work = self
 			.work
 			.take()
@@ -263,7 +255,6 @@ where
 	type Output = T;
 
 	fn compute(&mut self) -> Result<Self::Output> {
-		let _guard = profile_region(self.tag);
 		let work = self
 			.work
 			.take()
@@ -365,45 +356,6 @@ where
 	T: ToNapiValue + TypeName + Send + 'static,
 {
 	AsyncTask::new(Blocking { tag, cancel_token: cancel_token.into(), work: Some(Box::new(work)) })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Async Task - Tokio runtime integration
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Run an async task on Tokio's runtime with profiling.
-///
-/// Use this for operations that need to `.await` (async I/O, `select!`, etc.).
-/// For CPU-bound blocking work, use [`blocking_task`] instead.
-///
-/// # Arguments
-/// - `env`: N-API environment (needed for `spawn_future`)
-/// - `tag`: Profiling tag for this work
-/// - `work`: Async closure that performs the work
-///
-/// # Example
-/// ```ignore
-/// #[napi]
-/// fn run_async_io<'e>(env: &'e Env) -> Result<PromiseRaw<'e, String>> {
-///     async_task(env, "async_io", async move {
-///         let data = fetch_data().await?;
-///         Ok(data)
-///     })
-/// }
-/// ```
-pub fn future<'env, T, Fut>(
-	env: &'env Env,
-	tag: &'static str,
-	work: Fut,
-) -> Result<PromiseRaw<'env, T>>
-where
-	Fut: Future<Output = Result<T>> + Send + 'static,
-	T: ToNapiValue + Send + 'static,
-{
-	env.spawn_future(async move {
-		let _guard = profile_region(tag);
-		work.await
-	})
 }
 
 #[cfg(test)]

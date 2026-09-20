@@ -321,4 +321,102 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.handleInput("k");
 		assert.strictEqual(overlay.selectedOptionIndex, 2); // medium
 	});
+
+	it("types an exact value in the detail view of a preset number", () => {
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings([
+			{
+				name: "Temperature",
+				currentValue: "0.5",
+				description: "Sampling temperature",
+				displayType: "number",
+				options: [
+					{ label: "0.5", value: "0.5", current: true },
+					{ label: "0.7", value: "0.7" },
+				],
+			},
+		]);
+		overlay.show();
+		assert.strictEqual(overlay.handleInput("\r"), null);
+		assert.strictEqual(overlay.inDetailView, true);
+		assert.strictEqual(overlay.handleInput("1"), null);
+		assert.strictEqual(overlay.handleInput("."), null);
+		assert.strictEqual(overlay.handleInput("2"), null);
+		assert.deepStrictEqual(overlay.handleInput("\r"), {
+			type: "confirm",
+			settingName: "Temperature",
+			value: "1.2",
+		});
+	});
+
+	it("escapes from value entry back through the detail view to the menu", () => {
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings([
+			{
+				name: "Max tokens",
+				currentValue: "4096",
+				description: "Output cap",
+				displayType: "number",
+				options: [{ label: "4096", value: "4096", current: true }],
+			},
+		]);
+		overlay.show();
+		assert.strictEqual(overlay.handleInput("\r"), null);
+		assert.strictEqual(overlay.handleInput("8"), null);
+		assert.strictEqual(overlay.handleInput("\x1b"), null);
+		assert.strictEqual(overlay.inDetailView, true);
+		assert.strictEqual(overlay.handleInput("\x1b"), null);
+		assert.strictEqual(overlay.inDetailView, false);
+		assert.deepStrictEqual(overlay.handleInput("\x1b"), { type: "close" });
+	});
+
+	it("pre-fills optionless numbers and rejects an empty draft", () => {
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings([
+			{
+				name: "Max iterations",
+				currentValue: "30",
+				description: "Turn cap",
+				displayType: "number",
+			},
+		]);
+		overlay.show();
+		assert.strictEqual(overlay.handleInput("\r"), null);
+		for (let i = 0; i < 2; i++) {
+			assert.strictEqual(overlay.handleInput("\x7f"), null);
+		}
+		assert.strictEqual(overlay.handleInput("\r"), null);
+		assert.ok(overlay.render(40).join("\n").includes("non-negative"));
+		assert.strictEqual(overlay.handleInput("0"), null);
+		assert.deepStrictEqual(overlay.handleInput("\r"), {
+			type: "confirm",
+			settingName: "Max iterations",
+			value: "0",
+		});
+	});
+
+	it("still applies preset numbers through the option list", () => {
+		const overlay = new SettingsSelectorOverlay();
+		overlay.setSettings([
+			{
+				name: "Max iterations",
+				currentValue: "30",
+				description: "Turn cap",
+				displayType: "number",
+				options: [
+					{ label: "10", value: "10" },
+					{ label: "30", value: "30", current: true },
+				],
+			},
+		]);
+		overlay.show();
+		assert.strictEqual(overlay.handleInput("\r"), null);
+		assert.strictEqual(overlay.inDetailView, true);
+		assert.strictEqual(overlay.handleInput("\x1b[A"), null);
+		assert.deepStrictEqual(overlay.handleInput("\r"), {
+			type: "change",
+			settingName: "Max iterations",
+			value: "10",
+		});
+	});
 });

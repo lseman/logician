@@ -25,7 +25,6 @@ mod minimize;
 mod glob_util;
 mod iofs;
 mod js;
-mod prof;
 mod task;
 pub mod tokens;
 mod utils;

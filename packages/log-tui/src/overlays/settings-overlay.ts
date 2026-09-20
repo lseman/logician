@@ -13,7 +13,7 @@ import { theme } from "../terminal/theme.ts";
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
-interface SettingOption {
+export interface SettingOption {
 	label: string;
 	value: string;
 	current?: boolean;
@@ -43,6 +43,7 @@ export interface SettingDef {
 
 export type SettingsSelectorAction =
 	| { type: "change"; settingName: string; value: string }
+	| { type: "confirm"; settingName: string; value: string }
 	| { type: "open"; settingName: string }
 	| { type: "close" };
 
@@ -195,6 +196,8 @@ export class SettingsSelectorOverlay implements Component {
 	private _selectedOptionIndex = 0;
 	private _inDetailView = false;
 	private _searchQuery = "";
+	private _editing = false;
+	private _draft = "";
 	private _availableHeight: number | undefined;
 
 	setMaxHeight(height: number): void {
@@ -240,6 +243,8 @@ export class SettingsSelectorOverlay implements Component {
 		this._selectedIndex = 0;
 		this._selectedOptionIndex = 0;
 		this._searchQuery = "";
+		this._editing = false;
+		this._draft = "";
 		this._currentTabId = 0;
 		this._filtered = filterSettingsForTab(
 			this._settings,
@@ -261,6 +266,13 @@ export class SettingsSelectorOverlay implements Component {
 		if (!this.visible || !data) return null;
 		if (data === "\x03") return { type: "close" };
 		if (data === "\x1b") {
+			if (this._editing) {
+				this._editing = false;
+				const s = this._filtered[this._selectedIndex];
+				this._inDetailView = !!s?.options?.length;
+				this.invalidate();
+				return null;
+			}
 			if (this._inDetailView) {
 				this._inDetailView = false;
 				return null;
@@ -276,6 +288,7 @@ export class SettingsSelectorOverlay implements Component {
 			}
 			return { type: "close" };
 		}
+		if (this._editing) return this.handleEditInput(data);
 		if (this._inDetailView) return this.handleDetailInput(data);
 		if (data === "\x7f" || data === "\x08") {
 			this._searchQuery = this._searchQuery.slice(0, -1);
@@ -304,6 +317,12 @@ export class SettingsSelectorOverlay implements Component {
 			if (!s) return null;
 			if (s.name.toLowerCase() === "model") {
 				return { type: "open", settingName: s.name };
+			}
+			if (s.displayType === "number" && !s.options) {
+				this._editing = true;
+				this._draft = s.currentValue;
+				this.invalidate();
+				return null;
 			}
 			this._inDetailView = true;
 			this._selectedOptionIndex = s.options
@@ -375,6 +394,17 @@ export class SettingsSelectorOverlay implements Component {
 			return { type: "close" };
 		}
 
+		if (
+			s.displayType === "number" &&
+			data.length === 1 &&
+			((data >= "0" && data <= "9") ||
+				(data === "." && !this._draft.includes(".")))
+		) {
+			this._editing = true;
+			this._draft = data;
+			this.invalidate();
+			return null;
+		}
 		if (data === "\x1b[B" || data === "\x1bOB" || data === "j") {
 			this.moveOptionSelection(1);
 			return null;
@@ -391,6 +421,37 @@ export class SettingsSelectorOverlay implements Component {
 			this.moveOptionSelection(8);
 			return null;
 		}
+		return null;
+	}
+
+	private handleEditInput(data: string): SettingsSelectorAction | null {
+		const s = this._filtered[this._selectedIndex];
+		if (!s) {
+			this._editing = false;
+			return { type: "close" };
+		}
+		if (data === "\r" || data === "\n" || data === " ") {
+			const parsed = Number(this._draft);
+			if (!this._draft || !Number.isFinite(parsed) || parsed < 0) {
+				this._message = `${s.name}: enter a non-negative number`;
+				this.invalidate();
+				return null;
+			}
+			this._editing = false;
+			this._message = "";
+			return { type: "confirm", settingName: s.name, value: String(parsed) };
+		}
+		if (data === "\x7f" || data === "\x08") {
+			this._draft = this._draft.slice(0, -1);
+		} else if (data.length === 1) {
+			if (
+				(data >= "0" && data <= "9") ||
+				(data === "." && !this._draft.includes("."))
+			) {
+				this._draft += data;
+			}
+		}
+		this.invalidate();
 		return null;
 	}
 
@@ -453,9 +514,11 @@ export class SettingsSelectorOverlay implements Component {
 			);
 		}
 		const contentRows = Math.max(1, height - lines.length - 6);
-		const content = this._inDetailView
-			? this.renderOptions(inner, contentRows)
-			: this.renderSettings(inner, contentRows);
+		const content = this._editing
+			? this.renderInput(inner, contentRows)
+			: this._inDetailView
+				? this.renderOptions(inner, contentRows)
+				: this.renderSettings(inner, contentRows);
 		for (const line of content) lines.push(row(line, width));
 		lines.push(row("", width));
 		lines.push(
@@ -473,11 +536,13 @@ export class SettingsSelectorOverlay implements Component {
 			),
 		);
 		lines.push(divider(width));
-		const hint = this._inDetailView
-			? "↑↓ select · Enter/Space apply · Tab/Esc back"
-			: inner < 75
-				? "↑↓ select · ←→ tabs · Tab section · Enter edit · Esc back"
-				: "↑↓ select · Enter/Space change · Tab section · ←→ tabs · Type to search · Esc close";
+		const hint = this._editing
+			? "Type value · Enter apply · Esc cancel"
+			: this._inDetailView
+				? "↑↓ select · Enter/Space apply · Tab/Esc back"
+				: inner < 75
+					? "↑↓ select · ←→ tabs · Tab section · Enter edit · Esc back"
+					: "↑↓ select · Enter/Space change · Tab section · ←→ tabs · Type to search · Esc close";
 		lines.push(row(`${getMuted()}${hint}${RESET}`, width), bottomBorder(width));
 		return lines.slice(0, height).map(line => clampLineToWidth(line, width));
 	}
@@ -610,6 +675,21 @@ export class SettingsSelectorOverlay implements Component {
 				),
 			);
 		}
+		while (lines.length < height) lines.push("");
+		return lines.slice(0, height);
+	}
+
+	private renderInput(width: number, height: number): string[] {
+		const setting = this._filtered[this._selectedIndex];
+		if (!setting) return Array.from({ length: height }, () => "");
+		const lines = [
+			clampLineToWidth(`${getHeader()}${BOLD}${setting.name}${RESET}`, width),
+			clampLineToWidth(
+				`  ${getWarning()}${this._draft || "0"}${RESET}${getMuted()}  Enter apply · Esc cancel${RESET}`,
+				width,
+			),
+			"",
+		];
 		while (lines.length < height) lines.push("");
 		return lines.slice(0, height);
 	}
