@@ -15,6 +15,7 @@ import {
 	runCompaction,
 	shouldAutoCompact,
 } from "../../compaction/orchestration.ts";
+import { resolveTokenEncoding } from "../../../capabilities/provider/messages.ts";
 export type CompactionReason = "auto" | "manual";
 
 export interface SessionCompactorDependencies {
@@ -77,7 +78,11 @@ export class SessionCompactor {
 	shouldCompact(
 		messages: Message[] = this.dependencies.history(),
 	): Promise<boolean> {
-		return shouldAutoCompact(this.settings, messages);
+		return shouldAutoCompact(
+			this.settings,
+			messages,
+			resolveTokenEncoding(this.dependencies.backend().model),
+		);
 	}
 
 	async recordCompaction(

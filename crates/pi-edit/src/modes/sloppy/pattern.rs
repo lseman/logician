@@ -2,7 +2,7 @@
 //!
 //! Port of `packages/coding-agent/src/edit/sloppy.ts` lines 1651–2416.
 
-use super::types::{NormalizedText, PatternToken, ParsedPattern, LiteralFallback, SelectionPair, markers::{GAP, SELECT_CLOSE, SELECT_OPEN}};
+use super::types::{NormalizedText, PatternToken, ParsedPattern, LiteralFallback, SelectionPair, EdgeGaps, markers::{GAP, SELECT_CLOSE, SELECT_OPEN}};
 use crate::{error::EditError, text::normalize_unicode};
 
 /// Normalize matching text while retaining source byte boundaries.
@@ -29,7 +29,7 @@ pub fn normalize_text(source: &str) -> NormalizedText {
 	NormalizedText { text, starts, ends }
 }
 
-fn visible_identifier(text: &str) -> bool {
+pub(crate) fn visible_identifier(text: &str) -> bool {
 	text
 		.chars()
 		.any(|character| character.is_alphanumeric() || matches!(character, '_' | '$'))
@@ -72,6 +72,7 @@ pub(crate) fn parse_pattern(
 				text: pattern.to_owned(),
 				normalized,
 			}],
+			edge_gaps:                EdgeGaps::default(),
 			selection_start:          0,
 			selection_end:            1,
 			insertion:                false,
@@ -153,8 +154,31 @@ pub(crate) fn parse_pattern(
 		tokens.remove(0);
 		stripped_leading += 1;
 	}
+	let mut stripped_trailing = 0;
 	while matches!(tokens.last(), Some(PatternToken::Gap { .. })) {
 		tokens.pop();
+		stripped_trailing += 1;
+	}
+	let edge_gaps = EdgeGaps { leading: stripped_leading > 0, trailing: stripped_trailing > 0 };
+	// An edge gap spans nothing inside the match: the newline joining a
+	// whole-line `…` to its neighbour belongs to the gap, not the anchor, and
+	// the surviving captures renumber from zero.
+	if edge_gaps.leading
+		&& let Some(PatternToken::Literal { text, .. }) = tokens.first_mut()
+		&& let Some(rest) = text.strip_prefix('\n')
+	{
+		*text = rest.strip_prefix('\r').unwrap_or(rest).to_owned();
+	}
+	if edge_gaps.trailing
+		&& let Some(PatternToken::Literal { text, .. }) = tokens.last_mut()
+		&& let Some(rest) = text.strip_suffix('\n')
+	{
+		*text = rest.strip_suffix('\r').unwrap_or(rest).to_owned();
+	}
+	for token in &mut tokens {
+		if let PatternToken::Gap { capture_index, .. } = token {
+			*capture_index -= stripped_leading;
+		}
 	}
 	for boundary in &mut selection_boundaries {
 		*boundary = boundary.saturating_sub(stripped_leading).min(tokens.len());
@@ -269,6 +293,7 @@ pub(crate) fn parse_pattern(
 	};
 	Ok(ParsedPattern {
 		tokens,
+		edge_gaps,
 		selection_start,
 		selection_end,
 		insertion,

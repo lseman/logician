@@ -158,10 +158,15 @@ export async function runCompaction(
 export async function shouldAutoCompact(
 	settings: CompactionSettings,
 	messages: Message[],
+	tokenEncoding?: string,
 ): Promise<boolean> {
 	if (!settings.enabled) return false;
 	const contextWindow = settings.contextWindow ?? 128000;
 	const threshold = contextWindow - (settings.reserveTokens ?? 16384);
-	const currentTokens = await estimateChatPayloadTokens(messages);
+	const currentTokens = await estimateChatPayloadTokens(
+		messages,
+		undefined,
+		tokenEncoding,
+	);
 	return currentTokens > threshold;
 }

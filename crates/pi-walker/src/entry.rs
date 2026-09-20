@@ -4,7 +4,10 @@
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::{
-	borrow::Cow, fmt, hash::{Hash, Hasher}, io,
+	borrow::Cow,
+	fmt,
+	hash::{Hash, Hasher},
+	io,
 	path::{Path, PathBuf},
 	sync::Arc,
 };
@@ -716,6 +719,96 @@ impl<E> EntryVisitor for CollectedVisitor<E> {
 			mtime: entry.mtime,
 			size: entry.size,
 		});
+		Ok(WalkControl::Continue)
+	}
+}
+
+struct RankedEntry {
+	entry: CollectedEntry,
+	rank:  WalkRank,
+}
+
+impl Ord for RankedEntry {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		match (self.rank, other.rank) {
+			(WalkRank::PathAsc, WalkRank::PathAsc) => self.entry.path.cmp(&other.entry.path),
+			(WalkRank::MtimeDescPathAsc, WalkRank::MtimeDescPathAsc) => {
+				crate::policy::WalkRequest::compare_mtime_desc_path_asc(&self.entry, &other.entry)
+			},
+			(WalkRank::PathAsc, WalkRank::MtimeDescPathAsc) => std::cmp::Ordering::Less,
+			(WalkRank::MtimeDescPathAsc, WalkRank::PathAsc) => std::cmp::Ordering::Greater,
+		}
+	}
+}
+
+impl PartialOrd for RankedEntry {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl PartialEq for RankedEntry {
+	fn eq(&self, other: &Self) -> bool {
+		self.cmp(other) == std::cmp::Ordering::Equal
+	}
+}
+
+impl Eq for RankedEntry {}
+
+pub(crate) struct RankedCollectVisitor<'a> {
+	filter:   &'a WalkFilter,
+	rank:     WalkRank,
+	limit:    usize,
+	entries:  std::collections::BinaryHeap<RankedEntry>,
+	scanned:  usize,
+	filtered: usize,
+}
+
+impl<'a> RankedCollectVisitor<'a> {
+	pub(crate) const fn new(filter: &'a WalkFilter, rank: WalkRank, limit: usize) -> Self {
+		Self { filter, rank, limit, entries: std::collections::BinaryHeap::new(), scanned: 0, filtered: 0 }
+	}
+
+	pub(crate) fn into_outcome(self) -> WalkOutcome {
+		let stats = WalkStats {
+			cache_age_ms:     0,
+			scanned_entries:  self.scanned,
+			filtered_entries: self.filtered,
+			limited_entries:  self.scanned - self.filtered - self.entries.len(),
+		};
+		let entries = self
+			.entries
+			.into_sorted_vec()
+			.into_iter()
+			.map(|entry| entry.entry)
+			.collect();
+		WalkOutcome { entries, backend: WalkBackend::Fresh, stats }
+	}
+}
+
+impl EntryVisitor for RankedCollectVisitor<'_> {
+	type Error = String;
+
+	fn visit(&mut self, entry: Entry<'_>) -> std::result::Result<WalkControl, Self::Error> {
+		self.scanned += 1;
+		let entry = CollectedEntry {
+			path:      entry.relative.to_string(),
+			file_type: entry.file_type,
+			mtime:     entry.mtime,
+			size:      entry.size,
+		};
+		if !self.filter.accepts_collected(&entry) {
+			self.filtered += 1;
+			return Ok(WalkControl::Continue);
+		}
+		let candidate = RankedEntry { entry, rank: self.rank };
+		if self.entries.len() < self.limit {
+			self.entries.push(candidate);
+		} else if let Some(mut worst) = self.entries.peek_mut()
+			&& candidate < *worst
+		{
+			*worst = candidate;
+		}
 		Ok(WalkControl::Continue)
 	}
 }

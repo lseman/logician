@@ -38,11 +38,6 @@ export {
 	SoftToolRequirementManager,
 } from "./control/guards/soft-tool-requirement.ts";
 export {
-	AppendOnlyContextManager,
-	AppendOnlyLog,
-	StablePrefix,
-} from "./control/guards/stable-prefix.ts";
-export {
 	TextLoopDetector,
 	type TextLoopDetectorOptions,
 } from "./control/guards/text-loop-detector.ts";

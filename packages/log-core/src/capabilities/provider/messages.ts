@@ -13,6 +13,7 @@ import {
 	isCustomMessage,
 	isLlmMessage,
 } from "../../system/types/types-messages.ts";
+import type { Encoding } from "@logician/log-natives";
 import { loadNativeTokenizer } from "./native-tokenizer.ts";
 
 /** Minimal shape this module needs from a snapcompact `Frame` (see
@@ -259,17 +260,44 @@ export function convertToChatFormat(
 }
 
 /**
- * Count tokens in `text` using the native BPE tokenizer (o200k_base).
- * Async because loading the native addon is async; every caller in the
- * estimateTokens chain propagates that. Throws if the native addon isn't
- * built — see native-tokenizer.ts. For a synchronous, approximate count
- * (status bar, live inspection views), use estimateTokensHeuristic directly.
+ * Resolve the BPE encoding that matches a model family, for token budgeting.
+ * Budgets counted with the wrong family's tokenizer drift 10–25%, which
+ * distorts the compaction threshold and context gauges (premature
+ * compaction or context_full stalls). Unknown families return undefined and
+ * the tokenizer falls back to o200k_base.
  */
-export async function estimateTokens(text: string): Promise<number> {
+export function resolveTokenEncoding(model: string): string | undefined {
+	const name = model.toLowerCase();
+	if (name.includes("qwen")) return "Qwen3";
+	if (name.includes("deepseek")) return "DeepSeekV3";
+	if (name.includes("kimi")) return "KimiK2";
+	if (name.includes("glm")) return "Glm5";
+	if (name.includes("claude")) {
+		if (/opus[- ]?5(\.|$|\d)/.test(name)) return "ClaudeV5";
+		if (/(sonnet|fable)[- ]?5(\.|$|\d)/.test(name)) return "ClaudeV5Sonnet";
+		if (/opus[- ]?4[-.]?(7|8|9)(\.|$)/.test(name)) return "ClaudeV47";
+		return "ClaudeV3";
+	}
+	if (name.includes("gpt-3.5") || name === "gpt-4" || /^gpt-4-/.test(name)) {
+		return "Cl100kBase";
+	}
+	return undefined;
+}
+
+/**
+ * Count tokens in `text` using the native BPE tokenizer. Pass an
+ * `encoding` (see `resolveTokenEncoding`) to count with the model family's
+ * own vocabulary; defaults to o200k_base. Async because loading the native
+ * addon is async; every caller in the estimateTokens chain propagates that.
+ * Throws if the native addon isn't built — see native-tokenizer.ts. For a
+ * synchronous, approximate count (status bar, live inspection views), use
+ * estimateTokensHeuristic directly.
+ */
+export async function estimateTokens(text: string, encoding?: string): Promise<number> {
 	if (!text || text.length === 0) return 0;
 
 	const native = await loadNativeTokenizer();
-	return native.countTokens(text);
+	return native.countTokens(text, encoding as Encoding | undefined);
 }
 
 /**
@@ -403,12 +431,14 @@ function estimateNaturalLanguageTokens(text: string): number {
 export async function estimateChatPayloadTokens(
 	messages: Message[],
 	tools?: Record<string, unknown>[],
+	encoding?: string,
 ): Promise<number> {
 	return estimateTokens(
 		JSON.stringify({
 			messages: convertToChatFormat(messages),
 			tools: tools || [],
 		}),
+		encoding,
 	);
 }
 

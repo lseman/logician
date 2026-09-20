@@ -9,7 +9,7 @@ use crate::error::EditError;
 use crate::fuzzy::levenshtein_distance;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-fn exact_occurrences(content: &str, pattern: &str) -> Vec<Occurrence> {
+pub(crate) fn exact_occurrences(content: &str, pattern: &str) -> Vec<Occurrence> {
 	if pattern.is_empty() {
 		return Vec::new();
 	}
@@ -31,14 +31,14 @@ fn exact_occurrences(content: &str, pattern: &str) -> Vec<Occurrence> {
 	result
 }
 
-fn operator_signature(text: &str) -> String {
+pub(crate) fn operator_signature(text: &str) -> String {
 	text
 		.chars()
 		.filter(|character| !(character.is_alphanumeric() || matches!(character, '_' | '$')))
 		.collect()
 }
 
-fn differs_by_one_punctuation_insertion(left: &str, right: &str) -> bool {
+pub(crate) fn differs_by_one_punctuation_insertion(left: &str, right: &str) -> bool {
 	let left = left.chars().collect::<Vec<_>>();
 	let right = right.chars().collect::<Vec<_>>();
 	if left.len().abs_diff(right.len()) != 1 {
@@ -64,7 +64,7 @@ fn differs_by_one_punctuation_insertion(left: &str, right: &str) -> bool {
 	inserted.is_some_and(|character| !matches!(character, '{' | '}' | '(' | ')' | '[' | ']'))
 }
 
-fn fuzzy_occurrences(content: &str, pattern: &str, allow_punctuation: bool) -> Vec<Occurrence> {
+pub(crate) fn fuzzy_occurrences(content: &str, pattern: &str, allow_punctuation: bool) -> Vec<Occurrence> {
 	// These are only work limits. JS measured UTF-16 units; byte lengths are
 	// intentionally acceptable here.
 	if content.is_empty() || content.len() > 50_000 {
@@ -157,12 +157,12 @@ pub(crate) fn source_end(normalized: &NormalizedText, offset: usize, fallback: u
 		normalized.ends.get(offset - 1).copied().unwrap_or(fallback)
 	}
 }
-fn preceding_literal(tokens: &[PatternToken], boundary: usize) -> Option<usize> {
+pub(crate) fn preceding_literal(tokens: &[PatternToken], boundary: usize) -> Option<usize> {
 	(0..boundary)
 		.rev()
 		.find(|index| matches!(tokens[*index], PatternToken::Literal { .. }))
 }
-fn following_literal(tokens: &[PatternToken], boundary: usize) -> Option<usize> {
+pub(crate) fn following_literal(tokens: &[PatternToken], boundary: usize) -> Option<usize> {
 	(boundary..tokens.len()).find(|index| matches!(tokens[*index], PatternToken::Literal { .. }))
 }
 
@@ -173,7 +173,7 @@ pub(crate) enum MatchMode {
 	Fuzzy,
 }
 
-fn resolve_boundary(
+pub(crate) fn resolve_boundary(
 	boundary: usize,
 	kind: u8,
 	pattern: &ParsedPattern,
@@ -408,6 +408,7 @@ pub(crate) fn collect_candidates(
 						.iter()
 						.map(|index| self.chosen[index].start)
 						.collect(),
+					literal_gaps: false,
 				};
 				if let Some(existing) = self.candidates.iter_mut().find(|existing| {
 					existing.start == candidate.start
@@ -516,7 +517,7 @@ pub(crate) fn numbered_preview(content: &str, offset: usize) -> String {
 		.join("\n")
 }
 
-fn display_fragment(text: &str) -> String {
+pub(crate) fn display_fragment(text: &str) -> String {
 	if text.contains('\n') && text.split('\n').count() <= 8 {
 		return format!("\n{text}");
 	}
@@ -529,14 +530,14 @@ fn display_fragment(text: &str) -> String {
 	serde_json::to_string(&compact).expect("string serializes")
 }
 
-fn first_literal(pattern: &ParsedPattern) -> Option<(&str, &str)> {
+pub(crate) fn first_literal(pattern: &ParsedPattern) -> Option<(&str, &str)> {
 	pattern.tokens.iter().find_map(|token| match token {
 		PatternToken::Literal { text, normalized } => Some((text.as_str(), normalized.as_str())),
 		PatternToken::Gap { .. } => None,
 	})
 }
 
-fn no_match_error(
+pub(crate) fn no_match_error(
 	content: &str,
 	pattern: &ParsedPattern,
 	operation: &Operation,
@@ -558,7 +559,7 @@ fn no_match_error(
 		)
 	};
 	let first = if operation.all {
-		format!("Operation {operation_number} <SM:EDIT all> found 0 matches in {path}. {reason}")
+		format!("Operation {operation_number} *** SM:EDIT all found 0 matches in {path}. {reason}")
 	} else {
 		format!("Operation {operation_number} did not match {path}. {reason}")
 	};
@@ -588,11 +589,11 @@ fn no_match_error(
 			let corrected = operation.pattern_text.replacen(literal, &closest.0, 1);
 			format!(
 				"Copy-ready corrected operation:\n{}",
-				operation_payload(operation, if operation.all { "*" } else { "" }, Some(&corrected))
+				operation_payload(operation, path, operation.all, Some(&corrected))
 			)
 		} else if standalone {
 			"No copy-ready correction — the closest current text is only a fuzzy match. Re-read the \
-			 region above and rebuild <SM:FIND> from the exact current text."
+			 region above and rebuild *** SM:FIND from the exact current text."
 				.to_owned()
 		} else {
 			"No copy-ready correction — retrying this operation alone would drop sibling operations. \
@@ -606,7 +607,7 @@ fn no_match_error(
 	))
 }
 
-fn closest_fragment(content: &str, pattern: &str) -> (String, usize, f64) {
+pub(crate) fn closest_fragment(content: &str, pattern: &str) -> (String, usize, f64) {
 	let mut ranked = Vec::new();
 	let mut offset = 0;
 	for line in content.split('\n') {
@@ -627,11 +628,17 @@ fn closest_fragment(content: &str, pattern: &str) -> (String, usize, f64) {
 	if pattern.len() <= 160 {
 		for (line, line_offset, normalized, _) in ranked {
 			let width = pattern.len().min(normalized.text.len());
+			// The tail window only adds coverage when `len - width` lands on a
+			// char boundary (e.g. width 0 appends `len`); `char_indices` already
+			// yields every other boundary, and an unaligned fallback slices
+			// inside multibyte chars (e.g. CJK) and panics.
+			let tail = normalized.text.len().saturating_sub(width);
+			let tail = normalized.text.is_char_boundary(tail).then_some(tail);
 			for start in normalized
 				.text
 				.char_indices()
 				.map(|(index, _)| index)
-				.chain(std::iter::once(normalized.text.len().saturating_sub(width)))
+				.chain(tail)
 			{
 				let end = start + width;
 				if end > normalized.text.len() || !normalized.text.is_char_boundary(end) {
@@ -652,12 +659,13 @@ fn closest_fragment(content: &str, pattern: &str) -> (String, usize, f64) {
 	best
 }
 
-fn same_rewrite_for_all(
+pub(crate) fn same_rewrite_for_all(
 	pattern: &ParsedPattern,
 	operation: &Operation,
 	candidates: &[Candidate],
 ) -> bool {
 	match &operation.rewrite {
+		OperationRewrite::After { .. } => true,
 		OperationRewrite::Explicit { text } => {
 			let gaps = text.matches(GAP).count();
 			pattern
@@ -746,6 +754,7 @@ pub(crate) fn locate(
 							.then_some(vec![(start, end)])
 							.unwrap_or_default(),
 						tuple: vec![occurrence.start],
+						literal_gaps: true,
 					}
 				})
 				.collect::<Vec<_>>();
@@ -808,27 +817,33 @@ pub(crate) fn locate(
 			standalone_operation,
 		));
 	}
-	if candidates.len() <= 4 && !operation.desired_state {
+	if candidates.len() <= 4
+		&& !operation.desired_state
+		&& !matches!(operation.rewrite, OperationRewrite::After { .. })
+	{
 		let outcomes = candidates
 			.iter()
-			.map(|candidate| match &operation.rewrite {
-				OperationRewrite::Explicit { text } => {
-					format!("{}{}{}", &content[..candidate.start], text, &content[candidate.end..])
-				},
-				OperationRewrite::Inline { replacements } => {
-					let mut result = content.to_owned();
-					let mut spans = candidate
-						.selection_spans
-						.iter()
-						.copied()
-						.zip(replacements)
-						.collect::<Vec<_>>();
-					spans.sort_by_key(|((start, _), _)| std::cmp::Reverse(*start));
-					for ((start, end), replacement) in spans {
-						result.replace_range(start..end, replacement);
-					}
-					result
-				},
+			.filter_map(|candidate| {
+				Some(match &operation.rewrite {
+					OperationRewrite::After { .. } => return None,
+					OperationRewrite::Explicit { text } => {
+						format!("{}{}{}", &content[..candidate.start], text, &content[candidate.end..])
+					},
+					OperationRewrite::Inline { replacements } => {
+						let mut result = content.to_owned();
+						let mut spans = candidate
+							.selection_spans
+							.iter()
+							.copied()
+							.zip(replacements)
+							.collect::<Vec<_>>();
+						spans.sort_by_key(|((start, _), _)| std::cmp::Reverse(*start));
+						for ((start, end), replacement) in spans {
+							result.replace_range(start..end, replacement);
+						}
+						result
+					},
+				})
 			})
 			.map(|outcome| normalize_text(&outcome).text)
 			.collect::<HashSet<_>>();
@@ -843,22 +858,22 @@ pub(crate) fn locate(
 			format!(
 				"Near line {}:\n{}",
 				line_number_at(content, candidate.start),
-				operation_payload(operation, "", None)
+				operation_payload(operation, path, false, None)
 			)
 		})
 		.collect::<Vec<_>>()
 		.join("\n\n");
 	let all_retry = if same_rewrite_for_all(pattern, operation, &candidates) {
 		format!(
-			"All candidates receive the same rewrite; retry every match:\n{}\n\n",
-			operation_payload(operation, "*", None)
+			"\n\nAll candidates receive the same rewrite; retry every match:\n{}",
+			operation_payload(operation, path, true, None)
 		)
 	} else {
 		String::new()
 	};
 	Err(EditError::matched(format!(
-		"Operation {operation_number} is ambiguous: {} ordered tuples match.\n\n{all_retry}Add \
-		 context that only the intended match has — one of these:\n\n{retries}",
+		"Operation {operation_number} is ambiguous: {} ordered tuples match.\n\nAdd context that \
+		 only the intended match has — one of these:\n\n{retries}{all_retry}",
 		candidates.len()
 	)))
 }

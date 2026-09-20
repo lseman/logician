@@ -6,6 +6,7 @@ import {
 	createSystemMessage,
 	convertToLlm as defaultConvertToLlm,
 	estimateChatPayloadTokens,
+	resolveTokenEncoding,
 } from "../../capabilities/provider/messages.ts";
 import { ToolRegistry } from "../../capabilities/tools/registry.ts";
 import { ToolResultCache } from "../../capabilities/tools/tool-result-cache.ts";
@@ -22,7 +23,6 @@ import {
 	SoftToolRequirementExceededError,
 	SoftToolRequirementManager,
 } from "../../control/guards/soft-tool-requirement.ts";
-import { StablePrefix } from "../../control/guards/stable-prefix.ts";
 import { TextLoopDetector } from "../../control/guards/text-loop-detector.ts";
 import {
 	evaluateStopPolicies,
@@ -133,6 +133,9 @@ async function runAgentLoopInternal(
 		return newMessages;
 	};
 	let settings = resolveAgentSettings(config);
+	// Token budgets are only as good as the tokenizer family: resolve the
+	// model's BPE encoding once so estimates match the model's vocabulary.
+	const tokenEncoding = resolveTokenEncoding(config.backend.model);
 	const maxIterations = settings.maxIterations;
 	const executionPolicy = resolveExecutionPolicy(settings.executionProfile);
 	const interventionController =
@@ -278,14 +281,6 @@ async function runAgentLoopInternal(
 	const resolved = executionPolicy.embeddedPoliciesEnabled
 		? resolveAcceptance()
 		: resolveEffectiveAcceptance({ explicit: undefined });
-
-	// ── Build stable prefix ────────────────────────────────────────
-	// Freeze the system prompt + tool spec into a cached prefix.
-	// Subsequent turns reuse it if the fingerprint hasn't changed.
-	const stablePrefix = new StablePrefix();
-	const systemPromptText =
-		messages.find(m => m.role === "system")?.content ?? "";
-	stablePrefix.build(systemPromptText, registry.list());
 
 	while (iteration < maxIterations) {
 		if (config.signal?.aborted) {
@@ -546,12 +541,14 @@ async function runAgentLoopInternal(
 			}
 
 			// The final usage-only SSE chunk is optional and many local providers
-			// omit it. Estimate the serialized conversation as a reliable fallback
-			// so context usage never remains stuck at zero.
-			const contextTokens = Math.max(
-				await estimateChatPayloadTokens(messages, registry.toToolDefinitions()),
-				response?.usage?.totalTokens ?? 0,
-			);
+			// omit it. Prefer the provider-reported total when present; only fall
+			// back to estimating the serialized conversation (an expensive
+			// full-history pass) when the provider reported nothing.
+			const reportedTokens = response?.usage?.totalTokens ?? 0;
+			const contextTokens =
+				reportedTokens > 0
+					? reportedTokens
+					: await estimateChatPayloadTokens(messages, registry.toToolDefinitions(), tokenEncoding);
 			await emit({
 				type: "context_update",
 				tokens: contextTokens,

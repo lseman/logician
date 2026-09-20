@@ -19,6 +19,7 @@ import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import {
 	createUserMessage,
 	estimateChatPayloadTokens,
+	resolveTokenEncoding,
 } from "../../capabilities/provider/messages.ts";
 import type { SessionStore } from "../../capabilities/session/session-store.ts";
 import type {
@@ -191,7 +192,12 @@ export class AgentSession {
 	) {
 		this.onEvent = options.onEvent;
 		this.contextController = new AdaptiveContextController(
-			messages => estimateChatPayloadTokens([...messages]),
+			messages =>
+				estimateChatPayloadTokens(
+					[...messages],
+					undefined,
+					resolveTokenEncoding(this.backend.model),
+				),
 			options.contextLearning,
 		);
 		this.session = new SessionState({

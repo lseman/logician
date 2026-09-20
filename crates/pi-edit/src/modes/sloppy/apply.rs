@@ -2,13 +2,15 @@
 //!
 //! Port of `packages/coding-agent/src/edit/sloppy.ts` lines 4785–4972.
 
-use super::parse::{operation_payload, parse_operations};
+use super::parse::{edit_header, operation_payload, parse_operations};
 use super::recovery::{align_boundary_echoes, duplicate_collapse_span, expand_full_line_deletion, frame_line_insertion, fnv_payload, locate_with_recovery, no_op_error, positional_rewrite_segments, prepare_inline, reconcile_overlap, render_rewrite, resolve_references, rewrite_proves_whole_span, rewrite_selection_spans, snap_line_insertion_offset};
-use super::types::{ATOMICITY_NOTICE, OperationRewrite, PatternToken, PlannedEdit};
+use super::types::{ATOMICITY_NOTICE, Candidate, EdgeGaps, OperationRewrite, ParsedPattern, PatternToken, PlannedEdit, SelectionPair, markers::GAP};
 pub use super::pattern::normalize_text;
 use super::locate::line_number_at;
 use crate::{error::EditError, store::EditStore};
 use std::{
+
+	borrow::Cow,
 	collections::{BTreeMap, HashSet},
 	path::Path,
 };
@@ -21,6 +23,81 @@ pub struct ApplyContext<'a> {
 	pub canonical: &'a Path,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MatchMode {
+	Raw,
+	Normalized,
+	Fuzzy,
+}
+
+/// Drop the `*** SM:PUT` ellipses that re-emit `*** SM:FIND`'s open edges. An
+/// edge gap captured nothing, so re-emitting it writes nothing; a whole-line
+/// edge `…` takes the newline joining it to the rest of the rewrite with it.
+/// The leading edge is positional; the trailing one is only claimed by an
+/// ellipsis left over after the inner captures, since `…` re-emits captures
+/// in order.
+pub(crate) fn strip_edge_gaps(rewrite: &str, edges: EdgeGaps, inner: usize) -> Cow<'_, str> {
+	// A rewrite that is nothing but edge ellipses is context elision, not a
+	// deletion; leave it for `render_rewrite` to reject.
+	let keep = |stripped: String, current: &str| {
+		if stripped.trim().is_empty() {
+			current.to_owned()
+		} else {
+			stripped
+		}
+	};
+	let mut text = Cow::Borrowed(rewrite);
+	if edges.leading {
+		let at = text.len() - text.trim_start().len();
+		if text[at..].starts_with(GAP) {
+			let after = at + GAP.len();
+			let line_end = text[after..]
+				.find('\n')
+				.map_or(text.len(), |offset| after + offset);
+			let stripped = if text[after..line_end].trim().is_empty() {
+				let line_start = text[..at].rfind('\n').map_or(0, |offset| offset + 1);
+				format!("{}{}", &text[..line_start], &text[(line_end + 1).min(text.len())..])
+			} else {
+				format!("{}{}", &text[..at], &text[after..])
+			};
+			text = Cow::Owned(keep(stripped, &text));
+		}
+	}
+	if edges.trailing && text.matches(GAP).count() > inner {
+		let end = text.trim_end().len();
+		if text[..end].ends_with(GAP) {
+			let at = end - GAP.len();
+			let line_start = text[..at].rfind('\n').map_or(0, |offset| offset + 1);
+			let cut = if text[line_start..at].trim().is_empty() {
+				text[..line_start]
+					.strip_suffix('\n')
+					.map_or(line_start, |rest| rest.strip_suffix('\r').map_or(rest.len(), str::len))
+			} else {
+				at
+			};
+			let stripped = text[..cut].to_owned();
+			text = Cow::Owned(keep(stripped, &text));
+		}
+	}
+	text
+}
+
+/// Edges of `*** SM:FIND` that an inline selection borders; its replacement may
+/// re-emit them.
+fn selection_edges(
+	pattern: &ParsedPattern,
+	candidate: &Candidate,
+	pair: &SelectionPair,
+) -> EdgeGaps {
+	if candidate.literal_gaps {
+		return EdgeGaps::default();
+	}
+	EdgeGaps {
+		leading:  pattern.edge_gaps.leading && pair.start == 0,
+		trailing: pattern.edge_gaps.trailing && pair.end == pattern.tokens.len(),
+	}
+}
+
 #[allow(clippy::suspicious_operation_groupings, reason = "paired index bounds are intentional")]
 fn apply_operations(
 	content: &str,
@@ -28,7 +105,7 @@ fn apply_operations(
 	context: &mut ApplyContext<'_>,
 ) -> Result<String, EditError> {
 	let payload = fnv_payload(input);
-	let operations = parse_operations(input, content)?;
+	let operations = parse_operations(input, content, context.path)?;
 	let mut removed = vec![None; operations.len()];
 	let mut planned = Vec::new();
 	let mut recovery_notes = Vec::new();
@@ -60,7 +137,7 @@ fn apply_operations(
 			&exclusions,
 			operations.len() == 1,
 		);
-		let (operation, pattern, mut candidates) = match located {
+	let (operation, pattern, mut candidates) = match located {
 			Ok(value) => value,
 			Err(error)
 				if !deferred.contains(&index) && error.to_string().contains(" is ambiguous: ") =>
@@ -73,7 +150,7 @@ fn apply_operations(
 		};
 		if operation.whitespace_matched {
 			recovery_notes.push(format!(
-				"Note: operation {number}'s <SM:FIND> differed from the file in whitespace only and \
+				"Note: operation {number}'s *** SM:FIND differed from the file in whitespace only and \
 				 was matched leniently. Inserted lines are written exactly as authored — verify their \
 				 indentation."
 			));
@@ -82,6 +159,29 @@ fn apply_operations(
 			candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.start));
 		}
 		match &operation.rewrite {
+			OperationRewrite::After { text } => {
+				for candidate in &candidates {
+					// Insert before the final anchor line's newline, retaining its EOF convention.
+					let end = candidate.match_end;
+					let offset = if end > 0 && content.as_bytes()[end - 1] == b'\n' {
+						end - 1
+					} else {
+						content[end..]
+							.find('\n')
+							.map_or(content.len(), |at| end + at)
+					};
+					let mut replacement = String::with_capacity(text.len());
+					replacement.push('\n');
+					replacement.push_str(text.strip_suffix('\n').unwrap_or(text));
+					planned.push(PlannedEdit {
+						start: offset,
+						end: offset,
+						replacement,
+						operation_number: number,
+					});
+					last_match = candidate.match_start;
+				}
+			},
 			OperationRewrite::Inline { replacements } => {
 				let replacements = replacements
 					.iter()
@@ -102,12 +202,14 @@ fn apply_operations(
 						.collect::<Vec<_>>();
 					selections.sort_by_key(|(_, (start, _))| std::cmp::Reverse(*start));
 					for (selection_index, span) in selections {
+						let pair = &pattern.selection_pairs[selection_index];
 						let (prepared, replacement, deleted) = prepare_inline(
 							content,
 							candidate,
 							span,
-							&pattern.selection_pairs[selection_index],
+							pair,
 							&replacements[selection_index],
+							selection_edges(&pattern, candidate, pair),
 							number,
 							operation.whitespace_matched,
 						)?;
@@ -205,28 +307,24 @@ fn apply_operations(
 				{
 					let one_line = base.split_whitespace().collect::<Vec<_>>().join(" ");
 					let repeated = vec![one_line; pattern.selection_ranges.len()];
-					let header = if operation.all {
-						"<SM:EDIT all>"
-					} else {
-						"<SM:EDIT>"
-					};
+					let header = edit_header(context.path, operation.all);
 					let candidate = &candidates[0];
 					return Err(EditError::matched(
 						[
 							format!(
-								"Operation {number} has {} selections, but <SM:PUT> proves neither \
+								"Operation {number} has {} selections, but *** SM:PUT proves neither \
 								 positional substitution nor whole-span replacement.",
 								pattern.selection_ranges.len()
 							),
 							"Copy-ready per-selection interpretation:".to_owned(),
 							format!(
-								"{header}\n<SM:FIND>\n{}\n</SM:FIND>\n<SM:PUT>\n{}\n</SM:PUT>\n</SM:EDIT>",
+								"{header}\n*** SM:FIND\n{}\n*** SM:PUT\n{}",
 								operation.pattern_text,
 								repeated.join("\n")
 							),
 							"Copy-ready whole-span interpretation:".to_owned(),
 							format!(
-								"{header}\n<SM:FIND>\n{}\n</SM:FIND>\n<SM:PUT>\n{}\n</SM:PUT>\n</SM:EDIT>",
+								"{header}\n*** SM:FIND\n{}\n*** SM:PUT\n{}",
 								operation.pattern_text,
 								rewrite_selection_spans(content, candidate, &repeated)
 							),
@@ -259,6 +357,11 @@ fn apply_operations(
 							&pattern.selected_capture_indices
 						},
 						&candidate.captures,
+						if candidate.literal_gaps {
+							EdgeGaps::default()
+						} else {
+							pattern.edge_gaps
+						},
 						number,
 					)?;
 					let replacement = align_boundary_echoes(content, &candidate, &rendered);
@@ -282,12 +385,12 @@ fn apply_operations(
 							number,
 							if operation.assumed_deletion {
 								format!(
-									"Note: operation {number} had no <SM:PUT> and was applied as a move \
+									"Note: operation {number} had no *** SM:PUT and was applied as a move \
 									 deletion (a later operation re-emits its block)."
 								)
 							} else {
 								format!(
-									"Note: operation {number} deleted {lines} line(s); an empty <SM:PUT> \
+									"Note: operation {number} deleted {lines} line(s); an empty *** SM:PUT \
 									 means deletion — resend with the final text if you meant to replace."
 								)
 							},
@@ -387,9 +490,9 @@ fn apply_operations(
 			previous.operation_number,
 			current.operation_number,
 			previous.operation_number,
-			operation_payload(&operations[previous.operation_number - 1], "", None),
+			operation_payload(&operations[previous.operation_number - 1], context.path, false, None),
 			current.operation_number,
-			operation_payload(&operations[current.operation_number - 1], "", None)
+			operation_payload(&operations[current.operation_number - 1], context.path, false, None)
 		)));
 	}
 	let mut result = content.to_owned();
@@ -412,11 +515,11 @@ pub fn apply_sloppy(
 	mut context: ApplyContext<'_>,
 ) -> Result<String, EditError> {
 	apply_operations(content, input, &mut context).map_err(|error| {
-		let mut message = error.to_string();
-		if !message.contains(ATOMICITY_NOTICE) {
-			message.push('\n');
-			message.push_str(ATOMICITY_NOTICE);
-		}
-		EditError::matched(message)
+		let message = error.to_string();
+		EditError::matched(if message.contains(ATOMICITY_NOTICE) {
+			message
+		} else {
+			format!("{ATOMICITY_NOTICE}\n{message}")
+		})
 	})
 }

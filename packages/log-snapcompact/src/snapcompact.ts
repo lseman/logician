@@ -765,6 +765,7 @@ export async function compact(
 		totalChars,
 		layout.truncatedChars,
 		textChars,
+		extractDigestLines(messages),
 		options?.previousSummary,
 	);
 
@@ -828,21 +829,148 @@ export function computeFrameTokenOverhead(frames: Frame[]): number {
 	return total;
 }
 
+// ---------------------------------------------------------------------------
+// Structured digest (deterministic, zero-LLM)
+// ---------------------------------------------------------------------------
+
+/** Argument keys that carry a file path, in priority order. */
+const PATH_ARG_KEYS = [
+	"path",
+	"file",
+	"filePath",
+	"file_path",
+	"target",
+	"destination",
+] as const;
+
+/**
+ * Extract a path-like argument value from a tool call's arguments (object or
+ * JSON string). Free-form commands (e.g. bash) are intentionally skipped —
+ * only structured path arguments are navigable.
+ */
+function pathFromToolArgs(args: unknown): string | undefined {
+	let record: Record<string, unknown> | undefined;
+	if (args && typeof args === "object") {
+		record = args as Record<string, unknown>;
+	} else if (typeof args === "string" && args.length > 0 && args.length < 4_096) {
+		try {
+			const parsed: unknown = JSON.parse(args);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				record = parsed as Record<string, unknown>;
+			}
+		} catch {
+			return undefined;
+		}
+	}
+	if (!record) return undefined;
+	for (const key of PATH_ARG_KEYS) {
+		const value = record[key];
+		if (
+			typeof value === "string" &&
+			value.length > 1 &&
+			value.length <= 200 &&
+			/\.[a-zA-Z0-9]{1,8}$/.test(value)
+		) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+/** Collapse whitespace to a single line and cap the length. */
+function oneLine(text: string, max: number): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * Deterministic, zero-LLM digest of archived messages: the original goal,
+ * files touched, tool activity, and the last assistant statement before the
+ * cut. Keeps the summary message navigable on its own, so models without
+ * vision (or that skip bitmap decoding) still retain enough context to
+ * continue the work.
+ */
+function extractDigestLines(messages: CompactableMessage[]): string[] {
+	const lines: string[] = [];
+
+	// Goal: first user message.
+	const firstUser = messages.find(message => message.role === "user");
+	const goalText = firstUser
+		? typeof firstUser.content === "string"
+			? firstUser.content
+			: extractTextContent(firstUser.content)
+		: "";
+	if (goalText.trim()) lines.push(`Goal: ${oneLine(goalText, 240)}`);
+
+	// Files, activity, and last statement: walk assistant blocks.
+	const files: string[] = [];
+	const toolCounts = new Map<string, number>();
+	let toolCallsTotal = 0;
+	let lastAssistantText = "";
+	for (const message of messages) {
+		if (message.role !== "assistant") continue;
+		const blocks = message.content as
+			| Array<{
+					type: string;
+					text?: string;
+					name?: string;
+					arguments?: unknown;
+			  }>
+			| undefined;
+		for (const block of blocks ?? []) {
+			if (block?.type === "text" && block.text?.trim()) {
+				lastAssistantText = block.text; // chronological walk: last wins
+			} else if (block?.type === "toolCall") {
+				toolCallsTotal += 1;
+				const name = block.name ?? "unknown";
+				toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1);
+				const file = pathFromToolArgs(block.arguments);
+				if (file && !files.includes(file)) files.push(file);
+			}
+		}
+	}
+	if (files.length > 0) {
+		const shown = files.slice(0, 12);
+		const suffix =
+			files.length > shown.length
+				? ` (+${files.length - shown.length} more)`
+				: "";
+		lines.push(`Files: ${shown.join(", ")}${suffix}`);
+	}
+	if (toolCallsTotal > 0) {
+		const top = [...toolCounts.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 6)
+			.map(([name, count]) => `${name} ×${count}`)
+			.join(", ");
+		lines.push(
+			`Activity: ${messages.length} messages · ${toolCallsTotal} tool calls (${top})`,
+		);
+	}
+	if (lastAssistantText.trim()) {
+		lines.push(`Last before archive: ${oneLine(lastAssistantText, 240)}`);
+	}
+	return lines;
+}
+
 function buildSummary(
 	frameCount: number,
 	totalChars: number,
 	truncatedChars: number,
 	textChars: number,
+	digest: string[],
 	previousSummary?: string,
 ): string {
 	const textNote =
 		textChars > 0 ? ` (+${textChars.toLocaleString()} chars as text)` : "";
 
 	if (frameCount === 0 && textChars === 0) {
-		return previousSummary ?? "No prior history.";
+		const parts = [...digest];
+		if (previousSummary) parts.push(previousSummary);
+		return parts.length > 0 ? parts.join("\n") : "No prior history.";
 	}
 
-	const parts: string[] = [];
+	const parts: string[] = [...digest];
 	parts.push(
 		`Archived ${totalChars.toLocaleString()} chars of conversation history${textNote}.`,
 	);

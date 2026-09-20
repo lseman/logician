@@ -6,7 +6,10 @@
 // the harness's single live instance.
 
 import { execFile } from "node:child_process";
-import { estimateChatPayloadTokens } from "../../../capabilities/provider/messages.ts";
+import {
+	estimateChatPayloadTokens,
+	resolveTokenEncoding,
+} from "../../../capabilities/provider/messages.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
@@ -281,6 +284,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					tokensBefore: await estimateChatPayloadTokens(
 						messages,
 						deps.toolDefs(),
+						resolveTokenEncoding(config.model),
 					),
 					tokensAfter: result.tokensAfter,
 				});

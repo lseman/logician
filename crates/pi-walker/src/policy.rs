@@ -631,6 +631,15 @@ impl WalkRequest {
 		if matches!(rank, Some(WalkRank::MtimeDescPathAsc)) {
 			options.detail = WalkDetail::Full;
 		}
+		if !options.cache
+			&& let (Some(rank), Some(limit)) = (rank, limit)
+		{
+			let mut collector = crate::entry::RankedCollectVisitor::new(&self.filter, rank, limit);
+			crate::walk::walk_entries(&self.root, options, &mut collector, || {
+				heartbeat().map_err(|err| err.to_string())
+			})?;
+			return Ok(collector.into_outcome());
+		}
 		let mut scan = self.collect_entries_with_options(options, &heartbeat)?;
 		let mut backend = if scan.cache_age_ms == 0 {
 			WalkBackend::Fresh
@@ -675,7 +684,7 @@ impl WalkRequest {
 		}
 	}
 
-	fn compare_mtime_desc_path_asc(left: &CollectedEntry, right: &CollectedEntry) -> std::cmp::Ordering {
+	pub(crate) fn compare_mtime_desc_path_asc(left: &CollectedEntry, right: &CollectedEntry) -> std::cmp::Ordering {
 		let mtime_order = match (left.mtime, right.mtime) {
 			(Some(left_mtime), Some(right_mtime)) => right_mtime.total_cmp(&left_mtime),
 			(Some(_), None) => std::cmp::Ordering::Less,

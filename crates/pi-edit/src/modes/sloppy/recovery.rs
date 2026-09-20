@@ -3,8 +3,9 @@
 //! Port of `packages/coding-agent/src/edit/sloppy.ts` lines 4199–4784.
 
 use super::apply::ApplyContext;
-use super::types::{Candidate, NormalizedText, Operation, OperationRewrite, ParsedPattern, PlannedEdit, SelectionPair, markers::{GAP, SELECT_CLOSE, SELECT_DIVIDER, SELECT_OPEN}};
-use super::locate::{locate, numbered_preview, collect_candidates, source_start, MatchMode};
+use super::types::{Candidate, NormalizedText, Operation, OperationRewrite, ParsedPattern, PlannedEdit, SelectionPair, EdgeGaps, markers::{GAP, SELECT_CLOSE, SELECT_DIVIDER, SELECT_OPEN}};
+use super::apply::strip_edge_gaps;
+use super::locate::{locate, numbered_preview, collect_candidates, source_start, source_end, MatchMode};
 use super::parse::has_marker_lines;
 use super::pattern::{parse_pattern, normalize_text};
 use crate::error::EditError;
@@ -20,14 +21,17 @@ pub(crate) fn render_rewrite(
 	rewrite: &str,
 	indices: &[usize],
 	captures: &[String],
+	edges: EdgeGaps,
 	operation_number: usize,
 ) -> Result<String, EditError> {
 	if rewrite.contains(SELECT_OPEN) || rewrite.contains(SELECT_CLOSE) {
 		return Err(EditError::matched(format!(
-			"Operation {operation_number} has selection markers in <SM:PUT>; <SM:FIND> is current \
-			 text, <SM:PUT> is final text."
+			"Operation {operation_number} has selection markers in *** SM:PUT; *** SM:FIND is \
+			 current text, *** SM:PUT is final text."
 		)));
 	}
+	let stripped = strip_edge_gaps(rewrite, edges, indices.len());
+	let rewrite = stripped.as_ref();
 	let mut rendered = String::new();
 	let mut marker = 0;
 	let mut index = 0;
@@ -41,10 +45,10 @@ pub(crate) fn render_rewrite(
 			if marker >= indices.len() {
 				if line.trim() == GAP {
 					return Err(EditError::matched(format!(
-						"Operation {operation_number} <SM:PUT> has a whole-line {GAP} with no <SM:FIND> \
-						 gap to re-emit. <SM:PUT> is final text written verbatim: type the elided lines \
-						 out, or add a matching {GAP} gap to <SM:FIND>. To write a literal {GAP} line, \
-						 use the write tool."
+						"Operation {operation_number} *** SM:PUT has a whole-line {GAP} with no *** \
+						 SM:FIND gap to re-emit. *** SM:PUT is final text written verbatim: type the \
+						 elided lines out, or add a matching {GAP} gap to *** SM:FIND. To write a \
+						 literal {GAP} line, use the write tool."
 					)));
 				}
 				rendered.push_str(GAP);
@@ -91,14 +95,14 @@ pub(crate) fn align_boundary_echoes(content: &str, candidate: &Candidate, replac
 	let mut from = 0;
 	let mut to = replacement.len();
 	if prefix_echo {
-		from = replacement.strip_prefix(prefix).map_or(
-			replacement.len(),
+		from = replacement.strip_prefix(prefix).map_or_else(
+			|| source_end(&normalized_replacement, normalized_prefix.len(), replacement.len()),
 			|rest| replacement.len() - rest.len(),
 		);
 	}
 	if suffix_echo {
 		to = replacement.strip_suffix(suffix).map_or_else(
-		|| {
+			|| {
 				source_start(
 					&normalized_replacement,
 					normalized_replacement.text.len() - normalized_suffix.len(),
@@ -317,6 +321,7 @@ pub(crate) fn prepare_inline(
 	span: (usize, usize),
 	selection: &SelectionPair,
 	rewrite: &str,
+	edges: EdgeGaps,
 	operation_number: usize,
 	lenient: bool,
 ) -> Result<(Candidate, String, Option<String>), EditError> {
@@ -357,8 +362,13 @@ pub(crate) fn prepare_inline(
 	} else {
 		desired.to_owned()
 	};
-	let replacement =
-		render_rewrite(&framed, &selection.capture_indices, &candidate.captures, operation_number)?;
+	let replacement = render_rewrite(
+		&framed,
+		&selection.capture_indices,
+		&candidate.captures,
+		edges,
+		operation_number,
+	)?;
 	if replacement.is_empty() && start != end {
 		let deleted = content[start..end].to_owned();
 		candidate = expand_full_line_deletion(content, &candidate);
@@ -367,7 +377,7 @@ pub(crate) fn prepare_inline(
 	Ok((candidate, replacement, None))
 }
 
-fn drop_selection_echoes(pattern: &str) -> Option<String> {
+pub(crate) fn drop_selection_echoes(pattern: &str) -> Option<String> {
 	let mut result = String::new();
 	let mut run_start = 0;
 	let mut changed = false;
@@ -404,7 +414,7 @@ fn drop_selection_echoes(pattern: &str) -> Option<String> {
 	changed.then_some(result)
 }
 
-fn echo_line_candidates(pattern: &str) -> Vec<String> {
+pub(crate) fn echo_line_candidates(pattern: &str) -> Vec<String> {
 	let lines = pattern.split('\n').collect::<Vec<_>>();
 	let mut result = Vec::new();
 	for index in 1..lines.len() {
@@ -427,7 +437,7 @@ fn echo_line_candidates(pattern: &str) -> Vec<String> {
 	result
 }
 
-fn trailing_selection_candidate(pattern: &str) -> Option<String> {
+pub(crate) fn trailing_selection_candidate(pattern: &str) -> Option<String> {
 	let mut changed = false;
 	let lines = pattern
 		.split('\n')
@@ -472,7 +482,7 @@ fn trailing_selection_candidate(pattern: &str) -> Option<String> {
 	changed.then(|| lines.join("\n"))
 }
 
-fn recover_pattern_candidates(pattern: &str, inline: bool) -> Vec<String> {
+pub(crate) fn recover_pattern_candidates(pattern: &str, inline: bool) -> Vec<String> {
 	let mut result = Vec::new();
 	let mut push = |candidate: Option<String>| {
 		if let Some(candidate) = candidate
@@ -511,7 +521,7 @@ fn recover_pattern_candidates(pattern: &str, inline: bool) -> Vec<String> {
 	result
 }
 
-fn punctuation_pair_variants(operation: &Operation) -> Vec<Operation> {
+pub(crate) fn punctuation_pair_variants(operation: &Operation) -> Vec<Operation> {
 	let OperationRewrite::Inline { replacements } = &operation.rewrite else {
 		return Vec::new();
 	};
@@ -641,7 +651,7 @@ pub(crate) fn locate_with_recovery(
 	}
 }
 
-fn normalized_index_at(normalized: &NormalizedText, raw_offset: usize) -> usize {
+pub(crate) fn normalized_index_at(normalized: &NormalizedText, raw_offset: usize) -> usize {
 	normalized
 		.starts
 		.partition_point(|offset| *offset < raw_offset)
@@ -661,7 +671,11 @@ pub(crate) fn duplicate_collapse_span(
 	let match_start = normalized_index_at(&normalized, candidate.start);
 	let match_end = normalized_index_at(&normalized, candidate.end);
 	for overlap in (MIN_OVERLAP..=rewrite.len().min(match_start)).rev() {
-		if normalized.text[match_start - overlap..match_start] != rewrite[..overlap] {
+		if !normalized
+			.text
+			.get(match_start - overlap..match_start)
+			.is_some_and(|prefix| rewrite.starts_with(prefix))
+		{
 			continue;
 		}
 		let mut start = normalized
@@ -684,7 +698,11 @@ pub(crate) fn duplicate_collapse_span(
 			.min(normalized.text.len().saturating_sub(match_end)))
 		.rev()
 	{
-		if normalized.text[match_end..match_end + overlap] != rewrite[rewrite.len() - overlap..] {
+		if !normalized
+			.text
+			.get(match_end..match_end + overlap)
+			.is_some_and(|suffix| rewrite.ends_with(suffix))
+		{
 			continue;
 		}
 		let mut end = normalized
@@ -754,7 +772,7 @@ pub(crate) fn no_op_error(
 	} else if let Some(operation) = operation {
 		if let Some(matches) = match_count {
 			format!(
-				"Operation {operation} <SM:EDIT all> matched {matches} occurrences but all make no \
+				"Operation {operation} *** SM:EDIT all matched {matches} occurrences but all make no \
 				 change to {}.",
 				context.path
 			)
@@ -767,7 +785,7 @@ pub(crate) fn no_op_error(
 	let grounding = preview.map_or(String::new(), |(content, offset)| {
 		format!(
 			"\nYour rewrite normalized to text identical to these lines. Indentation-only changes \
-			 are applied verbatim; adjust the authored <SM:PUT> if another whitespace change was \
+			 are applied verbatim; adjust the authored *** SM:PUT if another whitespace change was \
 			 intended.\nCurrent file content near the closest match (no re-read needed):\n{}",
 			numbered_preview(content, offset)
 		)

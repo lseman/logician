@@ -15,6 +15,54 @@ import {
 	OpenAIChatCompletionsAdapter,
 	type ProviderAdapter,
 } from "./provider-adapter.ts";
+// ── Default provider timeouts ───────────────────────────────────────────────
+// A healthy server returns SSE response headers promptly — even for prompts
+// whose first token takes a long time to generate (headers precede
+// generation). No headers within this window means the connection is wedged
+// (llama.cpp OOM, vLLM deadlock) and the turn would otherwise hang until a
+// manual abort.
+const DEFAULT_INITIAL_RESPONSE_TIMEOUT_MS = 30_000;
+// Maximum silence on an already-open stream. Generous enough for thinking
+// models' first-token latency on slow local hardware; a wedged server never
+// resumes, so this bounds the wait.
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
+/**
+ * Resolves with `read`'s result, or rejects with a retryable timeout error if
+ * the stream stays silent for `idleMs`. On timeout `onTimeout` runs so the
+ * caller can release the reader (frees the underlying response body). The
+ * timer is unref'd, so a leaked guard (e.g. a mid-stream callback throwing)
+ * can never keep the process alive.
+ */
+function readWithIdleTimeout<T>(
+	read: Promise<T>,
+	onTimeout: () => void,
+	idleMs: number,
+): Promise<T> {
+	const pending = Promise.withResolvers<T>();
+	const timer = setTimeout(() => {
+		onTimeout();
+		pending.reject(
+			new BackendError({
+				category: "transient",
+				message: `No stream data from provider for ${Math.round(
+					idleMs / 1000,
+				)}s`,
+			}),
+		);
+	}, idleMs);
+	timer.unref?.();
+	read.then(
+		chunk => {
+			clearTimeout(timer);
+			pending.resolve(chunk);
+		},
+		error => {
+			clearTimeout(timer);
+			pending.reject(error);
+		},
+	);
+	return pending.promise;
+}
 
 // ── Typed backend errors ───────────────────────────────────────────────────
 // The backend classifies provider/network failures at the boundary so the loop
@@ -155,6 +203,7 @@ export function classifyNetworkError(error: Error): BackendError {
 		"connection refused",
 		"connection reset",
 		"connection timeout",
+		"timed out",
 		"network error",
 		"fetch failed",
 	].some(p => msg.includes(p));
@@ -353,6 +402,8 @@ export function createLLMBackend(options: {
 	thinkingLevel?: ThinkingLevel;
 	thinkingFormat?: ThinkingFormat;
 	providerAdapter?: ProviderAdapter;
+	initialResponseTimeoutMs?: number;
+	streamIdleTimeoutMs?: number;
 }): LLMBackend {
 	return new OpenAIBackend(options);
 }
@@ -365,6 +416,9 @@ export class OpenAIBackend implements LLMBackend {
 	private defaultThinkingLevel: ThinkingLevel = "off";
 	private thinkingFormat?: ThinkingFormat | undefined;
 	private readonly providerAdapter: ProviderAdapter;
+	// 0 disables a guard; undefined falls back to the module default.
+	private readonly initialResponseTimeoutMs?: number | undefined;
+	private readonly streamIdleTimeoutMs?: number | undefined;
 
 	constructor(options: {
 		baseUrl: string;
@@ -374,6 +428,8 @@ export class OpenAIBackend implements LLMBackend {
 		thinkingLevel?: ThinkingLevel | undefined;
 		thinkingFormat?: ThinkingFormat | undefined;
 		providerAdapter?: ProviderAdapter | undefined;
+		initialResponseTimeoutMs?: number | undefined;
+		streamIdleTimeoutMs?: number | undefined;
 	}) {
 		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.model = options.model;
@@ -383,6 +439,8 @@ export class OpenAIBackend implements LLMBackend {
 		this.thinkingFormat = options.thinkingFormat;
 		this.providerAdapter =
 			options.providerAdapter ?? new OpenAIChatCompletionsAdapter();
+		this.initialResponseTimeoutMs = options.initialResponseTimeoutMs;
+		this.streamIdleTimeoutMs = options.streamIdleTimeoutMs;
 	}
 
 	/** Clone this backend bound to a different model (LLMBackend.withModel). */
@@ -395,6 +453,8 @@ export class OpenAIBackend implements LLMBackend {
 			thinkingLevel: this.defaultThinkingLevel,
 			thinkingFormat: this.thinkingFormat,
 			providerAdapter: this.providerAdapter,
+			initialResponseTimeoutMs: this.initialResponseTimeoutMs,
+			streamIdleTimeoutMs: this.streamIdleTimeoutMs,
 		});
 	}
 
@@ -407,6 +467,8 @@ export class OpenAIBackend implements LLMBackend {
 			thinkingLevel: this.defaultThinkingLevel,
 			thinkingFormat: this.thinkingFormat,
 			providerAdapter: this.providerAdapter,
+			initialResponseTimeoutMs: this.initialResponseTimeoutMs,
+			streamIdleTimeoutMs: this.streamIdleTimeoutMs,
 		});
 	}
 
@@ -477,10 +539,25 @@ export class OpenAIBackend implements LLMBackend {
 			timeoutMs !== undefined && timeoutMs > 0
 				? AbortSignal.timeout(timeoutMs)
 				: undefined;
+		// Without an explicit per-request deadline, guard the response phase:
+		// a wedged server (llama.cpp OOM, vLLM deadlock) must not hang the
+		// turn until a manual abort.
+		let initialGuard: { signal: AbortSignal; ms: number } | undefined;
+		if (timeoutSignal === undefined) {
+			const ms =
+				this.initialResponseTimeoutMs ??
+				DEFAULT_INITIAL_RESPONSE_TIMEOUT_MS;
+			if (ms > 0) initialGuard = { signal: AbortSignal.timeout(ms), ms };
+		}
+		const requestSignals = [
+			signal,
+			timeoutSignal,
+			initialGuard?.signal,
+		].filter(
+			(candidate): candidate is AbortSignal => candidate !== undefined,
+		);
 		const requestSignal =
-			signal && timeoutSignal
-				? AbortSignal.any([signal, timeoutSignal])
-				: (signal ?? timeoutSignal);
+			requestSignals.length > 0 ? AbortSignal.any(requestSignals) : undefined;
 		let response: Response;
 		try {
 			response = await fetch(this.providerAdapter.endpoint(this.baseUrl), {
@@ -494,6 +571,17 @@ export class OpenAIBackend implements LLMBackend {
 			});
 		} catch (e) {
 			const error = e as Error;
+			// Initial-response guard fired. Bun rejects a timed-out signal with
+			// TimeoutError (not AbortError), so attribute by the signal rather
+			// than the error name.
+			if (initialGuard?.signal.aborted && !signal?.aborted) {
+				throw new BackendError({
+					category: "transient",
+					message: `No response from provider within ${Math.round(
+						initialGuard.ms / 1000,
+					)}s`,
+				});
+			}
 			// Aborts propagate unchanged so the loop's signal check handles them.
 			if (error.name === "AbortError") throw error;
 			throw classifyNetworkError(error);
@@ -517,6 +605,8 @@ export class OpenAIBackend implements LLMBackend {
 
 		const reader = response.body.getReader();
 		const decoder = new TextDecoder();
+		const streamIdleMs =
+			this.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
 		let buffer = "";
 		let fullContent = "";
 		let fullReasoning = "";
@@ -530,7 +620,19 @@ export class OpenAIBackend implements LLMBackend {
 		// onToolCallStart fires exactly once per streamed call.
 		const startedToolIndexes = new Set<number>();
 		while (true) {
-			const { value, done } = await reader.read();
+			const readPromise = reader.read();
+			const result =
+				streamIdleMs > 0
+					? await readWithIdleTimeout(
+							readPromise,
+							() =>
+								void reader
+									.cancel("stream idle timeout")
+									.catch(() => {}),
+							streamIdleMs,
+						)
+					: await readPromise;
+			const { value, done } = result;
 			if (done) break;
 
 			buffer += decoder.decode(value, { stream: true });
