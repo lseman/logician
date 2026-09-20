@@ -1,109 +1,51 @@
 // ── Functional Agent Loop ─────────────────────────────────────────────────
 // Pi-style loop contract for Logician's current backend/tool adapter:
 // context + prompts + config + emit => new messages.
+//
+// The loop body is a sequence of per-turn phases (turn-phases.ts) over a
+// shared TurnContext record; this module owns run setup, the loop skeleton,
+// and the public contract.
 
-import {
-	createSystemMessage,
-	convertToLlm as defaultConvertToLlm,
-	estimateChatPayloadTokens,
-	resolveTokenEncoding,
-} from "../../capabilities/provider/messages.ts";
-import { ToolRegistry } from "../../capabilities/tools/registry.ts";
+import { resolveTokenEncoding } from "../../capabilities/provider/messages.ts";
 import { ToolResultCache } from "../../capabilities/tools/tool-result-cache.ts";
 import { resolveAgentSettings } from "../../control/configuration/agent-settings.ts";
-import {
-	formatVerificationRepair,
-	type ResolvedAcceptance,
-	resolveEffectiveAcceptance,
-	shouldRunAcceptanceFinalization,
-	verifyAcceptanceCommands,
-} from "../../control/guards/acceptance-contract.ts";
-import {
-	MAX_ESCALATIONS,
-	SoftToolRequirementExceededError,
-	SoftToolRequirementManager,
-} from "../../control/guards/soft-tool-requirement.ts";
+import { resolveEffectiveAcceptance } from "../../control/guards/acceptance-contract.ts";
+import { SoftToolRequirementManager } from "../../control/guards/soft-tool-requirement.ts";
 import { TextLoopDetector } from "../../control/guards/text-loop-detector.ts";
-import {
-	evaluateStopPolicies,
-	resolveExecutionPolicy,
-} from "../../control/policy/execution-policy.ts";
-import { checkBudget } from "../../control/policy/exit-path.ts";
-import {
-	HarnessInterventionController,
-	type InterventionInput,
-} from "../../control/policy/intervention-controller.ts";
+import { resolveExecutionPolicy } from "../../control/policy/execution-policy.ts";
+import { HarnessInterventionController } from "../../control/policy/intervention-controller.ts";
 import { RunBudgetController } from "../../control/policy/run-budget.ts";
 import { AgentRunController } from "../../control/policy/run-controller.ts";
-import { createVerifiedStopPolicy } from "../../control/policy/verified-stop-policy.ts";
-import type { RunOutcomeStatus } from "../../system/types/execution-policy.ts";
-import type { RunBudgetDecision } from "../../system/types/run-budget.ts";
 import type {
 	AgentEventSink,
 	AgentMessage,
-	CompactableMessage,
 	Message,
 	Tool,
-	ToolCall,
 } from "../../system/types/types-messages.ts";
-import { compactToFit, toMessages } from "../compaction/engine.ts";
-import { executeToolBatch } from "../execution/tool-batch-controller.ts";
-import {
-	isToolFailureResult,
-	taskObjectiveFromMessages,
-} from "../loop/adaptive-mode.ts";
-import {
-	assistantText,
-	emitMessagePair,
-	lastAssistantContent,
-	stopReasonFor,
-	withSystemPrompt,
-} from "../loop/callbacks.ts";
+import { taskObjectiveFromMessages } from "../loop/adaptive-mode.ts";
+import { emitMessagePair, withSystemPrompt } from "../loop/callbacks.ts";
 import type { AgentLoopConfig } from "../loop/config.ts";
-import { processProviderResponse } from "../loop/provider-response.ts";
+import { createProviderTurnState } from "../loop/provider-turn.ts";
 import {
-	createProviderTurnState,
-	requestAssistantTurn,
-} from "../loop/provider-turn.ts";
-import { resolveModelContextWindow } from "./live/model.ts";
+	checkRunAbort,
+	createToolRegistry,
+	drainPostTurnFollowUps,
+	drainSteering,
+	evaluateStopPolicyPhase,
+	finalizeRun,
+	finishRun,
+	INNER_PHASES,
+	resolveAcceptance,
+	runAcceptanceRepairPhase,
+	runPhaseSequence,
+	type TurnContext,
+} from "./turn-phases.ts";
 
-// A steering interrupt cancels the in-flight provider call to redirect the
-// run, not to stop it — the harness auto-continues with the queued steering
-// text right after. Matched by exact summary text so both the loop runner
-// (which produces it) and the harness (which decides whether to resume as a
-// plain turn vs. an autonomous continuation) agree on what counts as one.
-export const STEERING_INTERRUPT_SUMMARY =
-	"Current provider response interrupted to apply steering.";
-
-const STEERING_INTERRUPT_NAME = "SteeringInterruptError";
-
-export function createSteeringInterruptReason(): Error {
-	const error = new Error(STEERING_INTERRUPT_SUMMARY);
-	error.name = STEERING_INTERRUPT_NAME;
-	return error;
-}
-
-function isSteeringInterrupt(signal: AbortSignal | undefined): boolean {
-	return (
-		signal?.aborted === true &&
-		signal.reason instanceof Error &&
-		signal.reason.name === STEERING_INTERRUPT_NAME
-	);
-}
-
-/**
- * Strategy-change nudge injected on the first text-stagnation hit. The run
- * gets one bounded recovery turn; a second hit blocks (see the loop below).
- */
-function formatStagnationNudge(hit: string): string {
-	return (
-		"[stagnation-nudge] The harness detected that your last response repeats " +
-		`prior content without new progress (${hit}). Do not restate the same ` +
-		"analysis. Change strategy and take a concrete next step: run a tool, " +
-		"make an edit, or state a decision and proceed. If the task is already " +
-		"complete, say so in one explicit sentence."
-	);
-}
+// Re-exported so existing import paths keep working.
+export {
+	createSteeringInterruptReason,
+	STEERING_INTERRUPT_SUMMARY,
+} from "./turn-phases.ts";
 
 export interface RunAgentLoopContext {
 	systemPrompt?: string | undefined;
@@ -122,32 +64,18 @@ async function runAgentLoopInternal(
 ): Promise<Message[]> {
 	const downstreamEmit = emit;
 	let eventSequence = 0;
-	emit = event =>
+	const stampedEmit: AgentEventSink = event =>
 		downstreamEmit({
 			...event,
 			seq: ++eventSequence,
 			ts: Date.now(),
 		});
-	let messages = [
+	const messages = [
 		...withSystemPrompt(context.systemPrompt, context.messages),
 		...prompts,
 	];
 	const newMessages: Message[] = [...prompts];
-	const finish = async (outcome: {
-		status: RunOutcomeStatus;
-		summary?: string | undefined;
-		source: "structured" | "heuristic" | "runtime";
-	}): Promise<Message[]> => {
-		await emit({
-			type: "agent_end",
-			messages: newMessages,
-			status: outcome.status,
-			summary: outcome.summary,
-			stepCount: iteration,
-		});
-		return newMessages;
-	};
-	let settings = resolveAgentSettings(config);
+	const settings = resolveAgentSettings(config);
 	// Token budgets are only as good as the tokenizer family: resolve the
 	// model's BPE encoding once so estimates match the model's vocabulary.
 	const tokenEncoding = resolveTokenEncoding(config.backend.model);
@@ -156,45 +84,16 @@ async function runAgentLoopInternal(
 	const interventionController =
 		config.interventionController ?? new HarnessInterventionController();
 	const runController = config.runController ?? new AgentRunController();
-	const intervene = (input: InterventionInput): Promise<void> | void =>
-		emit({
-			type: "harness_intervention",
-			...interventionController.record(input),
-		});
 	// ── P0-1: Shared tool result cache ─────────────────────────────────
 	const cache = new ToolResultCache(
 		config.cacheSize ?? 2000,
 		config.cacheTtlMs ?? 60_000,
 	);
-	const createRegistry = (tools: Tool[]): ToolRegistry => {
-		const next = new ToolRegistry({
-			cwd: context.cwd ?? config.cwd,
-			allowedPaths: config.allowedPaths,
-			allowAllPaths: config.allowAllPaths,
-			signal: config.signal,
-			onQuestionRequest: config.onQuestionRequest,
-			cache,
-			maxResultChars: config.truncation?.toolResultMaxChars,
-		});
-		next.registerMany(tools);
-		return next;
-	};
-	let registry = createRegistry(context.tools ?? config.tools ?? []);
-
 	const outputGuard = config.outputGuard;
-	let iteration = 0;
-	let performedToolWork = false;
-	let toolFailures = 0;
-	let stagnationNudges = 0;
 	const adaptiveObjective = taskObjectiveFromMessages([
 		...context.messages,
 		...prompts,
 	]);
-	let contextWasCompacted = false;
-	let acceptanceFailed = false;
-	let cachedVerificationResults:
-		| Awaited<ReturnType<typeof verifyAcceptanceCommands>>
-		| undefined;
 	const providerTurnState = createProviderTurnState();
 	const runBudget = new RunBudgetController(
 		{
@@ -210,709 +109,105 @@ async function runAgentLoopInternal(
 	const textLoopDetector = new TextLoopDetector();
 	const softToolManager = new SoftToolRequirementManager();
 
-	async function finishForBudgetExhaustion(
-		decision: RunBudgetDecision,
-	): Promise<Message[]> {
-		await intervene({
-			kind: "budget",
-			cause: "run_budget",
-			detector: "run_budget",
-			message: decision.reason ?? "Run budget exhausted.",
-			iteration,
-			counters: {
-				providerCalls: decision.snapshot.providerCalls,
-				toolCalls: decision.snapshot.toolCalls,
-				elapsedMs: decision.snapshot.elapsedMs,
-			},
-		});
-		return finish({
-			status: "blocked",
-			summary: decision.reason,
-			source: "runtime",
-		});
-	}
-
-	// ── Acceptance contract tracking ─────────────────────────────────────
-	let resolvedAcceptance: ResolvedAcceptance | null = null;
-
-	function resolveAcceptance(): ResolvedAcceptance {
-		if (!resolvedAcceptance) {
-			const raw = config.getAcceptanceConfig?.() ?? config.acceptance;
-			resolvedAcceptance = resolveEffectiveAcceptance({ explicit: raw });
-		}
-		return resolvedAcceptance;
-	}
-
-	function checkStopRules(resolved: ResolvedAcceptance): boolean {
-		if (!resolved.stopRules?.length) return false;
-		const text = lastAssistantContent(newMessages);
-		for (const rule of resolved.stopRules) {
-			if (text.includes(rule)) return true;
-		}
-		return false;
-	}
-
-	async function drainSteering(): Promise<Message[]> {
-		return (
-			(await config.hooks?.getSteeringMessages?.({ messages, iteration })) ?? []
-		);
-	}
-
-	async function drainFollowUps(): Promise<Message[]> {
-		return (
-			(await config.hooks?.getFollowUpMessages?.({
-				messages,
-				iteration,
-				assistantText: assistantText(newMessages.at(-1)),
-				stopReason: "stop",
-			})) ?? []
-		);
-	}
-
-	let pendingMessages = await drainSteering();
+	const ctx: TurnContext = {
+		context,
+		config,
+		emit: stampedEmit,
+		interventionController,
+		runController,
+		runBudget,
+		textLoopDetector,
+		softToolManager,
+		providerTurnState,
+		cache,
+		outputGuard,
+		tokenEncoding,
+		adaptiveObjective,
+		maxIterations,
+		executionPolicy,
+		messages,
+		newMessages,
+		iteration: 0,
+		pendingMessages: [],
+		hasMoreToolCalls: true,
+		settings,
+		registry: createToolRegistry(
+			context,
+			config,
+			cache,
+			context.tools ?? config.tools ?? [],
+		),
+		performedToolWork: false,
+		toolFailures: 0,
+		stagnationNudges: 0,
+		contextWasCompacted: false,
+		acceptanceFailed: false,
+		cachedVerificationResults: undefined,
+		resolvedAcceptance: null,
+		resolved: resolveEffectiveAcceptance({ explicit: undefined }),
+		turn: { turnId: "" },
+	};
 
 	// Apply beforeAgentStart hook
-	const beforeAgentStartResult = await config.hooks?.beforeAgentStart?.({
+	ctx.pendingMessages = await drainSteering(ctx);
+	const beforeAgentStartResult = await ctx.config.hooks?.beforeAgentStart?.({
 		prompt: prompts.map(p => p.content).join("\n"),
 		systemPrompt: context.systemPrompt ?? "",
-		messages: messages as AgentMessage[],
+		messages: ctx.messages as AgentMessage[],
 	});
 
-	await emit({ type: "agent_start" });
+	await ctx.emit({ type: "agent_start" });
 	const promptTurnId = "turn_0";
 	for (const prompt of prompts) {
-		await emitMessagePair(emit, promptTurnId, prompt);
+		await emitMessagePair(ctx.emit, promptTurnId, prompt);
 	}
 
 	// Apply beforeAgentStart hook results to messages and system prompt
 	if (beforeAgentStartResult?.messages) {
 		for (const msg of beforeAgentStartResult.messages) {
-			messages.push(msg as Message);
-			newMessages.push(msg as Message);
+			ctx.messages.push(msg as Message);
+			ctx.newMessages.push(msg as Message);
 		}
 	}
 	if (beforeAgentStartResult?.systemPrompt) {
 		context.systemPrompt = beforeAgentStartResult.systemPrompt;
 	}
-	const resolved = executionPolicy.embeddedPoliciesEnabled
-		? resolveAcceptance()
-		: resolveEffectiveAcceptance({ explicit: undefined });
+	if (executionPolicy.embeddedPoliciesEnabled) {
+		ctx.resolved = resolveAcceptance(ctx);
+	}
 
-	while (iteration < maxIterations) {
-		if (config.signal?.aborted) {
-			const steeringInterrupt = isSteeringInterrupt(config.signal);
-			if (!steeringInterrupt) {
-				await emit({ type: "error", message: "Operation aborted" });
-			}
-			return finish({
-				status: "cancelled",
-				summary: steeringInterrupt
-					? STEERING_INTERRUPT_SUMMARY
-					: "Operation aborted before the provider request.",
-				source: "runtime",
-			});
-		}
+	while (ctx.iteration < ctx.maxIterations) {
+		const abort = await checkRunAbort(ctx);
+		if (abort.kind === "finish") return finishRun(ctx, abort);
 
-		let hasMoreToolCalls = true;
+		ctx.hasMoreToolCalls = true;
 		while (
-			(hasMoreToolCalls || pendingMessages.length > 0) &&
-			iteration < maxIterations
+			(ctx.hasMoreToolCalls || ctx.pendingMessages.length > 0) &&
+			ctx.iteration < ctx.maxIterations
 		) {
-			const providerBudget = checkBudget(runBudget, "provider_call");
-			if (!providerBudget.allowed) {
-				return finishForBudgetExhaustion(providerBudget);
-			}
-			iteration++;
-			const turnId = `turn_${iteration}`;
-			await emit({ type: "turn_start", turnId });
-
-			if (pendingMessages.length > 0) {
-				for (const pending of pendingMessages) {
-					messages.push(pending);
-					newMessages.push(pending);
-					await emitMessagePair(emit, turnId, pending);
-				}
-				pendingMessages = [];
-			}
-			// ── Soft tool requirement reminder injection ────────────────
-			// If a new soft requirement activated, inject its reminder messages
-			// before the model call. This avoids the cache-invalidating cost of
-			// forcing tool_choice up front.
-			{
-				const reminder = softToolManager.getReminder();
-				if (reminder && reminder.length > 0) {
-					for (const msg of reminder) {
-						messages.push(msg);
-						newMessages.push(msg);
-						await emitMessagePair(emit, turnId, msg);
-					}
-				}
-			}
-			// ── Soft tool requirement: resolve from host ─────────────────
-			// Call getToolChoice to let the host set a soft requirement or
-			// hard tool choice for this turn. The manager tracks the active
-			// requirement and injects reminders on activation.
-			{
-				const toolNames = registry.list().map(t => t.name);
-				const toolChoice = await config.hooks?.getToolChoice?.({
-					messages: messages as Message[],
-					iteration,
-					availableTools: toolNames,
-				});
-				if (toolChoice && "soft" in toolChoice && toolChoice.soft) {
-					softToolManager.setRequirement(toolChoice);
-				}
-			}
-
-			// transformContext is request-scoped only (ExtensionHooks, not
-			// RunControlHooks) — its result must build this turn's outgoing
-			// payload and nothing else. It must never be folded back onto the
-			// canonical `messages`, or a transient injection (e.g. memory
-			// retrieval context) silently becomes part of durable history.
-			// Persistent edits belong in prepareNextTurn/beforeAgentStart instead.
-			const transformResult = await config.hooks?.transformContext?.({
-				messages: messages as AgentMessage[],
-				iteration,
-				signal: config.signal,
-			});
-			const requestMessages = transformResult?.messages as
-				| Message[]
-				| undefined;
-
-			const turnResult = await requestAssistantTurn({
-				state: providerTurnState,
-				messages,
-				presentationMessages: requestMessages,
-				config,
-				settings,
-				registry,
-				outputGuard,
-				turnId,
-				iteration,
-				adaptiveObjective,
-				performedToolWork,
-				toolFailures,
-				contextWasCompacted,
-				convertToLlm: config.convertToLlm ?? defaultConvertToLlm,
-				emit,
-				intervene,
-				isSteeringInterrupt,
-				steeringInterruptSummary: STEERING_INTERRUPT_SUMMARY,
-			});
-			if (turnResult.kind === "finish") {
-				return finish(turnResult.outcome);
-			}
-			const response = turnResult.response;
-			messages = turnResult.messages;
-			contextWasCompacted = turnResult.contextWasCompacted;
-
-			const tokenBudget = checkBudget(
-				runBudget,
-				"tokens",
-				response?.usage?.totalTokens ?? 0,
-			);
-			if (!tokenBudget.allowed) {
-				return finishForBudgetExhaustion(tokenBudget);
-			}
-			const processResult = processProviderResponse({
-				response,
-				registry,
-				outputGuard: outputGuard ?? null,
-				messages,
-				newMessages,
-				turnId,
-				iteration,
-				emit,
-				config,
-			});
-
-			let toolCalls: ToolCall[];
-			let assistant: Message;
-			if (processResult.success) {
-				toolCalls = processResult.toolCalls;
-				assistant = processResult.assistant;
-				if (toolCalls.length > 0) {
-					performedToolWork = true;
-				}
-				// Text-level loop detection on assistant content
-				const assistantText = assistant.content ?? "";
-				if (assistantText.length > 200) {
-					const loopHit = textLoopDetector.check(assistantText);
-					if (loopHit) {
-						// Bounded recovery: the first text-only hit injects one
-						// strategy-change nudge (same escalation pattern as the
-						// soft-tool manager); a second hit blocks the run. A first
-						// hit while tool calls are landing is counted only — the
-						// run is making work progress, so the batch runs as usual
-						// and the next text hit blocks.
-						stagnationNudges++;
-						textLoopDetector.reset();
-						const hasToolWork = toolCalls.length > 0;
-						if (stagnationNudges > 1) {
-							await intervene({
-								kind: "loop",
-								cause: "text_stagnation",
-								detector: "text_loop_detector",
-								message: `Text stagnation detected: ${loopHit}`,
-								iteration,
-								action: "change_strategy",
-							});
-							return finish({
-								status: "blocked",
-								summary:
-									"Agent entered a text stagnation loop — repeating content without progress.",
-								source: "runtime",
-							});
-						}
-						if (hasToolWork) {
-							await intervene({
-								kind: "loop",
-								cause: "text_stagnation",
-								detector: "text_loop_detector",
-								message: `Text stagnation detected while tools were running: ${loopHit}`,
-								iteration,
-								action: "change_strategy",
-							});
-						} else {
-							await intervene({
-								kind: "loop",
-								cause: "text_stagnation",
-								detector: "text_loop_detector",
-								message: `Text stagnation detected: ${loopHit}; strategy-change nudge injected.`,
-								iteration,
-								action: "change_strategy",
-							});
-							pendingMessages = [
-								{
-									role: "user",
-									content: formatStagnationNudge(loopHit),
-									timestamp: Date.now(),
-								},
-							];
-							continue;
-						}
-					}
-				}
-			} else {
-				return finish({
-					status: "failed",
-					summary:
-						processResult.errorMessage ?? "Model returned empty response.",
-					source: "runtime",
-				});
-			}
-			const rawStopReason =
-				(response?.stopReason as "stop" | "length" | "error") ?? "stop";
-			const stopReason = stopReasonFor(rawStopReason, toolCalls);
-
-			hasMoreToolCalls = false;
-			const toolBudget = checkBudget(runBudget, "tool_batch", toolCalls.length);
-			if (!toolBudget.allowed) {
-				return finishForBudgetExhaustion(toolBudget);
-			}
-			const batch = await executeToolBatch({
-				registry,
-				toolCalls,
-				rawStopReason,
-				toolExecution: settings.toolExecution,
-				iteration,
-				signal: config.signal,
-				hooks: config.hooks,
-				permissions: config.permissions,
-				onPermissionRequest: config.onPermissionRequest,
-				emit,
-			});
-			const toolResults = batch.messages;
-			const toolTerminated = batch.terminated;
-			const permissionEscalation = runController.recordPermissionBatch({
-				denials: batch.permissionDenials,
-				executed: batch.executedToolCallIds.length,
-			});
-			for (const toolResult of toolResults) {
-				if (isToolFailureResult(String(toolResult.content ?? ""))) {
-					toolFailures++;
-				}
-				messages.push(toolResult);
-				newMessages.push(toolResult);
-				await emitMessagePair(emit, turnId, toolResult);
-				hasMoreToolCalls = true;
-			}
-			// ── Soft tool requirement compliance ────────────────────────
-			{
-				const toolCallObjects = toolCalls.map(tc => {
-					let args: Record<string, unknown> = {};
-					try {
-						args = JSON.parse(tc.arguments ?? "{}");
-					} catch {
-						args = {};
-					}
-					return { name: tc.name, arguments: args };
-				});
-				try {
-					softToolManager.checkCompliance(toolCallObjects);
-				} catch (err) {
-					if (err instanceof SoftToolRequirementExceededError) {
-						const toolName = err.message.split("'")[1];
-						await intervene({
-							kind: "loop",
-							cause: "soft_tool_requirement_exceeded",
-							detector: "soft_tool_requirement",
-							message: `Soft tool requirement for '${toolName}' was not satisfied after ${MAX_ESCALATIONS} forced turns; aborting.`,
-							iteration,
-							action: "stop",
-						});
-						return finish({
-							status: "blocked",
-							summary:
-								"Soft tool requirement was not met after repeated escalations.",
-							source: "runtime",
-						});
-					}
-					throw err;
-				}
-			}
-			if (permissionEscalation) {
-				await intervene({
-					kind: "loop",
-					cause: "permission_denials",
-					detector: "permission_escalation",
-					message:
-						"Autonomous execution paused after repeated permission denials. User authorization or a different task scope is required.",
-					iteration,
-					action: "pause",
-					counters: {
-						consecutive: permissionEscalation.consecutive,
-						total: permissionEscalation.total,
-					},
-					limits: { consecutive: 3, total: 20 },
-				});
-				return finish({
-					status: "needs_input",
-					summary:
-						"Repeated permission denials require user authorization or a safer scope.",
-					source: "runtime",
-				});
-			}
-
-			// The final usage-only SSE chunk is optional and many local providers
-			// omit it. Prefer the provider-reported total when present; only fall
-			// back to estimating the serialized conversation (an expensive
-			// full-history pass) when the provider reported nothing.
-			const reportedTokens = response?.usage?.totalTokens ?? 0;
-			const contextTokens =
-				reportedTokens > 0
-					? reportedTokens
-					: await estimateChatPayloadTokens(
-							messages,
-							registry.toToolDefinitions(),
-							tokenEncoding,
-						);
-			// The effective window follows the active model: the per-model cap
-			// when configured for it (model cycling mutates config mid-run),
-			// otherwise the global setting.
-			const effectiveContextWindow = resolveModelContextWindow(
-				config.models,
-				config.model,
-				config.contextWindowTokens,
-			);
-			await emit({
-				type: "context_update",
-				tokens: contextTokens,
-				maxTokens: effectiveContextWindow,
-				cachedTokens: response?.usage?.cachedTokens ?? null,
-				promptTokens: response?.usage?.promptTokens ?? null,
-				completionTokens: response?.usage?.completionTokens ?? null,
-				prefixStable: turnResult.prefixStability?.stable,
-				prefixDivergedAt: turnResult.prefixStability?.divergedAt,
-				prefixRewritten: turnResult.prefixStability?.rewritten,
-			});
-			if (effectiveContextWindow) {
-				const budgetResult = outputGuard?.processResponse(
-					contextTokens,
-					effectiveContextWindow,
-				);
-				// budget_exhausted is a harder threshold than proactive compaction's
-				// (95% vs 80%) — if we're here, proactive compaction already failed
-				// to keep up (e.g. cooldown window, or a single oversized turn).
-				// Compact immediately rather than waiting for the next request to
-				// fail with context_full.
-				if (budgetResult?.action === "budget_exhausted") {
-					const compacted = await compactToFit(
-						messages as CompactableMessage[],
-						{
-							triggerTokens: 0,
-							targetTokens: Math.floor(effectiveContextWindow * 0.75),
-						},
-					);
-					if (compacted.changed) {
-						messages = toMessages(compacted.messages);
-						contextWasCompacted = true;
-						config.onContextCompacted?.(messages);
-						await emit({
-							type: "context_update",
-							tokens: compacted.tokensAfter,
-							maxTokens: effectiveContextWindow,
-							compacted: true,
-						});
-						await intervene({
-							kind: "compaction",
-							cause: "budget_exhausted",
-							detector: "context_budget",
-							message: `Context compacted from ${compacted.tokensBefore} to ${compacted.tokensAfter} tokens.`,
-							iteration,
-							counters: {
-								tokensBefore: compacted.tokensBefore,
-								tokensAfter: compacted.tokensAfter,
-							},
-						});
-					}
-				}
-			}
-
-			await emit({
-				type: "turn_end",
-				turnId,
-				stopReason,
-				message: assistant,
-				toolResults,
-			});
-
-			// Reset output guard after each completed turn
-			outputGuard?.reset();
-
-			const refreshedConfig = await config.refreshNextTurnConfig?.();
-			if (refreshedConfig) {
-				Object.assign(config, refreshedConfig);
-				settings = resolveAgentSettings(config);
-				context.systemPrompt = refreshedConfig.systemPrompt;
-				messages = [
-					createSystemMessage(
-						refreshedConfig.systemPrompt ?? "You are a helpful assistant.",
-					),
-					...messages.filter(message => message.role !== "system"),
-				];
-				registry = createRegistry(refreshedConfig.tools ?? []);
-			}
-
-			const prepareResult = await config.hooks?.prepareNextTurn?.({
-				messages,
-				iteration,
-				hadToolCalls: toolCalls.length > 0,
-			});
-			const prepared = prepareResult?.messages;
-			if (prepared) {
-				messages = prepared;
-				if (contextWasCompacted) config.onContextCompacted?.(messages);
-			}
-
-			// Fix #4: when a tool signals terminate, still drain followUps before exiting.
-			// This prevents skipping queued follow-up messages (e.g. steering injected
-			// mid-turn) just because a tool requested termination.
-			if (toolTerminated) {
-				const followUpsOnTerminate = await drainFollowUps();
-				if (followUpsOnTerminate.length > 0) {
-					if (
-						!followUpsOnTerminate.some(message =>
-							String(message.content).startsWith("[continuation-nudge:"),
-						)
-					) {
-						await intervene({
-							kind: "continuation",
-							cause: "follow_up_after_termination",
-							detector: "follow_up_queue",
-							message: `Harness scheduled ${followUpsOnTerminate.length} follow-up message(s) after tool termination.`,
-							iteration,
-						});
-					}
-					pendingMessages = followUpsOnTerminate;
-					hasMoreToolCalls = false;
-					// Re-enter inner loop with follow-up messages
-					continue;
-				}
-				return finish({ status: "completed", source: "runtime" });
-			}
-
-			// Fix #5: only invoke shouldStopAfterTurn when no tool calls ran.
-			// Tool turns always continue unless the hook is explicitly wired to stop
-			// on tool turns — checking it unconditionally causes premature exits when
-			// hooks have stale state from a previous no-tool turn.
-			const stop =
-				toolCalls.length === 0
-					? ((await config.hooks?.shouldStopAfterTurn?.({
-							messages,
-							iteration,
-							hadToolCalls: false,
-						})) ?? false)
-					: false;
-			// Acceptance stop rules take priority
-			let acceptanceStop = false;
-			if (!stop && shouldRunAcceptanceFinalization(resolved)) {
-				acceptanceStop = checkStopRules(resolved);
-			}
-			if (stop || acceptanceStop) {
-				if (stop) return finish({ status: "completed", source: "runtime" });
-				runController.requestAcceptanceStop();
-				break;
-			}
-
-			pendingMessages = await drainSteering();
+			const inner = await runPhaseSequence(ctx, INNER_PHASES);
+			if (Array.isArray(inner)) return inner;
+			if (inner.kind === "break") break;
 		}
+		const followUps = await drainPostTurnFollowUps(ctx);
+		if (followUps === "continue") continue;
 
-		pendingMessages = runController.acceptanceStopRequested
-			? []
-			: await drainFollowUps();
-		if (pendingMessages.length > 0) continue;
+		// Stop policies and the bounded verification repair are sequential,
+		// not a phase sequence: a `continue` from either re-enters the outer
+		// loop; a `break` from the stop policies falls through to the
+		// acceptance phase, and a `break` from the acceptance phase exits the
+		// outer loop.
+		const stopPolicy = await evaluateStopPolicyPhase(ctx);
+		if (stopPolicy.kind === "finish") return finishRun(ctx, stopPolicy);
+		if (stopPolicy.kind === "continue") continue;
 
-		const stopPolicies = [
-			...(config.verifiedStopEnabled === true
-				? [createVerifiedStopPolicy()]
-				: []),
-			...(config.stopPolicies ?? []),
-		];
-		const stopPolicyDecision = await evaluateStopPolicies(
-			stopPolicies,
-			{
-				messages,
-				newMessages,
-				iteration,
-				signal: config.signal,
-			},
-			evaluation => emit({ type: "policy_evaluation", ...evaluation }),
-		);
-		if (stopPolicyDecision?.action === "finish") {
-			return finish({
-				status: stopPolicyDecision.status,
-				summary: stopPolicyDecision.summary,
-				source: "structured",
-			});
-		}
-		if (
-			stopPolicyDecision?.action === "continue" &&
-			stopPolicyDecision.messages.length > 0
-		) {
-			pendingMessages = stopPolicyDecision.messages;
-			continue;
-		}
-
-		// Deterministic verification gets one bounded repair turn. This happens
-		// only after the ordinary autonomous policy considers the work finished.
-		if (resolved.verify.length > 0) {
-			await emit({
-				type: "acceptance_start",
-				level: resolved.level,
-				criteriaCount: resolved.criteria.length,
-			});
-			cachedVerificationResults = await verifyAcceptanceCommands(resolved, {
-				cwd: config.cwd,
-				signal: config.signal,
-			});
-			for (const result of cachedVerificationResults) {
-				await emit({
-					type: "acceptance_verify",
-					command: result.command,
-					result: result.result,
-					summary: result.summary,
-				});
-			}
-			if (
-				runController.requestVerificationRepair(
-					cachedVerificationResults,
-					iteration < maxIterations,
-				)
-			) {
-				const content = formatVerificationRepair(cachedVerificationResults);
-				await intervene({
-					kind: "verification",
-					cause: "verification_failed",
-					detector: "acceptance_verifier",
-					message: content,
-					iteration,
-					action: "recover",
-					limits: { repairAttempts: 1 },
-				});
-				pendingMessages = [{ role: "user", content, timestamp: Date.now() }];
-				continue;
-			}
-		}
+		const repair = await runAcceptanceRepairPhase(ctx);
+		if (repair.kind === "finish") return finishRun(ctx, repair);
+		if (repair.kind === "continue") continue;
 		break;
 	}
 
-	const finalMessagesForConclusion = newMessages;
-
-	if (iteration >= maxIterations) {
-		await emit({
-			type: "max_iterations",
-			iterations: iteration,
-			limit: maxIterations,
-		});
-	}
-
-	// ── Acceptance finalization ────────────────────────────────────────
-	if (shouldRunAcceptanceFinalization(resolved)) {
-		const verificationResults =
-			cachedVerificationResults ??
-			(await verifyAcceptanceCommands(resolved, {
-				cwd: config.cwd,
-				signal: config.signal,
-			}));
-
-		// Emit verification events
-		for (const result of verificationResults) {
-			await emit({
-				type: "acceptance_verify",
-				command: result.command,
-				result: result.result,
-				summary: result.summary,
-			});
-		}
-
-		const hasFailures = verificationResults.some(
-			r =>
-				r.result === "failed" &&
-				!resolved.verify.find(v => v.command === r.command)?.allowFailure,
-		);
-
-		acceptanceFailed = hasFailures;
-
-		await emit({
-			type: "acceptance_complete",
-			status: hasFailures ? "failed" : "passed",
-		});
-	}
-
-	// Final output guard reset when agent ends
-	outputGuard?.reset();
-	// Acceptance failure must take precedence over a model-declared `done`.
-	if (acceptanceFailed) {
-		return finish({
-			status: "failed",
-			summary:
-				"Acceptance contract not satisfied after the configured finalization turns.",
-			source: "runtime",
-		});
-	}
-	if (config.signal?.aborted) {
-		return finish({
-			status: "cancelled",
-			summary: isSteeringInterrupt(config.signal)
-				? STEERING_INTERRUPT_SUMMARY
-				: "Operation aborted.",
-			source: "runtime",
-		});
-	}
-
-	// Preserve the finalized transcript returned by the loop.
-	newMessages.splice(0, newMessages.length, ...finalMessagesForConclusion);
-
-	const finalText = lastAssistantContent(finalMessagesForConclusion);
-	return finish({
-		status: iteration >= maxIterations ? "failed" : "completed",
-		summary: finalText || undefined,
-		source:
-			iteration >= maxIterations || !executionPolicy.embeddedPoliciesEnabled
-				? "runtime"
-				: "heuristic",
-	});
+	return finalizeRun(ctx);
 }
 
 export function runAgentLoop(
