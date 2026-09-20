@@ -36,6 +36,9 @@ class FakeBackend implements LLMBackend {
 			}
 		);
 	}
+	async remote(_messages: Record<string, unknown>[]) {
+		return { summary: "[remote compaction not configured]", preserveData: {} };
+	}
 }
 
 const baseConfig: AgentConfig = {
@@ -101,6 +104,10 @@ void test("whole-task deadlines cancel a delegated run", async () => {
 						once: true,
 					});
 			}),
+		remote: async () => ({
+			summary: "[remote compaction not configured]",
+			preserveData: {},
+		}),
 	};
 	const result = await runDelegatedAgent({
 		task: "Never finishes",
@@ -129,6 +136,10 @@ void test("subagent progress callbacks emit accumulated output, matching other t
 			options.callbacks?.onTextEnd?.();
 			return { content: "Task complete.", toolCalls: [], stopReason: "stop" };
 		},
+		remote: async () => ({
+			summary: "[remote compaction not configured]",
+			preserveData: {},
+		}),
 	};
 	const tool = createSpawnAgentTool({
 		config: () => ({ ...baseConfig, tools: [] }),
@@ -161,6 +172,10 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 			active--;
 			return { content: "done", toolCalls: [], stopReason: "stop" };
 		},
+		remote: async () => ({
+			summary: "[remote compaction not configured]",
+			preserveData: {},
+		}),
 	};
 	const emitted: Array<{ type: string; taskIndex?: number }> = [];
 	const tool = createSpawnAgentsTool({
@@ -240,6 +255,10 @@ void test("subagent concurrency limits are isolated between sessions", async () 
 			active--;
 			return { content: "done", toolCalls: [], stopReason: "stop" };
 		},
+		remote: async () => ({
+			summary: "[remote compaction not configured]",
+			preserveData: {},
+		}),
 	};
 	const createSessionTool = () =>
 		createSpawnAgentsTool({

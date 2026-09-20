@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { DatabaseSync } from "node:sqlite";
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { ToolResult } from "@logician/log-core";
 import { createReadTool } from "../../capabilities/tools/read-file.ts";
 import { hasBeenRead } from "../../capabilities/tools/support/read-tracker.ts";
@@ -11,7 +11,8 @@ import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/ro
 
 const dirs: string[] = [];
 afterEach(() => {
-	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	for (const dir of dirs.splice(0))
+		rmSync(dir, { recursive: true, force: true });
 });
 function temp(): string {
 	const dir = mkdtempSync(path.join(tmpdir(), "archive-sqlite-tools-"));
@@ -23,7 +24,10 @@ function result(value: string | ToolResult): ToolResult {
 }
 function tools() {
 	const urls = new InternalUrlRouter();
-	return { read: createReadTool(urls), write: createWriteTool(undefined, urls) };
+	return {
+		read: createReadTool(urls),
+		write: createWriteTool(undefined, urls),
+	};
 }
 
 // ── zip family ──────────────────────────────────────────────────────────────
@@ -33,7 +37,10 @@ test("zip: write creates a member, read returns it, a second write to a new memb
 	const { read, write } = tools();
 
 	const first = result(
-		await write.execute({ path: "a.zip:foo.txt", content: "hello zip" }, { cwd }),
+		await write.execute(
+			{ path: "a.zip:foo.txt", content: "hello zip" },
+			{ cwd },
+		),
 	);
 	expect(first.content).toContain("Created a.zip:foo.txt");
 	expect(
@@ -71,7 +78,10 @@ test("tar and tar.gz: write creates a member, read returns it, listing paginates
 	const cwd = temp();
 	const { read, write } = tools();
 	for (const name of ["b.tar", "c.tar.gz"]) {
-		await write.execute({ path: `${name}:foo.txt`, content: "hello tar" }, { cwd });
+		await write.execute(
+			{ path: `${name}:foo.txt`, content: "hello tar" },
+			{ cwd },
+		);
 		expect(
 			result(await read.execute({ path: `${name}:foo.txt` }, { cwd })).content,
 		).toContain("1:hello tar");
@@ -84,7 +94,10 @@ test("tar and tar.gz: write creates a member, read returns it, listing paginates
 test("tar.gz: a second member write preserves the first member's content", async () => {
 	const cwd = temp();
 	const { read, write } = tools();
-	await write.execute({ path: "b.tar.gz:foo.txt", content: "hello tar" }, { cwd });
+	await write.execute(
+		{ path: "b.tar.gz:foo.txt", content: "hello tar" },
+		{ cwd },
+	);
 	await read.execute({ path: "b.tar.gz:foo.txt" }, { cwd });
 	await write.execute({ path: "b.tar.gz:bar.txt", content: "second" }, { cwd });
 	expect(
@@ -129,7 +142,10 @@ test("archive write to an existing container this session never touched is rejec
 	// refreshing its own read-tracking), so copy it to an untouched path instead.
 	copyFileSync(path.join(cwd, "a.zip"), path.join(cwd, "untouched.zip"));
 	const output = result(
-		await write.execute({ path: "untouched.zip:bar.txt", content: "y" }, { cwd }),
+		await write.execute(
+			{ path: "untouched.zip:bar.txt", content: "y" },
+			{ cwd },
+		),
 	);
 	expect(output.content).toContain("has not been read");
 });
@@ -165,11 +181,15 @@ test("sqlite: bare path lists tables, table path shows schema+rows, table:rowid 
 	const tableList = result(await read.execute({ path: "d.sqlite" }, { cwd }));
 	expect(tableList.content).toContain("people");
 
-	const tableRead = result(await read.execute({ path: "d.sqlite:people" }, { cwd }));
+	const tableRead = result(
+		await read.execute({ path: "d.sqlite:people" }, { cwd }),
+	);
 	expect(tableRead.content).toContain("CREATE TABLE");
 	expect(tableRead.content).toContain("Ada");
 
-	const rowRead = result(await read.execute({ path: "d.sqlite:people:1" }, { cwd }));
+	const rowRead = result(
+		await read.execute({ path: "d.sqlite:people:1" }, { cwd }),
+	);
 	expect(rowRead.content).toContain("Ada");
 	expect(rowRead.content).toContain("30");
 });
@@ -180,7 +200,10 @@ test("sqlite: insert creates a new file and table from JSON keys, update and del
 
 	const inserted = result(
 		await write.execute(
-			{ path: "e.sqlite:people", content: JSON.stringify({ name: "Ada", age: 30 }) },
+			{
+				path: "e.sqlite:people",
+				content: JSON.stringify({ name: "Ada", age: 30 }),
+			},
 			{ cwd },
 		),
 	);
@@ -201,7 +224,9 @@ test("sqlite: insert creates a new file and table from JSON keys, update and del
 		await write.execute({ path: "e.sqlite:people:1", content: "" }, { cwd }),
 	);
 	expect(deleted.content).toContain("Deleted people:1");
-	const afterDelete = result(await read.execute({ path: "e.sqlite:people:1" }, { cwd }));
+	const afterDelete = result(
+		await read.execute({ path: "e.sqlite:people:1" }, { cwd }),
+	);
 	expect(afterDelete.isError).toBe(true);
 	expect(afterDelete.content).toContain("No such row");
 });
@@ -213,7 +238,10 @@ test("sqlite write requires no prior read (no staleness gate, unlike archives)",
 	// No read() call first — should still succeed.
 	const output = result(
 		await write.execute(
-			{ path: "d.sqlite:people", content: JSON.stringify({ name: "Grace", age: 25 }) },
+			{
+				path: "d.sqlite:people",
+				content: JSON.stringify({ name: "Grace", age: 25 }),
+			},
 			{ cwd },
 		),
 	);
@@ -292,7 +320,8 @@ test("reading a non-existent table or rowid returns a clear message, not a throw
 		result(await read.execute({ path: "d.sqlite:missing" }, { cwd })).content,
 	).toContain("Error");
 	expect(
-		result(await read.execute({ path: "d.sqlite:people:999" }, { cwd })).content,
+		result(await read.execute({ path: "d.sqlite:people:999" }, { cwd }))
+			.content,
 	).toContain("Error");
 });
 
@@ -305,7 +334,10 @@ test("hasBeenRead(container) becomes true after reading an archive member or sql
 	// Built directly on disk (not via write.execute) so it starts untracked.
 	const zipSource = temp();
 	const { write: seedWrite } = tools();
-	await seedWrite.execute({ path: "seed.zip:foo.txt", content: "x" }, { cwd: zipSource });
+	await seedWrite.execute(
+		{ path: "seed.zip:foo.txt", content: "x" },
+		{ cwd: zipSource },
+	);
 	copyFileSync(path.join(zipSource, "seed.zip"), path.join(cwd, "a.zip"));
 	expect(hasBeenRead(path.join(cwd, "a.zip"))).toBe(false);
 	await read.execute({ path: "a.zip:foo.txt" }, { cwd });

@@ -86,9 +86,7 @@ export function inspectContext(
 	};
 }
 
-export function contextSources(
-	input: ContextInspectionInput,
-): ContextSource[] {
+export function contextSources(input: ContextInspectionInput): ContextSource[] {
 	const { messages, systemPrompt, memoryContext, toolDefinitions } = input;
 	const conversation = messages.filter(message => message.role !== "tool");
 	const toolEvidence = messages.filter(message => message.role === "tool");

@@ -17,13 +17,13 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Tool } from "@logician/log-core";
+import { loadNative } from "./support/native-addon.ts";
 import { ensureInsideCwd, resolvePath } from "./support/utils/path-utils.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	formatSize,
 	truncateHead,
 } from "./support/utils/truncate.ts";
-import { loadNative } from "./support/native-addon.ts";
 
 const DEFAULT_LIMIT = 1000;
 const GLOB_CHARS_RE = /[*?[\]{}]/;
@@ -121,7 +121,13 @@ export const glob: Tool = {
 		let result: Awaited<ReturnType<typeof native.glob>>;
 		try {
 			result = await native.glob(
-				{ pattern, path: searchPath, hidden: true, gitignore: true, maxResults: limit },
+				{
+					pattern,
+					path: searchPath,
+					hidden: true,
+					gitignore: true,
+					maxResults: limit,
+				},
 				null,
 			);
 		} catch (err) {

@@ -11,6 +11,15 @@ A few extras came along because the requested crates depend on them:
   `edit.rs`, plus the small internal helpers those two depend on: cancel,
   crash_handler, glob_util, iofs, js, prof, task). The JS-facing package
   is `packages/log-natives`; see its README for build/use.
+- `pi-minimize` — vendored from upstream `crates/pi-minimize` on
+  `origin/main` (8360f48, 2026-09-20), i.e. later than the fork snapshot
+  above. It is a pure-Rust library (no napi dependency); `pi-natives`
+  exposes it through logician-written bindings in `pi-natives/src/minimize.rs`
+  (not vendored), and the JS wrapper lives at
+  `packages/log-runtime/src/capabilities/tools/support/utils/minimize.ts`.
+  The bash tool runs it over chatty command output before settlement
+  (`LOGICIAN_MINIMIZER=0` disables it). Its full test suite runs in CI via
+  `cargo test --locked --workspace`.
 
 These are source-only vendored copies (no shared git history with upstream).
 `cargo check --workspace --all-targets` passes, and `pi-natives` builds into

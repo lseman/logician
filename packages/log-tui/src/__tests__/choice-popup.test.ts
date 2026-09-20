@@ -163,7 +163,11 @@ void test("selecting a free-text choice opens typing entry and submits the typed
 			question: "Why?",
 			choices: [
 				{ value: "a", label: "Option A" },
-				{ value: "__other__", label: "Other (type your own)", isFreeText: true },
+				{
+					value: "__other__",
+					label: "Other (type your own)",
+					isFreeText: true,
+				},
 			],
 		},
 	]);
@@ -192,7 +196,11 @@ void test("esc during typing cancels back to the choice list without dismissing 
 			id: "reason",
 			question: "Why?",
 			choices: [
-				{ value: "__other__", label: "Other (type your own)", isFreeText: true },
+				{
+					value: "__other__",
+					label: "Other (type your own)",
+					isFreeText: true,
+				},
 			],
 		},
 	]);

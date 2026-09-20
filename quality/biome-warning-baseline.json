@@ -1,0 +1,12 @@
+{
+	"production|lint/complexity/useOptionalChain": 2,
+	"production|lint/correctness/noUnusedPrivateClassMembers": 1,
+	"production|lint/style/noNonNullAssertion": 1,
+	"production|lint/suspicious/noAssignInExpressions": 1,
+	"production|lint/suspicious/noConfusingVoidType": 3,
+	"production|lint/suspicious/noControlCharactersInRegex": 4,
+	"production|lint/suspicious/noImplicitAnyLet": 1,
+	"production|lint/suspicious/useIterableCallbackReturn": 2,
+	"test|lint/complexity/useOptionalChain": 1,
+	"test|lint/style/noNonNullAssertion": 6
+}

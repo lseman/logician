@@ -1,16 +1,17 @@
 import type {
 	AgentConfig,
+	AgentModelConfig,
 	ThinkingFormat,
 	Tool,
 	TruncationConfig,
 	WebSearchConfig,
 } from "@logician/log-core";
-import type { FrameConfig } from "@logician/log-snapcompact";
 import type {
 	PermissionMode,
 	PermissionRules,
 } from "@logician/log-core/permissions";
 import type { AgentProtocolNotification } from "@logician/log-core/protocol";
+import type { FrameConfig } from "@logician/log-snapcompact";
 import type { LegroomSdkConfig } from "../../capabilities/legroom/worker.ts";
 import type { MemoriamSdkConfig } from "../../capabilities/memoriam/worker.ts";
 import type { ReasonerConfig } from "../../capabilities/reasoning/index.ts";

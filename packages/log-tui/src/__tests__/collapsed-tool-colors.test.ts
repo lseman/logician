@@ -99,6 +99,7 @@ for (const { tool, text, color } of cases) {
 			const expanded = renderTool(ctx, tool, width, true);
 			const row = collapsed.find(line => line.includes(text));
 			expect(row).toBeDefined();
+			if (row === undefined) throw new Error(`no line contains ${text}`);
 			expect(row).toContain(theme.fgRaw(color));
 			expect(expanded).toContain(row);
 			expect(collapsed.every(line => visibleWidth(line) <= width)).toBe(true);

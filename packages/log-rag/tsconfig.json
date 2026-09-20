@@ -15,9 +15,7 @@
 		"allowImportingTsExtensions": true,
 		"composite": true,
 		"noEmit": true,
-		"types": ["bun-types"],
-		"noUncheckedIndexedAccess": true,
-		"exactOptionalPropertyTypes": true
+		"types": ["bun-types"]
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist"]

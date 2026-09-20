@@ -12,13 +12,13 @@ import type { Tool, ToolResult } from "@logician/log-core";
 import { extractInternalUrlScheme } from "../../runtime/bridge/support/internal-urls/parse.ts";
 import type { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
 import { ensureTool } from "./external-tools.ts";
+import { loadNative } from "./support/native-addon.ts";
 import { resolvePath } from "./support/utils/path-utils.ts";
 import {
 	formatSize,
 	truncateHead,
 	truncateLine,
 } from "./support/utils/truncate.ts";
-import { loadNative } from "./support/native-addon.ts";
 
 const grepSchema = {
 	type: "object",
@@ -49,11 +49,13 @@ const grepSchema = {
 		},
 		skip: {
 			type: "number",
-			description: "Skip the first N matches before returning results (default: 0)",
+			description:
+				"Skip the first N matches before returning results (default: 0)",
 		},
 		case: {
 			type: "boolean",
-			description: "Case-sensitive search (default: true). Setting to false is equivalent to ignoreCase: true.",
+			description:
+				"Case-sensitive search (default: true). Setting to false is equivalent to ignoreCase: true.",
 		},
 	},
 	required: ["pattern"],
@@ -197,7 +199,9 @@ async function buildGrepOutput(
 
 		const lines = await getFileLines(match.filePath);
 		if (!lines.length) {
-			outputLines.push(`${relativePath}:${match.lineNumber}: (unable to read file)`);
+			outputLines.push(
+				`${relativePath}:${match.lineNumber}: (unable to read file)`,
+			);
 			continue;
 		}
 
@@ -484,9 +488,7 @@ export function createGrepTool(router?: InternalUrlRouter): Tool {
 
 			// ── case sensitivity (case takes priority over ignoreCase) ──
 			const effectiveIgnoreCase =
-				caseSensitive !== undefined
-					? !caseSensitive
-					: ignoreCase ?? false;
+				caseSensitive !== undefined ? !caseSensitive : (ignoreCase ?? false);
 
 			// ── cross-line pattern detection (literal \n in pattern) ───
 			const hasCrossLine = pattern.includes("\\n");

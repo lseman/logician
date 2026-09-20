@@ -1,11 +1,10 @@
+import type { Encoding } from "@logician/log-natives";
+import { SNAPCOMPACT_PRESERVE_KEY } from "@logician/log-snapcompact";
 import type {
 	AgentMessage,
 	BashExecutionMessage,
 	Message,
 } from "../../system/types/types-messages.ts";
-import {
-	SNAPCOMPACT_PRESERVE_KEY,
-} from "@logician/log-snapcompact";
 import {
 	isBashExecution,
 	isBranchSummary,
@@ -13,7 +12,6 @@ import {
 	isCustomMessage,
 	isLlmMessage,
 } from "../../system/types/types-messages.ts";
-import type { Encoding } from "@logician/log-natives";
 import { loadNativeTokenizer } from "./native-tokenizer.ts";
 
 /** Minimal shape this module needs from a snapcompact `Frame` (see
@@ -293,7 +291,10 @@ export function resolveTokenEncoding(model: string): string | undefined {
  * synchronous, approximate count (status bar, live inspection views), use
  * estimateTokensHeuristic directly.
  */
-export async function estimateTokens(text: string, encoding?: string): Promise<number> {
+export async function estimateTokens(
+	text: string,
+	encoding?: string,
+): Promise<number> {
 	if (!text || text.length === 0) return 0;
 
 	const native = await loadNativeTokenizer();

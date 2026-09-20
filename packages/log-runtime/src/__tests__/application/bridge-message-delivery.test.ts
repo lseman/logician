@@ -18,7 +18,14 @@ interface InternalState {
 	config: { systemPrompt: string };
 	currentTaskState?: unknown;
 	harness?: unknown;
-	plugins?: Record<string, unknown>;
+	plugins: {
+		ensureStarted?: () => Promise<void>;
+		applyContext: (context: {
+			additional_contexts?: string[];
+			context_messages?: unknown[];
+			initial_user_message?: string | null;
+		}) => void;
+	};
 	loadMcpToolsOnce: () => Promise<void>;
 }
 
@@ -151,8 +158,9 @@ void test("setSteeringInterrupt propagates to the live harness", () => {
 	const internal = bridge as unknown as InternalState;
 	installSession(internal, {
 		configure: (patch: Record<string, unknown>) => {
-			if (patch.steeringInterrupt !== undefined) {
-				harnessValues.push(patch.steeringInterrupt);
+			const value = patch.steeringInterrupt;
+			if (typeof value === "boolean") {
+				harnessValues.push(value);
 			}
 		},
 	});
@@ -186,7 +194,7 @@ void test("startup state reports the registered web_search capability", async ()
 		runtimeHooksEnabled: false,
 		webSearch: { baseUrl: "http://search.test:8090" },
 	});
-	const internal = bridge as unknown as Record<string, unknown>;
+	const internal = bridge as unknown as InternalState;
 	bypassStartup(internal);
 
 	const state = await bridge.init();
@@ -713,15 +721,17 @@ void test("core iterations reconcile output without completing the UI turn early
 		messages: [],
 		configure: () => {},
 		prompt: async () => {
-			// Simulate the provider emitting turn_end events via onEvent
-			internal.config.onEvent({
+			// Simulate the provider emitting message_update events mid-turn.
+			internal.emit({
 				type: "message_update",
+				turnId: "turn_test",
 				message: { role: "assistant", content: "First iteration" },
-			} as InternalState);
-			internal.config.onEvent({
+			});
+			internal.emit({
 				type: "message_update",
+				turnId: "turn_test",
 				message: { role: "assistant", content: "Final response" },
-			} as InternalState);
+			});
 		},
 		getQueues: () => ({ nextTurn: [] }),
 	});

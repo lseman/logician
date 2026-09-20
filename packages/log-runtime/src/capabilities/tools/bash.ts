@@ -6,8 +6,10 @@ import { spawn } from "node:child_process";
 import { constants, access as fsAccess, readFile } from "node:fs/promises";
 
 import type { Tool, ToolResult } from "@logician/log-core";
+import type { MinimizeResult } from "@logician/log-natives";
 import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
 import { defaultTaskManager } from "./support/utils/background-task-registry.ts";
+import { minimizeBashOutput } from "./support/utils/minimize.ts";
 import {
 	getShellConfig,
 	getShellEnv,
@@ -461,9 +463,28 @@ async function executeSingleCommand(
 			ctx.signal?.removeEventListener("abort", onAbort);
 
 			settle(async () => {
+				// Flush the capture to disk (if any) before reading the full
+				// text, so minimization sees a complete buffer.
+				await output.closeTempFile();
+				// Minimize chatty output (e.g. cargo test) before snapshotting.
+				// The full original is persisted as an artifact and the
+				// minimized replacement takes its place in the tool result.
+				let minimizedNote: string | undefined;
+				if (code !== null) {
+					const fullText = await output.getFullText();
+					const minimized = fullText
+						? await minimizeBashOutput(command, fullText, code)
+						: null;
+					if (minimized) {
+						const originalArtifactId = await saveMinimizedOriginal(
+							minimized.originalText,
+						);
+						output.replaceContent(minimized.text);
+						minimizedNote = minimizedNoteText(minimized, originalArtifactId);
+					}
+				}
 				const snapshot = output.snapshot({ persistIfTruncated: true });
 
-				output.closeTempFile().catch(() => {});
 				// Save truncated output to artifact if available
 				let artifactId: string | undefined;
 				if (snapshot.fullOutputPath && snapshot.truncation.truncated) {
@@ -525,7 +546,7 @@ async function executeSingleCommand(
 					artifactId,
 				);
 				resolve({
-					content: text,
+					content: minimizedNote ? `${text}\n\n${minimizedNote}` : text,
 					details,
 					exitCode: code,
 					signal,
@@ -741,6 +762,37 @@ async function saveTruncatedOutput(
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Persist the full original output before the minimizer replaces it, so the
+ * model can still retrieve it. Returns the artifact ID, or null when no
+ * artifact manager is available or the save fails.
+ */
+async function saveMinimizedOriginal(
+	originalText: string,
+): Promise<string | null> {
+	const registry = ArtifactRegistry.instance();
+	if (!registry.getManager() || !originalText) return null;
+	try {
+		return await registry.save(originalText, "bash");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * One-line notice appended to a minimized tool result, pointing the model at
+ * the persisted original output.
+ */
+function minimizedNoteText(
+	result: MinimizeResult,
+	artifactId: string | null,
+): string {
+	const original = formatSize(result.inputBytes);
+	const minimized = formatSize(result.outputBytes);
+	const ref = artifactId ? ` Full output: local://${artifactId}.` : "";
+	return `[minimized by ${result.filter} filter: ${original} → ${minimized}.${ref}]`;
 }
 
 function formatOutput(

@@ -10,7 +10,10 @@
 // encoding happen in native code (@logician/log-natives' renderSnapcompactPng,
 // ported from oh-my-pi's crates/pi-natives/src/snapcompact.rs).
 
-import { renderSnapcompactPng, snapcompactSupportedChars } from "@logician/log-natives";
+import {
+	renderSnapcompactPng,
+	snapcompactSupportedChars,
+} from "@logician/log-natives";
 
 /** Key under `CompactionSummaryMessage.snapcompact` holding the frame archive. */
 export const SNAPCOMPACT_PRESERVE_KEY = "snapcompact";
@@ -340,7 +343,9 @@ function isRenderableByFrameFont(ch: string): boolean {
 			if (cp === 0x7f) continue;
 			candidates += String.fromCodePoint(cp);
 		}
-		fontRenderableChars = new Set(snapcompactSupportedChars(FRAME_FONT, candidates));
+		fontRenderableChars = new Set(
+			snapcompactSupportedChars(FRAME_FONT, candidates),
+		);
 	}
 	return fontRenderableChars.has(ch);
 }
@@ -852,7 +857,11 @@ function pathFromToolArgs(args: unknown): string | undefined {
 	let record: Record<string, unknown> | undefined;
 	if (args && typeof args === "object") {
 		record = args as Record<string, unknown>;
-	} else if (typeof args === "string" && args.length > 0 && args.length < 4_096) {
+	} else if (
+		typeof args === "string" &&
+		args.length > 0 &&
+		args.length < 4_096
+	) {
 		try {
 			const parsed: unknown = JSON.parse(args);
 			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {

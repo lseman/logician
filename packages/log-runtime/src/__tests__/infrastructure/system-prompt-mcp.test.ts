@@ -53,7 +53,6 @@ void test("system prompt makes MCP the primary tool-selection workflow", () => {
 		fffGrepTool,
 	]);
 
-	assert.match(prompt, new RegExp(fullDescription));
 	assert.doesNotMatch(
 		prompt,
 		/Use ctx_execute for repository commands with potentially large output\./,

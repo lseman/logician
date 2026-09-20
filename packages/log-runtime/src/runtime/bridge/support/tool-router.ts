@@ -12,13 +12,13 @@ import { runPluginBackend } from "../../../adapters/claude-code/plugin-runtime.t
 import type { KernelManager } from "../../../capabilities/eval/kernel-manager.ts";
 import { loadPluginCommands } from "../../../capabilities/extensions/extensions.ts";
 import type { LspClientPool } from "../../../capabilities/lsp/lsp-client-pool.ts";
-import type { MemoriamGateway } from "../../../capabilities/memoriam/memoriam-gateway.ts";
 import {
 	McpServerRegistry,
 	type McpSnapshotResult,
 	type McpToggleResult,
 	setMcpRegistryInstance,
 } from "../../../capabilities/mcp/mcp-server-registry.ts";
+import type { MemoriamGateway } from "../../../capabilities/memoriam/memoriam-gateway.ts";
 import {
 	loadPrompts,
 	type Prompt,
@@ -36,13 +36,13 @@ import {
 } from "../../../capabilities/tools/default-tools.ts";
 import { graphician } from "../../../capabilities/tools/graphician.ts";
 import { createReadTool, read } from "../../../capabilities/tools/read-file.ts";
-import { createGrepTool, grep } from "../../../capabilities/tools/search.ts";
 import { isFffGrepTool } from "../../../capabilities/tools/registry.ts";
 import {
 	getDefaultSandboxProfile,
 	type SandboxProfile,
 	setDefaultSandboxProfile,
 } from "../../../capabilities/tools/sandbox.ts";
+import { createGrepTool, grep } from "../../../capabilities/tools/search.ts";
 import { XdDeviceRegistry } from "../../../capabilities/tools/support/xd-device-registry.ts";
 import {
 	createWriteTool,

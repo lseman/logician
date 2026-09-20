@@ -635,7 +635,7 @@ export declare const enum Encoding {
   Glm5 = 'Glm5',
 }
 
-/** Locate `<SM:EDIT path="…">` payloads the model emitted as plain text. */
+/** Locate `*** SM:EDIT path` payloads the model emitted as plain text. */
 export declare function extractInlineSloppyRegions(text: string): Array<InlineSloppyRegion>
 
 /** Resolved filesystem entry kind for glob filters and match metadata. */
@@ -886,6 +886,9 @@ export declare function hashlineFormatHeader(path: string, tag: string): string
 /** `N:line` numbered display rows starting at `startLine` (default 1). */
 export declare function hashlineFormatNumberedLines(text: string, startLine?: number | undefined | null): string
 
+/** Whether a row is a truncation notice emitted by `read`. */
+export declare function hashlineIsReadTruncationNotice(line: string): boolean
+
 /** Count of one canonical hashline op header shape in a payload. */
 export interface HashlineOpCount {
   label: string
@@ -939,6 +942,61 @@ export interface Match {
   contextAfter?: Array<ContextLine>
   /** Whether the line was truncated. */
   truncated?: boolean
+}
+
+/**
+ * Minimize a captured shell command output.
+ *
+ * Returns `None` when minimization is disabled, no filter matches the
+ * command, or the output passes through unchanged (pipes, compounds,
+ * unknown programs, too-large buffers). The command string is the exact
+ * line handed to the shell; `captured` is the merged stdout/stderr buffer.
+ */
+export declare function minimizeBashOutput(command: string, captured: string, exitCode: number, options?: MinimizeOptions | undefined | null): MinimizeResult | null
+
+/** N-API opt-in handle for the minimizer. */
+export interface MinimizeOptions {
+  /** Master switch. Absent / false = disabled. */
+  enabled?: boolean
+  /**
+   * Opt-in allowlist of program names (e.g. `"git"`). When empty or
+   * absent, all built-in filters are active.
+   */
+  only?: Array<string>
+  /** Program names explicitly excluded from minimization. */
+  except?: Array<string>
+  /**
+   * Maximum captured bytes per command before the engine falls back to
+   * the raw, un-minimized output. Default 4 MiB.
+   */
+  maxCaptureBytes?: number
+  /**
+   * Source-outline level for `cat <source-file>` minimization. Accepts
+   * `"default"` (current behavior) or `"aggressive"` (strip function
+   * bodies).
+   */
+  sourceOutlineLevel?: string
+}
+
+/**
+ * Telemetry for a single minimization.
+ *
+ * Surfaced only when the minimizer actually rewrote the command's output.
+ */
+export interface MinimizeResult {
+  /**
+   * Dispatch label produced by the minimizer (e.g. `"git"`,
+   * `"pipeline:gradle"`, `"pipeline+builtin"`).
+   */
+  filter: string
+  /** The minimized replacement text. */
+  text: string
+  /** The full original capture, before minimization. */
+  originalText: string
+  /** Captured byte length before minimization. */
+  inputBytes: number
+  /** Byte length of the minimized text the consumer received. */
+  outputBytes: number
 }
 
 /** Decode notebook JSON into the editable cell-marker text. */

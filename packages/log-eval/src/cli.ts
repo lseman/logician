@@ -5,8 +5,16 @@ import { buildReport, reportMarkdown } from "./report.ts";
 import { prepareTrialWorkspace, runTrial } from "./runner.ts";
 import { validateCorpus } from "./schema.ts";
 
+import type { EvalTrial } from "./types.ts";
+
 function load(file: string) {
 	return validateCorpus(JSON.parse(readFileSync(file, "utf8")));
+}
+
+function flagValue(rest: string[], flag: number, name: string): string {
+	const value = rest[flag + 1];
+	if (value === undefined) throw new Error(`missing value for ${name}`);
+	return value;
 }
 
 async function main(): Promise<void> {
@@ -29,7 +37,9 @@ async function main(): Promise<void> {
 	const trialsFlag = rest.indexOf("--trials");
 	const workRootFlag = rest.indexOf("--work-root");
 	const workspace = path.resolve(
-		workspaceFlag >= 0 ? rest[workspaceFlag + 1] : process.cwd(),
+		workspaceFlag >= 0
+			? flagValue(rest, workspaceFlag, "--workspace")
+			: process.cwd(),
 	);
 	const selected =
 		taskFlag >= 0
@@ -41,7 +51,7 @@ async function main(): Promise<void> {
 		throw new Error("--trials must be an integer from 1 to 20");
 	const workRoot = path.resolve(
 		workRootFlag >= 0
-			? rest[workRootFlag + 1]
+			? flagValue(rest, workRootFlag, "--work-root")
 			: "outputs/agent-eval-workspaces",
 	);
 	const trials = [];
@@ -54,22 +64,24 @@ async function main(): Promise<void> {
 			trials.push(await runTrial(task, trialWorkspace));
 		}
 	}
-	const report = buildReport(trials);
 	const output = path.resolve(
-		outputFlag >= 0 ? rest[outputFlag + 1] : "outputs/agent-eval-report.json",
+		outputFlag >= 0
+			? flagValue(rest, outputFlag, "--output")
+			: "outputs/agent-eval-report.json",
 	);
 	mkdirSync(path.dirname(output), { recursive: true });
 	const artifactRoot = output.replace(/\.json$/, ".artifacts");
 	mkdirSync(artifactRoot, { recursive: true });
-	for (const trial of trials) {
+	const finalTrials: EvalTrial[] = trials.map(trial => {
+		const { agentOutput, ...rest } = trial;
 		const artifact = path.join(
 			artifactRoot,
 			`${trial.taskId}-${trial.trialId}.jsonl`,
 		);
-		writeFileSync(artifact, trial.agentOutput ?? "", "utf8");
-		trial.trajectoryPath = artifact;
-		trial.agentOutput = undefined;
-	}
+		writeFileSync(artifact, agentOutput ?? "", "utf8");
+		return { ...rest, trajectoryPath: artifact };
+	});
+	const report = buildReport(finalTrials);
 	writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 	writeFileSync(
 		output.replace(/\.json$/, ".md"),

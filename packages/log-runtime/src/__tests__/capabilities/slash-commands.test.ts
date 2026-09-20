@@ -92,15 +92,18 @@ void test("ask popup preview is discoverable and invokes its local handler", () 
 	assert.equal(opened, true);
 });
 
-void test("help renders the live registry and supports topics", () => {
+void test("help renders the live registry and supports topics", async () => {
 	const commands = createSlashCommands(bridge, {});
 	const help = commands.find(command => command.command === "/help");
 	const alias = commands.find(command => command.command === "/?");
-	const full = help?.handler?.("") ?? "";
+	const full = String((await help?.handler?.("")) ?? "");
 	assert.match(full, new RegExp(`Available commands \\(${commands.length}\\)`));
 	assert.match(full, /\/context/);
 	assert.match(full, /\/settings/);
-	assert.match(alias?.handler?.("") ?? "", /Available commands/);
+	assert.match(
+		String((await alias?.handler?.("")) ?? ""),
+		/Available commands/,
+	);
 
 	const sessionHelp = formatSlashHelp(commands, "session");
 	assert.match(sessionHelp, /SESSION/);

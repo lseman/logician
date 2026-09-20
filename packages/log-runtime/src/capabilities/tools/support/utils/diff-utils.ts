@@ -9,7 +9,9 @@
 import * as path from "node:path";
 import { loadNative, type NativeModule } from "../native-addon.ts";
 
-type PatchHunk = Awaited<ReturnType<NativeModule["structuredPatchHunks"]>>[number];
+type PatchHunk = Awaited<
+	ReturnType<NativeModule["structuredPatchHunks"]>
+>[number];
 
 // ============================================================================
 // Unified format
@@ -26,7 +28,9 @@ function renderUnifiedFromHunks(
 	if (hunks.length === 0) return "";
 	const out = [`--- ${beforeLabel}`, `+++ ${afterLabel}`];
 	for (const hunk of hunks) {
-		out.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+		out.push(
+			`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
+		);
 		out.push(...hunk.lines);
 	}
 	return out.join("\n");
@@ -41,9 +45,10 @@ const NO_NEWLINE_MARKER = "\\ No newline at end of file";
  * not len(dels) + len(adds) — so a plain 1-line substitution (one removed
  * line + one added line) counts as 1 changed line, not 2.
  */
-function changeMetricsFromHunks(
-	hunks: PatchHunk[],
-): { firstChangedLine: number | undefined; linesChanged: number } {
+function changeMetricsFromHunks(hunks: PatchHunk[]): {
+	firstChangedLine: number | undefined;
+	linesChanged: number;
+} {
 	let firstChangedLine: number | undefined;
 	let linesChanged = 0;
 	for (const hunk of hunks) {

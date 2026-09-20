@@ -318,9 +318,8 @@ async function runNativeHashlineEdit(
 				receipts.push(mutationReceipt(result));
 				if (result.error) throw new Error(result.error);
 				filesAffected += result.filesAffected;
-				linesChanged += (
-					await generateEditDiffs(request.path, before, after)
-				).linesChanged;
+				linesChanged += (await generateEditDiffs(request.path, before, after))
+					.linesChanged;
 				return { written: after };
 			},
 		);

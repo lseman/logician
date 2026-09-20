@@ -17,8 +17,6 @@ export interface BuildSystemPromptOptions {
 	customPrompt?: string;
 	/** Tools to include in prompt. Default: all registered tools. */
 	selectedTools?: Tool[];
-	/** Optional one-line tool snippets keyed by tool name. */
-	toolSnippets?: Record<string, string>;
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
 	/** Working directory. */
@@ -187,7 +185,6 @@ export function buildStaticSystemPromptPrefix(
 	const {
 		customPrompt,
 		selectedTools,
-		toolSnippets,
 		appendSystemPrompt,
 		cwd = process.cwd(),
 		contextFiles: providedContextFiles,
@@ -209,13 +206,6 @@ export function buildStaticSystemPromptPrefix(
 	const tools = [...(selectedTools ?? [])].sort((a, b) =>
 		a.name.localeCompare(b.name),
 	);
-	const visibleTools = tools.filter(t => toolSnippets?.[t.name]);
-	const toolsList =
-		visibleTools.length > 0
-			? visibleTools
-					.map(t => `- ${t.name}: ${toolSnippets?.[t.name] ?? "?"}`)
-					.join("\n")
-			: "(none)";
 
 	const mcpWorkflow = buildMcpWorkflow(tools);
 	const hasWebSearch = tools.some(t => t.name === "web_search");
@@ -232,7 +222,6 @@ export function buildStaticSystemPromptPrefix(
 
 	// Load template and substitute placeholders
 	let prompt = SYSTEM_PROMPT_TEMPLATE;
-	prompt = prompt.replace("{toolsList}", toolsList);
 	prompt = prompt.replace("{mcpWorkflow}", mcpWorkflow.join("\n"));
 	prompt = prompt.replace("{webSection}", webSection);
 
@@ -293,7 +282,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 /**
  * Convenience function matching the old signature: buildDefaultSystemPrompt(cwd, tools).
- * Builds tool snippets from tool descriptions and delegates to buildSystemPrompt.
+ * Tool schemas travel via the provider tools array; the prompt carries only the
+ * static template plus the dynamic MCP/web workflow sections.
  */
 export function buildDefaultSystemPrompt(
 	cwd: string,
@@ -303,21 +293,9 @@ export function buildDefaultSystemPrompt(
 		"agentDir" | "loadProjectContext"
 	> = {},
 ): string {
-	const snippets: Record<string, string> = {};
-	for (const tool of tools) {
-		if (tool.promptSnippet) {
-			snippets[tool.name] = tool.promptSnippet;
-		} else {
-			const desc = tool.description || "";
-			const firstSentence = desc.split(".")[0];
-			snippets[tool.name] = firstSentence || desc;
-		}
-	}
-
 	return buildSystemPrompt({
 		cwd,
 		selectedTools: tools,
-		toolSnippets: snippets,
 		...options,
 	});
 }

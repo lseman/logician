@@ -198,6 +198,11 @@ const baseConfig: AgentConfig = {
 	systemPrompt: "parent",
 };
 
+const stubRemote = async (): Promise<{
+	summary: string;
+	preserveData: Record<string, unknown>;
+}> => ({ summary: "[remote compaction not configured]", preserveData: {} });
+
 function toolNamesBackend(capture: { names?: string[] }): LLMBackend {
 	return {
 		model: "fake",
@@ -213,6 +218,7 @@ function toolNamesBackend(capture: { names?: string[] }): LLMBackend {
 			);
 			return { content: "done", toolCalls: [], stopReason: "stop" };
 		},
+		remote: stubRemote,
 	};
 }
 
@@ -262,11 +268,7 @@ void test("spawn_agent with the explorer definition restricts the child to read-
 
 void test("spawn_agent with a custom allowlist restricts the child to exactly those tools", async () => {
 	const capture: { names?: string[] } = {};
-	const parentTools = [
-		fakeTool("read"),
-		fakeTool("edit"),
-		fakeTool("bash"),
-	];
+	const parentTools = [fakeTool("read"), fakeTool("edit"), fakeTool("bash")];
 	const tool = createSpawnAgentTool({
 		config: () => ({ ...baseConfig, tools: parentTools }),
 		backend: toolNamesBackend(capture),
@@ -299,6 +301,7 @@ void test("spawn_agent rejects a blank task before touching the backend", async 
 				called = true;
 				return { content: "done", toolCalls: [], stopReason: "stop" };
 			},
+			remote: stubRemote,
 		},
 		agents: () => BUILTIN_AGENTS,
 		emit: () => {},
@@ -319,6 +322,7 @@ void test("spawn_agent rejects an unknown agent name and lists the available one
 			async generate() {
 				return { content: "done", toolCalls: [], stopReason: "stop" };
 			},
+			remote: stubRemote,
 		},
 		agents: () => BUILTIN_AGENTS,
 		emit: () => {},
@@ -346,6 +350,7 @@ void test("spawn_agents rejects a task entry using an unknown agent before spawn
 				called = true;
 				return { content: "done", toolCalls: [], stopReason: "stop" };
 			},
+			remote: stubRemote,
 		},
 		agents: () => BUILTIN_AGENTS,
 		emit: () => {},
@@ -370,6 +375,7 @@ void test("spawn_agents rejects a task entry with a blank task string", async ()
 			async generate() {
 				return { content: "done", toolCalls: [], stopReason: "stop" };
 			},
+			remote: stubRemote,
 		},
 		agents: () => BUILTIN_AGENTS,
 		emit: () => {},
@@ -394,6 +400,7 @@ void test("spawn_agent surfaces backend errors as an isError result instead of t
 			async generate() {
 				throw new Error("backend exploded");
 			},
+			remote: stubRemote,
 		},
 		agents: () => BUILTIN_AGENTS,
 		emit: event => events.push(event),
@@ -441,6 +448,7 @@ void test("subagents inherit the parent permission boundary", async () => {
 						}
 					: { content: "done", toolCalls: [], stopReason: "stop" as const };
 			},
+			remote: stubRemote,
 		},
 		agents: () => BUILTIN_AGENTS,
 		emit: event => events.push(event),
@@ -481,6 +489,7 @@ void test("spawn_agents emits subagent_end for a task aborted while queued on th
 				await blocker;
 				return { content: "done", toolCalls: [], stopReason: "stop" };
 			},
+			remote: stubRemote,
 		},
 		agents: () => BUILTIN_AGENTS,
 		emit: event => events.push(event as unknown as Record<string, unknown>),

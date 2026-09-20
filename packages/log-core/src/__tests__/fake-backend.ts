@@ -41,13 +41,16 @@ export class FakeBackend implements LLMBackend {
 		return responder(messages, options);
 	}
 
-	async remote(_messages: Record<string, unknown>[], _options?: {
-		endpoint?: string;
-		model?: string;
-		maxTokens?: number;
-		timeoutMs?: number;
-		signal?: AbortSignal;
-	}): Promise<RemoteCompactionResult> {
+	async remote(
+		_messages: Record<string, unknown>[],
+		_options?: {
+			endpoint?: string;
+			model?: string;
+			maxTokens?: number;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
+	): Promise<RemoteCompactionResult> {
 		return { summary: "[remote compaction not configured]", preserveData: {} };
 	}
 }

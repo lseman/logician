@@ -22,8 +22,8 @@ import {
 } from "../../capabilities/tools/support/utils/truncate.ts";
 import { XdDeviceRegistry } from "../../capabilities/tools/support/xd-device-registry.ts";
 import { createWriteTool } from "../../capabilities/tools/write-file.ts";
-import { LocalProtocolHandler } from "../../runtime/bridge/support/internal-urls/local-protocol.ts";
 import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
+import { LocalProtocolHandler } from "../../runtime/bridge/support/internal-urls/local-protocol.ts";
 import { LogProtocolHandler } from "../../runtime/bridge/support/internal-urls/log-protocol.ts";
 import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
 import { SkillProtocolHandler } from "../../runtime/bridge/support/internal-urls/skill-protocol.ts";

@@ -193,6 +193,13 @@ export interface SessionConfig {
 	parentId?: string | undefined;
 	/** Session format version (auto-upgraded on load). */
 	version?: number;
+	/**
+	 * Window (ms) in which journal fsyncs and metadata rewrites are coalesced
+	 * into one disk sync per burst (default 100).
+	 */
+	flushDelayMs?: number;
+	/** Force an immediate flush once unsynced journal bytes exceed this (default 512 KiB). */
+	maxPendingBytes?: number;
 }
 
 /** Session listing entry for the browser UI — metadata plus a text preview. */
@@ -216,6 +223,8 @@ export class SessionCorruptionError extends Error {
 const DEFAULT_BASE_DIR = ".logician/sessions";
 const SESSIONS_DIR = "sessions";
 const META_FILE = "meta.json";
+const DEFAULT_FLUSH_DELAY_MS = 100;
+const DEFAULT_MAX_PENDING_BYTES = 512 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -316,6 +325,11 @@ export class SessionStore {
 	private parentId?: string | undefined;
 	private activeLeafId?: string | undefined;
 	private version = 3;
+	private readonly flushDelayMs: number;
+	private readonly maxPendingBytes: number;
+	private pendingJournalBytes = 0;
+	private metaDirty = false;
+	private flushTimer: NodeJS.Timeout | null = null;
 
 	constructor(
 		private readonly sessionId: string,
@@ -332,6 +346,8 @@ export class SessionStore {
 		this.cwd = config?.cwd;
 		this.createdAt = Date.now();
 		this.lastActivity = this.createdAt;
+		this.flushDelayMs = config?.flushDelayMs ?? DEFAULT_FLUSH_DELAY_MS;
+		this.maxPendingBytes = config?.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES;
 
 		// Load existing version for migration
 		const existingMeta = this.getMetaSilent();
@@ -494,7 +510,29 @@ export class SessionStore {
 		this.activeLeafId = entry.id;
 		this.messageCount++;
 		this.lastActivity = Date.now();
-		this.updateMeta();
+		this.scheduleMetaUpdate();
+		// Schedule the coalesced flush after the in-memory state has advanced,
+		// so a same-entry fast-path flush reads the updated metadata.
+		this.scheduleFlush();
+	}
+
+	/**
+	 * Force-durable: fsync the journal and write any pending metadata
+	 * synchronously, cancelling the coalesced flush timer. Callers that need
+	 * the journal on stable storage before continuing (e.g. before fork,
+	 * truncate, or handing the file to another process) call this.
+	 *
+	 * Safe to call when there is nothing pending; safe to call repeatedly.
+	 */
+	flush(): void {
+		this.cancelFlushTimer();
+		if (this.pendingJournalBytes > 0 && existsSync(this.filePath)) {
+			this.syncFile(this.filePath);
+		}
+		this.pendingJournalBytes = 0;
+		if (this.metaDirty) {
+			this.updateMeta();
+		}
 	}
 
 	/** Load all messages from the session file. */
@@ -632,6 +670,9 @@ export class SessionStore {
 
 	/** Remove the session directory and its conversation data. */
 	clear(): void {
+		this.cancelFlushTimer();
+		this.pendingJournalBytes = 0;
+		this.metaDirty = false;
 		if (existsSync(this.dir)) {
 			rmSync(this.dir, { recursive: true, force: true });
 		}
@@ -683,6 +724,7 @@ export class SessionStore {
 
 	/** Truncate the session file (keep only recent messages). */
 	truncate(keepLast: number): void {
+		this.flush();
 		const messages = this.load();
 		const truncated = messages.slice(-keepLast);
 		const entries: MessageSessionEntry[] = [];
@@ -711,8 +753,8 @@ export class SessionStore {
 
 	// ── Internals ───────────────────────────────────────────────────────
 
-	private updateMeta(): void {
-		this.writeMetaAtomically({
+	private buildMeta(): SessionMeta {
+		return {
 			id: this.sessionId,
 			createdAt: this.createdAt,
 			messageCount: this.messageCount,
@@ -722,17 +764,56 @@ export class SessionStore {
 			parentId: this.parentId,
 			activeLeafId: this.activeLeafId,
 			version: this.version,
-		});
+		};
+	}
+
+	private updateMeta(): void {
+		this.metaDirty = false;
+		this.writeMetaAtomically(this.buildMeta());
+	}
+
+	/** Coalesce per-entry metadata writes into the next journal flush. */
+	private scheduleMetaUpdate(): void {
+		this.metaDirty = true;
 	}
 
 	private appendJournalEntry(entry: SessionEntry): void {
+		const line = `${JSON.stringify(entry)}\n`;
 		const descriptor = openSync(this.filePath, "a", 0o600);
 		try {
-			appendFileSync(descriptor, `${JSON.stringify(entry)}\n`, "utf8");
-			fsyncSync(descriptor);
+			appendFileSync(descriptor, line, "utf8");
 		} finally {
 			closeSync(descriptor);
 		}
+		// The write is synchronous (process-crash durable); the fsync is
+		// coalesced into a burst by the caller.
+		this.pendingJournalBytes += Buffer.byteLength(line);
+	}
+
+	private scheduleFlush(): void {
+		if (this.pendingJournalBytes >= this.maxPendingBytes) {
+			this.flush();
+			return;
+		}
+		if (!this.flushTimer) {
+			this.flushTimer = setTimeout(() => {
+				this.flushTimer = null;
+				try {
+					this.flush();
+				} catch {
+					// A flush failure is a durability degradation, not a reason
+					// to kill the process; the next append retries.
+				}
+			}, this.flushDelayMs);
+			// A durability flush must not keep the process alive.
+			this.flushTimer.unref?.();
+		}
+	}
+
+	private cancelFlushTimer(): void {
+		if (!this.flushTimer) return;
+		clearTimeout(this.flushTimer);
+		this.flushTimer = null;
 	}
 
 	private writeMetaAtomically(meta: SessionMeta): void {

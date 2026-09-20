@@ -1,6 +1,7 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"ignoreBinaries": ["bwrap", "rtk", "xattr"],
+	"ignore": ["packages/log-natives/index.js"],
 	"workspaces": {
 		".": {
 			"entry": ["site/**/*.js", "skills/**/*.ts"],

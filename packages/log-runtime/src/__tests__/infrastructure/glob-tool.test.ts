@@ -9,7 +9,10 @@ function makeCwd(): string {
 	return mkdtempSync(join(tmpdir(), "logician-glob-"));
 }
 
-async function run(args: Record<string, unknown>, cwd: string): Promise<string> {
+async function run(
+	args: Record<string, unknown>,
+	cwd: string,
+): Promise<string> {
 	const prepared = glob.prepareArguments?.(args) ?? args;
 	const result = await glob.execute(prepared, { cwd });
 	return typeof result === "string" ? result : result.content;

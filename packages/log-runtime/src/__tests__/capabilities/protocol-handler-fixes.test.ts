@@ -3,25 +3,26 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ToolResult } from "@logician/log-core";
+import type { McpClient } from "../../capabilities/mcp/client.ts";
 import {
 	McpServerRegistry,
 	setMcpRegistryInstance,
 } from "../../capabilities/mcp/mcp-server-registry.ts";
-import type { McpClient } from "../../capabilities/mcp/client.ts";
 import { createReadTool } from "../../capabilities/tools/read-file.ts";
 import { hasBeenRead } from "../../capabilities/tools/support/read-tracker.ts";
 import { createWriteTool } from "../../capabilities/tools/write-file.ts";
 import { ArtifactRegistry } from "../../runtime/bridge/support/internal-urls/artifact-manager.ts";
-import { LocalProtocolHandler } from "../../runtime/bridge/support/internal-urls/local-protocol.ts";
 import { ConflictProtocolHandler } from "../../runtime/bridge/support/internal-urls/conflict-protocol.ts";
 import { IssueProtocolHandler } from "../../runtime/bridge/support/internal-urls/issue-protocol.ts";
+import { LocalProtocolHandler } from "../../runtime/bridge/support/internal-urls/local-protocol.ts";
 import { MemoryProtocolHandler } from "../../runtime/bridge/support/internal-urls/memory-protocol.ts";
 import { PrProtocolHandler } from "../../runtime/bridge/support/internal-urls/pr-protocol.ts";
 import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
-	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	for (const dir of dirs.splice(0))
+		rmSync(dir, { recursive: true, force: true });
 });
 function temp(): string {
 	const dir = mkdtempSync(path.join(tmpdir(), "protocol-fixes-"));
@@ -33,14 +34,20 @@ function result(value: string | ToolResult): ToolResult {
 }
 function tools() {
 	const urls = new InternalUrlRouter();
-	return { urls, read: createReadTool(urls), write: createWriteTool(undefined, urls) };
+	return {
+		urls,
+		read: createReadTool(urls),
+		write: createWriteTool(undefined, urls),
+	};
 }
 
 // ── memory:// ───────────────────────────────────────────────────────────────
 
 function stubMemoryGateway() {
 	return {
-		listObservations: async () => [{ id: "obs-1", content: "hello observation" }],
+		listObservations: async () => [
+			{ id: "obs-1", content: "hello observation" },
+		],
 		listMemories: async () => [{ id: "mem-1", content: "hello memory" }],
 	};
 }
@@ -50,19 +57,27 @@ test("memory://list, memory://memories, memory://observe/<id> resolve without th
 	urls.register(new MemoryProtocolHandler());
 	const memory = stubMemoryGateway();
 
-	const list = result(await read.execute({ path: "memory://list" }, { memory }));
+	const list = result(
+		await read.execute({ path: "memory://list" }, { memory }),
+	);
 	expect(list.content).toContain("obs-1");
 
-	const memories = result(await read.execute({ path: "memory://memories" }, { memory }));
+	const memories = result(
+		await read.execute({ path: "memory://memories" }, { memory }),
+	);
 	expect(memories.content).toContain("mem-1");
 
-	const observe = result(await read.execute({ path: "memory://observe/obs-1" }, { memory }));
+	const observe = result(
+		await read.execute({ path: "memory://observe/obs-1" }, { memory }),
+	);
 	expect(observe.content).toContain("hello observation");
 });
 
 // ── pr:// / issue:// ────────────────────────────────────────────────────────
 
-function stubGithubClient(calls: Array<{ name: string; args: Record<string, unknown> }>): McpClient {
+function stubGithubClient(
+	calls: Array<{ name: string; args: Record<string, unknown> }>,
+): McpClient {
 	return {
 		name: "github",
 		initialize: async () => {},
@@ -83,10 +98,16 @@ test("pr://owner/repo/1428/files actually invokes the GitHub client (parser no l
 
 	const { urls, read } = tools();
 	urls.register(new PrProtocolHandler());
-	const output = result(await read.execute({ path: "pr://octocat/Hello-World/1428/files" }, {}));
+	const output = result(
+		await read.execute({ path: "pr://octocat/Hello-World/1428/files" }, {}),
+	);
 	expect(calls).toHaveLength(1);
 	expect(calls[0]?.name).toBe("pull_requests_get_files");
-	expect(calls[0]?.args).toMatchObject({ owner: "octocat", repo: "Hello-World", number: 1428 });
+	expect(calls[0]?.args).toMatchObject({
+		owner: "octocat",
+		repo: "Hello-World",
+		number: 1428,
+	});
 	expect(output.content).not.toContain("GitHub MCP server is not available");
 });
 
@@ -101,7 +122,11 @@ test("issue://owner/repo/42/comments actually invokes the GitHub client", async 
 	await read.execute({ path: "issue://octocat/Hello-World/42/comments" }, {});
 	expect(calls).toHaveLength(1);
 	expect(calls[0]?.name).toBe("issues_get_comments");
-	expect(calls[0]?.args).toMatchObject({ owner: "octocat", repo: "Hello-World", issue_number: 42 });
+	expect(calls[0]?.args).toMatchObject({
+		owner: "octocat",
+		repo: "Hello-World",
+		issue_number: 42,
+	});
 });
 
 test("issue://owner/repo/abc rejects a non-numeric issue number instead of passing NaN through", async () => {
@@ -112,7 +137,9 @@ test("issue://owner/repo/abc rejects a non-numeric issue number instead of passi
 
 	const { urls, read } = tools();
 	urls.register(new IssueProtocolHandler());
-	const output = result(await read.execute({ path: "issue://octocat/Hello-World/abc" }, {}));
+	const output = result(
+		await read.execute({ path: "issue://octocat/Hello-World/abc" }, {}),
+	);
 	expect(calls).toHaveLength(0);
 	expect(output.content).toContain("Use `issue://owner/repo`");
 });
@@ -123,7 +150,16 @@ test("local://<id>:5-8 and :raw work, verified against non-ASCII content (byte/l
 	const cwd = temp();
 	ArtifactRegistry.resetForTests();
 	ArtifactRegistry.instance().init({ cwd, sessionId: "sel-test" });
-	const lines = ["línea uno", "línea dos", "línea tres", "línea cuatro", "línea cinco", "línea seis", "línea siete", "línea ocho"];
+	const lines = [
+		"línea uno",
+		"línea dos",
+		"línea tres",
+		"línea cuatro",
+		"línea cinco",
+		"línea seis",
+		"línea siete",
+		"línea ocho",
+	];
 	const id = await ArtifactRegistry.instance().save(lines.join("\n"), "tool");
 	if (id === null) throw new Error("save failed");
 
@@ -147,12 +183,22 @@ test("local://<id>:1-2,4-5 (comma-list) is not treated as a selector and falls t
 	const cwd = temp();
 	ArtifactRegistry.resetForTests();
 	ArtifactRegistry.instance().init({ cwd, sessionId: "sel-comma-test" });
-	const id = await ArtifactRegistry.instance().save("a\nb\nc\nd\ne", "tool");
+	const id = await ArtifactRegistry.instance().save(
+		"alpha\nbravo\ncharlie\ndelta\necho",
+		"tool",
+	);
 	if (id === null) throw new Error("save failed");
 
 	const { urls, read } = tools();
 	urls.register(new LocalProtocolHandler());
-	const output = result(await read.execute({ path: `local://${id}:1-2,4-5` }, {}));
+	const output = result(
+		await read.execute({ path: `local://${id}:1-2,4-5` }, {}),
+	);
+	// A comma-list is not a supported selector, so nothing is dropped — a
+	// true multi-range select of 1-2,4-5 would omit line 3.
+	for (const line of ["alpha", "bravo", "charlie", "delta", "echo"]) {
+		expect(output.content).toContain(line);
+	}
 
 	ArtifactRegistry.resetForTests();
 });
@@ -183,11 +229,15 @@ test("conflict://<file> lists blocks and conflict://<file>:<index> reads one", a
 	const { urls, read } = tools();
 	urls.register(new ConflictProtocolHandler());
 
-	const listing = result(await read.execute({ path: "conflict://app.ts" }, { cwd }));
+	const listing = result(
+		await read.execute({ path: "conflict://app.ts" }, { cwd }),
+	);
 	expect(listing.content).toContain("Block 0");
 	expect(listing.content).toContain("Block 1");
 
-	const block0 = result(await read.execute({ path: "conflict://app.ts:0" }, { cwd }));
+	const block0 = result(
+		await read.execute({ path: "conflict://app.ts:0" }, { cwd }),
+	);
 	expect(block0.content).toContain("mine-1");
 	expect(block0.content).toContain("theirs-1");
 });
@@ -201,7 +251,10 @@ test("conflict:// write resolves only the targeted block, leaving the other's ma
 
 	await read.execute({ path: "app.ts" }, { cwd }); // read-before-write gate
 	const output = result(
-		await write.execute({ path: "conflict://app.ts:0", content: "ours" }, { cwd }),
+		await write.execute(
+			{ path: "conflict://app.ts:0", content: "ours" },
+			{ cwd },
+		),
 	);
 	expect(output.isError).not.toBe(true);
 
@@ -222,7 +275,10 @@ test("conflict:// write with a bare file path (no index) resolves every block", 
 	urls.register(new ConflictProtocolHandler());
 
 	await read.execute({ path: "app.ts" }, { cwd });
-	await write.execute({ path: "conflict://app.ts", content: "theirs" }, { cwd });
+	await write.execute(
+		{ path: "conflict://app.ts", content: "theirs" },
+		{ cwd },
+	);
 
 	const after = result(await read.execute({ path: "app.ts" }, { cwd }));
 	expect(after.content).toContain("theirs-1");
@@ -238,7 +294,10 @@ test("conflict:// write rejects an invalid strategy", async () => {
 	await read.execute({ path: "app.ts" }, { cwd });
 
 	const output = result(
-		await write.execute({ path: "conflict://app.ts:0", content: "bogus" }, { cwd }),
+		await write.execute(
+			{ path: "conflict://app.ts:0", content: "bogus" },
+			{ cwd },
+		),
 	);
 	expect(output.content).toContain("Error");
 });
@@ -250,7 +309,10 @@ test("conflict:// write to a file that hasn't been read is rejected", async () =
 	urls.register(new ConflictProtocolHandler());
 
 	const output = result(
-		await write.execute({ path: "conflict://app.ts:0", content: "ours" }, { cwd }),
+		await write.execute(
+			{ path: "conflict://app.ts:0", content: "ours" },
+			{ cwd },
+		),
 	);
 	expect(output.content).toContain("Error");
 });
@@ -263,7 +325,10 @@ test("conflict:// rejects path traversal (no containment check previously)", asy
 	urls.register(new ConflictProtocolHandler());
 
 	const output = result(
-		await read.execute({ path: `conflict://../${path.basename(outside)}/secret.ts` }, { cwd }),
+		await read.execute(
+			{ path: `conflict://../${path.basename(outside)}/secret.ts` },
+			{ cwd },
+		),
 	);
 	expect(output.isError).toBe(true);
 });
@@ -274,7 +339,9 @@ test("path:conflicts formats the file's conflict blocks (previously advertised b
 	const cwd = temp();
 	writeFileSync(path.join(cwd, "app.ts"), conflictFixture());
 	const { read } = tools();
-	const output = result(await read.execute({ path: "app.ts:conflicts" }, { cwd }));
+	const output = result(
+		await read.execute({ path: "app.ts:conflicts" }, { cwd }),
+	);
 	expect(output.content).toContain("Conflict #0");
 	expect(output.content).toContain("Conflict #1");
 	expect(output.content).toContain("mine-1");
@@ -290,13 +357,19 @@ test("hasBeenRead(file) reflects reads through both the plain path and conflict:
 	expect(hasBeenRead(file)).toBe(false);
 	await read.execute({ path: "app.ts" }, { cwd });
 	expect(hasBeenRead(file)).toBe(true);
-	await write.execute({ path: "conflict://app.ts:0", content: "ours" }, { cwd });
+	await write.execute(
+		{ path: "conflict://app.ts:0", content: "ours" },
+		{ cwd },
+	);
 	// A second write right after the first should not be blocked by staleness
 	// (refreshAfterWrite must run after a successful conflict:// write).
 	// Indices are recomputed by re-scanning the file each time, so the block
 	// that was "index 1" before the first resolution is "index 0" now.
 	const second = result(
-		await write.execute({ path: "conflict://app.ts:0", content: "theirs" }, { cwd }),
+		await write.execute(
+			{ path: "conflict://app.ts:0", content: "theirs" },
+			{ cwd },
+		),
 	);
 	expect(second.isError).not.toBe(true);
 });

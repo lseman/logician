@@ -17,7 +17,11 @@ void test("disjoint edits produce separate hunks, untouched lines stay context",
 		.replace("line 2 old", "line 2 new")
 		.replace("line 33 old", "line 33 new");
 
-	const { diff, firstChangedLine } = await generateEditDiffs("edit", before, after);
+	const { diff, firstChangedLine } = await generateEditDiffs(
+		"edit",
+		before,
+		after,
+	);
 
 	assert.equal(firstChangedLine, 2);
 	// Two hunks — the untouched middle must not appear at all.

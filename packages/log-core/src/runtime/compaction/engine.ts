@@ -13,12 +13,12 @@
 
 import { randomUUID } from "node:crypto";
 import {
-	compact as snapcompact,
 	type Archive,
+	computeFrameTokenOverhead,
 	type Frame,
 	type FrameConfig,
-	computeFrameTokenOverhead,
 	PRESERVE_KEY,
+	compact as snapcompact,
 } from "@logician/log-snapcompact";
 import { DEFAULT_TRUNCATION } from "../../system/types/types-config.ts";
 import type {

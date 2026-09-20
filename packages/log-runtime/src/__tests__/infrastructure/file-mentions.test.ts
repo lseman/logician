@@ -14,7 +14,10 @@ void test("listProjectFiles lists files recursively without directories", async 
 	const files = await listProjectFiles(cwd);
 	assert.ok(files.includes("top.txt"));
 	assert.ok(files.includes("sub/nested.txt"));
-	assert.ok(!files.some(f => f.endsWith("/")), "directories should not be listed");
+	assert.ok(
+		!files.some(f => f.endsWith("/")),
+		"directories should not be listed",
+	);
 });
 
 void test("listProjectFiles respects .gitignore", async () => {

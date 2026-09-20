@@ -11,8 +11,10 @@ export function buildReport(trials: EvalTrial[]): EvalReport {
 		durations.length === 0
 			? 0
 			: durations.length % 2
-				? durations[middle]
-				: Math.round((durations[middle - 1] + durations[middle]) / 2);
+				? (durations[middle] ?? 0)
+				: Math.round(
+						((durations[middle - 1] ?? 0) + (durations[middle] ?? 0)) / 2,
+					);
 	return {
 		schemaVersion: EVAL_SCHEMA_VERSION,
 		generatedAt: new Date().toISOString(),

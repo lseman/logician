@@ -43,7 +43,7 @@ export function formatInstallation(
 		`Runtime: Bun ${report.bun ?? "unavailable"} (${report.platform})`,
 		`Terminal: TERM=${report.terminal.term ?? "unset"}, COLORTERM=${report.terminal.colorterm ?? "unset"}`,
 		`Theme: ${report.theme.name} (${report.theme.path})`,
-		report.theme.valid
+		report.theme.error === null
 			? `Color mode: ${report.theme.mode}; input border ANSI: ${JSON.stringify(report.theme.inputBarBorder)}`
 			: `Theme error: ${report.theme.error}`,
 	].join("\n");

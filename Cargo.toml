@@ -7,6 +7,7 @@ members = [
 	"crates/pi-natives",
 	"crates/snapcompact",
 	"crates/pi-walker",
+	"crates/pi-minimize",
 ]
 exclude = ["ecosystem/graphician/graphician-native"]
 
@@ -75,11 +76,13 @@ pi-natives = { path = "crates/pi-natives" }
 pi-edit = { path = "crates/pi-edit" }
 snapcompact = { path = "crates/snapcompact" }
 pi-walker = { path = "crates/pi-walker" }
+pi-minimize = { path = "crates/pi-minimize" }
 
 # ── Shared third-party deps ──────────────────────────────────────────────────
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.23"
+brush-parser = "0.3"
 dashmap = "6.1"
 fancy-regex = "0.16"
 flume = "0.11"
@@ -103,6 +106,7 @@ smallvec = { version = "1.15.1", features = ["serde", "write", "union", "const_n
 thiserror = "2"
 tiktoken-rs = "0.11"
 tokio = { version = "1", features = ["full"] }
+toml = "1.1"
 grep-matcher = "0.1"
 grep-pcre2 = "0.1"
 grep-regex = "0.1"

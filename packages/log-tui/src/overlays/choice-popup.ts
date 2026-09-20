@@ -417,7 +417,9 @@ export class ChoicePopup implements Component {
 		// ── Free-text entry ──
 		if (this.typingTab === this.currentTab) {
 			lines.push(
-				line(`${selectedColor}❯ ${text}${this.typingBuffer}${selectedColor}▏${RESET}`),
+				line(
+					`${selectedColor}❯ ${text}${this.typingBuffer}${selectedColor}▏${RESET}`,
+				),
 			);
 			lines.push(line());
 			lines.push(
@@ -458,9 +460,7 @@ export class ChoicePopup implements Component {
 						? `${selectedColor}${BOLD}[x]${RESET}`
 						: `${cursor ? selectedColor : muted}[ ]${RESET}`;
 				} else {
-					marker = cursor
-						? `${selectedColor}●${RESET}`
-						: `${muted}○${RESET}`;
+					marker = cursor ? `${selectedColor}●${RESET}` : `${muted}○${RESET}`;
 				}
 				const recommendedTag = isRecommended
 					? ` ${muted}${DIM}(recommended)${RESET}`

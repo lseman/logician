@@ -25,7 +25,7 @@ export const ask: Tool = {
 		"proceed — e.g. clarifying requirements, choosing between alternatives, " +
 		"or getting confirmation. Set multi: true on a question to allow selecting " +
 		"more than one choice (answer returned as an array). Set allowOther: true to " +
-		"add a free-text \"Other\" escape hatch. Set recommended to a choice's value " +
+		'add a free-text "Other" escape hatch. Set recommended to a choice\'s value ' +
 		"to pre-select it as a hint (no auto-timeout).",
 	promptSnippet: "Ask the user structured questions with options",
 	parameters: {
@@ -43,7 +43,8 @@ export const ask: Tool = {
 						question: { type: "string", description: "Question text." },
 						multi: {
 							type: "boolean",
-							description: "Allow selecting more than one choice (default: false).",
+							description:
+								"Allow selecting more than one choice (default: false).",
 						},
 						allowOther: {
 							type: "boolean",

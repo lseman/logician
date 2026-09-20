@@ -548,7 +548,11 @@ async function runAgentLoopInternal(
 			const contextTokens =
 				reportedTokens > 0
 					? reportedTokens
-					: await estimateChatPayloadTokens(messages, registry.toToolDefinitions(), tokenEncoding);
+					: await estimateChatPayloadTokens(
+							messages,
+							registry.toToolDefinitions(),
+							tokenEncoding,
+						);
 			await emit({
 				type: "context_update",
 				tokens: contextTokens,

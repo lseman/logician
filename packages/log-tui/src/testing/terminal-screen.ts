@@ -125,7 +125,7 @@ export class TerminalScreen {
 				end++;
 			}
 			if (end >= data.length) return data.length;
-			this.applyCsi(data.slice(start + 2, end), data[end]);
+			this.applyCsi(data.slice(start + 2, end), data.charAt(end));
 			return end + 1;
 		}
 		if (kind === "]" || kind === "_") {
@@ -205,15 +205,19 @@ export class TerminalScreen {
 			case "K":
 				this.eraseLine(first);
 				break;
-			case "X":
-				for (
-					let column = this.column;
-					column < Math.min(this.columns, this.column + (first || 1));
-					column++
-				) {
-					this.cells[this.row][column] = " ";
+			case "X": {
+				const row = this.cells[this.row];
+				if (row) {
+					for (
+						let column = this.column;
+						column < Math.min(this.columns, this.column + (first || 1));
+						column++
+					) {
+						row[column] = " ";
+					}
 				}
 				break;
+			}
 			case "s":
 				this.savedRow = this.row;
 				this.savedColumn = this.column;
@@ -228,8 +232,10 @@ export class TerminalScreen {
 	private eraseLine(mode: number): void {
 		const start = mode === 1 || mode === 2 ? 0 : this.column;
 		const end = mode === 0 ? this.columns : this.column + 1;
+		const row = this.cells[this.row];
+		if (!row) return;
 		for (let column = start; column < end; column++) {
-			this.cells[this.row][column] = " ";
+			row[column] = " ";
 		}
 	}
 
@@ -241,13 +247,16 @@ export class TerminalScreen {
 		}
 		this.printableWrites += width;
 		if (this.column + width >= this.columns) this.lastColumnWrites++;
-		this.cells[this.row][this.column] = char;
-		for (
-			let offset = 1;
-			offset < width && this.column + offset < this.columns;
-			offset++
-		) {
-			this.cells[this.row][this.column + offset] = "";
+		const row = this.cells[this.row];
+		if (row) {
+			row[this.column] = char;
+			for (
+				let offset = 1;
+				offset < width && this.column + offset < this.columns;
+				offset++
+			) {
+				row[this.column + offset] = "";
+			}
 		}
 		this.column += width;
 		if (this.column >= this.columns) {

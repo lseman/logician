@@ -8,10 +8,10 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { ArtifactRegistry } from "./artifact-manager";
-import { ensureInsideCwd } from "../../../../capabilities/tools/support/utils/path-utils.ts";
 import { atomicWriteFile } from "../../../../capabilities/tools/support/utils/atomic-write.ts";
+import { ensureInsideCwd } from "../../../../capabilities/tools/support/utils/path-utils.ts";
 import { formatSize } from "../../../../capabilities/tools/support/utils/truncate.ts";
+import { ArtifactRegistry } from "./artifact-manager";
 
 import type {
 	InternalResource,
@@ -38,7 +38,10 @@ function isRangeSelector(value: string): boolean {
 }
 
 /** Parse `<id>` or `<id>:<selector>` from the URL host+pathname. */
-function parseIdAndSelector(url: InternalUrl): { id: string; selector: string | null } {
+function parseIdAndSelector(url: InternalUrl): {
+	id: string;
+	selector: string | null;
+} {
 	const full = url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
 	if (!full) return { id: "", selector: null };
 	const colonIdx = full.indexOf(":");
@@ -49,7 +52,9 @@ function parseIdAndSelector(url: InternalUrl): { id: string; selector: string | 
 }
 
 /** Extract a range from a selector string. */
-function parseRange(selector: string): { offset?: number; limit?: number } | null {
+function parseRange(
+	selector: string,
+): { offset?: number; limit?: number } | null {
 	if (selector === "raw") return null;
 	const plusMatch = selector.match(/^(\d+)\+(\d+)$/);
 	if (plusMatch) {
@@ -111,7 +116,7 @@ export class LocalProtocolHandler implements ProtocolHandler {
 		// '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local'<numeric-id> — read artifact by ID (supports selectors)
 		const { id, selector } = parseIdAndSelector(url);
 		if (id && /^\d+$/.test(id)) {
-			return this.#resolveArtifact(url, id, selector, cwd, context);
+			return this.#resolveArtifact(url, id, selector, context);
 		}
 
 		// '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local'<path> — read file under artifacts directory
@@ -192,7 +197,7 @@ export class LocalProtocolHandler implements ProtocolHandler {
 
 	async complete(
 		query: string,
-		context?: ResolveContext,
+		_context?: ResolveContext,
 	): Promise<Array<{ value: string; description?: string }>> {
 		// If query looks like a number, suggest artifact IDs
 		if (/^\d*$/.test(query)) {
@@ -209,7 +214,6 @@ export class LocalProtocolHandler implements ProtocolHandler {
 		url: InternalUrl,
 		id: string,
 		selector: string | null,
-		cwd: string,
 		context?: ResolveContext,
 	): Promise<InternalResource> {
 		const registry = ArtifactRegistry.instance();
@@ -299,7 +303,7 @@ export class LocalProtocolHandler implements ProtocolHandler {
 		}
 
 		// Unknown selector — fall back to full
-		return this.#resolveArtifact(url, id, null, context?.cwd, context);
+		return this.#resolveArtifact(url, id, null, context);
 	}
 
 	private async listArtifacts(

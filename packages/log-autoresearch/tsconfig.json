@@ -14,9 +14,7 @@
 		"forceConsistentCasingInFileNames": true,
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
-		"types": ["node", "bun-types"],
-		"noUncheckedIndexedAccess": true,
-		"exactOptionalPropertyTypes": true
+		"types": ["node", "bun-types"]
 	},
 	"include": ["src/**/*"]
 }

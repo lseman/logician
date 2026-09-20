@@ -46,24 +46,24 @@ void test("context estimates include tool definition overhead", async () => {
 });
 
 void test("context compaction progressively tightens until it meets the target", async () => {
-		const messages: CompactableMessage[] = Array.from(
-			{ length: 20 },
-			(_, index) => createUserMessage(`message ${index} ${"x".repeat(2000)}`),
-		);
-		const result = await compactToFit(messages, {
-			triggerTokens: 0,
-			targetTokens: 2000,
-			settings: { mode: "shake" as const },
-		});
-		assert.equal(result.changed, true);
-		assert.ok(
-			result.tokensAfter <= 2000,
-			`${result.tokensAfter} should fit target`,
-		);
-		assert.ok(
-			result.messages.some(message => message.role === "compactionSummary"),
-		);
+	const messages: CompactableMessage[] = Array.from(
+		{ length: 20 },
+		(_, index) => createUserMessage(`message ${index} ${"x".repeat(2000)}`),
+	);
+	const result = await compactToFit(messages, {
+		triggerTokens: 0,
+		targetTokens: 2000,
+		settings: { mode: "shake" as const },
 	});
+	assert.equal(result.changed, true);
+	assert.ok(
+		result.tokensAfter <= 2000,
+		`${result.tokensAfter} should fit target`,
+	);
+	assert.ok(
+		result.messages.some(message => message.role === "compactionSummary"),
+	);
+});
 void test("context compaction never leaves an orphaned tool result", async () => {
 	const call = { id: "call_1", name: "read", arguments: "{}" };
 	const messages: CompactableMessage[] = [

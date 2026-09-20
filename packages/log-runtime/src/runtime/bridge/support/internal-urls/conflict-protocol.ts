@@ -82,7 +82,12 @@ export class ConflictProtocolHandler implements ProtocolHandler {
 		const cwd = context?.cwd ?? process.cwd();
 		const { file, index } = parseFileAndIndex(url);
 		const resolved = resolvePath(cwd, file);
-		ensureInsideCwd(cwd, resolved, context?.allowedPaths, context?.allowAllPaths);
+		ensureInsideCwd(
+			cwd,
+			resolved,
+			context?.allowedPaths,
+			context?.allowAllPaths,
+		);
 
 		const blocks = getConflictBlocks(resolved);
 		if (blocks.length === 0) {
@@ -96,7 +101,8 @@ export class ConflictProtocolHandler implements ProtocolHandler {
 		// conflict://<file> — list all conflicts
 		if (index === null) {
 			const lines = blocks.map(
-				b => `- Block ${b.index}: ${b.oursLabel} ... ${b.theirsLabel} at offset ${b.offset}`,
+				b =>
+					`- Block ${b.index}: ${b.oursLabel} ... ${b.theirsLabel} at offset ${b.offset}`,
 			);
 			return {
 				url: url.href,
@@ -142,7 +148,12 @@ export class ConflictProtocolHandler implements ProtocolHandler {
 		const cwd = context?.cwd ?? process.cwd();
 		const { file, index } = parseFileAndIndex(url);
 		const resolved = resolvePath(cwd, file);
-		ensureInsideCwd(cwd, resolved, context?.allowedPaths, context?.allowAllPaths);
+		ensureInsideCwd(
+			cwd,
+			resolved,
+			context?.allowedPaths,
+			context?.allowAllPaths,
+		);
 
 		if (!hasBeenRead(resolved)) {
 			throw new Error(

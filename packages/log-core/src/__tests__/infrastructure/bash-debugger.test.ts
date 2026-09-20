@@ -30,9 +30,8 @@ test("records final arguments and successful output for prepared and direct call
 		parameters: { type: "object", properties: {} },
 		prepareArguments: raw => {
 			const args = raw as Record<string, unknown>;
-			args.command = args.cmd;
-			delete args.cmd;
-			return args;
+			const { cmd, ...rest } = args;
+			return { ...rest, command: cmd };
 		},
 		execute: async args => String(args.command),
 	});

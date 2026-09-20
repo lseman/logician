@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
+import { PRESERVE_KEY } from "@logician/log-snapcompact";
 import {
 	convertToChatFormat,
 	convertToLlm,
 } from "../../capabilities/provider/messages.ts";
-import { PRESERVE_KEY } from "@logician/log-snapcompact";
 import type { AgentMessage } from "../../system/types/types-messages.ts";
 
 test("convertToLlm attaches snapcompact frames as images on the compaction summary message", () => {
@@ -66,7 +66,9 @@ test("convertToLlm omits images and the frames note when no frames are present",
 
 	const [converted] = convertToLlm(messages);
 	expect(converted?.images).toBeUndefined();
-	expect(String(converted?.content)).not.toContain("archived conversation history");
+	expect(String(converted?.content)).not.toContain(
+		"archived conversation history",
+	);
 
 	const [chatMessage] = convertToChatFormat(converted ? [converted] : []);
 	expect(typeof chatMessage?.content).toBe("string");

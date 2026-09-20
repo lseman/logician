@@ -169,7 +169,7 @@ export function createSlashCommands(
 			"local",
 			false,
 			{ category: "session" },
-			() => String(localHandlers.listBookmarks?.() ?? "No bookmarks."),
+			() => String(localHandlers.listBookmarks?.("") ?? "No bookmarks."),
 		),
 		cmd(
 			"/session",
@@ -178,7 +178,7 @@ export function createSlashCommands(
 			false,
 			{ category: "session", examples: ["/session"] },
 			() => {
-				localHandlers.openSessionManager?.();
+				localHandlers.openSessionManager?.("");
 				return undefined;
 			},
 		),
@@ -198,7 +198,7 @@ export function createSlashCommands(
 			false,
 			{ category: "agent", examples: ["/queue"] },
 			() => {
-				localHandlers.openQueueManager?.();
+				localHandlers.openQueueManager?.("");
 				return undefined;
 			},
 		),
@@ -223,7 +223,7 @@ export function createSlashCommands(
 			{ category: "context" },
 			() => {
 				return (
-					(localHandlers.getContext?.() as string | undefined) ||
+					(localHandlers.getContext?.("") as string | undefined) ||
 					"No context available."
 				);
 			},
@@ -332,7 +332,7 @@ export function createSlashCommands(
 			false,
 			{ category: "display", examples: ["/model"] },
 			() => {
-				localHandlers.openModelSelector?.();
+				localHandlers.openModelSelector?.("");
 				return undefined;
 			},
 		),
@@ -403,7 +403,7 @@ export function createSlashCommands(
 			false,
 			{ category: "display", examples: ["/mode"] },
 			() => {
-				localHandlers.cycleThinking?.();
+				localHandlers.cycleThinking?.("");
 				return "Thinking mode cycled.";
 			},
 		),
@@ -434,7 +434,7 @@ export function createSlashCommands(
 			false,
 			{ category: "display", examples: ["/clear"] },
 			() => {
-				localHandlers.clear?.();
+				localHandlers.clear?.("");
 				return "Transcript cleared.";
 			},
 		),
@@ -445,7 +445,7 @@ export function createSlashCommands(
 			false,
 			{ category: "display", examples: ["/ask-preview"] },
 			() => {
-				localHandlers.askPreview?.();
+				localHandlers.askPreview?.("");
 				return undefined;
 			},
 		),
@@ -472,7 +472,7 @@ export function createSlashCommands(
 					return `Permission mode: ${mode}`;
 				}
 				return `Valid modes: ${valid.join(", ")} (current: ${
-					localHandlers.getPermissionMode?.() ?? "acceptEdits"
+					localHandlers.getPermissionMode?.("") ?? "acceptEdits"
 				})`;
 			},
 		),
@@ -482,7 +482,8 @@ export function createSlashCommands(
 			"local",
 			false,
 			{ category: "permissions", examples: ["/plan"] },
-			() => String(localHandlers.togglePlanMode?.() ?? "Plan mode unavailable"),
+			() =>
+				String(localHandlers.togglePlanMode?.("") ?? "Plan mode unavailable"),
 		),
 		cmd(
 			"/rewind",
@@ -490,7 +491,7 @@ export function createSlashCommands(
 			"local",
 			false,
 			{ category: "permissions", examples: ["/rewind"] },
-			() => String(localHandlers.rewind?.() ?? "Nothing to rewind."),
+			() => String(localHandlers.rewind?.("") ?? "Nothing to rewind."),
 		),
 
 		// ── Shortcuts ────────────────────────────────────────────────────────
@@ -585,7 +586,8 @@ export function createSlashCommands(
 			"local",
 			false,
 			{ category: "misc", examples: ["/notifications"] },
-			() => String(localHandlers.notifications?.() ?? "No notifications yet."),
+			() =>
+				String(localHandlers.notifications?.("") ?? "No notifications yet."),
 		),
 		cmd(
 			"/version",
@@ -594,7 +596,7 @@ export function createSlashCommands(
 			false,
 			{ category: "misc" },
 			() =>
-				String(localHandlers.version?.() ?? "Logician version unavailable."),
+				String(localHandlers.version?.("") ?? "Logician version unavailable."),
 		),
 		// ── Sandbox ──────────────────────────────────────────────────────
 		cmd(
@@ -630,7 +632,7 @@ export function createSlashCommands(
 			{ category: "misc", examples: ["/sandbox-cycle"] },
 			() =>
 				String(
-					localHandlers.cycleSandboxMode?.() ?? "Sandbox cycle unavailable.",
+					localHandlers.cycleSandboxMode?.("") ?? "Sandbox cycle unavailable.",
 				),
 		),
 		cmd(
@@ -641,7 +643,7 @@ export function createSlashCommands(
 			{ category: "misc", examples: ["/execution-policy-cycle"] },
 			() =>
 				String(
-					localHandlers.cycleExecutionProfile?.() ??
+					localHandlers.cycleExecutionProfile?.("") ??
 						"Execution policy cycle unavailable.",
 				),
 		),
@@ -653,7 +655,7 @@ export function createSlashCommands(
 			{ category: "misc", examples: ["/inference-mode-cycle"] },
 			() =>
 				String(
-					localHandlers.cycleInferenceMode?.() ??
+					localHandlers.cycleInferenceMode?.("") ??
 						"Inference mode cycle unavailable.",
 				),
 		),
@@ -711,7 +713,7 @@ export function createSlashCommands(
 				examples: ["/rtk"],
 			},
 			() => {
-				const state = localHandlers.toggleRtkProxy?.();
+				const state = localHandlers.toggleRtkProxy?.("");
 				return state ? "RTK proxy: on" : "RTK proxy: off";
 			},
 		),
@@ -725,7 +727,7 @@ export function createSlashCommands(
 				examples: ["/legroom"],
 			},
 			() => {
-				const state = localHandlers.toggleLegroom?.();
+				const state = localHandlers.toggleLegroom?.("");
 				return state ? "Legroom SDK: on" : "Legroom SDK: off";
 			},
 		),

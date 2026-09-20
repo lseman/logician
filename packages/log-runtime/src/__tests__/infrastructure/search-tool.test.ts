@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ensureTool } from "../../capabilities/tools/external-tools.ts";
 import { createGrepTool, grep } from "../../capabilities/tools/search.ts";
+import { MemoryProtocolHandler } from "../../runtime/bridge/support/internal-urls/memory-protocol.ts";
 import { InternalUrlRouter } from "../../runtime/bridge/support/internal-urls/router.ts";
 import { SkillProtocolHandler } from "../../runtime/bridge/support/internal-urls/skill-protocol.ts";
-import { MemoryProtocolHandler } from "../../runtime/bridge/support/internal-urls/memory-protocol.ts";
 
 const rgTest = (await ensureTool("rg")) ? test : test.skip;
 
@@ -65,7 +65,13 @@ void rgTest(
 			{ pattern: "needle", path: "skill://demo" },
 			{
 				cwd,
-				skills: [{ name: "demo", path: skillFile, content: "heading\nneedle here\nbody" }],
+				skills: [
+					{
+						name: "demo",
+						path: skillFile,
+						content: "heading\nneedle here\nbody",
+					},
+				],
 			},
 		);
 		const content = typeof result === "string" ? result : result.content;
@@ -79,7 +85,9 @@ void test("grep searches an internal resource with no backing file in-process", 
 	const grepTool = createGrepTool(router);
 
 	const memory = {
-		listObservations: async () => [{ id: "obs-1", content: "needle in memory" }],
+		listObservations: async () => [
+			{ id: "obs-1", content: "needle in memory" },
+		],
 		listMemories: async () => [],
 	};
 	const result = await grepTool.execute(
@@ -116,7 +124,10 @@ void test("grep rejects a directory-shaped resource that has no backing sourcePa
 	});
 	const grepTool = createGrepTool(router);
 
-	const result = await grepTool.execute({ pattern: "x", path: "listing://" }, {});
+	const result = await grepTool.execute(
+		{ pattern: "x", path: "listing://" },
+		{},
+	);
 	const content = typeof result === "string" ? result : result.content;
 	assert.match(content, /^Error: grep cannot recurse/);
 });
@@ -157,11 +168,7 @@ void rgTest("grep skip with zero skip returns all matches", async () => {
 // ── case sensitivity ────────────────────────────────────────────────────────
 void rgTest("grep case:true is case-sensitive", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
-	writeFileSync(
-		join(cwd, "notes.txt"),
-		"Alpha\nALPHA\nalpha\n",
-		"utf8",
-	);
+	writeFileSync(join(cwd, "notes.txt"), "Alpha\nALPHA\nalpha\n", "utf8");
 	const result = await grep.execute(
 		{ pattern: "Alpha", path: join(cwd, "notes.txt"), case: true },
 		{ cwd },
@@ -174,30 +181,29 @@ void rgTest("grep case:true is case-sensitive", async () => {
 
 void rgTest("grep case:false is case-insensitive", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
-	writeFileSync(
-		join(cwd, "notes.txt"),
-		"Alpha\nALPHA\nalpha\n",
-		"utf8",
-	);
+	writeFileSync(join(cwd, "notes.txt"), "Alpha\nALPHA\nalpha\n", "utf8");
 	const result = await grep.execute(
 		{ pattern: "alpha", path: join(cwd, "notes.txt"), case: false },
 		{ cwd },
 	);
 	const content = typeof result === "string" ? result : result.content;
-	const lines = content.split("\n").filter(l => /: (Alpha|ALPHA|alpha)/.test(l));
+	const lines = content
+		.split("\n")
+		.filter(l => /: (Alpha|ALPHA|alpha)/.test(l));
 	assert.equal(lines.length, 3);
 });
 
 void rgTest("grep case takes priority over ignoreCase", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
-	writeFileSync(
-		join(cwd, "notes.txt"),
-		"Alpha\nALPHA\nalpha\n",
-		"utf8",
-	);
+	writeFileSync(join(cwd, "notes.txt"), "Alpha\nALPHA\nalpha\n", "utf8");
 	// case:true overrides ignoreCase:true
 	const result = await grep.execute(
-		{ pattern: "alpha", path: join(cwd, "notes.txt"), case: true, ignoreCase: true },
+		{
+			pattern: "alpha",
+			path: join(cwd, "notes.txt"),
+			case: true,
+			ignoreCase: true,
+		},
 		{ cwd },
 	);
 	const content = typeof result === "string" ? result : result.content;
@@ -209,11 +215,7 @@ void rgTest("grep case takes priority over ignoreCase", async () => {
 // ── cross-line patterns ────────────────────────────────────────────────────
 void rgTest("grep detects cross-line patterns via literal \\n", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
-	writeFileSync(
-		join(cwd, "notes.txt"),
-		"hello\nworld\nfoo\n",
-		"utf8",
-	);
+	writeFileSync(join(cwd, "notes.txt"), "hello\nworld\nfoo\n", "utf8");
 	const result = await grep.execute(
 		{ pattern: "hello\\nworld", path: join(cwd, "notes.txt") },
 		{ cwd },
@@ -255,31 +257,35 @@ void rgTest("grep filters by file:LINE1-LINE2 selector", async () => {
 	assert.match(content, /No matches/);
 });
 
-void rgTest("grep line-range selector returns match when in range", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
-	writeFileSync(
-		join(cwd, "notes.txt"),
-		"line one\nneedle here\nline three\n",
-		"utf8",
-	);
-	const result = await grep.execute(
-		{
-			pattern: "needle",
-			path: join(cwd, "notes.txt") + ":2-2",
-		},
-		{ cwd },
-	);
-	const content = typeof result === "string" ? result : result.content;
-	assert.match(content, /needle/);
-});
+void rgTest(
+	"grep line-range selector returns match when in range",
+	async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "logician-grep-"));
+		writeFileSync(
+			join(cwd, "notes.txt"),
+			"line one\nneedle here\nline three\n",
+			"utf8",
+		);
+		const result = await grep.execute(
+			{
+				pattern: "needle",
+				path: join(cwd, "notes.txt") + ":2-2",
+			},
+			{ cwd },
+		);
+		const content = typeof result === "string" ? result : result.content;
+		assert.match(content, /needle/);
+	},
+);
 
 // ── prepareArguments ───────────────────────────────────────────────────────
 void test("grep prepareArguments passes through skip and case", () => {
-	const args = grep.prepareArguments?.({
-		pattern: "test",
-		skip: 5,
-		case: false,
-	}) ?? {};
+	const args =
+		grep.prepareArguments?.({
+			pattern: "test",
+			skip: 5,
+			case: false,
+		}) ?? {};
 	assert.equal(args.pattern, "test");
 	assert.equal(args.skip, 5);
 	assert.equal(args.case, false);

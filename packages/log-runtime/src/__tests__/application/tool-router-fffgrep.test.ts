@@ -165,14 +165,23 @@ void test("constructor hides FFF grep by origin even when its exposed name has a
 		server: "fff",
 		tool: "multi_grep",
 	});
+	// MCP tools mount as xd:// devices rather than top-level function tools,
+	// so the toggle is observed through getMcpToolCount().
+	const enabled = makeRouter({
+		tools: [makeTool("grep"), fffGrep, fffMultiGrep],
+	});
+	assert.equal(enabled.router.getMcpToolCount(), 2);
+
 	const { router } = makeRouter({
 		fffgrepEnabled: false,
 		tools: [makeTool("grep"), fffGrep, fffMultiGrep],
 	});
 	assert.deepEqual(
 		router.getDefaultTools().map(tool => tool.name),
-		["grep", "multi_grep"],
+		["grep"],
 	);
+	// fff__grep__2 is hidden by origin (server fff / tool grep) despite the
+	// collision suffix on its exposed name; the other fff tool stays.
 	assert.equal(router.getMcpToolCount(), 1);
 });
 
@@ -194,10 +203,14 @@ void test("FFF grep can be disabled and re-enabled without losing tool identity"
 	assert.equal(router.getMcpToolCount(), 0);
 
 	router.setFffgrepEnabled(true);
-	assert.deepEqual(
-		router.getDefaultTools().map(tool => tool.name),
-		["grep", "fff__grep"],
-	);
 	assert.equal(router.getMcpToolCount(), 1);
+	const restored = (
+		router as unknown as { defaultTools: Tool[] }
+	).defaultTools.find(tool => tool.name === "fff__grep");
+	assert.equal(
+		restored,
+		fffGrep,
+		"the same tool instance is restored, not a copy",
+	);
 	assert.equal(onContextChangedCalls.length, 2);
 });

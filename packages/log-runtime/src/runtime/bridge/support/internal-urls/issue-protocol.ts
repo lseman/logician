@@ -40,8 +40,7 @@ function parseIssuePath(url: InternalUrl): IssuePathParts | null {
 	// The shared parser only puts the first path segment into `url.host`; the
 	// rest lands in `url.pathname`. Reassemble the full address before
 	// splitting — see log-protocol.ts for the same pattern.
-	const full =
-		url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
+	const full = url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
 
 	if (!full) return null;
 

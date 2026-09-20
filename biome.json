@@ -6,7 +6,12 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**", "!**/dist", "!**/node_modules"]
+		"includes": [
+			"**",
+			"!**/dist",
+			"!**/node_modules",
+			"!packages/log-natives/index.js"
+		]
 	},
 	"formatter": {
 		"enabled": true,

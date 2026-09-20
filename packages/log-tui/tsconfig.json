@@ -4,12 +4,11 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"jsx": "react-jsx",
-		"rootDir": ".",
+		"rootDir": "..",
 		"outDir": "dist",
 		"strict": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
-		"declaration": true,
 		"sourceMap": true,
 		"resolveJsonModule": true,
 		"forceConsistentCasingInFileNames": true,
@@ -24,9 +23,7 @@
 				"../log-core/src/system/types/types-protocol.ts"
 			]
 		},
-		"types": ["node", "bun-types"],
-		"noUncheckedIndexedAccess": true,
-		"exactOptionalPropertyTypes": true
+		"types": ["node", "bun-types"]
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist"]

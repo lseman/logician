@@ -114,7 +114,9 @@ export class LoopDetector {
 	#exemptTools: ReadonlySet<string>;
 	#lastHash: string | undefined;
 	#batchCount = 0;
-	#lastReportedCall: { toolCallId: string; name: string; arguments: string } | undefined;
+	#lastReportedCall:
+		| { toolCallId: string; name: string; arguments: string }
+		| undefined;
 
 	// ── Per-call duplicate detection (pre-execution) ────────────────────
 	#dupThreshold: number;
@@ -128,15 +130,18 @@ export class LoopDetector {
 	#failPathCounts = new Map<string, number>();
 
 	constructor(options: LoopDetectorOptions = {}) {
-		this.#batchThreshold = Math.max(1, Math.trunc(
-			options.batchThreshold ?? DEFAULT_BATCH_THRESHOLD,
-		));
-		this.#dupThreshold = Math.max(0, Math.trunc(
-			options.duplicateThreshold ?? DEFAULT_DUPLICATE_THRESHOLD,
-		));
-		this.#failThreshold = Math.max(0, Math.trunc(
-			options.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD,
-		));
+		this.#batchThreshold = Math.max(
+			1,
+			Math.trunc(options.batchThreshold ?? DEFAULT_BATCH_THRESHOLD),
+		);
+		this.#dupThreshold = Math.max(
+			0,
+			Math.trunc(options.duplicateThreshold ?? DEFAULT_DUPLICATE_THRESHOLD),
+		);
+		this.#failThreshold = Math.max(
+			0,
+			Math.trunc(options.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD),
+		);
 		this.#exemptTools = new Set(options.exemptTools ?? ["hub"]);
 	}
 
@@ -166,9 +171,13 @@ export class LoopDetector {
 		// Canonicalise: sort keys in args, sort calls by name then id.
 		const calls = toolCalls.map(tc => ({
 			...tc,
-			arguments: JSON.stringify(canonicalizeToolCallValue(JSON.parse(tc.arguments || "{}"))),
+			arguments: JSON.stringify(
+				canonicalizeToolCallValue(JSON.parse(tc.arguments || "{}")),
+			),
 		}));
-		calls.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+		calls.sort(
+			(a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+		);
 		const hash = JSON.stringify(calls.map(tc => [tc.name, tc.arguments]));
 
 		if (hash === this.#lastHash) {
@@ -182,32 +191,39 @@ export class LoopDetector {
 
 		// Find first non-exempt call for the report.
 		const reportCall =
-			toolCalls.find(tc => !this.#exemptTools.has(tc.name))
-			?? toolCalls[0]!;
-		this.#lastReportedCall = { toolCallId: reportCall.id, name: reportCall.name, arguments: reportCall.arguments };
+			toolCalls.find(tc => !this.#exemptTools.has(tc.name)) ?? toolCalls[0]!;
+		this.#lastReportedCall = {
+			toolCallId: reportCall.id,
+			name: reportCall.name,
+			arguments: reportCall.arguments,
+		};
 
 		// Summarize result.
 		const resultMsg = toolResults.find(r => r.id === reportCall.id);
 		let resultSummary = "";
 		if (resultMsg) {
 			const text = String(resultMsg.content).replace(/\s+/g, " ").trim();
-			resultSummary = text.length > RESULT_SUMMARY_LIMIT
-				? `${text.slice(0, RESULT_SUMMARY_LIMIT)}…`
-				: text;
+			resultSummary =
+				text.length > RESULT_SUMMARY_LIMIT
+					? `${text.slice(0, RESULT_SUMMARY_LIMIT)}…`
+					: text;
 		}
 
-		const argSummary = JSON.stringify(canonicalizeToolCallValue(
-			JSON.parse(reportCall.arguments || "{}"),
-		)).replace(/\s+/g, " ").trim();
+		const argSummary = JSON.stringify(
+			canonicalizeToolCallValue(JSON.parse(reportCall.arguments || "{}")),
+		)
+			.replace(/\s+/g, " ")
+			.trim();
 
 		return {
 			kind: "repeated_tool_call",
 			toolName: reportCall.name,
 			count: this.#batchCount,
 			resultSummary,
-			argumentsSummary: argSummary.length > ARGUMENT_SUMMARY_LIMIT
-				? `${argSummary.slice(0, ARGUMENT_SUMMARY_LIMIT)}…`
-				: argSummary,
+			argumentsSummary:
+				argSummary.length > ARGUMENT_SUMMARY_LIMIT
+					? `${argSummary.slice(0, ARGUMENT_SUMMARY_LIMIT)}…`
+					: argSummary,
 		};
 	}
 
@@ -222,17 +238,14 @@ export class LoopDetector {
 		// Batch-loop guard: only block the exact offending call. A changed
 		// argument set is a changed approach and must be allowed through.
 		const repeatedCallMatches =
-			this.#lastReportedCall?.name === name
-			&& this.#callSignature(name, args)
-				=== this.#callSignature(
+			this.#lastReportedCall?.name === name &&
+			this.#callSignature(name, args) ===
+				this.#callSignature(
 					this.#lastReportedCall.name,
 					this.#lastReportedCall.arguments,
 				);
 
-		if (
-			this.#batchCount >= this.#batchThreshold
-			&& repeatedCallMatches
-		) {
+		if (this.#batchCount >= this.#batchThreshold && repeatedCallMatches) {
 			return {
 				block: true,
 				guard: "batch-loop",
@@ -266,8 +279,8 @@ export class LoopDetector {
 				return this.#tripFailure(name, "the same call");
 			}
 			if (
-				path
-				&& (this.#failPathCounts.get(path) || 0) >= this.#failThreshold
+				path &&
+				(this.#failPathCounts.get(path) || 0) >= this.#failThreshold
 			) {
 				return this.#tripFailure(name, `\`${path}\``);
 			}
@@ -306,9 +319,9 @@ export class LoopDetector {
 
 	#callSignature(name: string, args: string): string {
 		try {
-			const canon = JSON.stringify(canonicalizeToolCallValue(
-				JSON.parse(args || "{}"),
-			));
+			const canon = JSON.stringify(
+				canonicalizeToolCallValue(JSON.parse(args || "{}")),
+			);
 			return `${name} ${canon}`;
 		} catch {
 			return `${name} ${args || ""}`;
@@ -317,17 +330,17 @@ export class LoopDetector {
 
 	#batchLoopMessage(name: string, count: number): string {
 		return (
-			`Error: [batch-loop-guard] blocked — \`${name}\` was part of an identical `
-			+ `tool-call batch ${count} times in a row (threshold: ${this.#batchThreshold}). `
-			+ `Change your approach.`
+			`Error: [batch-loop-guard] blocked — \`${name}\` was part of an identical ` +
+			`tool-call batch ${count} times in a row (threshold: ${this.#batchThreshold}). ` +
+			`Change your approach.`
 		);
 	}
 
 	#dupMessage(name: string, count: number): string {
 		return (
-			`Error: [duplicate-guard] blocked — \`${name}\` called with the same `
-			+ `(or cosmetically-varied) arguments ${count} times in a row `
-			+ `(threshold: ${this.#dupThreshold}). Stop repeating; change your approach.`
+			`Error: [duplicate-guard] blocked — \`${name}\` called with the same ` +
+			`(or cosmetically-varied) arguments ${count} times in a row ` +
+			`(threshold: ${this.#dupThreshold}). Stop repeating; change your approach.`
 		);
 	}
 
@@ -335,11 +348,10 @@ export class LoopDetector {
 		return {
 			block: true,
 			guard: "failure",
-			message: (
-				`Error: [failure-guard] blocked — \`${toolName}\` has failed on `
-				+ `${target} ${this.#failThreshold} times. Stop retrying; inspect the `
-				+ `actual error, fix the root cause, or use a different tool.`
-			),
+			message:
+				`Error: [failure-guard] blocked — \`${toolName}\` has failed on ` +
+				`${target} ${this.#failThreshold} times. Stop retrying; inspect the ` +
+				`actual error, fix the root cause, or use a different tool.`,
 		};
 	}
 

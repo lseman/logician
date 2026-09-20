@@ -6,8 +6,8 @@
  * identically under plain Node (>=22.19) and bun — no new dependency.
  */
 
-import { DatabaseSync } from "node:sqlite";
 import * as fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 
 const SQLITE_MAGIC = "SQLite format 3\0";
 const SAMPLE_ROW_LIMIT = 20;

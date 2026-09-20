@@ -59,7 +59,6 @@ import {
 	type Focusable,
 	isFocusable,
 	type Scrollable,
-	Spacer,
 	visibleWidth,
 } from "./primitives.ts";
 
@@ -80,12 +79,12 @@ const EMPTY_RENDERER_METRICS: RendererMetrics = {
 };
 
 import { Buffer } from "node:buffer";
-import { theme } from "./theme.ts";
 import { appendFileSync } from "node:fs";
 // ── Terminal input ───────────────────────────────────────────────────────────
 // Keyboard comes from process.stdin in raw mode (pi-style). The bridge child's
 // events arrive on its own stdout pipe, so stdin is free for the keyboard.
 import process from "node:process";
+import { theme } from "./theme.ts";
 
 // ── Render debug logging ─────────────────────────────────────────────────────
 // Opt-in, off by default: LOGICIAN_TUI_DEBUG_RENDER=1 appends one JSON line per
@@ -607,8 +606,20 @@ export class TUI extends Container {
 					.slice(1, 5)
 					.map(l => l.trim())
 					.join("\n        ") ?? "(no stack)";
-			const tName = (() => { try { return theme.name; } catch { return "not-initialized"; } })();
-			const tMode = (() => { try { return theme.mode; } catch { return "not-initialized"; } })();
+			const tName = (() => {
+				try {
+					return theme.name;
+				} catch {
+					return "not-initialized";
+				}
+			})();
+			const tMode = (() => {
+				try {
+					return theme.mode;
+				} catch {
+					return "not-initialized";
+				}
+			})();
 			const errorBanner =
 				`\x1b[?25l` +
 				`\x1b[38;5;196m╔══════════════════════════════════════════════════════════════╗\n` +

@@ -19,6 +19,7 @@ export function createInternalUrlRouter(): InternalUrlRouter {
 		new MemoryProtocolHandler(),
 		new LocalProtocolHandler(),
 		new McpProtocolHandler(),
+		new RagProtocolHandler(),
 		new AgentProtocolHandler(),
 		new LogProtocolHandler(),
 		new SshProtocolHandler(),

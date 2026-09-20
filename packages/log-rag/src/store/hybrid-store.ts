@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { Index, MetricKind } from "usearch";
+import { tokenize } from "../tokenize.ts";
 import type { RAGChunk, SearchHit } from "../types.ts";
 import {
 	type ChunkRow,
@@ -15,7 +16,6 @@ import {
 	type SqliteStatement,
 	toRAGChunk,
 } from "./sqlite-shared.ts";
-import { tokenize } from "../tokenize.ts";
 
 // ── SQLite helpers ─────────────────────────────────────────────────────────────
 

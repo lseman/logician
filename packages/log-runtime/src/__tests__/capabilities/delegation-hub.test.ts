@@ -42,6 +42,9 @@ class FakeBackend implements LLMBackend {
 		};
 		return resp;
 	}
+	async remote(_messages: Record<string, unknown>[]) {
+		return { summary: "[remote compaction not configured]", preserveData: {} };
+	}
 }
 
 const baseConfig: AgentConfig = {

@@ -32,24 +32,20 @@ function readHarnessConfigSnapshot(): HarnessConfigSnapshot {
 			string,
 			unknown
 		>;
+		const snapshot: HarnessConfigSnapshot = {};
+		if (typeof raw.model === "string") snapshot.model = raw.model;
+		if (typeof raw.permissionMode === "string")
+			snapshot.permissionMode = raw.permissionMode;
+		if (typeof raw.toolExecution === "string")
+			snapshot.toolExecution = raw.toolExecution;
+		if (typeof raw.maxIterations === "number")
+			snapshot.maxIterations = raw.maxIterations;
+		if (raw.compaction && typeof raw.compaction === "object")
+			snapshot.compaction = raw.compaction as Record<string, unknown>;
 		const mcpServers = raw.mcpServers;
-		return {
-			model: typeof raw.model === "string" ? raw.model : undefined,
-			permissionMode:
-				typeof raw.permissionMode === "string" ? raw.permissionMode : undefined,
-			toolExecution:
-				typeof raw.toolExecution === "string" ? raw.toolExecution : undefined,
-			maxIterations:
-				typeof raw.maxIterations === "number" ? raw.maxIterations : undefined,
-			compaction:
-				raw.compaction && typeof raw.compaction === "object"
-					? (raw.compaction as Record<string, unknown>)
-					: undefined,
-			mcpServerNames:
-				mcpServers && typeof mcpServers === "object"
-					? Object.keys(mcpServers)
-					: undefined,
-		};
+		if (mcpServers && typeof mcpServers === "object")
+			snapshot.mcpServerNames = Object.keys(mcpServers);
+		return snapshot;
 	} catch {
 		return {};
 	}
@@ -210,14 +206,26 @@ function outputMetrics(
 				};
 			};
 			if (entry.type !== "metadata") continue;
-			return {
-				toolCalls: entry.meta?.tool_calls,
-				contextTokens: entry.meta?.context_tokens,
-				model: entry.meta?.model,
-				permissionRequests: entry.meta?.permission_requests,
-				compactions: entry.meta?.compactions,
-				retries: entry.meta?.retries,
-			};
+			const meta = entry.meta;
+			const metrics: Pick<
+				EvalTrial["metrics"],
+				| "toolCalls"
+				| "contextTokens"
+				| "model"
+				| "permissionRequests"
+				| "compactions"
+				| "retries"
+			> = {};
+			if (meta?.tool_calls !== undefined) metrics.toolCalls = meta.tool_calls;
+			if (meta?.context_tokens !== undefined)
+				metrics.contextTokens = meta.context_tokens;
+			if (meta?.model !== undefined) metrics.model = meta.model;
+			if (meta?.permission_requests !== undefined)
+				metrics.permissionRequests = meta.permission_requests;
+			if (meta?.compactions !== undefined)
+				metrics.compactions = meta.compactions;
+			if (meta?.retries !== undefined) metrics.retries = meta.retries;
+			return metrics;
 		} catch {
 			// Non-JSON diagnostics are retained in the artifact but not projected.
 		}
@@ -311,9 +319,11 @@ export async function runTrial(
 		// report (e.g. when metadata.model is absent).
 		harnessConfig: {
 			...harnessConfig,
-			model: metrics.model ?? harnessConfig.model,
+			...(metrics.model !== undefined ? { model: metrics.model } : {}),
 		},
-		trajectoryPath: options.trajectoryPath,
+		...(options.trajectoryPath !== undefined
+			? { trajectoryPath: options.trajectoryPath }
+			: {}),
 		agentOutput: `${agent.stdout}${agent.stderr}`.slice(-200_000),
 	};
 	return trial;

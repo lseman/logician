@@ -7,6 +7,7 @@
 
 import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
+import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TRUNCATION } from "@logician/log-core";
@@ -362,9 +363,66 @@ export class OutputAccumulator {
 			stream.end();
 		});
 	}
-
 	getLastLineBytes(): number {
 		return this.currentLineBytes;
+	}
+
+	/**
+	 * The full captured text (decoded UTF-8), or undefined when nothing was
+	 * captured. Reads the temp file when the output outgrew the in-memory
+	 * bound. Call after finish().
+	 */
+	async getFullText(): Promise<string | undefined> {
+		if (this.totalRawBytes === 0 && this.totalDecodedBytes === 0) {
+			return this.tailText || undefined;
+		}
+		if (this.tempFilePath) {
+			const buffer = await readFile(this.tempFilePath).catch(() => null);
+			return buffer ? new TextDecoder().decode(buffer) : undefined;
+		}
+		return this.tailText || undefined;
+	}
+
+	/**
+	 * Replace the captured content with new text, discarding the original
+	 * capture (in-memory chunks and temp file) and recomputing the
+	 * line/byte accounting so snapshots reflect the replacement. The
+	 * caller is responsible for persisting the original output first.
+	 */
+	replaceContent(text: string): void {
+		this.rawChunks = [Buffer.from(text, "utf-8")];
+		if (this.tempFileStream) {
+			const stream = this.tempFileStream;
+			this.tempFileStream = undefined;
+			stream.end();
+		}
+		if (this.tempFilePath) {
+			unlink(this.tempFilePath).catch(() => {});
+			this.tempFilePath = undefined;
+		}
+		const bytes = byteLength(text);
+		this.tailText = text;
+		this.tailBytes = bytes;
+		this.totalRawBytes = bytes;
+		this.totalDecodedBytes = bytes;
+		this.tailStartsAtLineBoundary = true;
+		let newlines = 0;
+		let lastNewline = -1;
+		for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
+			newlines++;
+			lastNewline = i;
+		}
+		if (newlines === 0) {
+			this.completedLines = 0;
+			this.currentLineBytes = bytes;
+			this.hasOpenLine = text.length > 0;
+		} else {
+			this.completedLines = newlines;
+			const tail = text.slice(lastNewline + 1);
+			this.currentLineBytes = byteLength(tail);
+			this.hasOpenLine = tail.length > 0;
+		}
+		this.totalLines = this.completedLines + (this.hasOpenLine ? 1 : 0);
 	}
 
 	private appendDecodedText(text: string): void {

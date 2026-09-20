@@ -470,9 +470,9 @@ export class ToolRegistry {
 
 	toToolDefinitions(): Record<string, unknown>[] {
 		// Deferred, unresolved tools are excluded from the request entirely —
-		// their name+description already appear as plain text in the (cached)
-		// system prompt tool list, and search_tools promotes them into this
-		// array once the model asks for them by name/topic.
+		// the always-on search_tools tool (auto-registered with the first
+		// deferred tool) advertises them and promotes matches into this
+		// array once the model asks by name/topic.
 		const deferredNames = new Set(this.deferredTools().map(tool => tool.name));
 		return this.list()
 			.filter(tool => !deferredNames.has(tool.name))

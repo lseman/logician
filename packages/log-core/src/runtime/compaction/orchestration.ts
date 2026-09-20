@@ -4,6 +4,7 @@
 // Delegates to the single compaction engine (compactToFit) shared with the
 // loop's context-full retry and the builtin proactive hook.
 
+import type { FrameConfig } from "@logician/log-snapcompact";
 import type { LLMBackend } from "../../capabilities/provider/backend.ts";
 import { estimateChatPayloadTokens } from "../../capabilities/provider/messages.ts";
 import { generateCompactionSummary } from "../../capabilities/session/summaries/summary-generation.ts";
@@ -17,7 +18,6 @@ import {
 	compactToFit,
 	shakeCompaction,
 } from "./engine.ts";
-import type { FrameConfig } from "@logician/log-snapcompact";
 
 export interface CompactionOutcome {
 	changed: boolean;
@@ -93,9 +93,12 @@ export async function runCompaction(
 	// Remote mode: use provider's native compaction endpoint
 	if (mode === "remote") {
 		const remoteSummarizer = async (older: CompactableMessage[]) => {
-			const result = await backend.remote(older as unknown as Record<string, unknown>[], {
-				maxTokens: options.maxTokens ?? 2048,
-			});
+			const result = await backend.remote(
+				older as unknown as Record<string, unknown>[],
+				{
+					maxTokens: options.maxTokens ?? 2048,
+				},
+			);
 			return result.summary;
 		};
 

@@ -1355,7 +1355,10 @@ void test("expanded subagent streams render fenced code with syntax highlighting
 
 	assert.match(plain(rendered), /Found this/);
 	assert.match(plain(rendered), /const answer = 42/);
-	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
+	assert.match(
+		rendered,
+		new RegExp("\u001b\\[38(?:;2;\\d+;\\d+;\\d+|;5;\\d+)mconst"),
+	);
 });
 
 void test("expanded agent progress is never character-truncated", () => {
@@ -1484,7 +1487,10 @@ void test("expanded completed subagent keeps its streaming transcript", () => {
 	assert.match(output, /Inspecting files/);
 	assert.match(output, /const ok = true/);
 	assert.match(output, /Audit complete/);
-	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
+	assert.match(
+		rendered,
+		new RegExp("\u001b\\[38(?:;2;\\d+;\\d+;\\d+|;5;\\d+)mconst"),
+	);
 });
 
 void test("expanded completed subagent does not repeat its final report", () => {
@@ -1569,7 +1575,10 @@ void test("collapsed completed subagent formats its final report as markdown", (
 	const outputExpanded = plain(renderedExpanded);
 	assert.match(outputExpanded, /Approved.*zero errors/);
 	assert.match(renderedExpanded, new RegExp("\u001b\\[1mApproved"));
-	assert.match(renderedExpanded, new RegExp("\u001b\\[38;5;\\d+mconst"));
+	assert.match(
+		renderedExpanded,
+		new RegExp("\u001b\\[38(?:;2;\\d+;\\d+;\\d+|;5;\\d+)mconst"),
+	);
 });
 
 void test("post-edit diagnostics render as a dedicated formatted block", () => {
@@ -2685,7 +2694,10 @@ void test("expanded spawn_agents keeps concurrent text streams attributed", () =
 
 	assert.match(output, /1\. explorer.*Inspect API[\s\S]*API stream/);
 	assert.match(output, /2\. reviewer.*Inspect tests[\s\S]*Test stream/);
-	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
+	assert.match(
+		rendered,
+		new RegExp("\u001b\\[38(?:;2;\\d+;\\d+;\\d+|;5;\\d+)mconst"),
+	);
 });
 
 void test("spawn_agents shows partial failures and expanded reports", () => {
@@ -2783,7 +2795,10 @@ void test("edited TypeScript previews are syntax highlighted", () => {
 	]);
 	const rendered = display.render(100).join("\n");
 
-	assert.match(rendered, new RegExp("\u001b\\[38;5;\\d+mconst"));
+	assert.match(
+		rendered,
+		new RegExp("\u001b\\[38(?:;2;\\d+;\\d+;\\d+|;5;\\d+)mconst"),
+	);
 	assert.match(plain(rendered), /const answer = "yes";/);
 });
 

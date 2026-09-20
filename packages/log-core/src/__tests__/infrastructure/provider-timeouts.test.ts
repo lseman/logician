@@ -82,7 +82,9 @@ void test("stream idle timeout aborts a stream that goes silent mid-generation",
 	const server = Bun.serve({
 		port: 0,
 		fetch: () =>
-			wedgedSseResponse('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'),
+			wedgedSseResponse(
+				'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n',
+			),
 	});
 	try {
 		const backend = new OpenAIBackend({
@@ -129,10 +131,9 @@ void test("timeout guards do not fire on a healthy fast stream", async () => {
 			streamIdleTimeoutMs: 150, // guard active, must not fire
 		});
 		let content = "";
-		const response = await backend.generate(
-			[{ role: "user", content: "hi" }],
-			{ callbacks: { onDelta: delta => (content += delta) } },
-		);
+		const response = await backend.generate([{ role: "user", content: "hi" }], {
+			callbacks: { onDelta: delta => (content += delta) },
+		});
 		assert.equal(content, "hello");
 		assert.equal(response.usage?.totalTokens, 5);
 	} finally {

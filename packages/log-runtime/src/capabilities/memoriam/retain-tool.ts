@@ -65,7 +65,9 @@ export function createRetainTool(opts: RetainToolOptions): Tool {
 			}
 			for (const item of items) {
 				await gateway.createMemory(
-					item.context ? `${item.content}\n\nContext: ${item.context}` : item.content,
+					item.context
+						? `${item.content}\n\nContext: ${item.context}`
+						: item.content,
 					{ type: "fact", sessionIds: [sessionId] },
 				);
 			}

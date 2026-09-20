@@ -798,6 +798,13 @@ export class AgentSession {
 				console.error("[session] session append failed:", _e);
 			}
 		}
+		try {
+			// Turn boundary is the durability checkpoint: one fsync per turn
+			// instead of one per message.
+			this.session.store.flush();
+		} catch (_e: unknown) {
+			console.error("[session] session flush failed:", _e);
+		}
 	}
 
 	// Configuration changes become visible at the next turn snapshot.

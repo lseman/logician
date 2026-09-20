@@ -15,6 +15,7 @@ import {
 	OpenAIChatCompletionsAdapter,
 	type ProviderAdapter,
 } from "./provider-adapter.ts";
+
 // ── Default provider timeouts ───────────────────────────────────────────────
 // A healthy server returns SSE response headers promptly — even for prompts
 // whose first token takes a long time to generate (headers precede
@@ -545,15 +546,10 @@ export class OpenAIBackend implements LLMBackend {
 		let initialGuard: { signal: AbortSignal; ms: number } | undefined;
 		if (timeoutSignal === undefined) {
 			const ms =
-				this.initialResponseTimeoutMs ??
-				DEFAULT_INITIAL_RESPONSE_TIMEOUT_MS;
+				this.initialResponseTimeoutMs ?? DEFAULT_INITIAL_RESPONSE_TIMEOUT_MS;
 			if (ms > 0) initialGuard = { signal: AbortSignal.timeout(ms), ms };
 		}
-		const requestSignals = [
-			signal,
-			timeoutSignal,
-			initialGuard?.signal,
-		].filter(
+		const requestSignals = [signal, timeoutSignal, initialGuard?.signal].filter(
 			(candidate): candidate is AbortSignal => candidate !== undefined,
 		);
 		const requestSignal =
@@ -625,10 +621,7 @@ export class OpenAIBackend implements LLMBackend {
 				streamIdleMs > 0
 					? await readWithIdleTimeout(
 							readPromise,
-							() =>
-								void reader
-									.cancel("stream idle timeout")
-									.catch(() => {}),
+							() => void reader.cancel("stream idle timeout").catch(() => {}),
 							streamIdleMs,
 						)
 					: await readPromise;

@@ -25,11 +25,11 @@ export {
 	stripTextToolCalls,
 } from "./capabilities/provider/text-tool-calls.ts";
 export {
-	setBashDebugger,
-	getBashDebuggerReport,
-	clearBashDebugger,
-	isBashDebuggerEnabled,
 	type BashDebugEntry,
+	clearBashDebugger,
+	getBashDebuggerReport,
+	isBashDebuggerEnabled,
+	setBashDebugger,
 } from "./capabilities/tools/bash-debugger.ts";
 export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
 export {
@@ -48,6 +48,17 @@ export type {
 	StopPolicyKind,
 } from "./control/policy/execution-policy.ts";
 export { createVerifiedStopPolicy } from "./control/policy/verified-stop-policy.ts";
+// ── Context compaction ──────────────────────────────────────────────────────
+export {
+	type CompactionMode,
+	type CompactionSettings,
+	type CompactionSummarizer,
+	type CompactToFitResult,
+	compactToFit,
+	microCompactCompactableMessages,
+	pruneHistoricalToolOutputs,
+	shakeCompaction,
+} from "./runtime/compaction/engine.ts";
 export {
 	EventJournal,
 	type EventJournalEntry,
@@ -124,14 +135,3 @@ export type {
 	ToolContext,
 	ToolResult,
 } from "./system/types/types-messages.ts";
-// ── Context compaction ──────────────────────────────────────────────────────
-export {
-	compactToFit,
-	microCompactCompactableMessages,
-	pruneHistoricalToolOutputs,
-	shakeCompaction,
-	type CompactionMode,
-	type CompactionSettings,
-	type CompactToFitResult,
-	type CompactionSummarizer,
-} from "./runtime/compaction/engine.ts";

@@ -1,4 +1,5 @@
 import type { LLMBackend } from "../../../capabilities/provider/backend.ts";
+import { resolveTokenEncoding } from "../../../capabilities/provider/messages.ts";
 import type { ExtensionRunner } from "../../../system/extension/runner.ts";
 import type { AgentConfig } from "../../../system/types/types-config.ts";
 import type {
@@ -15,7 +16,6 @@ import {
 	runCompaction,
 	shouldAutoCompact,
 } from "../../compaction/orchestration.ts";
-import { resolveTokenEncoding } from "../../../capabilities/provider/messages.ts";
 export type CompactionReason = "auto" | "manual";
 
 export interface SessionCompactorDependencies {
@@ -160,7 +160,8 @@ export class SessionCompactor {
 			// also allows "remote"/"auto"/"shake", a pre-existing, differently
 			// shaped union not unified here).
 			const effectiveMode: CompactionMode | undefined =
-				mode ?? (this.settings.mode === "snapcompact" ? "snapcompact" : undefined);
+				mode ??
+				(this.settings.mode === "snapcompact" ? "snapcompact" : undefined);
 			// Auto-derive the vision-model provider hint from the live model
 			// unless explicitly configured — otherwise PROVIDER_COLS tuning is
 			// unreachable.

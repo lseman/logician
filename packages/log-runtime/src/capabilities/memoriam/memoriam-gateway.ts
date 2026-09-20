@@ -5,7 +5,7 @@ worker and injects hooks into the agent config (e.g. auto-observe tool calls,
 context retrieval).
 */
 
-import type { AgentConfig } from "@logician/log-core";
+import type { AgentConfig, AgentHooks } from "@logician/log-core";
 import type {
 	CompressedObservation,
 	ExportData,
@@ -19,6 +19,17 @@ import { MemoriamWorker } from "./worker.ts";
 export class MemoriamGateway {
 	private readonly worker: MemoriamWorker;
 	private enabled: boolean;
+	/** Bumped whenever the memory store may have changed. Keys the
+	 *  injected-context cache so the (relatively expensive) retrieval only
+	 *  re-runs when memories actually change, keeping the injected block
+	 *  byte-stable across turns for prompt-cache stability. */
+	private memoryRevision = 0;
+	/** Cached get_context results per (session, query, budget) key, valid
+	 *  until the memory revision bumps. */
+	private readonly contextCache = new Map<
+		string,
+		{ revision: number; text: string }
+	>();
 
 	constructor(options: MemoriamSdkConfig = {}) {
 		this.worker = new MemoriamWorker(options);
@@ -37,10 +48,18 @@ export class MemoriamGateway {
 	/** Inject Memoriam hooks into the agent config.
 
 	Calls:
-	- `beforeProviderPayload`: retrieve memory context and prepend it to the
+	- `beforeProviderPayload`: retrieve memory context and append it to the
 	  conversation so the model sees relevant memories every turn.
+
+	The block is appended (not prepended) so the leading system prompt and
+	history — the provider's cacheable prefix — are never disturbed; see
+	`normalizeProviderMessages` in log-core's backend, which re-roles the
+	trailing system message at the transport boundary. The retrieval itself
+	is revision-keyed: it only re-runs when the memory store actually
+	changed (any mutation through this gateway bumps the revision), so the
+	injected text stays byte-stable across turns.
 	*/
-	createHooks(existingHooks: AgentConfig["hooks"]): AgentConfig["hooks"] {
+	createHooks(existingHooks: AgentConfig["hooks"]): AgentHooks {
 		return {
 			...existingHooks,
 			beforeProviderPayload: async context => {
@@ -50,19 +69,26 @@ export class MemoriamGateway {
 				// Retrieve memory context and inject it as a system note.
 				const sessionIds = context.hookSessionId ? [context.hookSessionId] : [];
 				if (!sessionIds.length) return { payload };
+				const sessionId = sessionIds[0];
 				const query = (payload as { messages?: unknown[] })?.messages?.length
 					? "all"
 					: "recent";
+				const budget = context.payload?.maxTokens
+					? (context.payload.maxTokens as number) * 0.4
+					: 16_000;
 				try {
-					const contextText = await this.worker.getContext(
-						sessionIds[0],
-						query,
-						context.payload?.maxTokens
-							? (context.payload.maxTokens as number) * 0.4
-							: 16_000,
-					);
+					const cacheKey = `${sessionId}|${query}|${budget}`;
+					const cached = this.contextCache.get(cacheKey);
+					const contextText =
+						cached && cached.revision === this.memoryRevision
+							? cached.text
+							: await this.worker.getContext(sessionId, query, budget);
+					this.contextCache.set(cacheKey, {
+						revision: this.memoryRevision,
+						text: contextText,
+					});
 					if (!contextText) return { payload };
-					// Prepend a system-level memory context block.
+					// Append a trailing system context block.
 					const messages = payload.messages as {
 						role: string;
 						content: string;
@@ -75,15 +101,21 @@ export class MemoriamGateway {
 					return {
 						payload: {
 							...payload,
-							messages: [injectMsg, ...messages],
+							messages: [...messages, injectMsg],
 						},
 					};
 				} catch {
 					// Fail open — return payload unchanged if memory retrieval fails.
+					// The cache is not updated on failure, so the next call retries.
 					return { payload };
 				}
 			},
 		};
+	}
+
+	/** Invalidate cached context — called by every store-mutating method. */
+	private bumpMemoryRevision(): void {
+		this.memoryRevision += 1;
 	}
 
 	// ── Session operations ────────────────────────────────────────────────
@@ -95,6 +127,7 @@ export class MemoriamGateway {
 		cwd: string,
 	): Promise<Session> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.createSession(id, name, project, cwd);
 	}
 
@@ -113,11 +146,13 @@ export class MemoriamGateway {
 		updates: Record<string, unknown>,
 	): Promise<Session | null> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.updateSession(id, updates);
 	}
 
 	async clearSessions(keepSessionId?: string | null): Promise<void> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.clearSessions(keepSessionId ?? null);
 	}
 
@@ -135,6 +170,7 @@ export class MemoriamGateway {
 		},
 	): Promise<CompressedObservation | null> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.observe(sessionId, hookType, opts);
 	}
 
@@ -153,6 +189,7 @@ export class MemoriamGateway {
 
 	async clearObservations(): Promise<number> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.clearObservations();
 	}
 
@@ -169,6 +206,7 @@ export class MemoriamGateway {
 		},
 	): Promise<Memory> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.createMemory(content, opts ?? {});
 	}
 
@@ -184,6 +222,7 @@ export class MemoriamGateway {
 
 	async removeMemory(id: string): Promise<boolean> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.removeMemory(id);
 	}
 
@@ -197,6 +236,7 @@ export class MemoriamGateway {
 
 	async consolidate(sessionId: string): Promise<Memory[]> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.consolidate(sessionId);
 	}
 
@@ -226,6 +266,7 @@ export class MemoriamGateway {
 		config?: Record<string, unknown>,
 	): Promise<Record<string, string>> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.autoTier(config);
 	}
 
@@ -235,6 +276,7 @@ export class MemoriamGateway {
 		maxDeletes?: number;
 	}): Promise<Record<string, unknown>> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.autoForget(opts);
 	}
 
@@ -247,6 +289,7 @@ export class MemoriamGateway {
 		confidence: number,
 	): Promise<unknown> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.relate(sourceId, targetId, type, confidence);
 	}
 
@@ -264,6 +307,7 @@ export class MemoriamGateway {
 
 	async importData(data: ExportData, onConflict: string): Promise<unknown> {
 		this.assertEnabled();
+		this.bumpMemoryRevision();
 		return this.worker.importData(data, onConflict);
 	}
 

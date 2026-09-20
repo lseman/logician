@@ -126,7 +126,7 @@ function findClosest(arr: number[], value: number): number {
 	let minDist = Infinity;
 	let minIdx = 0;
 	for (let i = 0; i < arr.length; i++) {
-		const dist = Math.abs(value - arr[i]);
+		const dist = Math.abs(value - (arr[i] ?? 0));
 		if (dist < minDist) {
 			minDist = dist;
 			minIdx = i;
@@ -141,17 +141,17 @@ function rgbTo256(r: number, g: number, b: number): number {
 	const bI = findClosest(CUBE_VALUES, b);
 	const cubeIdx = 16 + 36 * rI + 6 * gI + bI;
 	const cubeDist =
-		(r - CUBE_VALUES[rI]) ** 2 * 0.299 +
-		(g - CUBE_VALUES[gI]) ** 2 * 0.587 +
-		(b - CUBE_VALUES[bI]) ** 2 * 0.114;
+		(r - (CUBE_VALUES[rI] ?? 0)) ** 2 * 0.299 +
+		(g - (CUBE_VALUES[gI] ?? 0)) ** 2 * 0.587 +
+		(b - (CUBE_VALUES[bI] ?? 0)) ** 2 * 0.114;
 
 	const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
 	const gI2 = findClosest(GRAY_VALUES, gray);
 	const grayIdx = 232 + gI2;
 	const grayDist =
-		(r - GRAY_VALUES[gI2]) ** 2 * 0.299 +
-		(g - GRAY_VALUES[gI2]) ** 2 * 0.587 +
-		(b - GRAY_VALUES[gI2]) ** 2 * 0.114;
+		(r - (GRAY_VALUES[gI2] ?? 0)) ** 2 * 0.299 +
+		(g - (GRAY_VALUES[gI2] ?? 0)) ** 2 * 0.587 +
+		(b - (GRAY_VALUES[gI2] ?? 0)) ** 2 * 0.114;
 
 	// Tinted charcoal surfaces are often closer to the gray ramp than to the
 	// coarse color cube. Avoid turning a subtle tint into saturated navy.

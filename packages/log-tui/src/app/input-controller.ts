@@ -21,7 +21,10 @@ export function isCtrlE(data: string): boolean {
  */
 function handleOverlayInput(ctx: LogicianTUI, data: string): boolean {
 	const check = <T>(
-		overlay: { isVisibleOverlay(): boolean; handleInput(data: string): T | null },
+		overlay: {
+			isVisibleOverlay(): boolean;
+			handleInput(data: string): T | null;
+		},
 		actionHandler: (action: T) => void,
 	): boolean => {
 		if (overlay.isVisibleOverlay()) {
@@ -40,16 +43,37 @@ function handleOverlayInput(ctx: LogicianTUI, data: string): boolean {
 		return true;
 	}
 
-	if (check(ctx.pluginManager, a => ctx.handlePluginManagerAction(a))) return true;
+	if (check(ctx.pluginManager, a => ctx.handlePluginManagerAction(a)))
+		return true;
 	if (check(ctx.mcpManager, a => ctx.handleMcpManagerAction(a))) return true;
-	if (check(ctx.autoresearchDashboard, a => ctx.handleAutoresearchDashboardAction(a))) return true;
-	if (check(ctx.reasonerSelector, a => ctx.handleReasonerSelectorAction(a))) return true;
-	if (check(ctx.queueManager, a => ctx.handleQueueManagerAction(a))) return true;
-	if (check(ctx.modelSelector, a => ctx.handleModelSelectorAction(a))) return true;
-	if (check(ctx.inferenceModeSelector, a => ctx.handleInferenceModeSelectorAction(a))) return true;
-	if (check(ctx.themeSelector, a => ctx.handleThemeSelectorAction(a))) return true;
-	if (check(ctx.settingsSelector, a => ctx.handleSettingsSelectorAction(a))) return true;
-	if (check(ctx.thinkingLevelSelector, a => ctx.handleThinkingLevelSelectorAction(a))) return true;
+	if (
+		check(ctx.autoresearchDashboard, a =>
+			ctx.handleAutoresearchDashboardAction(a),
+		)
+	)
+		return true;
+	if (check(ctx.reasonerSelector, a => ctx.handleReasonerSelectorAction(a)))
+		return true;
+	if (check(ctx.queueManager, a => ctx.handleQueueManagerAction(a)))
+		return true;
+	if (check(ctx.modelSelector, a => ctx.handleModelSelectorAction(a)))
+		return true;
+	if (
+		check(ctx.inferenceModeSelector, a =>
+			ctx.handleInferenceModeSelectorAction(a),
+		)
+	)
+		return true;
+	if (check(ctx.themeSelector, a => ctx.handleThemeSelectorAction(a)))
+		return true;
+	if (check(ctx.settingsSelector, a => ctx.handleSettingsSelectorAction(a)))
+		return true;
+	if (
+		check(ctx.thinkingLevelSelector, a =>
+			ctx.handleThinkingLevelSelectorAction(a),
+		)
+	)
+		return true;
 
 	return false;
 }
@@ -209,9 +233,7 @@ function handleKeyBinding(ctx: LogicianTUI, data: string): boolean {
 	}
 	// Alt+J/K — tool card navigation; Alt+Enter — toggle focused tool
 	if (data === "\x1bj" || data === "\x1bk") {
-		const position = ctx.transcriptDisplay.focusTool(
-			data === "\x1bj" ? 1 : -1,
-		);
+		const position = ctx.transcriptDisplay.focusTool(data === "\x1bj" ? 1 : -1);
 		if (position) {
 			ctx.notify(`Tool ${position.index}/${position.total}`, "info");
 			ctx.tui.requestRender();
@@ -229,7 +251,9 @@ function handleKeyBinding(ctx: LogicianTUI, data: string): boolean {
 	// Ctrl+Shift+T — cycle thinking display mode
 	if (data === "\x14") {
 		ctx.transcript.cycleThinkingDisplayMode();
-		ctx.transcriptDisplay.setThinkingMode(ctx.transcript.getThinkingDisplayMode());
+		ctx.transcriptDisplay.setThinkingMode(
+			ctx.transcript.getThinkingDisplayMode(),
+		);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 		ctx.tui.requestRender();
 		return true;
@@ -337,7 +361,10 @@ function handleChoicePopupSubmit(ctx: LogicianTUI): void {
 		return;
 	}
 
-	if (qid && ctx.bridge.respondToQuestion(qid, ctx.choicePopup.getResponseValue())) {
+	if (
+		qid &&
+		ctx.bridge.respondToQuestion(qid, ctx.choicePopup.getResponseValue())
+	) {
 		ctx.transcript.addSystemMessage(
 			`Questions answered: ${Object.keys(answers).length}`,
 		);
@@ -358,7 +385,9 @@ function handleChoicePopupDismiss(ctx: LogicianTUI): void {
 		ctx.choicePopup.hide();
 		ctx.planPhase = "idle";
 		ctx.bridge.setPermissionMode(ctx.normalPermissionMode);
-		ctx.transcript.addSystemMessage("Plan approval dismissed — nothing was executed.");
+		ctx.transcript.addSystemMessage(
+			"Plan approval dismissed — nothing was executed.",
+		);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 		return;
 	}
@@ -401,13 +430,19 @@ function handlePermissionPopupInput(
 	ctx.pendingPermission = null;
 	ctx.permissionPopup.hide();
 	ctx.tui.removeOverlay(ctx.permissionPopup);
-	ctx.statusPanel.update({ phase: action.type !== "close" ? "streaming" : "ready" });
+	ctx.statusPanel.update({
+		phase: action.type !== "close" ? "streaming" : "ready",
+	});
 	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 }
 
 // ── Submit handler ───────────────────────────────────────────────────────────
 
-function handleInputSubmit(ctx: LogicianTUI, text: string, intent: string): void {
+function handleInputSubmit(
+	ctx: LogicianTUI,
+	text: string,
+	intent: string,
+): void {
 	// Pending permission answer takes priority.
 	if (ctx.pendingPermission) {
 		const answer = text.trim().toLowerCase();
@@ -418,7 +453,9 @@ function handleInputSubmit(ctx: LogicianTUI, text: string, intent: string): void
 					? "always"
 					: "deny";
 		ctx.bridge.respondToPermission(ctx.pendingPermission.toolCallId, decision);
-		ctx.transcript.addSystemMessage(`Permission ${decision}: ${ctx.pendingPermission.toolName}`);
+		ctx.transcript.addSystemMessage(
+			`Permission ${decision}: ${ctx.pendingPermission.toolName}`,
+		);
 		ctx.pendingPermission = null;
 		ctx.statusPanel.update({ phase: "streaming" });
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
@@ -471,7 +508,11 @@ function handleInputSubmit(ctx: LogicianTUI, text: string, intent: string): void
 	startNewTurn(ctx, text);
 }
 
-function executeBashCommand(ctx: LogicianTUI, command: string, excludeFromContext: boolean): void {
+function executeBashCommand(
+	ctx: LogicianTUI,
+	command: string,
+	excludeFromContext: boolean,
+): void {
 	ctx.statusPanel.update({ phase: "bash" });
 	ctx.statusPanel.startAnimation();
 	ctx.tui.renderNow();
@@ -492,7 +533,11 @@ function executeBashCommand(ctx: LogicianTUI, command: string, excludeFromContex
 	});
 }
 
-function executePythonCommand(ctx: LogicianTUI, code: string, excludeFromContext: boolean): void {
+function executePythonCommand(
+	ctx: LogicianTUI,
+	code: string,
+	excludeFromContext: boolean,
+): void {
 	ctx.statusPanel.update({ phase: "python" });
 	ctx.statusPanel.startAnimation();
 	ctx.tui.renderNow();
@@ -716,7 +761,8 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 	ctx.inputBar.onChange = (text: string) => handleInputChange(ctx, text);
 
 	// Input bar submission
-	ctx.inputBar.onSubmit = (text: string, intent: string) => handleInputSubmit(ctx, text, intent);
+	ctx.inputBar.onSubmit = (text: string, intent: string) =>
+		handleInputSubmit(ctx, text, intent);
 
 	// Cancel handler
 	ctx.inputBar.onCancel = () => {
