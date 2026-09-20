@@ -79,6 +79,11 @@ export interface SettingSpec {
 	max?: number;
 	/** When true, `min` is exclusive (setting must be > min). */
 	minExclusive?: boolean;
+	/**
+	 * Range violations are dropped without a warning (legacy alias or
+	 * "0 means unset" soft knobs).
+	 */
+	silent?: boolean;
 	ui?: SettingUi;
 }
 
@@ -338,8 +343,13 @@ export const SETTINGS_SCHEMA: Readonly<Record<string, SettingSpec>> = {
 	chatTemplate: { type: "string" },
 	thinkingFormat: { type: "enum", enum: THINKING_FORMATS },
 	toolExecution: { type: "enum", enum: VALID_TOOL_EXECUTION },
-	contextWindow: { type: "number", min: 0, minExclusive: true },
-	contextWindowTokens: { type: "number", min: 0, minExclusive: true },
+	contextWindow: { type: "number", min: 0, minExclusive: true, silent: true },
+	contextWindowTokens: {
+		type: "number",
+		min: 0,
+		minExclusive: true,
+		silent: true,
+	},
 	hooks: { type: "boolean" },
 	mcp: { type: "object" },
 	mcpServers: { type: "object" },
@@ -368,11 +378,17 @@ export const SETTINGS_SCHEMA: Readonly<Record<string, SettingSpec>> = {
 	"lsp.enabled": { type: "boolean" },
 	"lsp.timeoutMs": { type: "number", min: 0, minExclusive: true },
 	"lsp.serverOverrides": { type: "object" },
-	"compaction.reserveTokens": { type: "number", min: 0, minExclusive: true },
+	"compaction.reserveTokens": {
+		type: "number",
+		min: 0,
+		minExclusive: true,
+		silent: true,
+	},
 	"compaction.keepRecentTokens": {
 		type: "number",
 		min: 0,
 		minExclusive: true,
+		silent: true,
 	},
 	truncation: { type: "object" },
 	"truncation.toolResultMaxChars": {

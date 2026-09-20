@@ -105,13 +105,19 @@ function coerceEnvValue(
 
 /**
  * Apply env overrides to a validated config object. Returns a new object
- * (input is not mutated) plus warnings for values that failed coercion.
+ * (input is not mutated), the coerced overrides that were applied (for
+ * provenance reporting), and warnings for values that failed coercion.
  */
 export function applyEnvOverrides(
 	config: Record<string, unknown>,
 	environment: NodeJS.ProcessEnv = process.env,
-): { config: Record<string, unknown>; warnings: string[] } {
+): {
+	config: Record<string, unknown>;
+	applied: Record<string, unknown>;
+	warnings: string[];
+} {
 	const patched: Record<string, unknown> = { ...config };
+	const applied: Record<string, unknown> = {};
 	const warnings: string[] = [];
 	for (const [key, vars] of Object.entries(ENV_OVERRIDES)) {
 		const raw = vars
@@ -119,7 +125,10 @@ export function applyEnvOverrides(
 			.find(value => value !== undefined && value.trim() !== "");
 		if (raw === undefined) continue;
 		const coerced = coerceEnvValue(key, raw, warnings);
-		if (coerced !== undefined) patched[key] = coerced;
+		if (coerced !== undefined) {
+			patched[key] = coerced;
+			applied[key] = coerced;
+		}
 	}
-	return { config: patched, warnings };
+	return { config: patched, applied, warnings };
 }

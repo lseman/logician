@@ -188,6 +188,7 @@ void test("untrusted runtime resolution ignores project configuration", () => {
 	assert.equal(resolved.bridge.baseUrl, "http://global.test:7000");
 	assert.equal(resolved.bridge.permissions?.mode, "acceptEdits");
 	assert.equal(resolved.bridge.projectTrusted, false);
+	assert.ok(!resolved.provenance.some(e => e.layer === "project"));
 });
 
 void test("trusted runtime resolution overlays project config on global settings", () => {
@@ -242,4 +243,48 @@ void test("trusted runtime resolution overlays project config on global settings
 		enabled: true,
 		timeoutMs: 1_000,
 	});
+	const byKey = new Map(resolved.provenance.map(e => [e.key, e]));
+	assert.deepEqual(byKey.get("model"), {
+		key: "model",
+		value: "global-model",
+		layer: "global",
+	});
+	assert.deepEqual(byKey.get("compaction.enabled"), {
+		key: "compaction.enabled",
+		value: true,
+		layer: "project",
+	});
+	assert.deepEqual(byKey.get("compaction.reserveTokens"), {
+		key: "compaction.reserveTokens",
+		value: 8_000,
+		layer: "global",
+	});
+	assert.deepEqual(byKey.get("lsp.timeoutMs"), {
+		key: "lsp.timeoutMs",
+		value: 1_000,
+		layer: "project",
+	});
+	assert.equal(byKey.get("mcpServers")?.layer, "project");
+});
+
+void test("runtime provenance attributes env overrides to the env layer", () => {
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_MODEL: "env-model",
+		LOGICIAN_HOOKS: "0",
+	});
+	const byKey = new Map(resolved.provenance.map(e => [e.key, e]));
+	assert.deepEqual(byKey.get("model"), {
+		key: "model",
+		value: "env-model",
+		layer: "env",
+	});
+	assert.deepEqual(byKey.get("hooks"), {
+		key: "hooks",
+		value: false,
+		layer: "env",
+	});
+	// Keys only the project file set stay attributed to project.
+	assert.equal(byKey.get("reasoner")?.layer, "project");
+	assert.equal(byKey.get("maxRetries")?.layer, "project");
 });

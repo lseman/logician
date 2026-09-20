@@ -1,26 +1,19 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import {
-	type AgentModelConfig,
-	INFERENCE_MODE_ORDER,
-	isValidInferenceMode,
-	THINKING_FORMATS,
-	THINKING_LEVELS,
-	type ThinkingFormat,
-	type ThinkingLevel,
-	type TruncationConfig,
-} from "@logician/log-core";
+import type { AgentModelConfig, TruncationConfig } from "@logician/log-core";
 import { getReasonerIds } from "../../capabilities/reasoning/index.ts";
 import {
-	getEnumValues,
 	getKnownConfigKeys,
 	getNestedKeys,
 	getSettingSpec,
+	type SettingSpec,
 } from "./settings-schema.ts";
 
 /** Validated configuration with warnings collected during load. */
 export interface ResolvedLogicianConfig {
 	path?: string;
+	/** Parsed file contents before validation (provenance reporting). */
+	raw?: Record<string, unknown>;
 	config: LogicianTuiConfig;
 	warnings: string[];
 }
@@ -30,18 +23,8 @@ export interface ResolvedLogicianConfig {
  * registry (settings-schema.ts) so the two can't drift apart.
  */
 const KNOWN_KEYS = new Set(getKnownConfigKeys());
-const TOOLS_KEYS = new Set(getNestedKeys("tools"));
-const COMPACTION_KEYS = new Set(getNestedKeys("compaction"));
-const TRUNCATION_KEYS = new Set(getNestedKeys("truncation"));
-const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(
-	getNestedKeys("truncation.microCompactMaxChars"),
-);
-const WEB_SEARCH_KEYS = new Set(getNestedKeys("webSearch"));
 /** Sourced from the reasoner registry itself so this can't drift from the real set. */
 const REASONER_IDS = new Set(getReasonerIds());
-const PERMISSIONS_KEYS = new Set(getNestedKeys("permissions"));
-const LEGROOM_KEYS = new Set(getNestedKeys("legroom"));
-const MEMORIAM_KEYS = new Set(getNestedKeys("memoriam"));
 
 /** Validate a URL string (non-empty, starts with http:// or https://). */
 function isValidUrl(v: unknown): boolean {
@@ -62,32 +45,280 @@ function warn(warnings: string[], msg: string): void {
 	warnings.push(msg);
 }
 
-function copyStrings(
-	source: Record<string, unknown>,
-	target: LogicianTuiConfig,
-	keys: readonly (keyof LogicianTuiConfig)[],
+/**
+ * Keys validated by dedicated blocks in `validateConfig` rather than the
+ * registry pass: semantics the schema registry cannot express (filesystem
+ * check, external registry lookup, clamping instead of ignore).
+ */
+const CUSTOM_KEYS: ReadonlySet<string> = new Set([
+	"cwd",
+	"reasoner",
+	"temperature",
+]);
+
+/**
+ * Sub-objects whose fields are validated from the schema registry. Objects
+ * not listed here are passthroughs (mcp, mcpServers, plugins,
+ * reasonerConfig) and keep dedicated blocks in `validateConfig`.
+ */
+const SUB_OBJECTS = [
+	"lsp",
+	"legroom",
+	"memoriam",
+	"compaction",
+	"truncation",
+	"tools",
+	"webSearch",
+	"permissions",
+] as const;
+
+/**
+ * Validate one scalar field from its schema spec, writing the accepted
+ * value to `out[field]`. `path` is the full dotted key used in warning
+ * messages; `field` is the local key in `out`.
+ */
+function validateScalarField(
+	path: string,
+	field: string,
+	value: unknown,
+	spec: SettingSpec,
+	out: Record<string, unknown>,
+	warnings: string[],
 ): void {
-	const output = target as Record<string, unknown>;
-	for (const key of keys) output[key] = configString(source[key]);
+	if (value === undefined) return;
+	switch (spec.type) {
+		case "string": {
+			const s = configString(value);
+			if (s !== undefined) out[field] = s;
+			return;
+		}
+		case "url":
+			if (isValidUrl(value)) {
+				out[field] = configString(value);
+			} else {
+				warn(warnings, `"${path}" must be a valid http/https URL.`);
+			}
+			return;
+		case "number": {
+			const n = configNumber(value);
+			if (n === undefined) return;
+			const okMin =
+				spec.min === undefined
+					? true
+					: spec.minExclusive
+						? n > spec.min
+						: n >= spec.min;
+			const okMax = spec.max === undefined || n <= spec.max;
+			if (okMin && okMax) {
+				out[field] = n;
+			} else if (!spec.silent) {
+				warn(warnings, rangeMessage(path, spec));
+			}
+			return;
+		}
+		case "boolean": {
+			const b = configBool(value, spec.default as boolean | undefined);
+			if (b !== undefined) out[field] = b;
+			return;
+		}
+		case "enum": {
+			const s = configString(value);
+			const valid = spec.enum ?? [];
+			if (s !== undefined && valid.includes(s)) {
+				out[field] = s;
+			} else if (s !== undefined) {
+				warn(warnings, `"${path}" must be one of: ${valid.join(", ")}.`);
+			}
+			return;
+		}
+		default:
+			return;
+	}
 }
 
-function copyBooleans(
-	source: Record<string, unknown>,
-	target: LogicianTuiConfig,
-	defaults: Readonly<Record<string, boolean | undefined>>,
-): void {
-	const output = target as Record<string, unknown>;
-	for (const [key, fallback] of Object.entries(defaults))
-		output[key] = configBool(source[key], fallback);
+/** Unified range-violation message for number settings. */
+function rangeMessage(key: string, spec: SettingSpec): string {
+	const min = spec.min ?? 0;
+	const inclusive = spec.minExclusive !== true;
+	const max = spec.max !== undefined ? ` and <= ${spec.max}` : "";
+	return `"${key}" must be ${inclusive ? ">=" : ">"} ${min}${max}. Ignored.`;
 }
 
-function copyNumbers(
-	source: Record<string, unknown>,
-	target: LogicianTuiConfig,
-	keys: readonly (keyof LogicianTuiConfig)[],
+/** Filter an array field down to its string elements. */
+function copyStringArray(
+	path: string,
+	field: string,
+	value: unknown,
+	out: Record<string, unknown>,
+	warnings: string[],
 ): void {
-	const output = target as Record<string, unknown>;
-	for (const key of keys) output[key] = configNumber(source[key]);
+	if (!Array.isArray(value)) {
+		warn(warnings, `"${path}" must be an array of strings.`);
+		return;
+	}
+	out[field] = value.filter((item): item is string => typeof item === "string");
+}
+
+/** Filter an array field down to its non-blank string elements. */
+function copyTrimmedStringArray(
+	path: string,
+	field: string,
+	value: unknown,
+	out: Record<string, unknown>,
+	warnings: string[],
+): void {
+	if (!Array.isArray(value)) {
+		warn(warnings, `"${path}" must be an array of strings.`);
+		return;
+	}
+	out[field] = value.filter(
+		(item): item is string =>
+			typeof item === "string" && item.trim().length > 0,
+	);
+}
+
+/**
+ * Per-sub-object handlers for the fields that need bespoke treatment:
+ * string-array element filtering, object pass-through, and the deep
+ * serverOverrides shape.
+ */
+type SubObjectCustom = (
+	value: Record<string, unknown>,
+	out: Record<string, unknown>,
+	warnings: string[],
+) => void;
+
+const SUB_OBJECT_CUSTOMS: Readonly<Record<string, SubObjectCustom>> = {
+	legroom: (value, out, warnings) => {
+		if (value.args !== undefined)
+			copyStringArray("legroom.args", "args", value.args, out, warnings);
+		if (value.config !== undefined) {
+			if (typeof value.config === "object" && value.config !== null)
+				out.config = value.config;
+			else warn(warnings, '"legroom.config" must be an object.');
+		}
+	},
+	memoriam: (value, out, warnings) => {
+		if (value.args !== undefined)
+			copyStringArray("memoriam.args", "args", value.args, out, warnings);
+		if (value.config !== undefined) {
+			if (typeof value.config === "object" && value.config !== null)
+				out.config = value.config;
+			else warn(warnings, '"memoriam.config" must be an object.');
+		}
+	},
+	permissions: (value, out, warnings) => {
+		if (value.allow !== undefined)
+			copyTrimmedStringArray(
+				"permissions.allow",
+				"allow",
+				value.allow,
+				out,
+				warnings,
+			);
+		if (value.deny !== undefined)
+			copyTrimmedStringArray(
+				"permissions.deny",
+				"deny",
+				value.deny,
+				out,
+				warnings,
+			);
+	},
+	lsp: (value, out, warnings) => {
+		if (value.serverOverrides === undefined) return;
+		if (
+			typeof value.serverOverrides !== "object" ||
+			value.serverOverrides === null
+		) {
+			warn(warnings, '"lsp.serverOverrides" must be an object.');
+			return;
+		}
+		const overrides = value.serverOverrides as Record<string, unknown>;
+		const parsed: Record<
+			string,
+			{ command: string; args?: string[]; languageId: string }
+		> = {};
+		for (const [ext, def] of Object.entries(overrides)) {
+			if (typeof def !== "object" || def === null) {
+				warn(warnings, `"lsp.serverOverrides.${ext}" must be an object.`);
+				continue;
+			}
+			const d = def as Record<string, unknown>;
+			if (typeof d.command !== "string" || !d.command.trim()) {
+				warn(
+					warnings,
+					`"lsp.serverOverrides.${ext}.command" must be a non-empty string.`,
+				);
+				continue;
+			}
+			if (typeof d.languageId !== "string" || !d.languageId.trim()) {
+				warn(
+					warnings,
+					`"lsp.serverOverrides.${ext}.languageId" must be a non-empty string.`,
+				);
+				continue;
+			}
+			const args = Array.isArray(d.args)
+				? d.args.filter((a): a is string => typeof a === "string")
+				: undefined;
+			parsed[ext] = {
+				command: d.command.trim(),
+				args,
+				languageId: d.languageId.trim(),
+			};
+		}
+		out.serverOverrides = parsed;
+	},
+};
+
+/**
+ * Validate one sub-object: unknown-key warnings, registry-driven validation
+ * of every registered field (recursing into nested sub-objects), then the
+ * object's custom handler for bespoke fields. `parent` is the schema path
+ * used for lookups and messages; `key` is where the assembled object lands
+ * in `sink`.
+ */
+function validateSubObject(
+	parent: string,
+	raw: unknown,
+	sink: Record<string, unknown>,
+	key: string,
+	warnings: string[],
+): void {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		warn(warnings, `"${parent}" must be an object.`);
+		return;
+	}
+	const value = raw as Record<string, unknown>;
+	const known = getNestedKeys(parent);
+	for (const k of Object.keys(value)) {
+		if (!known.includes(k)) {
+			warn(warnings, `Unknown ${parent} key: "${k}".`);
+		}
+	}
+	const out: Record<string, unknown> = {};
+	for (const field of known) {
+		const fieldPath = `${parent}.${field}`;
+		const fv = value[field];
+		const spec = getSettingSpec(fieldPath);
+		if (spec === undefined || fv === undefined) continue;
+		if (spec.type === "object") {
+			// Nested sub-object (truncation.microCompactMaxChars) — recurse
+			// into the parent's out so it lands under `field`. Objects
+			// without registered children (lsp.serverOverrides) are handled
+			// by the custom handler.
+			if (getNestedKeys(fieldPath).length > 0) {
+				validateSubObject(fieldPath, fv, out, field, warnings);
+			}
+			continue;
+		}
+		if (spec.type === "array" || spec.type === "models") continue; // custom
+		validateScalarField(fieldPath, field, fv, spec, out, warnings);
+	}
+	const custom = SUB_OBJECT_CUSTOMS[parent];
+	if (custom) custom(value, out, warnings);
+	if (Object.keys(out).length > 0) sink[key] = out;
 }
 
 export function validateConfig(
@@ -101,6 +332,7 @@ export function validateConfig(
 
 	const obj = raw as Record<string, unknown>;
 	const cfg: LogicianTuiConfig = {};
+	const sink = cfg as Record<string, unknown>;
 
 	// Check for unknown top-level keys.
 	for (const key of Object.keys(obj)) {
@@ -109,31 +341,31 @@ export function validateConfig(
 		}
 	}
 
-	// String fields (URLs validated).
-	if (obj.baseUrl !== undefined) {
-		if (isValidUrl(obj.baseUrl)) {
-			cfg.baseUrl = configString(obj.baseUrl);
-		} else {
-			warn(warnings, '"baseUrl" must be a valid http/https URL.');
+	// Registry-driven pass: every scalar key is validated from its schema
+	// spec (type, range, enum) so adding a key to settings-schema.ts is
+	// enough to validate it here. Keys with semantics beyond scalar
+	// coercion (CUSTOM_KEYS) and object/array keys keep dedicated blocks
+	// below.
+	for (const key of getKnownConfigKeys()) {
+		if (CUSTOM_KEYS.has(key)) continue;
+		const spec = getSettingSpec(key);
+		if (spec === undefined) continue;
+		const value = obj[key];
+		if (value === undefined) {
+			// Boolean defaults come from the registry so the UI, docs, and
+			// validation share one source of truth.
+			if (spec.type === "boolean" && spec.default !== undefined)
+				sink[key] = spec.default;
+			continue;
 		}
-	}
-	if (obj.llmUrl !== undefined) {
-		if (isValidUrl(obj.llmUrl)) {
-			cfg.llmUrl = configString(obj.llmUrl);
-		} else {
-			warn(warnings, '"llmUrl" must be a valid http/https URL.');
+		if (
+			spec.type === "object" ||
+			spec.type === "array" ||
+			spec.type === "models"
+		) {
+			continue;
 		}
-	}
-
-	copyStrings(obj, cfg, ["model", "theme", "systemPrompt", "chatTemplate"]);
-	if (obj.executionProfile !== undefined) {
-		const profile = configString(obj.executionProfile);
-		const valid = getEnumValues("executionProfile") ?? [];
-		if (valid.includes(profile ?? "")) {
-			cfg.executionProfile = profile as LogicianTuiConfig["executionProfile"];
-		} else {
-			warn(warnings, `"executionProfile" must be one of: ${valid.join(", ")}.`);
-		}
+		validateScalarField(key, key, value, spec, sink, warnings);
 	}
 
 	// models: array of named model objects for cycling (Ctrl+L model selector).
@@ -193,7 +425,8 @@ export function validateConfig(
 			cfg.models = parsed as LogicianTuiConfig["models"];
 		}
 	}
-	// temperature: 0–2
+
+	// temperature: 0–2 (clamps out-of-range values instead of ignoring).
 	if (obj.temperature !== undefined) {
 		const t = configNumber(obj.temperature);
 		if (t !== undefined) {
@@ -209,122 +442,7 @@ export function validateConfig(
 		}
 	}
 
-	// maxTokens: > 0
-	if (obj.maxTokens !== undefined) {
-		const mt = configNumber(obj.maxTokens);
-		if (mt !== undefined) {
-			if (mt <= 0) {
-				warn(warnings, `"maxTokens" must be > 0, got ${mt}. Ignored.`);
-			} else {
-				cfg.maxTokens = mt;
-			}
-		}
-	}
-
-	// maxIterations: > 0
-	if (obj.maxIterations !== undefined) {
-		const mi = configNumber(obj.maxIterations);
-		if (mi !== undefined) {
-			if (mi <= 0) {
-				warn(warnings, `"maxIterations" must be > 0, got ${mi}. Ignored.`);
-			} else {
-				cfg.maxIterations = mi;
-			}
-		}
-	}
-
-	// maxTotalTokens: > 0
-	if (obj.maxTotalTokens !== undefined) {
-		const mt = configNumber(obj.maxTotalTokens);
-		if (mt !== undefined) {
-			if (mt <= 0) {
-				warn(warnings, `"maxTotalTokens" must be > 0, got ${mt}. Ignored.`);
-			} else {
-				cfg.maxTotalTokens = mt;
-			}
-		}
-	}
-
-	// contextWindow / contextWindowTokens: > 0
-	if (obj.contextWindow !== undefined) {
-		const cw = configNumber(obj.contextWindow);
-		if (cw !== undefined && cw > 0) cfg.contextWindow = cw;
-	}
-	if (obj.contextWindowTokens !== undefined) {
-		const cwt = configNumber(obj.contextWindowTokens);
-		if (cwt !== undefined && cwt > 0) cfg.contextWindowTokens = cwt;
-	}
-
-	// Enum fields.
-	if (obj.toolExecution !== undefined) {
-		const te = configString(obj.toolExecution);
-		const valid = getEnumValues("toolExecution") ?? [];
-		if (!valid.includes(te ?? "")) {
-			warn(
-				warnings,
-				`"toolExecution" must be "sequential" or "parallel", got: "${te}".`,
-			);
-		} else {
-			cfg.toolExecution = te as "sequential" | "parallel";
-		}
-	}
-	if (obj.permissionMode !== undefined) {
-		const pm = configString(obj.permissionMode);
-		const validModes = getEnumValues("permissionMode") ?? [];
-		if (!validModes.includes(pm ?? "")) {
-			warn(warnings, `"permissionMode" invalid, got: "${pm}".`);
-		} else {
-			cfg.permissionMode = pm as LogicianTuiConfig["permissionMode"];
-		}
-	}
-	if (obj.workflowMode !== undefined) {
-		const mode = configString(obj.workflowMode);
-		const valid = getEnumValues("workflowMode") ?? [];
-		if (valid.includes(mode ?? "")) cfg.workflowMode = mode as "act" | "plan";
-		else warn(warnings, `"workflowMode" must be one of: ${valid.join(", ")}.`);
-	}
-
-	// Boolean defaults come from the schema registry so the UI, docs, and
-	// validation share one source of truth.
-	const booleanDefaults: Readonly<Record<string, boolean | undefined>> =
-		Object.fromEntries(
-			getKnownConfigKeys()
-				.filter(key => getSettingSpec(key)?.type === "boolean")
-				.map(key => [key, getSettingSpec(key)?.default as boolean | undefined]),
-		);
-	copyBooleans(obj, cfg, booleanDefaults);
-
-	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
-	if (obj.inferenceMode !== undefined) {
-		const im = configString(obj.inferenceMode);
-		if (im && !isValidInferenceMode(im)) {
-			warn(
-				warnings,
-				`"inferenceMode" must be one of: ${INFERENCE_MODE_ORDER.join(", ")}, got: "${im}".`,
-			);
-		} else if (im) {
-			cfg.inferenceMode = im as LogicianTuiConfig["inferenceMode"];
-		}
-	}
-	if (obj.thinkingLevel !== undefined) {
-		const level = configString(obj.thinkingLevel);
-		if (!level || !THINKING_LEVELS.includes(level as ThinkingLevel)) {
-			warn(
-				warnings,
-				`"thinkingLevel" must be one of: ${THINKING_LEVELS.join(", ")}.`,
-			);
-		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
-	}
-	if (obj.thinkingFormat !== undefined) {
-		const fmt = configString(obj.thinkingFormat);
-		if (!fmt || !THINKING_FORMATS.includes(fmt as ThinkingFormat)) {
-			warn(
-				warnings,
-				`"thinkingFormat" must be one of: ${THINKING_FORMATS.join(", ")}.`,
-			);
-		} else cfg.thinkingFormat = fmt as LogicianTuiConfig["thinkingFormat"];
-	}
-
+	// reasoner: name from the reasoner registry; unknown names fall back.
 	if (obj.reasoner !== undefined) {
 		cfg.reasoner = configString(obj.reasoner)?.toLowerCase();
 		if (!cfg.reasoner) warn(warnings, '"reasoner" must be a non-empty string.');
@@ -333,6 +451,7 @@ export function validateConfig(
 			cfg.reasoner = "none";
 		}
 	}
+	// reasonerConfig: object passthrough.
 	if (obj.reasonerConfig !== undefined) {
 		if (
 			obj.reasonerConfig &&
@@ -344,36 +463,6 @@ export function validateConfig(
 			};
 		} else {
 			warn(warnings, '"reasonerConfig" must be an object.');
-		}
-	}
-	copyNumbers(obj, cfg, ["transcriptMaxTurns", "transcriptMaxRenderedLines"]);
-
-	// Numeric keys validated as "must be >= 0" (or "> 0") with ignore-on-
-	// violation. Ranges come from the schema registry.
-	for (const key of [
-		"maxRetries",
-		"retryBaseDelayMs",
-		"turnTimeoutMs",
-		"cacheSize",
-		"cacheTtlMs",
-		"duplicateToolThreshold",
-		"toolFailureLoopThreshold",
-		"maxParallelAgents",
-	] as const) {
-		const minimum = getSettingSpec(key)?.min ?? 0;
-		const inclusive = getSettingSpec(key)?.minExclusive !== true;
-		const source = obj;
-		if (source[key] === undefined) continue;
-		const value = configNumber(source[key]);
-		const valid =
-			value !== undefined && (inclusive ? value >= minimum : value > minimum);
-		if (!valid) {
-			warn(
-				warnings,
-				`"${key}" must be ${inclusive ? ">=" : ">"} ${minimum}. Ignored.`,
-			);
-		} else {
-			cfg[key] = value;
 		}
 	}
 
@@ -400,7 +489,7 @@ export function validateConfig(
 		}
 	}
 
-	// cwd: explicit project root.
+	// cwd: explicit project root (existence checked against the filesystem).
 	if (obj.cwd !== undefined) {
 		const cwd = configString(obj.cwd);
 		if (cwd !== undefined) {
@@ -413,307 +502,15 @@ export function validateConfig(
 		}
 	}
 
-	// lsp sub-object.
-	if (obj.lsp !== undefined) {
-		if (typeof obj.lsp !== "object" || obj.lsp === null) {
-			warn(warnings, '"lsp" must be an object.');
-		} else {
-			const l = obj.lsp as Record<string, unknown>;
-			const lc: {
-				enabled?: boolean;
-				timeoutMs?: number;
-				serverOverrides?: Record<
-					string,
-					{
-						command: string;
-						args?: string[];
-						languageId: string;
-					}
-				>;
-			} = {};
-			for (const key of Object.keys(l)) {
-				if (
-					key !== "enabled" &&
-					key !== "timeoutMs" &&
-					key !== "serverOverrides"
-				) {
-					warn(warnings, `Unknown lsp key: "${key}".`);
-				}
-			}
-			const le = configBool(l.enabled);
-			if (le !== undefined) lc.enabled = le;
-			const lt = configNumber(l.timeoutMs);
-			if (lt !== undefined && lt > 0) lc.timeoutMs = lt;
-			if (
-				l.serverOverrides !== undefined &&
-				typeof l.serverOverrides === "object" &&
-				l.serverOverrides !== null
-			) {
-				const overrides = l.serverOverrides as Record<string, unknown>;
-				const parsedOverrides: NonNullable<typeof lc.serverOverrides> = {};
-				for (const [ext, def] of Object.entries(overrides)) {
-					if (typeof def !== "object" || def === null) {
-						warn(warnings, `"lsp.serverOverrides.${ext}" must be an object.`);
-						continue;
-					}
-					const d = def as Record<string, unknown>;
-					if (typeof d.command !== "string" || !d.command.trim()) {
-						warn(
-							warnings,
-							`"lsp.serverOverrides.${ext}.command" must be a non-empty string.`,
-						);
-						continue;
-					}
-					if (typeof d.languageId !== "string" || !d.languageId.trim()) {
-						warn(
-							warnings,
-							`"lsp.serverOverrides.${ext}.languageId" must be a non-empty string.`,
-						);
-						continue;
-					}
-					const args = Array.isArray(d.args)
-						? d.args.filter((a): a is string => typeof a === "string")
-						: undefined;
-					parsedOverrides[ext] = {
-						command: d.command.trim(),
-						args,
-						languageId: d.languageId.trim(),
-					};
-				}
-				if (Object.keys(parsedOverrides).length > 0) {
-					lc.serverOverrides = parsedOverrides;
-				}
-			}
-			if (Object.keys(lc).length > 0) cfg.lsp = lc;
+	// Sub-objects: registry-driven fields plus per-object custom handlers
+	// (SUB_OBJECT_CUSTOMS) for element filtering and deep shapes.
+	for (const parent of SUB_OBJECTS) {
+		if (obj[parent] !== undefined) {
+			validateSubObject(parent, obj[parent], sink, parent, warnings);
 		}
 	}
 
-	// Legroom SDK worker.
-	if (obj.legroom !== undefined) {
-		if (
-			typeof obj.legroom !== "object" ||
-			obj.legroom === null ||
-			Array.isArray(obj.legroom)
-		) {
-			warn(warnings, '"legroom" must be an object.');
-		} else {
-			const value = obj.legroom as Record<string, unknown>;
-			for (const key of Object.keys(value)) {
-				if (!LEGROOM_KEYS.has(key))
-					warn(warnings, `Unknown legroom key: "${key}".`);
-			}
-			const mode = configString(value.mode);
-			const modes = getEnumValues("legroom.mode") ?? [];
-			if (mode !== undefined && !modes.includes(mode)) {
-				warn(warnings, `"legroom.mode" must be one of: ${modes.join(", ")}.`);
-			} else {
-				const args = Array.isArray(value.args)
-					? value.args.filter(
-							(item): item is string => typeof item === "string",
-						)
-					: undefined;
-				if (value.args !== undefined && !Array.isArray(value.args))
-					warn(warnings, '"legroom.args" must be an array of strings.');
-				const compressionConfig =
-					value.config &&
-					typeof value.config === "object" &&
-					!Array.isArray(value.config)
-						? (value.config as Record<string, unknown>)
-						: undefined;
-				if (value.config !== undefined && !compressionConfig)
-					warn(warnings, '"legroom.config" must be an object.');
-				const timeoutMs = configNumber(value.timeoutMs);
-				if (timeoutMs !== undefined && timeoutMs <= 0)
-					warn(warnings, '"legroom.timeoutMs" must be greater than zero.');
-				cfg.legroom = {
-					...(mode !== undefined && { mode: mode as "off" | "sdk" }),
-					...(configString(value.python) !== undefined && {
-						python: configString(value.python),
-					}),
-					...(args !== undefined && { args }),
-					...(configBool(value.failOpen) !== undefined && {
-						failOpen: configBool(value.failOpen),
-					}),
-					...(timeoutMs !== undefined && timeoutMs > 0 && { timeoutMs }),
-					...(compressionConfig !== undefined && {
-						config: compressionConfig,
-					}),
-				};
-			}
-		}
-	}
-
-	// Memoriam SDK worker.
-	if (obj.memoriam !== undefined) {
-		if (
-			typeof obj.memoriam !== "object" ||
-			obj.memoriam === null ||
-			Array.isArray(obj.memoriam)
-		) {
-			warn(warnings, '"memoriam" must be an object.');
-		} else {
-			const value = obj.memoriam as Record<string, unknown>;
-			for (const key of Object.keys(value)) {
-				if (!MEMORIAM_KEYS.has(key))
-					warn(warnings, `Unknown memoriam key: "${key}".`);
-			}
-			const mode = configString(value.mode);
-			const modes = getEnumValues("memoriam.mode") ?? [];
-			if (mode !== undefined && !modes.includes(mode)) {
-				warn(warnings, `"memoriam.mode" must be one of: ${modes.join(", ")}.`);
-			} else {
-				const args = Array.isArray(value.args)
-					? value.args.filter(
-							(item): item is string => typeof item === "string",
-						)
-					: undefined;
-				if (value.args !== undefined && !Array.isArray(value.args))
-					warn(warnings, '"memoriam.args" must be an array of strings.');
-				const memoriamConfig =
-					value.config &&
-					typeof value.config === "object" &&
-					!Array.isArray(value.config)
-						? (value.config as Record<string, unknown>)
-						: undefined;
-				if (value.config !== undefined && !memoriamConfig)
-					warn(warnings, '"memoriam.config" must be an object.');
-				const timeoutMs = configNumber(value.timeoutMs);
-				if (timeoutMs !== undefined && timeoutMs <= 0)
-					warn(warnings, '"memoriam.timeoutMs" must be greater than zero.');
-				cfg.memoriam = {
-					...(mode !== undefined && { mode: mode as "off" | "sdk" }),
-					...(configString(value.python) !== undefined && {
-						python: configString(value.python),
-					}),
-					...(args !== undefined && { args }),
-					...(configBool(value.failOpen) !== undefined && {
-						failOpen: configBool(value.failOpen),
-					}),
-					...(timeoutMs !== undefined && timeoutMs > 0 && { timeoutMs }),
-					...(memoriamConfig !== undefined && {
-						config: memoriamConfig,
-					}),
-				};
-			}
-		}
-	}
-
-	// compaction sub-object.
-	if (obj.compaction !== undefined) {
-		if (typeof obj.compaction !== "object" || obj.compaction === null) {
-			warn(warnings, '"compaction" must be an object.');
-		} else {
-			const c = obj.compaction as Record<string, unknown>;
-			const ccfg: {
-				enabled?: boolean;
-				reserveTokens?: number;
-				keepRecentTokens?: number;
-			} = {};
-			for (const key of Object.keys(c)) {
-				if (!COMPACTION_KEYS.has(key)) {
-					warn(warnings, `Unknown compaction key: "${key}".`);
-				}
-			}
-			const ce = configBool(c.enabled);
-			if (ce !== undefined) ccfg.enabled = ce;
-			const crt = configNumber(c.reserveTokens);
-			if (crt !== undefined && crt > 0) ccfg.reserveTokens = crt;
-			const krt = configNumber(c.keepRecentTokens);
-			if (krt !== undefined && krt > 0) ccfg.keepRecentTokens = krt;
-			if (Object.keys(ccfg).length > 0) cfg.compaction = ccfg;
-		}
-	}
-
-	// truncation sub-object: universal output/result size caps.
-	if (obj.truncation !== undefined) {
-		if (typeof obj.truncation !== "object" || obj.truncation === null) {
-			warn(warnings, '"truncation" must be an object.');
-		} else {
-			const t = obj.truncation as Record<string, unknown>;
-			const tcfg: TruncationConfig = {};
-			for (const key of Object.keys(t)) {
-				if (!TRUNCATION_KEYS.has(key)) {
-					warn(warnings, `Unknown truncation key: "${key}".`);
-				}
-			}
-			for (const key of [
-				"toolResultMaxChars",
-				"maxLines",
-				"grepLineMaxChars",
-				"subagentResultMaxChars",
-				"compactionSummaryMaxChars",
-				"transcriptMessageMaxChars",
-			] as const) {
-				const n = configNumber(t[key]);
-				if (n !== undefined) {
-					if (n <= 0) {
-						warn(
-							warnings,
-							`"truncation.${key}" must be > 0, got ${n}. Ignored.`,
-						);
-					} else {
-						tcfg[key] = n;
-					}
-				}
-			}
-			if (t.microCompactMaxChars !== undefined) {
-				if (
-					typeof t.microCompactMaxChars !== "object" ||
-					t.microCompactMaxChars === null
-				) {
-					warn(
-						warnings,
-						'"truncation.microCompactMaxChars" must be an object.',
-					);
-				} else {
-					const m = t.microCompactMaxChars as Record<string, unknown>;
-					const mcfg: NonNullable<TruncationConfig["microCompactMaxChars"]> =
-						{};
-					for (const key of Object.keys(m)) {
-						if (!MICRO_COMPACT_MAX_CHARS_KEYS.has(key)) {
-							warn(
-								warnings,
-								`Unknown truncation.microCompactMaxChars key: "${key}".`,
-							);
-						}
-					}
-					for (const key of ["tool", "assistant", "default"] as const) {
-						const n = configNumber(m[key]);
-						if (n !== undefined) {
-							if (n <= 0) {
-								warn(
-									warnings,
-									`"truncation.microCompactMaxChars.${key}" must be > 0, got ${n}. Ignored.`,
-								);
-							} else {
-								mcfg[key] = n;
-							}
-						}
-					}
-					if (Object.keys(mcfg).length > 0) tcfg.microCompactMaxChars = mcfg;
-				}
-			}
-			if (Object.keys(tcfg).length > 0) cfg.truncation = tcfg;
-		}
-	}
-	// tools sub-object.
-	if (obj.tools !== undefined) {
-		if (typeof obj.tools !== "object" || obj.tools === null) {
-			warn(warnings, '"tools" must be an object.');
-		} else {
-			const t = obj.tools as Record<string, unknown>;
-			const tcfg: { xdev?: boolean } = {};
-			for (const key of Object.keys(t)) {
-				if (!TOOLS_KEYS.has(key)) {
-					warn(warnings, `Unknown tools key: "${key}".`);
-				}
-			}
-			const xv = configBool(t.xdev);
-			if (xv !== undefined) tcfg.xdev = xv;
-			if (Object.keys(tcfg).length > 0) cfg.tools = tcfg;
-		}
-	}
-	// MCP fields (passthrough, but warn on unknown sub-keys).
+	// MCP fields (passthrough, no sub-key validation).
 	if (obj.mcp !== undefined && typeof obj.mcp === "object") {
 		cfg.mcp = obj.mcp as Record<string, unknown>;
 	}
@@ -733,63 +530,6 @@ export function validateConfig(
 		}
 	}
 
-	// webSearch sub-object.
-	if (obj.webSearch !== undefined) {
-		if (typeof obj.webSearch !== "object" || obj.webSearch === null) {
-			warn(warnings, '"webSearch" must be an object.');
-		} else {
-			const ws = obj.webSearch as Record<string, unknown>;
-			const wscfg: NonNullable<LogicianTuiConfig["webSearch"]> = {};
-			for (const key of Object.keys(ws)) {
-				if (!WEB_SEARCH_KEYS.has(key)) {
-					warn(warnings, `Unknown webSearch key: "${key}".`);
-				}
-			}
-			if (ws.baseUrl !== undefined) {
-				if (!isValidUrl(ws.baseUrl)) {
-					warn(warnings, '"webSearch.baseUrl" must be a valid http/https URL.');
-				} else {
-					wscfg.baseUrl = configString(ws.baseUrl);
-				}
-			}
-			if (ws.maxResults !== undefined) {
-				const mr = configNumber(ws.maxResults);
-				if (mr !== undefined && mr > 0 && mr <= 100) {
-					wscfg.maxResults = mr;
-				} else {
-					warn(warnings, `"webSearch.maxResults" must be 1–100, got: ${mr}.`);
-				}
-			}
-			cfg.webSearch = Object.keys(wscfg).length > 0 ? wscfg : undefined;
-		}
-	}
-
-	// permissions sub-object.
-	if (obj.permissions !== undefined) {
-		if (typeof obj.permissions !== "object" || obj.permissions === null) {
-			warn(warnings, '"permissions" must be an object.');
-		} else {
-			const perms = obj.permissions as Record<string, unknown>;
-			const percfg: NonNullable<LogicianTuiConfig["permissions"]> = {};
-			for (const key of Object.keys(perms)) {
-				if (!PERMISSIONS_KEYS.has(key)) {
-					warn(warnings, `Unknown permissions key: "${key}".`);
-				}
-			}
-			if (Array.isArray(perms.allow)) {
-				percfg.allow = perms.allow.filter(
-					(v): v is string => typeof v === "string" && v.trim().length > 0,
-				);
-			}
-			if (Array.isArray(perms.deny)) {
-				percfg.deny = perms.deny.filter(
-					(v): v is string => typeof v === "string" && v.trim().length > 0,
-				);
-			}
-			cfg.permissions = Object.keys(percfg).length > 0 ? percfg : undefined;
-		}
-	}
-
 	// simpleTools: explicit list of tool names that render as simple one-liners.
 	if (obj.simpleTools !== undefined) {
 		if (Array.isArray(obj.simpleTools)) {
@@ -804,6 +544,7 @@ export function validateConfig(
 			warn(warnings, '"simpleTools" must be an array of strings.');
 		}
 	}
+
 	// Strip undefined values so the returned config only contains set fields.
 	return Object.fromEntries(
 		Object.entries(cfg).filter(([, v]) => v !== undefined),

@@ -35,6 +35,7 @@ function loadLogicianConfigFile(configPath: string): ResolvedLogicianConfig {
 		if (raw && typeof raw === "object") {
 			return {
 				path: configPath,
+				raw: raw as Record<string, unknown>,
 				config: validateConfig(raw, warnings),
 				warnings,
 			};

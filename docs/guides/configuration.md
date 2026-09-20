@@ -171,5 +171,9 @@ Configuration is resolved in this order (highest priority first):
 5. Built-in defaults
 
 Run `logician doctor --json` to inspect the selected config path, validation
-warnings, and effective backend, permission, MCP, and diagnostics settings. The
-doctor is read-only and does not connect to the model or MCP servers.
+warnings, and effective backend, permission, MCP, and diagnostics settings.
+The report also includes a config precedence table (`config.provenance`)
+attributing every key you set to the layer that supplied its value
+(`global`, `project`, or `env`), which is the fastest way to find out where
+a surprising value comes from. The doctor is read-only and does not connect
+to the model or MCP servers.

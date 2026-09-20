@@ -448,7 +448,11 @@ void test("validateConfig validates webSearch.baseUrl and clamps maxResults rang
 	assert.ok(
 		warnings.some(w => w.includes('"webSearch.baseUrl" must be a valid')),
 	);
-	assert.ok(warnings.some(w => w.includes('"webSearch.maxResults" must be 1')));
+	assert.ok(
+		warnings.some(w =>
+			w.includes('"webSearch.maxResults" must be >= 1 and <= 100'),
+		),
+	);
 });
 
 void test("validateConfig accepts a memoriam SDK worker block", () => {

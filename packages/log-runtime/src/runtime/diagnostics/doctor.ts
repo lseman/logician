@@ -4,6 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { loadSkills } from "../../capabilities/skills/loader.ts";
 import { getToolPath } from "../../capabilities/tools/external-tools.ts";
+import {
+	type ConfigProvenance,
+	formatConfigProvenance,
+} from "../configuration/config-provenance.ts";
 import { resolveRuntimeConfig } from "../configuration/runtime-config.ts";
 import { inspectNative } from "./native.ts";
 
@@ -21,6 +25,7 @@ export interface DoctorReport {
 		path: string | null;
 		valid: boolean;
 		warnings: string[];
+		provenance: ConfigProvenance;
 		error?: string;
 	};
 	backend: { baseUrl: string; model: string | null; probed: false };
@@ -140,6 +145,7 @@ export async function buildDoctorReport(
 			path: loaded?.configPath ?? null,
 			valid: configError === undefined,
 			warnings: loaded?.warnings ?? [],
+			provenance: loaded?.provenance ?? [],
 			...(configError ? { error: configError } : {}),
 		},
 		backend: {
@@ -239,6 +245,8 @@ export function formatDoctorReport(report: DoctorReport): string {
 	for (const w of report.config.warnings) {
 		lines.push(`    ${dim("Warning: ") + w}`);
 	}
+	lines.push(`    ${dim("config precedence (global < project < env):")}`);
+	lines.push(formatConfigProvenance(report.config.provenance));
 
 	// Backend
 	lines.push(

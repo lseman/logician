@@ -6,6 +6,10 @@ import {
 	type LogicianTuiConfig,
 } from "./config.ts";
 import {
+	buildConfigProvenance,
+	type ConfigProvenance,
+} from "./config-provenance.ts";
+import {
 	loadGlobalLogicianConfig,
 	loadLogicianConfig,
 } from "./config-store.ts";
@@ -15,6 +19,8 @@ export interface ResolvedRuntimeConfig {
 	configPath?: string;
 	warnings: string[];
 	source: LogicianTuiConfig;
+	/** Precedence table: which layer (global/project/env) set each key. */
+	provenance: ConfigProvenance;
 	bridge: AgentBridgeOptions;
 }
 
@@ -99,11 +105,19 @@ export function resolveRuntimeConfig(
 		environment,
 	);
 	const config = envApplied.config as unknown as LogicianTuiConfig;
+	// Precedence table from the raw layer inputs (not the validated
+	// config, which carries injected defaults).
+	const provenance = buildConfigProvenance({
+		global: global.raw,
+		project: project?.raw,
+		env: envApplied.applied,
+	});
 
 	return {
 		configPath: loaded.path,
 		warnings: [...loaded.warnings, ...envApplied.warnings],
 		source: config,
+		provenance,
 		bridge: {
 			configPath: loaded.path,
 			baseUrl:
