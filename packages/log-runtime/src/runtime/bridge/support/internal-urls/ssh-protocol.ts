@@ -1,9 +1,13 @@
 // ── ssh:// protocol handler ────────────────────────────────────────────────────
-// Reads files and lists directories on remote hosts via ssh/scp.
+// Reads files, lists directories, and writes files on remote hosts via ssh/scp.
 // URL forms:
 //   ssh://                              — lists configured/known hosts
 //   ssh://<host>/path/to/file           — reads a file on remote host
 //   ssh://<host>/path/to/dir/           — lists directory contents
+//
+// Write: byte-exact remote file write (staged through a temp in the destination
+// directory; in-place overwrite preserves inode and permission bits, new paths
+// commit by atomic rename). Directories, FIFOs, sockets, and devices are refused.
 //
 // Host resolution:
 //   1. ~/.logician/ssh.json (if present) — named host entries
@@ -14,6 +18,7 @@
 // Max file size: 1 MiB for inline reading.
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -24,6 +29,7 @@ import type {
 	ProtocolHandler,
 	ResolveContext,
 	UrlCompletion,
+	WriteContext,
 } from "./types";
 
 const SSH_TEXT_MAX_BYTES = 1 * 1024 * 1024;
@@ -83,11 +89,18 @@ async function loadConfiguredHosts(): Promise<SshHostEntry[]> {
 	}
 }
 
-/** Execute a command via spawn, returning { stdout, stderr, code }. */
+/**
+ * Execute a command via spawn, returning { stdout, stderr, code }.
+ * When `stdin` is given it is piped to the child (used by the staged write);
+ * the child's stdin is always closed so remote commands that read stdin
+ * (e.g. `cat`) cannot hang on an open pipe.
+ */
 function execSsh(
 	command: string,
 	args: string[],
 	timeoutMs: number = 30_000,
+	stdin?: Buffer,
+	signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
 	const { promise, resolve, reject } = Promise.withResolvers<{
 		stdout: string;
@@ -98,13 +111,26 @@ function execSsh(
 		timeout: timeoutMs,
 		stdio: ["pipe", "pipe", "pipe"],
 		shell: false,
+		...(signal ? { signal } : {}),
 	});
 	const stdoutChunks: Buffer[] = [];
 	const stderrChunks: Buffer[] = [];
 	proc.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
 	proc.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+	// A child killed by the timeout or an aborted signal exits with code null
+	// and no output of its own; give the caller a readable reason.
+	const noteKill = () => {
+		if (stdoutChunks.length === 0 && stderrChunks.length === 0) {
+			stderrChunks.push(Buffer.from("command timed out or was aborted"));
+		}
+	};
 	proc.on("error", (err: NodeJS.ErrnoException) => {
-		if (err.code === "ETIMEDOUT" || err.code === "SIGTERM") {
+		if (
+			err.code === "ETIMEDOUT" ||
+			err.code === "SIGTERM" ||
+			err.code === "ABORT"
+		) {
+			noteKill();
 			resolve({
 				stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
 				stderr: Buffer.concat(stderrChunks).toString("utf-8"),
@@ -115,12 +141,21 @@ function execSsh(
 		}
 	});
 	proc.on("close", code => {
+		if (code === null) noteKill();
 		resolve({
 			stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
 			stderr: Buffer.concat(stderrChunks).toString("utf-8"),
 			code,
 		});
 	});
+	if (stdin) {
+		// EPIPE is expected when the remote command exits before reading all
+		// input (e.g. it refuses the destination); the exit status carries
+		// the real outcome, so suppress the error and let close resolve it.
+		proc.stdin?.on("error", () => {});
+		proc.stdin?.write(stdin);
+	}
+	proc.stdin?.end();
 	return promise;
 }
 
@@ -162,6 +197,58 @@ function remotePathFromUrl(url: InternalUrl): string {
 	const pathPart = raw.startsWith("/") ? raw.slice(1) : raw;
 	if (!pathPart || pathPart === ".") return ".";
 	return pathPart;
+}
+/** Wrap a POSIX path in single quotes so the remote shell treats it as one word. */
+function quotePosixPath(p: string): string {
+	return `'${p.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Write bytes to a remote file byte-exact. Stdin is always staged first into
+ * a uniquely named temp in the destination directory (so the remote never
+ * blocks on an unread pipe and a dropped connection lands in the temp, never
+ * the destination). The destination then dictates the commit:
+ *  - a directory — or a symlink to one, since the `-d` test follows links — is
+ *    refused (a plain `mv tmp dir` would move the temp INTO it).
+ *  - an existing non-symlink regular file is rewritten IN PLACE from the
+ *    staged temp, preserving its inode and therefore its ordinary permission
+ *    bits (a `0600` secret stays `0600` on overwrite), ACLs, xattrs, and
+ *    hardlinks. The setuid/setgid bits may be cleared by the write (per POSIX).
+ *  - an existing special file (FIFO/socket/device) is refused, not replaced.
+ *  - anything else (a new path, a symlink to a non-directory, a dangling
+ *    symlink) is committed with an atomic rename, which REPLACES a symlink
+ *    with a regular file rather than writing through it.
+ * The EXIT trap removes the staged temp on every exit path.
+ */
+async function writeRemoteFile(
+	target: SshTarget,
+	remotePath: string,
+	content: Buffer,
+	signal?: AbortSignal,
+): Promise<void> {
+	const dest = quotePosixPath(remotePath);
+	const tmp = quotePosixPath(`${remotePath}.logician-tmp.${randomUUID()}`);
+	const command =
+		`t=${tmp}; trap 'rm -f -- "$t"' 0; ` +
+		`mkdir -p -- "$(dirname "$t")" && ` +
+		`cat > "$t" && { ` +
+		`if [ -d ${dest} ]; then echo 'ssh://: destination is a directory' >&2; exit 1; ` +
+		`elif [ -f ${dest} ] && [ ! -L ${dest} ]; then cat "$t" > ${dest} || exit 1; ` +
+		`elif [ -e ${dest} ] && [ ! -L ${dest} ]; then echo 'ssh://: destination is a special file (not a regular file)' >&2; exit 1; ` +
+		`else mv "$t" ${dest}; fi; ` +
+		`}`;
+	const { stderr, code } = await execSsh(
+		"ssh",
+		buildSshArgs(target, command),
+		30_000,
+		content,
+		signal,
+	);
+	if (code !== 0) {
+		throw new Error(
+			`ssh://: write to ${remotePath} failed: ${stderr.trim() || `exit ${code}`}`,
+		);
+	}
 }
 
 /** SSH alone interprets user, host and port in a resource-link authority. */
@@ -299,6 +386,43 @@ export class SshProtocolHandler implements ProtocolHandler {
 			};
 		}
 
+		// Stat before transferring: fail fast when the target is missing or not
+		// a regular file (FIFOs and devices would hang the transfer) and skip
+		// oversized files without downloading them.
+		const {
+			stdout: statOut,
+			stderr: statErr,
+			code: statCode,
+		} = await execSsh(
+			"ssh",
+			buildSshArgs(
+				target,
+				`test -f "${remotePath}" && wc -c < "${remotePath}"`,
+			),
+		);
+		if (statCode !== 0) {
+			throw new Error(
+				`ssh://: not a readable regular file: ${remotePath}${statErr ? ` — ${statErr.trim()}` : ""}`,
+			);
+		}
+		const remoteSize = Number.parseInt(statOut.trim(), 10);
+		if (!Number.isFinite(remoteSize) || remoteSize < 0) {
+			throw new Error(`ssh://: could not determine size of ${remotePath}`);
+		}
+		if (remoteSize > SSH_TEXT_MAX_BYTES) {
+			throw new Error(
+				`ssh://: ${remotePath} is ${remoteSize} bytes, exceeds ${SSH_TEXT_MAX_BYTES / 1024 / 1024} MiB limit`,
+			);
+		}
+		if (remoteSize === 0) {
+			return {
+				url: url.href,
+				content: "",
+				contentType: contentTypeFor(remotePath),
+				size: 0,
+			};
+		}
+
 		// File read via scp
 		const { stdout, stderr, code } = await execSsh(
 			"scp",
@@ -306,9 +430,6 @@ export class SshProtocolHandler implements ProtocolHandler {
 		);
 		if (code !== 0) {
 			throw new Error(`ssh://: ${stderr || `scp failed (exit ${code})`}`);
-		}
-		if (stdout.length === 0) {
-			throw new Error(`ssh://: empty file — ${remotePath}`);
 		}
 
 		// Check for binary content
@@ -351,5 +472,33 @@ export class SshProtocolHandler implements ProtocolHandler {
 				value: encodeURIComponent(host.name),
 				description: `${host.name} — ${hostAddress(host)}`,
 			}));
+	}
+
+	/**
+	 * Byte-exact remote write. Stages stdin into a temp in the destination
+	 * directory, then commits in place (existing regular file — preserves
+	 * inode and permission bits) or by atomic rename (new path / symlink).
+	 * Refuses directories and special files; see writeRemoteFile.
+	 */
+	async write(
+		url: InternalUrl,
+		content: string,
+		context?: WriteContext,
+	): Promise<void> {
+		context?.signal?.throwIfAborted();
+		const remotePath = remotePathFromUrl(url);
+		if (remotePath.endsWith("/")) {
+			throw new Error(
+				"ssh:// write requires a file path, not a directory (remove the trailing '/')",
+			);
+		}
+		const target = await resolveTarget(url);
+		await writeRemoteFile(
+			target,
+			remotePath,
+			Buffer.from(content, "utf-8"),
+			context?.signal,
+		);
+		context?.signal?.throwIfAborted();
 	}
 }

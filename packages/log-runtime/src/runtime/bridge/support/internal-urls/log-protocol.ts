@@ -51,11 +51,6 @@ function formatDirectoryListing(
 	return `# ${url.pathname === "/" ? "Docs" : url.pathname.slice(1)}\n\n${lines}\n`;
 }
 
-/** Format the root index as markdown with categories. */
-function formatIndex(_cwd: string): string {
-	return `# Logician Docs\n\nBrowse available documentation with \`log://<path>\`.\n\nRoot listing: \`log://\`\nSubdirectories: \`log://guides/\`, \`log://architecture/\`, \`log://reference/\`, \`log://tutorials/\`, \`log://design/\`\n`;
-}
-
 export class LogProtocolHandler implements ProtocolHandler {
 	readonly scheme = "log";
 	readonly immutable = true;
@@ -73,7 +68,7 @@ export class LogProtocolHandler implements ProtocolHandler {
 		if (!hostname || (hostname === "log" && pathname === "/")) {
 			return {
 				url: url.href,
-				content: formatIndex(cwd),
+				content: await this.#formatIndex(docsDir),
 				contentType: "text/markdown",
 			};
 		}
@@ -109,6 +104,16 @@ export class LogProtocolHandler implements ProtocolHandler {
 				"code" in err &&
 				(err as { code: string }).code === "ENOENT"
 			) {
+				// Extension-less docs convention: log://guides/foo → guides/foo.md
+				const mdFallback = `${resolvedAbs}.md`;
+				try {
+					const mdStat = await fs.stat(mdFallback);
+					if (mdStat.isFile()) {
+						return this.#readFile(mdFallback, url);
+					}
+				} catch {
+					// no .md fallback — fall through to not-found below
+				}
 				// Provide helpful listing of available docs
 				const available = await this.#listAvailable(docsDir, url);
 				throw new Error(`Not found: ${url.href}\n${available}`);
@@ -209,5 +214,22 @@ export class LogProtocolHandler implements ProtocolHandler {
 		} catch {
 			return [];
 		}
+	}
+
+	/** Format the root index from the actual docs/ contents. */
+	async #formatIndex(docsDir: string): Promise<string> {
+		try {
+			await fs.access(docsDir);
+		} catch {
+			return `# Logician Docs\n\nNo \`docs/\` directory found under \`${docsDir}\`.\n`;
+		}
+		const entries = await this.#listEntries(docsDir);
+		if (entries.length === 0) {
+			return `# Logician Docs\n\nThe \`docs/\` directory is empty.\n`;
+		}
+		const lines = entries
+			.map(e => `- \`${e.name}${e.isDir ? "/" : ""}\``)
+			.join("\n");
+		return `# Logician Docs\n\nBrowse available documentation with \`log://<path>\`.\n\nTop-level entries under docs/:\n\n${lines}\n`;
 	}
 }

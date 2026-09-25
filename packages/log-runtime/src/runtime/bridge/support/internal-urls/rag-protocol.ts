@@ -19,6 +19,7 @@ import type {
 	InternalResource,
 	InternalUrl,
 	ProtocolHandler,
+	ResolveContext,
 	WriteContext,
 } from "./types";
 
@@ -32,20 +33,41 @@ interface JsonArgs {
 
 /** Parse and validate JSON content from a write call. */
 function parseJsonArgs(url: InternalUrl, content: string): JsonArgs {
-	const parsed = JSON.parse(content);
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(content);
+	} catch (err) {
+		throw new Error(
+			`rag://${url.host}: invalid JSON — ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
 		throw new Error(
-			`Invalid JSON for ${url.host}://<action>. Expected an object with {docId, path, query, k}.`,
+			`rag://${url.host}: expected a JSON object with {docId, path, query, k}, got ${Array.isArray(parsed) ? "array" : typeof parsed}.`,
 		);
 	}
 	return parsed as JsonArgs;
+}
+
+/**
+ * Lazily load the RAG pipeline for a cwd. Dynamic import is intentional:
+ * `capabilities/rag` pulls in the full `@logician/log-rag` graph (native
+ * sqlite bindings, transformers.js), which the internal-URL router must not
+ * force onto every process at module-load time.
+ */
+async function loadPipeline(cwd: string) {
+	const { getPipeline } = await import("../../../../capabilities/rag/index.ts");
+	return getPipeline(cwd);
 }
 
 export class RagProtocolHandler implements ProtocolHandler {
 	readonly scheme = "rag";
 	readonly immutable = false;
 
-	async resolve(url: InternalUrl): Promise<InternalResource> {
+	async resolve(
+		url: InternalUrl,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
 		const full = url.pathname === "/" ? url.host : `${url.host}${url.pathname}`;
 
 		// rag:// — show usage help
@@ -71,17 +93,48 @@ export class RagProtocolHandler implements ProtocolHandler {
 
 		// rag://list — list indexed documents
 		if (full === "list") {
-			return {
-				url: url.href,
-				content:
-					"# RAG\n\nUse `write` to operate on indexed documents.\n\nUse `read rag://` for usage help.",
-				contentType: "text/markdown",
-			};
+			return this.#listDocuments(url, context);
 		}
 
 		throw new Error(
 			`Unknown rag:// path: ${full}. Use rag:// for help, rag://list to list documents, or write to search/ingest/delete.`,
 		);
+	}
+
+	/** List indexed document IDs from the RAG store for this cwd. */
+	async #listDocuments(
+		url: InternalUrl,
+		context?: ResolveContext,
+	): Promise<InternalResource> {
+		const cwd = context?.cwd ?? process.cwd();
+		try {
+			const pipeline = await loadPipeline(cwd);
+			const [documentIds, chunkCount] = await Promise.all([
+				pipeline.listDocuments(),
+				pipeline.countChunks(),
+			]);
+			if (documentIds.length === 0) {
+				return {
+					url: url.href,
+					content: [
+						"# RAG",
+						"",
+						"No documents indexed.",
+						'Ingest one with: `write rag://ingest` — JSON: `{"path": "doc.pdf"}`',
+					].join("\n"),
+					contentType: "text/markdown",
+				};
+			}
+			const lines = documentIds.map(id => `- \`${id}\``).join("\n");
+			return {
+				url: url.href,
+				content: `# RAG\n\n${documentIds.length} document(s), ${chunkCount} chunk(s) indexed:\n\n${lines}\n`,
+				contentType: "text/markdown",
+			};
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw new Error(`rag://list failed: ${msg}`);
+		}
 	}
 
 	async write(
@@ -98,10 +151,7 @@ export class RagProtocolHandler implements ProtocolHandler {
 			throw new Error("cwd is required for rag:// operations.");
 		}
 
-		const { getPipeline } = await import(
-			"../../../../capabilities/rag/index.ts"
-		);
-		const pipeline = getPipeline(cwd);
+		const pipeline = await loadPipeline(cwd);
 
 		// rag://search — search indexed documents
 		if (full === "search") {
@@ -110,13 +160,17 @@ export class RagProtocolHandler implements ProtocolHandler {
 			}
 			const k = Number(args.k ?? 5);
 			const results = await pipeline.search(args.query, k);
-			const hits = results.map((h: SearchHit) => ({
-				id: h.chunk.id,
-				documentId: h.chunk.documentId,
-				text: h.chunk.text.slice(0, 500),
-				score: parseFloat(h.score.toFixed(4)),
-				metadata: h.chunk.metadata,
-			}));
+			const hits = results.map((h: SearchHit) => {
+				const truncated = h.chunk.text.length > 500;
+				return {
+					id: h.chunk.id,
+					documentId: h.chunk.documentId,
+					text: h.chunk.text.slice(0, 500),
+					...(truncated ? { truncated: true } : {}),
+					score: parseFloat(h.score.toFixed(4)),
+					metadata: h.chunk.metadata,
+				};
+			});
 			return JSON.stringify(
 				{ query: args.query, results: hits, totalFound: results.length },
 				null,

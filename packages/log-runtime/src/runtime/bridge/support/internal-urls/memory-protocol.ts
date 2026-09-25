@@ -12,6 +12,7 @@ import type {
 	InternalUrl,
 	ProtocolHandler,
 	ResolveContext,
+	UrlCompletion,
 } from "./types";
 
 type MemoryGateway = {
@@ -101,6 +102,49 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		);
 	}
 
+	/**
+	 * Candidates for the token after `memory://`. The static routes are always
+	 * offered; when the gateway is configured, `memory/…` and `observe/…`
+	 * queries are answered with real IDs (observation window: the same 100
+	 * most recent `resolve` scans, so a completed ID is one `observe/<id>` can
+	 * actually fetch).
+	 */
+	async complete(
+		query: string,
+		context?: ResolveContext,
+	): Promise<UrlCompletion[]> {
+		const gateway = context?.memory as MemoryGateway | undefined;
+		const q = query.toLowerCase();
+		const items: UrlCompletion[] = [];
+		for (const [value, description] of [
+			["list", "recent observations"],
+			["memories", "all stored memories"],
+		] as const) {
+			if (q === "" || value.startsWith(q) || q.startsWith(value)) {
+				items.push({ value, description });
+			}
+		}
+		if (!gateway) return items;
+		if (q.startsWith("memory/")) {
+			const memories = await gateway.listMemories();
+			for (const m of memories) {
+				items.push({
+					value: `memory/${m.id}`,
+					description: m.content.slice(0, 80),
+				});
+			}
+		} else if (q.startsWith("observe/")) {
+			const observations = await gateway.listObservations("all", 100);
+			for (const o of observations) {
+				items.push({
+					value: `observe/${o.id}`,
+					description: o.content.slice(0, 80),
+				});
+			}
+		}
+		return items;
+	}
+
 	private async handleList(
 		gateway: MemoryGateway,
 		url: InternalUrl,
@@ -134,17 +178,26 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		id: string,
 		url: InternalUrl,
 	): Promise<InternalResource> {
-		const observations = await gateway.listObservations("all", 100);
-		const obs = observations.find(o => o.id === id);
-		if (!obs) {
-			throw new Error(`Unknown observation: ${id}`);
+		// The worker protocol only lists by (session, limit) — no get-by-id or
+		// offset. Scan a small window first, then deepen, so recent lookups
+		// stay cheap and older observations remain reachable.
+		const windows = [100, 2000];
+		for (const limit of windows) {
+			const observations = await gateway.listObservations("all", limit);
+			const obs = observations.find(o => o.id === id);
+			if (obs) {
+				return {
+					url: url.href,
+					content: obs.content,
+					contentType: "text/plain",
+					sourcePath: `memory://observe/${id}`,
+				};
+			}
 		}
-		return {
-			url: url.href,
-			content: obs.content,
-			contentType: "text/plain",
-			sourcePath: `memory://observe/${id}`,
-		};
+		const maxWindow = windows[windows.length - 1];
+		throw new Error(
+			`Unknown observation: ${id} (not found in the most recent ${maxWindow} observations). Older observations may have been pruned.`,
+		);
 	}
 
 	private async handleMemory(

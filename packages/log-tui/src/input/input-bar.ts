@@ -27,6 +27,30 @@ function isArrow(data: string, direction: "A" | "B" | "C" | "D"): boolean {
 		new RegExp(`^\\x1b\\[(?:1(?:;\\d+)?)?${direction}$`).test(data)
 	);
 }
+/**
+ * Find the last `scheme://` marker in `before` that starts at a token
+ * boundary (line start, or whitespace/quote/paren) and whose remainder to
+ * the end of `before` holds no whitespace. Schemes are tried in order; the
+ * marker position, not the scheme length, decides the token start.
+ */
+function findUrlToken(
+	before: string,
+	schemes: string[],
+): { scheme: string; index: number } | null {
+	for (const scheme of schemes) {
+		const marker = `${scheme.toLowerCase()}://`;
+		let idx = before.lastIndexOf(marker);
+		while (idx !== -1) {
+			const boundaryOk = idx === 0 || /[\s"'`(<=]/.test(before[idx - 1]);
+			if (boundaryOk && !/\s/.test(before.slice(idx + marker.length))) {
+				return { scheme: scheme.toLowerCase(), index: idx };
+			}
+			if (idx === 0) break;
+			idx = before.lastIndexOf(marker, idx - 1);
+		}
+	}
+	return null;
+}
 
 // ── Input bar ─────────────────────────────────────────────────────────────────
 
@@ -206,6 +230,39 @@ export class InputBar implements Component, Focusable {
 		if (idx === -1) return;
 		this._pushUndo();
 		const newBefore = `${before.slice(0, idx)}skill://${name} `;
+		this.value = newBefore + after;
+		this.cursor = this._graphemeCount(newBefore);
+		this._invalidate();
+	}
+
+	// ── Internal URL token detection ────────────────────────────────────────
+
+	/**
+	 * The "scheme://partial" token immediately before the cursor, for any of
+	 * the given schemes. The scheme must start at a token boundary (line
+	 * start, or whitespace/quote/paren) and the remainder to the cursor must
+	 * hold no whitespace. Returns null when the cursor is not inside an
+	 * active URL token.
+	 */
+	getActiveUrlQuery(
+		schemes: string[],
+	): { scheme: string; token: string } | null {
+		const segs = this._segments();
+		const before = segs.slice(0, this.cursor).join("");
+		const found = findUrlToken(before, schemes);
+		if (!found) return null;
+		return { scheme: found.scheme, token: before.slice(found.index) };
+	}
+
+	/** Replace the active URL token at the cursor with `fullUrl` plus a trailing space. */
+	insertUrl(schemes: string[], fullUrl: string): void {
+		const segs = this._segments();
+		const before = segs.slice(0, this.cursor).join("");
+		const after = segs.slice(this.cursor).join("");
+		const found = findUrlToken(before, schemes);
+		if (!found) return;
+		this._pushUndo();
+		const newBefore = `${before.slice(0, found.index)}${fullUrl} `;
 		this.value = newBefore + after;
 		this.cursor = this._graphemeCount(newBefore);
 		this._invalidate();

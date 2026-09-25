@@ -111,13 +111,17 @@ export const rag_search: Tool = {
 			const pipeline = getPipeline(requireCwd(ctx));
 			const k = Number(args.k ?? 5);
 			const results = await pipeline.search(query, k);
-			const hits = results.map((h: SearchHit) => ({
-				id: h.chunk.id,
-				documentId: h.chunk.documentId,
-				text: h.chunk.text.slice(0, 500),
-				score: parseFloat(h.score.toFixed(4)),
-				metadata: h.chunk.metadata,
-			}));
+			const hits = results.map((h: SearchHit) => {
+				const truncated = h.chunk.text.length > 500;
+				return {
+					id: h.chunk.id,
+					documentId: h.chunk.documentId,
+					text: h.chunk.text.slice(0, 500),
+					...(truncated ? { truncated: true } : {}),
+					score: parseFloat(h.score.toFixed(4)),
+					metadata: h.chunk.metadata,
+				};
+			});
 
 			return {
 				content: JSON.stringify(

@@ -12,13 +12,12 @@ import {
 	createSpawnAgentTool,
 	createSubagentConcurrencyLimiter,
 } from "../../capabilities/delegation/definitions.ts";
-import { createHubMessageBus } from "../../capabilities/delegation/hub.ts";
 import {
-	hubInboxTool,
-	hubJobsTool,
-	hubSendTool,
-	hubWaitTool,
-} from "../../capabilities/delegation/hub-tools.ts";
+	createHubMessageBus,
+	type HubMessageBus,
+} from "../../capabilities/delegation/hub.ts";
+import { createHubTool } from "../../capabilities/hub/hub-tool.ts";
+import { defaultHub } from "../../capabilities/hub/process-manager.ts";
 
 // ── Fake backend ──────────────────────────────────────────────────────────────
 
@@ -75,7 +74,7 @@ const baseConfig: AgentConfig = {
 
 // ── Helper: build minimal spawn_agents deps with a hub ────────────────────────
 
-function makeDeps(hub: ReturnType<typeof createHubMessageBus>) {
+function makeDeps(hub: HubMessageBus) {
 	return {
 		config: () => ({ ...baseConfig, tools: [] }),
 		backend: new FakeBackend([]),
@@ -85,6 +84,11 @@ function makeDeps(hub: ReturnType<typeof createHubMessageBus>) {
 		hub,
 	};
 }
+
+// Builds a unified hub tool bound to the shared process manager + a message bus.
+// Used by every bus-dependent test so the shared process manager is consistent.
+const makeHubTool = (agentId: string, hub: HubMessageBus) =>
+	createHubTool({ manager: defaultHub, bus: hub, agentId });
 
 // ── Hub registration via spawn_agents ─────────────────────────────────────────
 
@@ -139,24 +143,44 @@ test("hub.complete is called with correct status on subagent exit", async () => 
 
 // ── Hub tools availability ────────────────────────────────────────────────────
 
-test("hub tools have correct names and signatures", async () => {
+test("unified hub tool exposes process and coordination ops", async () => {
 	const hub = createHubMessageBus();
-	const hubTools = [
-		hubSendTool({ hub, agentId: "test" }),
-		hubWaitTool({ hub, agentId: "test" }),
-		hubJobsTool({ hub, agentId: "test" }),
-		hubInboxTool({ hub, agentId: "test" }),
-	];
 
-	assert.equal(hubTools[0].name, "hub_send");
-	assert.equal(hubTools[1].name, "hub_wait");
-	assert.equal(hubTools[2].name, "hub_jobs");
-	assert.equal(hubTools[3].name, "hub_inbox");
+	const withBus = createHubTool({
+		manager: defaultHub,
+		bus: hub,
+		agentId: "test",
+	});
+	assert.equal(withBus.name, "hub");
+	assert.ok(withBus.parameters, "hub has parameters");
+	assert.ok(typeof withBus.execute === "function", "hub has execute");
 
-	for (const t of hubTools) {
-		assert.ok(t.parameters, `${t.name} has parameters`);
-		assert.ok(typeof t.execute === "function", `${t.name} has execute`);
-	}
+	const withBusParams = withBus.parameters as {
+		properties: { op: { enum: string[] } };
+	}; // Tool.parameters is an untyped schema; the op enum is what I set.
+	const ops = withBusParams.properties.op.enum;
+	assert.ok(ops.includes("start"));
+	assert.ok(ops.includes("ps"));
+	assert.ok(ops.includes("logs"));
+	assert.ok(ops.includes("stop"));
+	assert.ok(ops.includes("restart"));
+	assert.ok(ops.includes("send"));
+	assert.ok(ops.includes("wait"));
+	assert.ok(ops.includes("describe"));
+	// Coordination ops only exist when a message bus is wired in.
+	assert.ok(ops.includes("jobs"));
+	assert.ok(ops.includes("inbox"));
+	assert.ok(!ops.includes("hub_send"), "no legacy tool name");
+
+	const withoutBus = createHubTool({ manager: defaultHub });
+	const withoutBusParams = withoutBus.parameters as {
+		properties: { op: { enum: string[] } };
+	}; // Tool.parameters is an untyped schema; the op enum is what I set.
+	const opsNoBus = withoutBusParams.properties.op.enum;
+	assert.ok(opsNoBus.includes("start"));
+	assert.ok(opsNoBus.includes("ps"));
+	assert.ok(!opsNoBus.includes("jobs"), "no jobs without a bus");
+	assert.ok(!opsNoBus.includes("inbox"), "no inbox without a bus");
 });
 
 // ── Hub send / receive ────────────────────────────────────────────────────────
@@ -179,14 +203,17 @@ test("hub-send delivers messages to another agent", async () => {
 		status: "running",
 	});
 
-	const sendTool = hubSendTool({ hub, agentId: senderId });
+	const sendTool = makeHubTool(senderId, hub);
 	const result = await sendTool.execute(
-		{ to: receiverId, body: "hello from sender" },
+		{ op: "send", to: receiverId, body: "hello from sender" },
 		{ onUpdate: () => {} },
 	);
 
 	if (typeof result === "string") {
-		assert.equal(result, "Message sent.");
+		assert.ok(
+			result.includes("Message sent"),
+			`Expected "Message sent": ${result}`,
+		);
 	} else {
 		assert.ok(
 			result.content.includes("Message sent"),
@@ -194,8 +221,11 @@ test("hub-send delivers messages to another agent", async () => {
 		);
 	}
 
-	const inboxTool = hubInboxTool({ hub, agentId: receiverId });
-	const inboxResult = await inboxTool.execute({}, { onUpdate: () => {} });
+	const inboxTool = makeHubTool(receiverId, hub);
+	const inboxResult = await inboxTool.execute(
+		{ op: "inbox" },
+		{ onUpdate: () => {} },
+	);
 
 	if (typeof inboxResult === "string") {
 		assert.ok(
@@ -222,8 +252,8 @@ test("hub-jobs returns registered agents", async () => {
 		status: "running",
 	});
 
-	const jobsTool = hubJobsTool({ hub, agentId: "test" });
-	const result = await jobsTool.execute({}, { onUpdate: () => {} });
+	const jobsTool = makeHubTool("test", hub);
+	const result = await jobsTool.execute({ op: "jobs" }, { onUpdate: () => {} });
 
 	if (typeof result === "string") {
 		assert.ok(
@@ -251,10 +281,10 @@ test("hub-wait returns messages after target completes", async () => {
 		status: "running",
 	});
 
-	const waitTool = hubWaitTool({ hub, agentId: "waiter" });
+	const waitTool = makeHubTool("waiter", hub);
 	// Wait returns immediately with an empty array when no messages are pending.
 	const result = await waitTool.execute(
-		{ handles: [targetId], timeout_ms: 100 },
+		{ op: "wait", handles: [targetId], timeout_ms: 100 },
 		{ onUpdate: () => {} },
 	);
 
@@ -290,7 +320,9 @@ test("spawn_agent works when hub is present", async () => {
 
 	assert.ok(
 		typeof result !== "string" || !result.includes("Error:"),
-		`spawn_agent should not fail due to hub: ${typeof result === "string" ? result : "structured"}`,
+		`spawn_agent should not fail due to hub: ${
+			typeof result === "string" ? result : "structured"
+		}`,
 	);
 
 	// Hub should have received registration and completion for the spawned agent.

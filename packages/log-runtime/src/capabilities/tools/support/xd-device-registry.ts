@@ -78,6 +78,9 @@ export class XdDeviceRegistry implements ProtocolHandler {
 				"```json",
 				JSON.stringify(tool.parameters, null, 2),
 				"```",
+				...(tool.promptGuidelines?.length
+					? ["", "## Guidelines", ...tool.promptGuidelines.map(g => `- ${g}`)]
+					: []),
 			].join("\n"),
 		};
 	}

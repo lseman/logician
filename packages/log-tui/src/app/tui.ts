@@ -71,6 +71,7 @@ import {
 } from "../overlays/theme-selector.ts";
 import type { ThinkingLevelSelectorAction } from "../overlays/thinking-level-selector.ts";
 import { ThinkingLevelSelectorOverlay } from "../overlays/thinking-level-selector.ts";
+import { UrlPopup } from "../overlays/url-popup.ts";
 import { Flex } from "../rendering/flex.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
 import { Separator } from "../rendering/separator.ts";
@@ -136,6 +137,7 @@ import {
 	setThemeByName as setThemeByNameImpl,
 	updateFileMentionPopup as updateFileMentionPopupImpl,
 	updateSkillPopup as updateSkillPopupImpl,
+	updateUrlPopup as updateUrlPopupImpl,
 } from "./overlay-controllers/index.ts";
 import {
 	autoSaveTurn,
@@ -168,6 +170,7 @@ export class LogicianTUI {
 	slashPopup: SlashPopup;
 	fileMentionPopup: FileMentionPopup;
 	skillPopup: SkillPopup;
+	urlPopup: UrlPopup;
 	choicePopup: ChoicePopup;
 	choicePopupPreview = false;
 	workflowMode: "act" | "plan";
@@ -328,6 +331,7 @@ export class LogicianTUI {
 		this.slashPopup = new SlashPopup();
 		this.fileMentionPopup = new FileMentionPopup();
 		this.skillPopup = new SkillPopup();
+		this.urlPopup = new UrlPopup();
 		this.choicePopup = new ChoicePopup();
 		this.permissionPopup = new PermissionPopup();
 		this.pluginManager = new PluginManagerOverlay();
@@ -632,6 +636,11 @@ export class LogicianTUI {
 			align: "left",
 			maxHeight: 18,
 		});
+		this.tui.showOverlay(this.urlPopup, {
+			anchor: "aboveInput",
+			align: "left",
+			maxHeight: 18,
+		});
 		this.tui.showOverlay(this.mcpManager, {
 			anchor: "aboveInput",
 			align: "left",
@@ -772,6 +781,18 @@ export class LogicianTUI {
 
 	async updateSkillPopup(query: string): Promise<void> {
 		updateSkillPopupImpl(this, query);
+	}
+
+	/** Internal-URL schemes the bridge can complete (skill:// has its own popup). */
+	get urlCompletionSchemes(): string[] {
+		return this.bridge.urlCompletionSchemes();
+	}
+
+	async updateUrlPopup(token: {
+		scheme: string;
+		token: string;
+	}): Promise<void> {
+		await updateUrlPopupImpl(this, token);
 	}
 	openModelSelector(): void {
 		openModelSelectorImpl(this);

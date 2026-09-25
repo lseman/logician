@@ -51,6 +51,10 @@ import {
 import { resolveWebSearchConfig } from "../environment.ts";
 import { ArtifactRegistry } from "./internal-urls/artifact-manager.ts";
 import { createInternalUrlRouter } from "./internal-urls/default-router.ts";
+import type {
+	ResolveContext,
+	UrlCompletion,
+} from "./internal-urls/types.ts";
 import {
 	getProjectPromptDirs,
 	getProjectSkillDirs,
@@ -243,6 +247,25 @@ export class ToolRouter {
 
 	getDefaultTools(): Tool[] {
 		return filterCoreTools(this.defaultTools);
+	}
+
+	// ── Internal URL completion ─────────────────────────────────────────
+
+	/** Schemes whose resource handler supports host/path autocomplete. */
+	internalUrlCompletionSchemes(): string[] {
+		return this.resourceRouter.completionSchemes();
+	}
+
+	/**
+	 * Candidates for a `scheme://<query>` token, delegated to the resource
+	 * router's handler. Returns null when the scheme has no completions.
+	 */
+	async completeInternalUrl(
+		scheme: string,
+		query: string,
+		context?: ResolveContext,
+	): Promise<UrlCompletion[] | null> {
+		return this.resourceRouter.complete(scheme, query, context);
 	}
 
 	private syncDevices(): void {

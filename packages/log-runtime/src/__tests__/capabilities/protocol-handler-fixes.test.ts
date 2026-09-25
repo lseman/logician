@@ -73,6 +73,30 @@ test("memory://list, memory://memories, memory://observe/<id> resolve without th
 	expect(observe.content).toContain("hello observation");
 });
 
+test("memory:// completion offers routes, then real IDs once the gateway is configured", async () => {
+	const handler = new MemoryProtocolHandler();
+	const memory = stubMemoryGateway();
+
+	const bare = await handler.complete("", { memory });
+	expect(bare.map(c => c.value).sort()).toEqual(["list", "memories"]);
+
+	const prefix = await handler.complete("mem", { memory });
+	expect(prefix.map(c => c.value)).toEqual(["memories"]);
+
+	const memories = await handler.complete("memory/", { memory });
+	expect(memories.map(c => c.value)).toEqual(["memory/mem-1"]);
+	expect(memories.find(c => c.value === "memory/mem-1")?.description).toBe(
+		"hello memory",
+	);
+
+	const observations = await handler.complete("observe/obs-", { memory });
+	expect(observations.map(c => c.value)).toEqual(["observe/obs-1"]);
+
+	// Without a gateway only the static routes are reachable.
+	const noGateway = await handler.complete("memory/", undefined);
+	expect(noGateway).toEqual([]);
+});
+
 // ── pr:// / issue:// ────────────────────────────────────────────────────────
 
 function stubGithubClient(

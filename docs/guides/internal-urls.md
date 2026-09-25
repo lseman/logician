@@ -94,12 +94,19 @@ Reads documentation in the workspace `docs/` directory:
 
 ## Remote hosts — `ssh://`
 
-Reads files on remote hosts via SSH/scp:
+Reads and writes files on remote hosts via SSH/scp:
 
 | URL | Action |
 |---|---|
 | `ssh://` | List configured hosts (see `~/.logician/ssh.json`) |
 | `ssh://<host>/path` | Read a remote file |
+| `write ssh://<host>/path` | Write a remote file |
+
+Writes stage to a temporary file on the remote host and move it into place,
+so a failed write never corrupts the target. Existing regular files are
+replaced in place (inode and permission bits preserved); directories and
+special files are refused; symlinks are replaced with regular files rather
+than written through.
 
 ## Skills — `skill://`
 

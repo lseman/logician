@@ -30,7 +30,9 @@ The main transcript is scrollable. Tool activity is rendered as compact cards
 that can be focused and expanded, while longer-lived workflows can open a work
 surface or fullscreen overlay without replacing the conversation. An empty
 session shows project-aware starting actions; typing `/` opens the searchable
-command palette and `@` starts file mention completion.
+command palette, `@` starts file mention completion, and internal resource
+URLs (`skill://`, `memory://`, `local://`, `log://`, `ssh://`) get inline
+completion as you type the token before the cursor.
 
 ## Keybindings
 

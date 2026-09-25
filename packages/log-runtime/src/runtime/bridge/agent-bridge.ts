@@ -1221,28 +1221,71 @@ export class AgentRuntime {
 				content: skill.content,
 				path: skill.filePath,
 			})),
-			memory: this.memoriamEnabled
-				? {
-						listObservations: (sessionId: string, limit: number) =>
-							this.memory
-								.listObservations(sessionId, limit)
-								.then((results: unknown[]) =>
-									results.map(r => ({
-										id: String((r as Record<string, unknown>).id ?? ""),
-										content: String(
-											(r as Record<string, unknown>).content ?? "",
-										),
-									})),
-								),
-						listMemories: (query?: Record<string, unknown>) =>
-							this.memory.listMemories(query).then((results: unknown[]) =>
-								results.map(r => ({
-									id: String((r as Record<string, unknown>).id ?? ""),
-									content: String((r as Record<string, unknown>).content ?? ""),
-								})),
+			memory: this.memoryToolContext(),
+		});
+	}
+
+	/**
+	 * Memory tool context shared by the tool registry and URL completion:
+	 * the memoriam worker's observation/memory listings, normalized to the
+	 * plain { id, content } shape the internal-URL handlers consume.
+	 */
+	private memoryToolContext(): {
+		listObservations: (
+			sessionId: string,
+			limit: number,
+		) => Promise<Array<{ id: string; content: string }>>;
+		listMemories: (
+			query?: Record<string, unknown>,
+		) => Promise<Array<{ id: string; content: string }>>;
+	} | undefined {
+		if (!this.memoriamEnabled) return undefined;
+		return {
+			listObservations: (sessionId: string, limit: number) =>
+				this.memory
+					.listObservations(sessionId, limit)
+					.then((results: unknown[]) =>
+						results.map(r => ({
+							id: String((r as Record<string, unknown>).id ?? ""),
+							content: String(
+								(r as Record<string, unknown>).content ?? "",
 							),
-					}
-				: undefined,
+						})),
+					),
+			listMemories: (query?: Record<string, unknown>) =>
+				this.memory.listMemories(query).then((results: unknown[]) =>
+					results.map(r => ({
+						id: String((r as Record<string, unknown>).id ?? ""),
+						content: String(
+							(r as Record<string, unknown>).content ?? "",
+						),
+					})),
+				),
+		};
+	}
+
+	/** Internal-URL schemes whose handlers support host/path completion in the input bar. */
+	urlCompletionSchemes(): string[] {
+		return this.toolRouter.internalUrlCompletionSchemes();
+	}
+
+	/**
+	 * Candidates for a `scheme://<query>` token typed in the input bar, using
+	 * the same skills/memory context the tools resolve URLs with. Returns
+	 * null when the scheme has no completions.
+	 */
+	async completeInternalUrl(
+		scheme: string,
+		query: string,
+	): Promise<Array<{ value: string; description?: string }> | null> {
+		return this.toolRouter.completeInternalUrl(scheme, query, {
+			cwd: this.config.cwd,
+			skills: this.toolRouter.getLoadedSkills().map(skill => ({
+				name: skill.name,
+				content: skill.content,
+				path: skill.filePath,
+			})),
+			memory: this.memoryToolContext(),
 		});
 	}
 

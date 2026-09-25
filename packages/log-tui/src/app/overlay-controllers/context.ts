@@ -15,6 +15,7 @@ import type { SettingsSelectorOverlay } from "../../overlays/settings-overlay.ts
 import type { SkillPopup } from "../../overlays/skill-popup.ts";
 import type { ThemeSelectorOverlay } from "../../overlays/theme-selector.ts";
 import type { ThinkingLevelSelectorOverlay } from "../../overlays/thinking-level-selector.ts";
+import type { UrlPopup } from "../../overlays/url-popup.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { StatusBar } from "../../status/status-bar.ts";
 import type { TuiHandle } from "../../terminal/core.ts";
@@ -42,6 +43,8 @@ export interface OverlayHandlersCtx {
 	sessionTree: SessionTreeOverlay;
 	fileMentionPopup: FileMentionPopup;
 	skillPopup: SkillPopup;
+	urlPopup: UrlPopup;
+	urlCompletionSchemes: string[];
 	fileMentionListedCwd: string | null;
 	fileMentionListing: Promise<string[]> | null;
 	modelSelector: InstanceType<typeof ModelSelectorOverlay>;

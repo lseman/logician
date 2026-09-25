@@ -1,10 +1,10 @@
-// ── '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local' protocol handler ────────────────────────────────────────────────
+// ── local:// protocol handler ────────────────────────────────────────────────
 // Resolves session-local artifacts (JSONL journals, session meta, etc.).
 // URL forms:
-//   '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local'<path>     — reads a file under the session artifacts directory
-//   '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local/0'          — reads artifact by numeric ID
-//   '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local/0:10-30'    — artifact with line-range selector
-//   '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local/0:raw'      — artifact verbatim
+//   local://<path>     — reads a file under the session artifacts directory
+//   local:///0          — reads artifact by numeric ID
+//   local:///0:10-30    — artifact with line-range selector
+//   local:///0:raw      — artifact verbatim
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -108,18 +108,18 @@ export class LocalProtocolHandler implements ProtocolHandler {
 			context?.allowAllPaths,
 		);
 
-		// '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local' — list available artifacts
+		// local:// — list available artifacts
 		if (!resolved || (url.host === "local" && url.pathname === "/")) {
 			return this.listArtifacts(artifactDir, url);
 		}
 
-		// '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local'<numeric-id> — read artifact by ID (supports selectors)
+		// local://<numeric-id> — read artifact by ID (supports selectors)
 		const { id, selector } = parseIdAndSelector(url);
 		if (id && /^\d+$/.test(id)) {
 			return this.#resolveArtifact(url, id, selector, context);
 		}
 
-		// '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local'<path> — read file under artifacts directory
+		// local://<path> — read file under artifacts directory
 		try {
 			const stat = await fs.stat(resolved);
 			if (stat.isDirectory()) {
@@ -137,7 +137,7 @@ export class LocalProtocolHandler implements ProtocolHandler {
 				}
 				if (stat.size > LOCAL_TEXT_RESOURCE_MAX_BYTES) {
 					throw new Error(
-						`${url.href} is ${formatSize(stat.size)}, exceeding the ${formatSize(LOCAL_TEXT_RESOURCE_MAX_BYTES)} limit for '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local' text resources. Use bash tools to inspect it, or the backing path directly.`,
+						`${url.href} is ${formatSize(stat.size)}, exceeding the ${formatSize(LOCAL_TEXT_RESOURCE_MAX_BYTES)} limit for local:// text resources. Use bash tools to inspect it, or the backing path directly.`,
 					);
 				}
 				const buffer = await fs.readFile(resolved);
@@ -182,7 +182,7 @@ export class LocalProtocolHandler implements ProtocolHandler {
 		);
 		if (!resolved) {
 			throw new Error(
-				`'/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local' write requires a target: '/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local'<name> (got ${url.href})`,
+				`local:// write requires a target: local://<name> (got ${url.href})`,
 			);
 		}
 
@@ -254,7 +254,7 @@ export class LocalProtocolHandler implements ProtocolHandler {
 
 		if (content.length > MAX_ARTIFACT_BYTES) {
 			throw new Error(
-				`'/home/seman/.omp/agent/sessions/-logician/2026-09-14T15-47-18-748Z_01a0a099-f25c-7093-9375-1f584092948f/local'${id} exceeds ${MAX_ARTIFACT_BYTES / 1024 / 1024} MiB limit; use \`read\` with line selectors or the backing path for large files`,
+				`local://${id} exceeds ${MAX_ARTIFACT_BYTES / 1024 / 1024} MiB limit; use \`read\` with line selectors or the backing path for large files`,
 			);
 		}
 

@@ -26,7 +26,8 @@ export class McpProtocolHandler implements ProtocolHandler {
 
 		const host = url.host;
 
-		// No host — list all servers and their resource status
+		// No host — list all servers, their status, and the resources each
+		// loaded server exposes (one failing server must not break the list).
 		if (!url.target || url.target === "/") {
 			const servers = registry.servers;
 			if (!servers || servers.length === 0) {
@@ -37,14 +38,44 @@ export class McpProtocolHandler implements ProtocolHandler {
 				};
 			}
 
-			const lines = servers
-				.filter((s: { enabled?: boolean }) => s.enabled !== false)
-				.map(
-					(s: { serverName: string; toolCount: number; loaded: boolean }) => {
-						const status = s.loaded ? "✅" : "❌";
-						return `- ${status} \`${s.serverName}\` (${s.toolCount} tools, ${s.loaded ? "loaded" : "unavailable"})`;
-					},
-				);
+			const lines = await Promise.all(
+				servers
+					.filter((s: { enabled?: boolean }) => s.enabled !== false)
+					.map(
+						async (s: {
+							serverName: string;
+							toolCount: number;
+							loaded: boolean;
+						}) => {
+							const status = s.loaded ? "✅" : "❌";
+							let resourceNote = "";
+							if (s.loaded) {
+								try {
+									const listed = await registry.listResources(s.serverName);
+									const shown = listed.resources.slice(0, 10);
+									const resourceLines = shown
+										.map(
+											r =>
+												`  - \`${r.uri}\`${r.description ? ` — ${r.description}` : ""}`,
+										)
+										.join("\n");
+									const extra =
+										listed.resources.length > shown.length
+											? `\n  - … and ${listed.resources.length - shown.length} more`
+											: "";
+									resourceNote =
+										listed.resources.length === 0
+											? ""
+											: `\n  resources:\n${resourceLines}${extra}`;
+								} catch {
+									resourceNote =
+										"\n  resources: (server does not expose resources)";
+								}
+							}
+							return `- ${status} \`${s.serverName}\` (${s.toolCount} tools, ${s.loaded ? "loaded" : "unavailable"})${resourceNote}`;
+						},
+					),
+			);
 
 			return {
 				url: url.href,

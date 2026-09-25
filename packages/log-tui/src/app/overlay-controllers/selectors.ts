@@ -153,6 +153,34 @@ export function updateSkillPopup(ctx: OverlayHandlersCtx, query: string): void {
 	ctx.tui.requestRender();
 }
 
+// ── Internal URL autocomplete ─────────────────────────────────────────
+
+export async function updateUrlPopup(
+	ctx: OverlayHandlersCtx,
+	token: { scheme: string; token: string },
+): Promise<void> {
+	const query = token.token.slice(token.scheme.length + 3);
+	const candidates = await ctx.bridge.completeInternalUrl(token.scheme, query);
+	// The user may have kept typing (or left the token) while the lookup was
+	// in flight; only apply this result if the token is still active.
+	const current = ctx.inputBar.getActiveUrlQuery(ctx.urlCompletionSchemes);
+	if (!current || current.token !== token.token) return;
+
+	ctx.urlPopup.setItems(
+		(candidates ?? []).map(candidate => ({
+			value: `${token.scheme}://${candidate.value}`,
+			description: candidate.description,
+		})),
+	);
+	ctx.urlPopup.setQuery(token.token);
+	if (ctx.urlPopup.hasMatches()) {
+		if (!ctx.urlPopup.isVisibleOverlay()) ctx.urlPopup.show();
+	} else {
+		ctx.urlPopup.hide();
+	}
+	ctx.tui.requestRender();
+}
+
 export function openModelSelector(ctx: OverlayHandlersCtx): void {
 	const modelInfos: ModelInfo[] = ctx.bridge.models.options().map(option => ({
 		id: option.key,

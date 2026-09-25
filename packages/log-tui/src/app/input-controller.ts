@@ -140,6 +140,33 @@ function handleAutocompleteInput(ctx: LogicianTUI, data: string): boolean {
 		return false;
 	}
 
+	// URL popup (memory://, ssh://, log://, …): same pattern as skill.
+	if (ctx.urlPopup.isVisibleOverlay()) {
+		if (data === "\x1b[A" || data === "\x1bOA") {
+			ctx.urlPopup.moveSelection(-1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\x1b[B" || data === "\x1bOB") {
+			ctx.urlPopup.moveSelection(1);
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\t" || data === "\r" || data === "\n") {
+			const value = ctx.urlPopup.currentValue();
+			if (value) ctx.inputBar.insertUrl(ctx.urlCompletionSchemes, value);
+			ctx.urlPopup.hide();
+			ctx.tui.requestRender();
+			return true;
+		}
+		if (data === "\x1b") {
+			ctx.urlPopup.hide();
+			ctx.tui.requestRender();
+			return true;
+		}
+		return false;
+	}
+
 	// Slash popup: up/down navigation, tab complete, escape dismiss/stop loop,
 	// enter accept command and fall through to input bar.
 	if (ctx.slashPopup.isVisibleOverlay()) {
@@ -670,6 +697,13 @@ function handleInputChange(ctx: LogicianTUI, text: string): void {
 			void ctx.updateSkillPopup(skillQuery);
 		} else if (ctx.skillPopup.isVisibleOverlay()) {
 			ctx.skillPopup.hide();
+		} else {
+			const urlToken = ctx.inputBar.getActiveUrlQuery(ctx.urlCompletionSchemes);
+			if (urlToken !== null) {
+				void ctx.updateUrlPopup(urlToken);
+			} else if (ctx.urlPopup.isVisibleOverlay()) {
+				ctx.urlPopup.hide();
+			}
 		}
 	}
 

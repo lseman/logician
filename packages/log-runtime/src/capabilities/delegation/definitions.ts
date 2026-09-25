@@ -22,13 +22,9 @@ import {
 } from "@logician/log-core";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import { AgentOutputRegistry } from "../../runtime/bridge/support/internal-urls/agent-registry.js";
+import { createHubTool } from "../hub/hub-tool.ts";
+import { defaultHub } from "../hub/process-manager.ts";
 import { createHubMessageBus, type HubMessageBus } from "./hub.ts";
-import {
-	hubInboxTool,
-	hubJobsTool,
-	hubSendTool,
-	hubWaitTool,
-} from "./hub-tools.ts";
 import {
 	budgetFromArgs,
 	contractFromArgs,
@@ -323,15 +319,23 @@ async function _runSpawn(
 		});
 	}
 
-	// Child tools: resolve allowlist, then add hub coordination tools.
-	const childTools = deps.hub
-		? resolveChildTools(def, parent.tools ?? []).concat([
-				hubSendTool({ hub: deps.hub, agentId }),
-				hubWaitTool({ hub: deps.hub, agentId }),
-				hubJobsTool({ hub: deps.hub, agentId }),
-				hubInboxTool({ hub: deps.hub, agentId }),
-			])
-		: resolveChildTools(def, parent.tools ?? []);
+	// Child tools: resolve the allowlist, then collapse any inherited process
+	// hub plus peer coordination into a single `hub` tool. A child keeps exactly
+	// one `hub` — process ops, plus peer ops when a message bus is wired in.
+	const resolvedTools = resolveChildTools(def, parent.tools ?? []);
+	const childHasHub =
+		resolvedTools.some(t => t.name === "hub") || deps.hub !== undefined;
+	const childTools = childHasHub
+		? resolvedTools
+				.filter(t => t.name !== "hub")
+				.concat([
+					createHubTool({
+						manager: defaultHub,
+						bus: deps.hub,
+						agentId,
+					}),
+				])
+		: resolvedTools;
 
 	// Accumulates text_delta chunks below into the full output so far — every
 	// onUpdate producer sends a cumulative snapshot, not a delta, so this

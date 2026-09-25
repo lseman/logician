@@ -41,7 +41,7 @@ export class AgentProtocolHandler implements ProtocolHandler {
 		}
 
 		// No path segment or root — return full result as JSON
-		if (!pathname || pathname === "/" || pathname === "/0") {
+		if (!pathname || pathname === "/") {
 			const result = {
 				agentId: entry.agentId,
 				agent: entry.agent,
