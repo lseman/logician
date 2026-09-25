@@ -358,9 +358,19 @@ export async function checkRunAbort(ctx: TurnContext): Promise<PhaseOutcome> {
 export async function drainPostTurnFollowUps(
 	ctx: TurnContext,
 ): Promise<"continue" | "proceed"> {
-	ctx.pendingMessages = ctx.runController.acceptanceStopRequested
+	const followUps = ctx.runController.acceptanceStopRequested
 		? []
 		: await drainFollowUps(ctx);
+	if (followUps.length > 0) {
+		await intervene(ctx, {
+			kind: "continuation",
+			cause: "follow_up",
+			detector: "follow_up_queue",
+			message: `Harness scheduled ${followUps.length} follow-up message(s) for the next turn.`,
+			iteration: ctx.iteration,
+		});
+	}
+	ctx.pendingMessages = followUps;
 	return ctx.pendingMessages.length > 0 ? "continue" : "proceed";
 }
 
@@ -393,6 +403,13 @@ export async function evaluateStopPolicyPhase(
 		};
 	}
 	if (decision?.action === "continue" && decision.messages.length > 0) {
+		await intervene(ctx, {
+			kind: "continuation",
+			cause: "stop_policy",
+			detector: "structured_stop_policy",
+			message: `Stop policy ${decision.policyId ?? "anonymous"} requested continuation with ${decision.messages.length} message(s).`,
+			iteration: ctx.iteration,
+		});
 		ctx.pendingMessages = decision.messages;
 		return CONTINUE;
 	}
@@ -439,6 +456,13 @@ export async function runAcceptanceRepairPhase(
 				iteration: ctx.iteration,
 				action: "recover",
 				limits: { repairAttempts: 1 },
+			});
+			await intervene(ctx, {
+				kind: "continuation",
+				cause: "verification_repair",
+				detector: "acceptance_verifier",
+				message: `Acceptance verification failed — injecting repair prompt for ${ctx.cachedVerificationResults?.length ?? 0} command(s).`,
+				iteration: ctx.iteration,
 			});
 			ctx.pendingMessages = [{ role: "user", content, timestamp: Date.now() }];
 			return CONTINUE;
@@ -1075,7 +1099,17 @@ export async function decideTurnContinuation(
 		return BREAK;
 	}
 
-	ctx.pendingMessages = await drainSteering(ctx);
+	const steering = await drainSteering(ctx);
+	if (steering.length > 0) {
+		await intervene(ctx, {
+			kind: "continuation",
+			cause: "steering",
+			detector: "steering_queue",
+			message: `Harness injected ${steering.length} steering message(s) into the next turn.`,
+			iteration: ctx.iteration,
+		});
+	}
+	ctx.pendingMessages = steering;
 	return CONTINUE;
 }
 
