@@ -5,7 +5,7 @@ export {
 	PermissionPolicy,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
-export { ToolRegistry } from "@logician/log-core/runtime";
+export { ToolRegistry } from "@logician/log-core";
 export {
 	configurePluginRuntimeEnv,
 	runHookEvent,

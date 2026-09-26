@@ -1,14 +1,15 @@
 /** Coordinates one interactive agent session and its runtime integrations. */
 
 import type { AgentConfig, Message, QueueMode, Tool } from "@logician/log-core";
-import { OpenAIBackend, TtsrManager } from "@logician/log-core";
+import { OpenAIBackend, RuleLoader, TtsrManager } from "@logician/log-core";
+import { getRuleStore, setRuleStore } from "./support/internal-urls/rule-protocol.ts";
 import type { RuntimeEvent } from "@logician/log-core/events";
 import type { PermissionMode } from "@logician/log-core/permissions";
-import type { AbortResult, SessionStore } from "@logician/log-core/runtime";
+import type { AbortResult, SessionStore } from "@logician/log-core";
 import {
 	estimateChatPayloadTokensHeuristic,
 	type ToolRegistry,
-} from "@logician/log-core/runtime";
+} from "@logician/log-core";
 import type { AgentSession } from "@logician/log-core/session";
 import {
 	configurePluginRuntimeEnv,
@@ -65,7 +66,13 @@ import {
 import { SessionRunner } from "./session-runner.ts";
 import { ModelSelector } from "./support/model-selector.ts";
 import { buildToolRegistry } from "./support/runtime-context.ts";
+import {
+	type CfgApproval,
+	CfgProtocolHandler,
+} from "./support/internal-urls/cfg-protocol.ts";
 import { ToolRouter } from "./support/tool-router.ts";
+import { saveConfigPath } from "../configuration/config-store.ts";
+import { resolveRuntimeConfig } from "../configuration/runtime-config.ts";
 import { TodoTracker } from "./todo-tracker.ts";
 import { TtsrCoordinator } from "./ttsr-coordinator.ts";
 
@@ -175,18 +182,159 @@ export class AgentRuntime {
 			repeatGap: 10,
 			builtinRules: true,
 			disabledRules: [] as string[],
+			judge: true,
 			...this.#ttsrSettings,
 		};
 		const manager = new TtsrManager(settings);
-		return new TtsrCoordinator({
+
+		// Wire rule:// protocol to TTSR rules
+		if (!getRuleStore()) setRuleStore({ rules: new Map() });
+
+		const coordinator = new TtsrCoordinator({
 			manager,
-			abort: async () => {
-				await this.abort();
+			// Replace the in-flight provider call with the rule as the next
+			// turn; the runner auto-continues with it. Outside a turn there is
+			// no stream to replace, so fall back to a follow-up.
+			interrupt: text => {
+				try {
+					this.sessions.queues.steerNow(text);
+				} catch {
+					this.sessions.queues.followUp(text);
+				}
 			},
-			steer: message => this.sessions.queues.steer(message),
 			followUp: message => this.sessions.queues.followUp(message),
 			emit: event => this.emit(event),
+			judge: async ({ system, user, signal }) => {
+				const response = await this.backend.generate(
+					[
+						{ role: "system", content: system },
+						{ role: "user", content: user },
+					],
+					{ temperature: 0, maxTokens: 1024, thinkingLevel: "off", signal },
+				);
+				return response.content ?? "";
+			},
+			onJudgeError: error =>
+				this.events.reportError(
+					error instanceof Error ? error : new Error(String(error)),
+					{ component: "ttsr", operation: "judge", recoverable: true },
+				),
 		});
+
+		this.#syncRulesToProtocol(coordinator);
+
+		// Project/user rule files (.logician/rules, .cursor/rules, …) carry
+		// project-authored content, so they load only in trusted projects.
+		if (this.projectTrusted) {
+			void new RuleLoader(manager, settings)
+				.loadAll(undefined, this.cwd)
+				.then(() => this.#syncRulesToProtocol(coordinator))
+				.catch(error =>
+					this.events.reportError(
+						error instanceof Error ? error : new Error(String(error)),
+						{ component: "ttsr", operation: "discover-rules", recoverable: true },
+					),
+				);
+		}
+
+		return coordinator;
+	}
+
+	/** Wrap tool/response hooks with TTSR checks, chaining the inner hooks. */
+	private buildTtsrHooks(inner: AgentConfig["hooks"]): AgentConfig["hooks"] {
+		return {
+			...inner,
+			beforeToolCall: async (ctx, signal) => {
+				const blocked = await this.ttsrCoordinator.beforeToolCall(
+					ctx.toolCall,
+					ctx.args,
+				);
+				if (blocked !== undefined) return { content: blocked, isError: true };
+				return inner?.beforeToolCall?.(ctx, signal);
+			},
+			afterToolCall: async (ctx, signal) => {
+				const result = await inner?.afterToolCall?.(ctx, signal);
+				const reminder = this.ttsrCoordinator.buildToolReminder(ctx.toolCall.id);
+				if (!reminder) return result;
+				return {
+					...result,
+					content: `${reminder}\n\n${result?.content ?? ctx.result}`,
+				};
+			},
+			afterProviderResponse: (ctx, signal) => {
+				this.ttsrCoordinator.onAssistantResponse(ctx.content);
+				return inner?.afterProviderResponse?.(ctx, signal);
+			},
+		};
+	}
+
+	/**
+	 * cfg:// for the interactive main session: reads resolve the config fresh
+	 * from disk + env, live writes go through updateSettings, saves go to the
+	 * global config, and every write is approved through the question UI.
+	 */
+	private createCfgHandler(): CfgProtocolHandler {
+		return new CfgProtocolHandler({
+			resolve: () => {
+				const resolved = resolveRuntimeConfig(this.cwd, process.env, {
+					loadProjectConfig: this.projectTrusted,
+				});
+				return {
+					config: resolved.source as unknown as Record<string, unknown>,
+					provenance: resolved.provenance,
+				};
+			},
+			applyLive: patch => this.updateSettings(patch),
+			save: (path, value) => saveConfigPath(path, value),
+			approve: async request => {
+				const change = `${request.path}: ${request.previous} → ${request.value}`;
+				const answer = await this.interactions.requestQuestion({
+					questions: [
+						{
+							id: "cfg",
+							header: request.save ? "Save setting" : "Change setting",
+							question: [
+								`The agent wants to ${request.save ? "save to your global config" : "change for this session"}:`,
+								change,
+								...(request.shadowedBy
+									? [`Note: the ${request.shadowedBy} overrides the saved value in this project.`]
+									: []),
+							].join("\n"),
+							recommended: "deny",
+							choices: [
+								{ value: "once", label: "Allow" },
+								{
+									value: "session",
+									label: "Allow for this session",
+									description: request.save
+										? "Also allow later setting changes and saves without asking"
+										: "Also allow later session-only setting changes without asking",
+								},
+								{ value: "deny", label: "Deny" },
+							],
+						},
+					],
+				});
+				return answer === "once" || answer === "session"
+					? (answer as CfgApproval)
+					: "deny";
+			},
+		});
+	}
+
+	#syncRulesToProtocol(coordinator: TtsrCoordinator): void {
+		const store = getRuleStore();
+		if (!store) return;
+
+		store.rules.clear();
+		for (const rule of coordinator.getRules()) {
+			store.rules.set(rule.name, {
+				name: rule.name,
+				content: rule.content,
+				path: rule.path,
+				description: rule.description,
+			});
+		}
 	}
 
 	private readonly memoriam: MemoriamGateway;
@@ -281,6 +429,9 @@ export class AgentRuntime {
 				if (this.baseSystemPrompt) this.plugins?.refreshContext();
 			},
 		});
+		if (opts.interactive !== false) {
+			this.toolRouter.registerResourceHandler(this.createCfgHandler());
+		}
 		this.baseSystemPrompt = buildDefaultSystemPrompt(
 			this.cwd,
 			this._defaultTools,
@@ -305,7 +456,8 @@ export class AgentRuntime {
 			tools: this._defaultTools,
 			webSearch,
 			permissions: this.interactions.permissions,
-			hooks: this.buildTodoHooks(
+			hooks: this.buildTtsrHooks(
+				this.buildTodoHooks(
 				this.buildMemoriamHooks(
 					this.buildLegroomHooks(
 						createPostEditDiagnosticHooks(
@@ -319,6 +471,7 @@ export class AgentRuntime {
 						),
 					),
 				),
+			),
 			),
 			onPermissionRequest: ctx => this.interactions.requestPermission(ctx),
 			onTurnEnd: turnId => this.emit({ type: "turn_end", turnId }),
@@ -346,7 +499,17 @@ export class AgentRuntime {
 		this.ttsrCoordinator = this.buildTtsrCoordinator();
 		if (!this.#ttsrSubscribed) {
 			this.events.subscribe(notification => {
-				this.ttsrCoordinator.processEvent(notification.event);
+				const event = notification.event;
+				// Reset buffer on turn start
+				if (event.type === "turn_start") {
+					this.ttsrCoordinator.reset();
+				}
+				// Increment message count at turn end
+				if (event.type === "turn_end") {
+					this.ttsrCoordinator.incrementMessageCount();
+				}
+				// Process all other events for TTSR matching
+				this.ttsrCoordinator.processEvent(event);
 			});
 			this.#ttsrSubscribed = true;
 		}
@@ -505,7 +668,7 @@ export class AgentRuntime {
 		this.lifecycle = new RuntimeLifecycle({
 			cancel: () => this.cancel(),
 			resetTurns: () => {
-				this.ttsrCoordinator.reset();
+				this.ttsrCoordinator.newSession();
 				this.turns.reset();
 			},
 			dropSession: () => this.sessions.drop(),
@@ -778,6 +941,8 @@ export class AgentRuntime {
 
 	/** Abort: clear steering/follow-up queues (preserves nextTurn). */
 	async abort(): Promise<AbortResult | null> {
+		// Drop TTSR state tied to the aborted step (per-tool reminders).
+		this.ttsrCoordinator.incrementRetryToken();
 		// harness.abort() clears steering/follow-up and emits onQueueChange.
 		return this.sessions.abort();
 	}
@@ -1051,7 +1216,22 @@ export class AgentRuntime {
 		tokensAfter: number;
 	} | null> {
 		const injected = this.ttsrCoordinator.persistInjected();
-		const result = await this.sessions.compact(mode);
+
+		// Resolve compaction method from settings if no explicit mode given
+		let effectiveMode = mode;
+		if (!mode && this.compactionSettings) {
+			const { resolveCompactionMethod } = await import(
+				"@logician/log-eoh/compaction-methods"
+			);
+			const resolved = resolveCompactionMethod(this.compactionSettings, {
+				serverCompactionAvailable: false,
+				snapcompactAvailable: mode === "snapcompact",
+				llmAvailable: true,
+			});
+			if (resolved) effectiveMode = resolved as any;
+		}
+
+		const result = await this.sessions.compact(effectiveMode);
 		if (result) {
 			this.ttsrCoordinator.restoreInjected(injected);
 		}

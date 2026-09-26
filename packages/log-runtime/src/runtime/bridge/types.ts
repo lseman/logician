@@ -157,13 +157,20 @@ export interface AgentBridgeOptions {
 	permissions?: PermissionsCapabilityConfig;
 	extensions?: ExtensionsCapabilityConfig;
 	eventStream?: EventStreamConfig;
+	/**
+	 * Whether a user can answer interactive prompts. False for headless runs:
+	 * features that need approval (cfg:// writes) are not offered.
+	 */
+	interactive?: boolean;
 	ttsr?: {
 		enabled?: boolean;
 		repeatMode?: "once" | "gap";
+		repeatGap?: number;
 		contextMode?: "discard" | "keep";
-
 		interruptMode?: "always" | "prose-only" | "tool-only" | "never";
 		builtinRules?: boolean;
 		disabledRules?: string[];
+		/** Ask the session model about judged (`question`) rules. */
+		judge?: boolean;
 	};
 }

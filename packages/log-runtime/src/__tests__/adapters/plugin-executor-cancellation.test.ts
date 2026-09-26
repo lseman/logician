@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { CancellationError } from "@logician/log-core/runtime";
+import { CancellationError } from "@logician/log-core";
 import { runShellCommand } from "../../adapters/claude-code/plugin-executor.ts";
 
 void test("plugin shell deadlines use the shared cancellation module", async () => {

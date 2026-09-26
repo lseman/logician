@@ -1,12 +1,19 @@
 // ── Internal URL router ─────────────────────────────────────────────────────
 // One handler per scheme. Sessions own an instance; the static accessor is
 // retained for standalone tools and integrations without a session owner.
+//
+// Inspired by oh-my-pi's protocol specification model: handlers declare their
+// capabilities via SchemeSpec so tools consult the router instead of branching
+// on scheme names. The router provides introspection (describe, spec) that
+// powers system prompt generation and tool approval gates.
 
 import { extractInternalUrlScheme, parseInternalUrl } from "./parse";
 import type {
 	InternalResource,
 	ProtocolHandler,
 	ResolveContext,
+	SchemeHost,
+	SchemeSpec,
 	UrlCompletion,
 	WriteContext,
 } from "./types";
@@ -106,5 +113,55 @@ export class InternalUrlRouter {
 		const handler = this.#handlers.get(scheme.toLowerCase());
 		if (!handler?.complete) return null;
 		return handler.complete(query, context);
+	}
+
+	// ── Introspection API (inspired by oh-my-pi) ────────────────────────────
+
+	/** Get the scheme spec for a registered scheme. */
+	spec(scheme: string): SchemeSpec | undefined {
+		const handler = this.#handlers.get(scheme.toLowerCase());
+		return handler?.spec;
+	}
+
+	/**
+	 * Describe all registered schemes with their metadata.
+	 * Returns a list of SchemeHost objects for system prompt generation.
+	 */
+	describe(): SchemeHost[] {
+		const hosts: SchemeHost[] = [];
+		for (const [scheme] of this.#handlers) {
+			const host: SchemeHost = { scheme };
+			// Handlers can populate addressable/count via a callback or by examining context.
+			// For now, return basic info; handlers that need dynamic counts should
+			// set them in their promptDoc implementation.
+			hosts.push(host);
+		}
+		return hosts;
+	}
+
+	/**
+	 * Build the system prompt fragment for all addressable schemes.
+	 * Calls each handler's promptDoc with its SchemeHost, and only includes
+	 * schemes where promptDoc returns a non-empty string.
+	 */
+	buildPromptFragment(): string {
+		const parts: string[] = [];
+		for (const host of this.describe()) {
+			const handler = this.#handlers.get(host.scheme);
+			if (!handler || !handler.promptDoc) continue;
+			const doc = handler.promptDoc(host);
+			if (doc && doc.trim()) parts.push(doc);
+		}
+		return parts.join("\n\n");
+	}
+
+	/** Get all registered scheme names. */
+	schemes(): string[] {
+		return Array.from(this.#handlers.keys());
+	}
+
+	/** Check if a specific scheme is registered. */
+	hasScheme(scheme: string): boolean {
+		return this.#handlers.has(scheme.toLowerCase());
 	}
 }

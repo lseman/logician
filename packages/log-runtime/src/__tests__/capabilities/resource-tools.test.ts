@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Tool, ToolResult } from "@logician/log-core";
-import { ToolRegistry } from "@logician/log-core/runtime";
+import { ToolRegistry } from "@logician/log-core";
 import { createDefaultTools } from "../../capabilities/tools/default-tools.ts";
 import { createReadTool } from "../../capabilities/tools/read-file.ts";
 import { hasBeenRead } from "../../capabilities/tools/support/read-tracker.ts";

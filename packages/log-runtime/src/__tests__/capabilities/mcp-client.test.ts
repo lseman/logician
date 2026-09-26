@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { CancellationError } from "@logician/log-core/runtime";
+import { CancellationError } from "@logician/log-core";
 import {
 	allocateMcpToolName,
 	buildMcpProcessEnv,

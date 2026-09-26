@@ -4,7 +4,7 @@ import {
 	type AbortResult,
 	estimateChatPayloadTokens,
 	type SessionStore,
-} from "@logician/log-core/runtime";
+} from "@logician/log-core";
 import { AgentSession } from "@logician/log-core/session";
 import {
 	claudeToolMatcherName,

@@ -97,6 +97,39 @@ export function saveConfigNestedField(
 	});
 }
 
+/**
+ * Set (or with `undefined`, remove) a dotted config path in the global
+ * settings file, creating intermediate objects and pruning ones left empty.
+ */
+export function saveConfigPath(path: string, value: unknown): boolean {
+	const segments = path.split(".");
+	const leaf = segments.pop();
+	if (!leaf || segments.some(segment => !segment)) return false;
+	return updateGlobalConfig(raw => {
+		const parents: Record<string, unknown>[] = [raw];
+		let node = raw;
+		for (const segment of segments) {
+			const child = node[segment];
+			const next =
+				child && typeof child === "object" && !Array.isArray(child)
+					? (child as Record<string, unknown>)
+					: {};
+			node[segment] = next;
+			node = next;
+			parents.push(node);
+		}
+		if (value === undefined) delete node[leaf];
+		else node[leaf] = value;
+		for (let depth = segments.length; depth > 0; depth--) {
+			const parent = parents[depth - 1];
+			const segment = segments[depth - 1];
+			const child = parents[depth];
+			if (!parent || !segment || !child) continue;
+			if (Object.keys(child).length === 0) delete parent[segment];
+		}
+	});
+}
+
 export function updateConfigFile(
 	configPath: string,
 	mutate: (raw: Record<string, unknown>) => void,

@@ -212,16 +212,25 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 		case "agent_retry_end":
 			ctx.statusPanel.update({ phase: event.success ? "thinking" : "error" });
 			break;
-		case "ttsr_injected":
+		case "ttsr_injected": {
+			// XML-like rule content renders as a system notice (◇ SYSTEM + │ border).
+			const content = event.ruleContent;
+			const isXmlLike = isXmlLikeTtsrContent(content);
+			const text = isXmlLike
+				? `[System] ${content.trim()}`
+				: `Interrupted stream: ${content}`;
+			const rules = event.ruleNames.join(", ");
+			const label = isXmlLike ? `TTSR: ${rules}` : `TTSR Rule "${rules}"`;
 			ctx.transcript.handleEvent({
 				type: "notice",
 				level: "info",
-				label: `TTSR Rule "${event.ruleName}"`,
-				text: `Interrupted stream: ${event.ruleContent}`,
+				label,
+				text,
 			});
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			ctx.tui.requestRender();
 			break;
+		}
 		case "ttsr_queued":
 			ctx.transcript.handleEvent({
 				type: "notice",
@@ -231,6 +240,20 @@ function handleEvent(ctx: BridgeEventHandlerCtx, event: RuntimeEvent): void {
 			});
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			ctx.tui.requestRender();
+			break;
+		case "ttsr_triggered":
+			// Stream interrupts already surface via ttsr_injected, and in-stream
+			// reminders via the queue; only judged verdicts need their own notice.
+			if (event.streamKey.startsWith("judge:")) {
+				ctx.transcript.handleEvent({
+					type: "notice",
+					level: "info",
+					label: `TTSR judge: ${event.ruleNames.join(", ")}`,
+					text: "Rule judge flagged the last output; a warning is queued.",
+				});
+				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+				ctx.tui.requestRender();
+			}
 			break;
 		case "runtime_status":
 			ctx.statusPanel.update({
@@ -479,4 +502,9 @@ function assertNever(value: never): never {
 	throw new Error(
 		`Unhandled runtime event: ${String((value as { type?: unknown }).type)}`,
 	);
+}
+/** Check if TTSR rule content looks like XML (triggers system-notice rendering). */
+export function isXmlLikeTtsrContent(content: string): boolean {
+	if (!content.startsWith("<")) return false;
+	return />[\s\S]*<\/[a-z]/i.test(content) || /^<[^>]+\/>$/i.test(content);
 }

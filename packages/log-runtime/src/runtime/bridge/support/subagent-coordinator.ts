@@ -18,7 +18,7 @@ import {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
-} from "@logician/log-core/runtime";
+} from "@logician/log-core";
 import type { AgentSession } from "@logician/log-core/session";
 import {
 	type AgentDefinition,

@@ -1,0 +1,892 @@
+import { randomUUID } from "node:crypto";
+import { writeBashDebugEvent } from "../tools/bash-debugger.ts";
+
+// ── LLM Backend ──────────────────────────────────────────────────────────────────
+// OpenAI-compatible HTTP client for streaming LLM responses.
+// Mirrors Python LlamaCppClient/VLLMClient but simplified for TS.
+
+import type { RemoteCompactionResult } from "../compaction/engine.ts";
+import type { ThinkingFormat, ThinkingLevel } from "../types/config.ts";
+import type { ToolCall } from "../types/messages.ts";
+import {
+	OpenAIChatCompletionsAdapter,
+	type ProviderAdapter,
+} from "./provider-adapter.ts";
+
+// ── Default provider timeouts ───────────────────────────────────────────────
+// A healthy server returns SSE response headers promptly — even for prompts
+// whose first token takes a long time to generate (headers precede
+// generation). No headers within this window means the connection is wedged
+// (llama.cpp OOM, vLLM deadlock) and the turn would otherwise hang until a
+// manual abort.
+const DEFAULT_INITIAL_RESPONSE_TIMEOUT_MS = 30_000;
+// Maximum silence on an already-open stream. Generous enough for thinking
+// models' first-token latency on slow local hardware; a wedged server never
+// resumes, so this bounds the wait.
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
+/**
+ * Resolves with `read`'s result, or rejects with a retryable timeout error if
+ * the stream stays silent for `idleMs`. On timeout `onTimeout` runs so the
+ * caller can release the reader (frees the underlying response body). The
+ * timer is unref'd, so a leaked guard (e.g. a mid-stream callback throwing)
+ * can never keep the process alive.
+ */
+function readWithIdleTimeout<T>(
+	read: Promise<T>,
+	onTimeout: () => void,
+	idleMs: number,
+): Promise<T> {
+	const pending = Promise.withResolvers<T>();
+	const timer = setTimeout(() => {
+		onTimeout();
+		pending.reject(
+			new BackendError({
+				category: "transient",
+				message: `No stream data from provider for ${Math.round(
+					idleMs / 1000,
+				)}s`,
+			}),
+		);
+	}, idleMs);
+	timer.unref?.();
+	read.then(
+		chunk => {
+			clearTimeout(timer);
+			pending.resolve(chunk);
+		},
+		error => {
+			clearTimeout(timer);
+			pending.reject(error);
+		},
+	);
+	return pending.promise;
+}
+
+// ── Typed backend errors ───────────────────────────────────────────────────
+// The backend classifies provider/network failures at the boundary so the loop
+// can branch on a category instead of re-sniffing error message strings. The
+// loop keeps a string-matching fallback for errors thrown outside the backend.
+
+export type BackendErrorCategory =
+	// Prompt exceeds the model's context window. Recover by compacting, not by
+	// retrying the same request.
+	| "context_full"
+	// Provider rate limit (HTTP 429). Retryable with backoff.
+	| "rate_limit"
+	// Transient server / network failure (HTTP 5xx, connection errors).
+	// Retryable with backoff.
+	| "transient"
+	// Client error (HTTP 4xx other than 429): malformed request. Not retryable.
+	| "client"
+	// A tool call already stored in history has arguments the provider can't
+	// parse as JSON. Retrying resends the identical unparseable history and
+	// fails identically every time; compaction doesn't help either since it
+	// never inspects/repairs individual tool_calls. Not retryable.
+	| "poisoned_history"
+	// Anything the backend couldn't classify.
+	| "unknown";
+
+export class BackendError extends Error {
+	readonly category: BackendErrorCategory;
+	readonly status?: number | undefined;
+	/** Whether retrying the same request could succeed (rate_limit / transient). */
+	readonly retryable: boolean;
+	/** Provider-requested retry delay (Retry-After header), when present. */
+	readonly retryAfterMs?: number | undefined;
+
+	constructor(opts: {
+		category: BackendErrorCategory;
+		message: string;
+		status?: number | undefined;
+		retryAfterMs?: number | undefined;
+	}) {
+		super(opts.message);
+		this.name = "BackendError";
+		this.category = opts.category;
+		this.status = opts.status;
+		this.retryAfterMs = opts.retryAfterMs;
+		this.retryable =
+			opts.category === "rate_limit" || opts.category === "transient";
+	}
+}
+
+// Classify an HTTP error response by status + body. Context-full is detected
+// from the body text since providers signal it inconsistently (400 or 413 with
+// a "context"/"too long"/"tokens" message).
+export function classifyHttpError(
+	status: number,
+	body: string,
+	retryAfterHeader?: string | null,
+): BackendError {
+	const lower = body.toLowerCase();
+	// "Failed to parse tool call arguments as JSON" means a previously-stored
+	// assistant message has a tool_call whose arguments are malformed (usually
+	// truncated by the output token limit before it was saved). Resending the
+	// same history always fails the same way — this must not be treated as
+	// transient/retryable.
+	const looksPoisonedHistory = [
+		"failed to parse tool call arguments",
+		"failed to parse tool calls",
+		"invalid tool call arguments",
+	].some(p => lower.includes(p));
+	if (looksPoisonedHistory) {
+		return new BackendError({
+			category: "poisoned_history",
+			message: `LLM request failed: ${status} ${body}`,
+			status,
+		});
+	}
+	// "Assistant message must contain either 'content' or 'tool_calls'" is
+	// NOT a context-full error — it means a previously-stored assistant message
+	// is malformed (empty content, no tool_calls).  Compaction won't fix it;
+	// the same bad message would be resent.  Classify as client so the loop
+	// can recover by compacting (which drops the bad message) or aborting.
+	const looksContextFull = [
+		"context",
+		"too long",
+		"too many tokens",
+		"maximum context",
+		"reduce the length",
+		"n_ctx",
+	].some(p => lower.includes(p));
+	const message = `LLM request failed: ${status} ${body}`;
+
+	if (looksContextFull) {
+		return new BackendError({ category: "context_full", message, status });
+	}
+	if (status === 429) {
+		return new BackendError({
+			category: "rate_limit",
+			message,
+			status,
+			retryAfterMs: parseRetryAfter(retryAfterHeader),
+		});
+	}
+	if (status >= 500) {
+		return new BackendError({ category: "transient", message, status });
+	}
+	if (status >= 400) {
+		return new BackendError({ category: "client", message, status });
+	}
+	return new BackendError({ category: "unknown", message, status });
+}
+
+// Parse a Retry-After header: either delay-seconds or an HTTP date. Returns
+// milliseconds, clamped to [0, 5 min]; undefined when absent/unparseable.
+function parseRetryAfter(header?: string | null): number | undefined {
+	if (!header) return undefined;
+	const trimmed = header.trim();
+	const seconds = Number(trimmed);
+	let ms: number;
+	if (Number.isFinite(seconds)) {
+		ms = seconds * 1000;
+	} else {
+		const date = Date.parse(trimmed);
+		if (Number.isNaN(date)) return undefined;
+		ms = date - Date.now();
+	}
+	return Math.min(Math.max(ms, 0), 5 * 60_000);
+}
+
+// Classify a thrown network/fetch error (no HTTP response). Connection-level
+// failures are transient; an abort is rethrown unchanged by the caller.
+export function classifyNetworkError(error: Error): BackendError {
+	const msg = `${error.name || ""} ${error.message || ""}`.toLowerCase();
+	const transient = [
+		"econnrefused",
+		"econnreset",
+		"etimedout",
+		"eai-again",
+		"socket hang up",
+		"connection refused",
+		"connection reset",
+		"connection timeout",
+		"timed out",
+		"network error",
+		"fetch failed",
+	].some(p => msg.includes(p));
+	return new BackendError({
+		category: transient ? "transient" : "unknown",
+		message: error.message,
+	});
+}
+
+export interface LLMResponse {
+	content: string | null;
+	toolCalls: ToolCall[];
+	stopReason: "stop" | "length" | "error";
+	errorMessage?: string | undefined;
+	/** Non-null when the model refused to answer (safety/content-policy refusal). */
+	refusal?: string | undefined;
+	/** Provider-reported token usage from the final stream chunk, when available.
+	 * Lets the loop report real context size instead of a local char/4 estimate. */
+	usage?:
+		| {
+				promptTokens?: number | undefined;
+				completionTokens?: number | undefined;
+				totalTokens?: number | undefined;
+				/** Prompt tokens served from the provider's cache, when reported. */
+				cachedTokens?: number | undefined;
+		  }
+		| undefined;
+}
+
+interface ProviderUsage {
+	prompt_tokens?: unknown;
+	completion_tokens?: unknown;
+	total_tokens?: unknown;
+	cached_tokens?: unknown;
+	cache_read_input_tokens?: unknown;
+	prompt_tokens_details?: { cached_tokens?: unknown };
+	input_tokens_details?: { cached_tokens?: unknown };
+}
+
+function tokenCount(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? Math.floor(value)
+		: undefined;
+}
+
+/** Get the in-progress accumulator for a streamed tool call, creating it on first sight. */
+function ensureToolCallAccumulator(
+	toolCalls: ToolCall[],
+	index: number,
+): ToolCall {
+	let acc = toolCalls[index];
+	if (!acc) {
+		acc = { id: "", name: "", arguments: "" };
+		toolCalls[index] = acc;
+	}
+	return acc;
+}
+
+/** Normalize OpenAI-compatible (including llama.cpp) usage telemetry. */
+export function parseProviderUsage(raw: unknown): LLMResponse["usage"] {
+	if (!raw || typeof raw !== "object") {
+		return undefined;
+	}
+	const usage = (raw && typeof raw === "object" ? raw : {}) as ProviderUsage;
+	const cachedTokens = tokenCount(
+		usage.prompt_tokens_details?.cached_tokens ??
+			usage.input_tokens_details?.cached_tokens ??
+			usage.cache_read_input_tokens ??
+			usage.cached_tokens,
+	);
+	return {
+		promptTokens: tokenCount(usage.prompt_tokens),
+		completionTokens: tokenCount(usage.completion_tokens),
+		totalTokens: tokenCount(usage.total_tokens),
+		...(cachedTokens !== undefined && { cachedTokens }),
+	};
+}
+
+/**
+ * Re-role any system message that is not at the start of the array to `user`.
+ *
+ * The loop appends request-time context (memory index, task state) as trailing
+ * system messages so the leading system prompt — the cacheable prefix — stays
+ * stable. Chat templates behind many OpenAI-compatible servers (SGLang, vLLM,
+ * llama.cpp) only accept a system/developer message at position 0 and raise
+ * "System message must be at the beginning" for any later occurrence. `user`
+ * is accepted by every chat template, so trailing system context is re-roled
+ * here at the transport boundary instead of changing the loop's logical
+ * message model or the prompt-cache prefix.
+ */
+export function normalizeProviderMessages(
+	messages: Record<string, unknown>[],
+): Record<string, unknown>[] {
+	let sawNonSystem = false;
+	return messages.map(message => {
+		if (message.role === "system" && sawNonSystem) {
+			return { ...message, role: "user" };
+		}
+		if (message.role !== "system") sawNonSystem = true;
+		return message;
+	});
+}
+
+/** Streaming callbacks for a generate() call. All optional. */
+export interface GenerateCallbacks {
+	onDelta?: (delta: string) => void;
+	onThinking?: (delta: string) => void;
+	onTextStart?: () => void;
+	onTextEnd?: () => void;
+	// Fired once per streamed tool call, the moment its name is first known
+	// (placeholder/empty-name chunks are skipped). Gives the UI an early
+	// "running" state while the model is still emitting the call's arguments.
+	onToolCallStart?: (toolCallId: string, name: string, args: string) => void;
+	onToolCallDelta?: (toolCallId: string, delta: string) => void;
+	onToolCallIdUpdate?: (previousToolCallId: string, toolCallId: string) => void;
+	// The backend's own coherent accumulation so far — the same content/
+	// toolCalls shape the final LLMResponse resolves to, plus reasoning (which
+	// LLMResponse doesn't carry — it's mid-stream-only). Fired after every
+	// chunk that changes it. A consumer can trust this wholesale instead of
+	// reconciling onDelta/onThinking/onToolCallDelta itself.
+	onSnapshot?: (snapshot: {
+		content: string;
+		reasoning: string;
+		toolCalls: ToolCall[];
+	}) => void;
+}
+
+/** Options for a generate() call. */
+export interface GenerateOptions {
+	tools?: Record<string, unknown>[] | undefined;
+	temperature?: number | undefined;
+	maxTokens?: number | undefined;
+	// Additional sampling params (populated when an inference mode is active).
+	topP?: number | undefined;
+	topK?: number | undefined;
+	minP?: number | undefined;
+	presencePenalty?: number | undefined;
+	repetitionPenalty?: number | undefined;
+	signal?: AbortSignal | undefined;
+	thinkingLevel?: ThinkingLevel | undefined;
+	callbacks?: GenerateCallbacks | undefined;
+	// Per-request extras supplied by the loop's provider-boundary hooks
+	// (beforeProviderRequest / beforeProviderPayload).
+	headers?: Record<string, string> | undefined;
+	/** Per-request deadline. Combined with the caller's cancellation signal. */
+	timeoutMs?: number | undefined;
+	transformPayload?: (
+		payload: Record<string, unknown>,
+	) => Promise<Record<string, unknown>> | Record<string, unknown>;
+	// Max retry attempts for this request (overrides config default).
+	maxRetries?: number | undefined;
+	// Cache retention hint forwarded to providers supporting it.
+	cacheRetention?: string | undefined;
+	// Provider metadata forwarded with requests.
+	metadata?: Record<string, unknown> | undefined;
+}
+
+export interface LLMBackend {
+	generate(
+		messages: Record<string, unknown>[],
+		options?: GenerateOptions,
+	): Promise<LLMResponse>;
+
+	/** Return a backend identical to this one but bound to a different model. */
+	withModel(model: string): LLMBackend;
+	/** Clone the backend with both model and provider endpoint when supported. */
+	withEndpoint?(model: string, baseUrl: string): LLMBackend;
+
+	/**
+	 * Remote (server-side) compaction: delegates history condensing to the
+	 * provider's native compact endpoint (/responses/compact, Anthropic compact
+	 * beta, or a custom remoteEndpoint). Returns the provider's compacted
+	 * summary plus any preserve data (replacement history, compaction items).
+	 */
+	remote(
+		messages: Record<string, unknown>[],
+		options?: {
+			endpoint?: string;
+			model?: string;
+			maxTokens?: number;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
+	): Promise<RemoteCompactionResult>;
+
+	/** The model this backend currently targets. */
+	readonly model: string;
+}
+
+/** Construct the default LLMBackend implementation (OpenAI-compatible chat completions). */
+export function createLLMBackend(options: {
+	baseUrl: string;
+	model: string;
+	chatTemplate?: string;
+	stop?: string[];
+	thinkingLevel?: ThinkingLevel;
+	thinkingFormat?: ThinkingFormat;
+	providerAdapter?: ProviderAdapter;
+	initialResponseTimeoutMs?: number;
+	streamIdleTimeoutMs?: number;
+}): LLMBackend {
+	return new OpenAIBackend(options);
+}
+
+export class OpenAIBackend implements LLMBackend {
+	readonly baseUrl: string;
+	readonly model: string;
+	private chatTemplate?: string | undefined;
+	private stop?: string[] | undefined;
+	private defaultThinkingLevel: ThinkingLevel = "off";
+	private thinkingFormat?: ThinkingFormat | undefined;
+	private readonly providerAdapter: ProviderAdapter;
+	// 0 disables a guard; undefined falls back to the module default.
+	private readonly initialResponseTimeoutMs?: number | undefined;
+	private readonly streamIdleTimeoutMs?: number | undefined;
+
+	constructor(options: {
+		baseUrl: string;
+		model: string;
+		chatTemplate?: string | undefined;
+		stop?: string[] | undefined;
+		thinkingLevel?: ThinkingLevel | undefined;
+		thinkingFormat?: ThinkingFormat | undefined;
+		providerAdapter?: ProviderAdapter | undefined;
+		initialResponseTimeoutMs?: number | undefined;
+		streamIdleTimeoutMs?: number | undefined;
+	}) {
+		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+		this.model = options.model;
+		this.chatTemplate = options.chatTemplate;
+		this.stop = options.stop;
+		this.defaultThinkingLevel = options.thinkingLevel ?? "off";
+		this.thinkingFormat = options.thinkingFormat;
+		this.providerAdapter =
+			options.providerAdapter ?? new OpenAIChatCompletionsAdapter();
+		this.initialResponseTimeoutMs = options.initialResponseTimeoutMs;
+		this.streamIdleTimeoutMs = options.streamIdleTimeoutMs;
+	}
+
+	/** Clone this backend bound to a different model (LLMBackend.withModel). */
+	withModel(model: string): OpenAIBackend {
+		return new OpenAIBackend({
+			baseUrl: this.baseUrl,
+			model,
+			chatTemplate: this.chatTemplate,
+			stop: this.stop,
+			thinkingLevel: this.defaultThinkingLevel,
+			thinkingFormat: this.thinkingFormat,
+			providerAdapter: this.providerAdapter,
+			initialResponseTimeoutMs: this.initialResponseTimeoutMs,
+			streamIdleTimeoutMs: this.streamIdleTimeoutMs,
+		});
+	}
+
+	withEndpoint(model: string, baseUrl: string): OpenAIBackend {
+		return new OpenAIBackend({
+			baseUrl,
+			model,
+			chatTemplate: this.chatTemplate,
+			stop: this.stop,
+			thinkingLevel: this.defaultThinkingLevel,
+			thinkingFormat: this.thinkingFormat,
+			providerAdapter: this.providerAdapter,
+			initialResponseTimeoutMs: this.initialResponseTimeoutMs,
+			streamIdleTimeoutMs: this.streamIdleTimeoutMs,
+		});
+	}
+
+	/** Update the default thinking level at runtime. */
+	setDefaultThinkingLevel(level: ThinkingLevel): void {
+		this.defaultThinkingLevel = level;
+	}
+
+	async generate(
+		messages: Record<string, unknown>[],
+		options: GenerateOptions = {},
+	): Promise<LLMResponse> {
+		const {
+			tools,
+			temperature = 0.5,
+			maxTokens = 4096,
+			topP,
+			topK,
+			minP,
+			presencePenalty,
+			repetitionPenalty,
+			signal,
+			thinkingLevel,
+			callbacks = {},
+			headers: extraHeaders,
+			timeoutMs,
+			cacheRetention,
+			transformPayload,
+		} = options;
+		const {
+			onDelta,
+			onThinking,
+			onTextStart,
+			onTextEnd,
+			onToolCallStart,
+			onToolCallDelta,
+			onToolCallIdUpdate,
+			onSnapshot,
+		} = callbacks;
+
+		const providerMessages = normalizeProviderMessages(messages);
+
+		const effectiveLevel = thinkingLevel ?? this.defaultThinkingLevel;
+		const body = this.providerAdapter.buildPayload({
+			model: this.model,
+			messages: providerMessages,
+			tools,
+			temperature,
+			maxTokens,
+			topP,
+			topK,
+			minP,
+			presencePenalty,
+			repetitionPenalty,
+			stop: this.stop,
+			thinkingLevel: effectiveLevel,
+			thinkingFormat: this.thinkingFormat,
+			cacheRetention,
+		});
+
+		// Let a provider-payload hook inspect/rewrite the final body.
+		const finalBody = transformPayload ? await transformPayload(body) : body;
+		const debugRequestId = randomUUID();
+		writeBashDebugEvent("provider.request", {
+			requestId: debugRequestId,
+			body: finalBody,
+		});
+
+		const timeoutSignal =
+			timeoutMs !== undefined && timeoutMs > 0
+				? AbortSignal.timeout(timeoutMs)
+				: undefined;
+		// Without an explicit per-request deadline, guard the response phase:
+		// a wedged server (llama.cpp OOM, vLLM deadlock) must not hang the
+		// turn until a manual abort.
+		let initialGuard: { signal: AbortSignal; ms: number } | undefined;
+		if (timeoutSignal === undefined) {
+			const ms =
+				this.initialResponseTimeoutMs ?? DEFAULT_INITIAL_RESPONSE_TIMEOUT_MS;
+			if (ms > 0) initialGuard = { signal: AbortSignal.timeout(ms), ms };
+		}
+		const requestSignals = [signal, timeoutSignal, initialGuard?.signal].filter(
+			(candidate): candidate is AbortSignal => candidate !== undefined,
+		);
+		const requestSignal =
+			requestSignals.length > 0 ? AbortSignal.any(requestSignals) : undefined;
+		let response: Response;
+		try {
+			response = await fetch(this.providerAdapter.endpoint(this.baseUrl), {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					...extraHeaders,
+				},
+				body: JSON.stringify(finalBody),
+				signal: requestSignal ?? null,
+			});
+		} catch (e) {
+			const error = e as Error;
+			// Initial-response guard fired. Bun rejects a timed-out signal with
+			// TimeoutError (not AbortError), so attribute by the signal rather
+			// than the error name.
+			if (initialGuard?.signal.aborted && !signal?.aborted) {
+				throw new BackendError({
+					category: "transient",
+					message: `No response from provider within ${Math.round(
+						initialGuard.ms / 1000,
+					)}s`,
+				});
+			}
+			// Aborts propagate unchanged so the loop's signal check handles them.
+			if (error.name === "AbortError") throw error;
+			throw classifyNetworkError(error);
+		}
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw classifyHttpError(
+				response.status,
+				errorText,
+				response.headers.get("retry-after"),
+			);
+		}
+
+		if (!response.body) {
+			throw new BackendError({
+				category: "transient",
+				message: "Response body is unavailable",
+			});
+		}
+
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder();
+		const streamIdleMs =
+			this.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+		let buffer = "";
+		let fullContent = "";
+		let fullReasoning = "";
+		let toolCalls: ToolCall[] = [];
+		let stopReason: LLMResponse["stopReason"] = "stop";
+		let refusal: string | undefined;
+		let finishReason: string | undefined;
+		let usage: LLMResponse["usage"];
+		let hasText = false;
+		// Tool-call indices whose early start event has already been emitted, so
+		// onToolCallStart fires exactly once per streamed call.
+		const startedToolIndexes = new Set<number>();
+		while (true) {
+			const readPromise = reader.read();
+			const result =
+				streamIdleMs > 0
+					? await readWithIdleTimeout(
+							readPromise,
+							() => void reader.cancel("stream idle timeout").catch(() => {}),
+							streamIdleMs,
+						)
+					: await readPromise;
+			const { value, done } = result;
+			if (done) break;
+
+			buffer += decoder.decode(value, { stream: true });
+
+			const lines = buffer.split("\n");
+			buffer = lines.pop() || "";
+
+			for (const line of lines) {
+				if (!line.startsWith("data: ")) continue;
+				const data = line.slice(6).trim();
+				writeBashDebugEvent("provider.sse", {
+					requestId: debugRequestId,
+					data,
+				});
+				if (!data || data === "[DONE]") continue;
+
+				try {
+					const chunk = JSON.parse(data);
+					// finish_reason and usage can arrive on chunks that carry no delta
+					// (notably the trailing usage-only chunk), so read them first.
+					const chunkFinish = chunk.choices?.[0]?.finish_reason;
+					if (chunkFinish) finishReason = chunkFinish;
+					if (chunk.usage) {
+						const parsed = parseProviderUsage(chunk.usage);
+						usage = {
+							promptTokens: parsed?.promptTokens ?? usage?.promptTokens,
+							completionTokens:
+								parsed?.completionTokens ?? usage?.completionTokens,
+							totalTokens: parsed?.totalTokens ?? usage?.totalTokens,
+							cachedTokens: parsed?.cachedTokens ?? usage?.cachedTokens,
+						};
+					}
+					const delta = chunk.choices?.[0]?.delta;
+					if (!delta) continue;
+					// Detect provider safety/content-policy refusals (OpenAI returns delta.refusal).
+					if (delta.refusal) {
+						refusal = (refusal || "") + delta.refusal;
+					}
+
+					// Emit text_start on first text content
+					if (delta.content && !hasText) {
+						hasText = true;
+						onTextStart?.();
+					}
+
+					let changed = false;
+					if (delta.content) {
+						onDelta?.(delta.content);
+						fullContent += delta.content;
+						changed = true;
+					}
+
+					if (delta.reasoning) {
+						onThinking?.(delta.reasoning);
+						fullReasoning += delta.reasoning;
+						changed = true;
+					}
+					if (delta.reasoning_content) {
+						onThinking?.(delta.reasoning_content);
+						fullReasoning += delta.reasoning_content;
+						changed = true;
+					}
+
+					if (delta.tool_calls) {
+						changed = true;
+						for (const tc of delta.tool_calls) {
+							// Accumulate tool call across chunks.
+							const acc = ensureToolCallAccumulator(toolCalls, tc.index);
+							if (tc.id) {
+								const previousId = acc.id;
+								if (!previousId && startedToolIndexes.has(tc.index)) {
+									onToolCallIdUpdate?.(`tool_${tc.index}`, tc.id);
+								}
+								acc.id = tc.id;
+							}
+							if (tc.function?.name) acc.name = tc.function.name;
+							if (tc.function?.arguments) {
+								acc.arguments += tc.function.arguments;
+							}
+
+							// Emit the early start once, the moment the name is known.
+							// Skipping empty-name chunks lets the UI reuse this chunk
+							// (by id/name) when the loop emits the authoritative start
+							// before execution — no duplicate card.
+							if (acc.name && !startedToolIndexes.has(tc.index)) {
+								startedToolIndexes.add(tc.index);
+								onToolCallStart?.(
+									acc.id || `tool_${tc.index}`,
+									acc.name,
+									acc.arguments,
+								);
+							}
+							if (tc.function?.arguments && startedToolIndexes.has(tc.index)) {
+								onToolCallDelta?.(
+									acc.id || `tool_${tc.index}`,
+									tc.function.arguments,
+								);
+							}
+						}
+					}
+
+					if (changed && onSnapshot) {
+						onSnapshot({
+							content: fullContent,
+							reasoning: fullReasoning,
+							toolCalls: toolCalls
+								.filter(tc => tc?.name)
+								.map((tc, index) => ({
+									id: tc.id || `tool_${index}`,
+									name: tc.name,
+									arguments: tc.arguments || "",
+								})),
+						});
+					}
+				} catch (_e: unknown) {
+					// Skip parse errors (partial JSON is normal in streaming)
+				}
+			}
+		}
+
+		// Emit text_end after streaming completes (before tool_call_end which
+		// is emitted by the loop layer after parsing).
+		if (hasText) {
+			onTextEnd?.();
+		}
+
+		writeBashDebugEvent("provider.assembled", {
+			requestId: debugRequestId,
+			toolCalls,
+			content: fullContent,
+			finishReason,
+		});
+		toolCalls = toolCalls
+			.filter(tc => tc?.name)
+			.map((tc, index) => ({
+				id: tc.id || `tool_${index}`,
+				name: tc.name,
+				arguments: tc.arguments || "{}",
+			}));
+
+		// Map the provider finish_reason to our stop reason. "length" means the
+		// completion was truncated by max_tokens — the loop surfaces this rather
+		// than treating it as a clean stop. Tool calls override (handled by the
+		// loop, which sets "tool_calls").
+		if (finishReason === "length") {
+			stopReason = "length";
+		} else if (toolCalls.length > 0) {
+			stopReason = "stop";
+		}
+
+		return {
+			content: fullContent || null,
+			toolCalls,
+			stopReason,
+			refusal,
+			usage,
+		};
+	}
+	/** Remote (server-side) compaction implementation — OpenAI /responses/compact. */
+	async remote(
+		messages: Record<string, unknown>[],
+		options: {
+			endpoint?: string;
+			model?: string;
+			maxTokens?: number;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		} = {},
+	): Promise<RemoteCompactionResult> {
+		const {
+			endpoint: customEndpoint,
+			model: compactionModel,
+			maxTokens = 2048,
+			timeoutMs = 30000,
+			signal,
+		} = options;
+
+		const endpoint =
+			customEndpoint ??
+			(this.baseUrl.endsWith("/v1")
+				? `${this.baseUrl}/responses/compact`
+				: `${this.baseUrl}/v1/responses/compact`);
+
+		const model = compactionModel ?? this.model;
+
+		const timeoutSignal = AbortSignal.timeout(timeoutMs);
+		const requestSignal = signal
+			? AbortSignal.any([signal, timeoutSignal])
+			: timeoutSignal;
+
+		const body = {
+			model,
+			history: messages,
+			max_input_tokens: (this.model as unknown as number) || 128000,
+			max_output_tokens: maxTokens,
+		};
+
+		const response = await fetch(endpoint, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+			signal: requestSignal,
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`Remote compaction failed: ${response.status} ${errorText}`,
+			);
+		}
+
+		const result = (await response.json()) as {
+			compaction?: {
+				type: string;
+				encrypted_content?: string;
+				summary?: string;
+			};
+			compaction_summary?: {
+				type: string;
+				summary: string;
+			};
+			usage?: {
+				input_tokens?: number;
+				output_tokens?: number;
+				total_tokens?: number;
+			};
+		};
+
+		// Extract summary from the compaction response
+		const summary =
+			result.compaction_summary?.summary ??
+			result.compaction?.summary ??
+			"Conversation history compacted by provider.";
+
+		// Collect preserve data from the compaction item
+		const preserveData: Record<string, unknown> = {};
+		if (result.compaction) {
+			preserveData.compaction = result.compaction;
+		}
+
+		// Parse token usage
+		const usage: RemoteCompactionResult["usage"] = result.usage
+			? (
+					[
+						["promptTokens", result.usage.input_tokens],
+						["completionTokens", result.usage.output_tokens],
+						["totalTokens", result.usage.total_tokens],
+					] as [string, number | undefined][]
+				)
+					.filter((entry): entry is [string, number] => entry[1] !== undefined)
+					.reduce<Record<string, number>>((acc, [key, val]) => {
+						acc[key] = val;
+						return acc;
+					}, {})
+			: undefined;
+
+		return {
+			summary,
+			...(Object.keys(preserveData).length > 0 ? { preserveData } : {}),
+			usage,
+		};
+	}
+}

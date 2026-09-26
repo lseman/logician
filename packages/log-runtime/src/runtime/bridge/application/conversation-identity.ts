@@ -1,5 +1,5 @@
 import type { AgentConfig } from "@logician/log-core";
-import type { SessionStore } from "@logician/log-core/runtime";
+import type { SessionStore } from "@logician/log-core";
 import { createHookTranscriptPath, eventLogPathFor } from "../environment.ts";
 
 interface IdentitySessionPort {

@@ -1,5 +1,5 @@
 import type { AgentConfig } from "@logician/log-core";
-import { resolveAgentSettings } from "@logician/log-core/runtime";
+import { resolveAgentSettings } from "@logician/log-core";
 import type { RuntimeSettingsPatch } from "../types.ts";
 
 export type RuntimeToggleKey =

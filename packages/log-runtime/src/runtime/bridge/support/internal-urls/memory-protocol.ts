@@ -12,6 +12,7 @@ import type {
 	InternalUrl,
 	ProtocolHandler,
 	ResolveContext,
+	SchemeHost,
 	UrlCompletion,
 } from "./types";
 
@@ -37,6 +38,19 @@ type MemoryGateway = {
 export class MemoryProtocolHandler implements ProtocolHandler {
 	readonly scheme = "memory";
 	readonly immutable = true;
+	readonly spec = { backing: "virtual", selectors: "lines" as const };
+
+	promptDoc(host: SchemeHost): string | undefined {
+		if (!host.addressable) return undefined;
+		return [
+			"**memory://** - Access agent memory and observations.",
+			"URL forms:",
+			"- `memory://list` - recent observations",
+			"- `memory://memories` - all stored memories",
+			"- `memory://observe/<id>` - get observation by ID",
+			"- `memory://memory/<id>` - get memory by ID",
+		].join("\n");
+	}
 
 	async resolve(
 		url: InternalUrl,

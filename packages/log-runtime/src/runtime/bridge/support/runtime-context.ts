@@ -7,7 +7,7 @@
  * reimplementing.
  */
 
-import { ToolRegistry } from "@logician/log-core/runtime";
+import { ToolRegistry } from "@logician/log-core";
 import type { ToolRouter } from "./tool-router.ts";
 
 /** Registry construction options a caller controls; cwd/tools come from the router. */

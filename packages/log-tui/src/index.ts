@@ -150,7 +150,10 @@ async function main(): Promise<void> {
 			for (const warning of runtimeConfig.warnings) {
 				process.stderr.write(`warning: ${warning}\n`);
 			}
-			const bridge = new AgentRuntime(runtimeConfig.bridge);
+			const bridge = new AgentRuntime({
+				...runtimeConfig.bridge,
+				interactive: false,
+			});
 			process.exitCode = await runHeadlessExec(bridge, {
 				...execArgs,
 				cwd,

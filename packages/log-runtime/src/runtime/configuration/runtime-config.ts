@@ -49,6 +49,7 @@ export function mergeRuntimeConfigLayers(
 		"plugins",
 		"legroom",
 		"memoriam",
+		"ttsr",
 	] as const) {
 		const value = mergeObject(
 			global[key] as Record<string, unknown> | undefined,
@@ -166,6 +167,7 @@ export function resolveRuntimeConfig(
 			verifiedStopEnabled: configBool(config.verifiedStopEnabled),
 			proactiveCompactionEnabled: configBool(config.compaction?.enabled),
 			compaction: config.compaction,
+			ttsr: config.ttsr,
 			maxParallelAgents: configNumber(config.maxParallelAgents),
 			lsp: config.lsp,
 			continuationEnabled: configBool(config.continuationEnabled, true),

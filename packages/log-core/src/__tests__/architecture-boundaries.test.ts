@@ -2,11 +2,35 @@ import { describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-const MODULE_DEPTH = new Map([
-	["system", 0],
-	["capabilities", 1],
-	["control", 2],
-	["runtime", 3],
+/**
+ * Feature modules and their layer. A module may import (at runtime) only from
+ * its own layer or below; type-only imports are exempt. Every top-level
+ * directory must appear here, so a new module has to pick its layer.
+ */
+const MODULE_LAYER = new Map([
+	// Foundation: shared contracts and plumbing.
+	["types", 0],
+	["lifecycle", 0],
+	["events", 0],
+	// Primitives.
+	["tools", 1],
+	["config", 1],
+	["evaluation", 1],
+	// Model I/O.
+	["provider", 2],
+	// Capabilities built on the provider.
+	["session", 3],
+	["guards", 3],
+	["ttsr", 3],
+	["policy", 3],
+	["context", 3],
+	["compaction", 4],
+	// Orchestration: the agent loop and its hook/extension surfaces.
+	["loop", 5],
+	["hooks", 5],
+	["extensions", 5],
+	// The session that owns a running agent.
+	["harness", 6],
 ]);
 
 async function sourceFiles(root: string): Promise<string[]> {
@@ -42,12 +66,7 @@ describe("core architecture boundaries", () => {
 			.filter(entry => entry.isDirectory() && entry.name !== "__tests__")
 			.map(entry => entry.name)
 			.sort();
-		expect(directories).toEqual([
-			"capabilities",
-			"control",
-			"runtime",
-			"system",
-		]);
+		expect(directories).toEqual([...MODULE_LAYER.keys()].sort());
 	});
 
 	test("source does not import workspace feature packages", async () => {
@@ -55,9 +74,9 @@ describe("core architecture boundaries", () => {
 		const offenders: string[] = [];
 		// Files in log-core that import from @logician/log-snapcompact (allowed)
 		const allowed = new Set([
-			"runtime/compaction/orchestration.ts",
-			"runtime/compaction/engine.ts",
-			"capabilities/provider/messages.ts",
+			"compaction/orchestration.ts",
+			"compaction/engine.ts",
+			"provider/messages.ts",
 		]);
 		for (const file of await sourceFiles(sourceRoot)) {
 			if (file.includes(`${path.sep}__tests__${path.sep}`)) continue;
@@ -71,14 +90,14 @@ describe("core architecture boundaries", () => {
 		expect(offenders).toEqual([]);
 	});
 
-	test("foundational modules never depend on orchestration modules", async () => {
+	test("modules never import from a higher layer", async () => {
 		const sourceRoot = path.resolve(import.meta.dir, "../");
 		const violations: string[] = [];
 		for (const file of await sourceFiles(sourceRoot)) {
 			if (file.includes(`${path.sep}__tests__${path.sep}`)) continue;
 			const sourceModule =
 				path.relative(sourceRoot, file).split(path.sep)[0] ?? "";
-			const sourceDepth = MODULE_DEPTH.get(sourceModule);
+			const sourceDepth = MODULE_LAYER.get(sourceModule);
 			if (sourceDepth === undefined) continue;
 
 			for (const specifier of await scannedImports(
@@ -88,7 +107,7 @@ describe("core architecture boundaries", () => {
 				const target = path.resolve(path.dirname(file), specifier);
 				const targetModule =
 					path.relative(sourceRoot, target).split(path.sep)[0] ?? "";
-				const targetDepth = MODULE_DEPTH.get(targetModule);
+				const targetDepth = MODULE_LAYER.get(targetModule);
 				if (targetDepth === undefined || targetDepth <= sourceDepth) continue;
 				violations.push(
 					`${path.relative(sourceRoot, file)} -> ${specifier} (${sourceModule} -> ${targetModule})`,
@@ -100,11 +119,8 @@ describe("core architecture boundaries", () => {
 
 	test("protocol types are self-contained (no workspace deps)", async () => {
 		const sourceRoot = path.resolve(import.meta.dir, "../");
-		const protocolFile = path.resolve(
-			sourceRoot,
-			"system/types/types-protocol.ts",
-		);
-		const eventFile = path.resolve(sourceRoot, "system/types/types-events.ts");
+		const protocolFile = path.resolve(sourceRoot, "types/protocol.ts");
+		const eventFile = path.resolve(sourceRoot, "types/events.ts");
 		const protocolSources = [protocolFile, eventFile];
 		const offenders: string[] = [];
 		for (const file of protocolSources) {

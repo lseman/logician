@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CancellationScope } from "@logician/log-core/runtime";
+import { CancellationScope } from "@logician/log-core";
 import { stripJsonComments } from "../../capabilities/tools/support/utils/json-utils.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────

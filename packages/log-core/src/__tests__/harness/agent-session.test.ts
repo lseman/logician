@@ -10,19 +10,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BackendError } from "../../capabilities/provider/backend.ts";
-import {
-	SessionCorruptionError,
-	SessionRegistry,
-	SessionStore,
-} from "../../capabilities/session/session-store.ts";
 import {
 	AgentSession,
 	defineHarnessModule,
 	HarnessBusyError,
 	HarnessConfigurationError,
-} from "../../runtime/harness/agent-session.ts";
-import type { AgentConfig } from "../../system/types/types-config.ts";
+} from "../../harness/agent-session.ts";
+import { BackendError } from "../../provider/backend.ts";
+import {
+	SessionCorruptionError,
+	SessionRegistry,
+	SessionStore,
+} from "../../session/session-store.ts";
+import type { AgentConfig } from "../../types/config.ts";
 import { FakeBackend, textResponse } from "../fake-backend.ts";
 
 function makeHarness(backend: FakeBackend, cwd?: string): AgentSession {

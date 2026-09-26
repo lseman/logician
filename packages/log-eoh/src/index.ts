@@ -681,3 +681,4 @@ ${best.code}
 		return { message, injectAsTurn: true };
 	}
 }
+export * from "./compaction-methods/index.ts";

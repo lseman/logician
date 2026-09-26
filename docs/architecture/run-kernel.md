@@ -18,26 +18,26 @@ actually needs it (thread state, file state, run status).
 
 ## Continuation tracking
 
-The harness turn loop (`runtime/harness/agent-harness.ts`) drives each
+The harness turn loop (`loop/agent-harness.ts`) drives each
 turn through intake, model call, tool execution, and hooks. In-memory runtime
 status — phase (`idle` / `turn` / `compaction` / `branch_summary`),
 streaming state, pending tool calls, retry attempts, and the last run
-outcome — is projected by `runtime/state/runtime-state.ts` from the harness's
+outcome — is projected by `events/runtime-state.ts` from the harness's
 own event stream. This projection drives UI-facing status; it is
 intentionally ephemeral and rebuilds from the next turn if lost.
 
 Run-scoped policy (budgets, stop conditions, acceptance checks) is owned by
-`control/policy/run-controller.ts`, `run-budget.ts`, and
+`policy/run-controller.ts`, `run-budget.ts`, and
 `execution-policy.ts`; the pure vocabulary those files consume
-(`RunBudgetLimits`, `RunOutcomeStatus`) lives under `system/types/` so
+(`RunBudgetLimits`, `RunOutcomeStatus`) lives under `types/` so
 other layers can reference it without depending on the enforcement classes.
 Task status shown to the harness comes from an optional, capability-supplied
-`TaskLedger` (`system/types/task-ledger.ts`) — a read-only snapshot, not a
+`TaskLedger` (`types/task-ledger.ts`) — a read-only snapshot, not a
 durable store itself.
 
 ## Thread ledger
 
-`capabilities/session/thread-ledger.ts` is the append-only record of
+`session/thread-ledger.ts` is the append-only record of
 conversation changes. Rather than mutating history in place, rewinds,
 branch merges, and compactions append a `projection` item with the
 replacement messages and a typed reason (`restore`, `rewind`,
@@ -48,7 +48,7 @@ erased.
 
 ## File checkpoints
 
-`capabilities/session/file-checkpoints.ts` snapshots files before the
+`session/file-checkpoints.ts` snapshots files before the
 agent's own tools touch them, so `/rewind` restores the workspace alongside
 the conversation:
 
@@ -71,7 +71,7 @@ then simply not captured for that frame.
 ## Compaction checkpoints
 
 When a transcript has been compacted repeatedly and keeps re-growing,
-`runtime/compaction/run-checkpoint.ts` resets it to a small, structured
+`compaction/run-checkpoint.ts` resets it to a small, structured
 handoff instead of compacting again: the original objective, recent tool
 evidence, the last assistant message, and current task state, rewritten as
 a single "continue from here" message. This bounds context growth on long

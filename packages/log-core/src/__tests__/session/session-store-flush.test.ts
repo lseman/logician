@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionStore } from "../../capabilities/session/session-store.ts";
+import { SessionStore } from "../../session/session-store.ts";
 
 const msg = (content: string) => ({
 	role: "user" as const,

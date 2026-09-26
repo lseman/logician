@@ -4,7 +4,7 @@
 // This is a compatibility boundary, not Logician's general hook system.
 
 import type { AgentHooks, Message, ToolCall } from "@logician/log-core";
-import { createUserMessage } from "@logician/log-core/runtime";
+import { createUserMessage } from "@logician/log-core";
 import { type PluginCommandResult, runHookEvent } from "./plugin-runtime.ts";
 
 export interface ClaudeCodeHookLayerOptions {

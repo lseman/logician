@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
 	SessionCompactor,
 	type SessionCompactorDependencies,
-} from "../../runtime/harness/internal/session-compactor.ts";
-import type { AgentConfig } from "../../system/types/types-config.ts";
-import type { Message } from "../../system/types/types-messages.ts";
+} from "../../harness/internal/session-compactor.ts";
+import type { AgentConfig } from "../../types/config.ts";
+import type { Message } from "../../types/messages.ts";
 import { FakeBackend } from "../fake-backend.ts";
 
 function largeHistory(): Message[] {

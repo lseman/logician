@@ -1,8 +1,54 @@
 // ── Internal URL types ───────────────────────────────────────────────────────
-// Lightweight types for the internal URL routing system.
-// Registered internal URLs are resolved by tools like read,
-// providing access to agent resources
-// without exposing filesystem paths.
+// Enhanced types for the internal URL routing system, inspired by oh-my-pi's
+// protocol specification model. Handlers declare their capabilities via SchemeSpec
+// so tools consult the router instead of branching on scheme names.
+
+/**
+ * How a scheme's resources exist.
+ * - `file`: resolved content is the byte-identical content of the file locate() returns.
+ * - `virtual`: content is rendered by the handler (may still locate a backing file).
+ * - `remote`: content lives on another host or service; never locatable.
+ */
+export type SchemeBacking = "file" | "virtual" | "remote";
+
+/**
+ * Read-selector grammar after the URL.
+ * - `lines`: any trailing :<selector> chain is a read selector (artifact://3:raw:1-50).
+ * - `none`: never peel; the URL is passed through as written.
+ */
+export type SchemeSelectors = "lines" | "none";
+
+/** Write policy for a writable scheme. Absent on read-only schemes. */
+export interface SchemeWritePolicy {
+	/** Who performs the write: file (standard tools) or handler (custom logic). */
+	via: "file" | "handler";
+}
+
+/**
+ * Rich scheme declaration that tells tools how to consume a protocol.
+ * Declared on ProtocolHandler via spec().
+ */
+export interface SchemeSpec {
+	/** How the scheme's resources exist (file, virtual, remote). */
+	backing?: SchemeBacking;
+	/** Read-selector grammar after the URL. */
+	selectors?: SchemeSelectors;
+}
+
+/**
+ * Per-scheme metadata for system prompt generation and tool introspection.
+ * Populated by ProtocolHandler.describe().
+ */
+export interface SchemeHost {
+	/** The scheme name (e.g., "memory", "skill"). */
+	scheme: string;
+	/** Whether this scheme is currently addressable (has content). */
+	addressable?: boolean;
+	/** Count of addressable resources (rules, skills, etc.) — used for promptDoc gating. */
+	count?: number;
+}
+
+// ── Resource & URL types ──────────────────────────────────────────────────────
 
 /** Resource payload returned by protocol handlers. */
 export interface InternalResource {
@@ -15,7 +61,7 @@ export interface InternalResource {
 	isDirectory?: boolean;
 	/**
 	 * True when this resource cannot be edited via write. Stamped by the
-	 * router from {@link ProtocolHandler.immutable} when a handler's resolve()
+	 * router from ProtocolHandler.immutable when a handler's resolve()
 	 * doesn't set it itself; a value set here always wins.
 	 */
 	immutable?: boolean;
@@ -75,7 +121,7 @@ export interface ResolveContext {
 
 /**
  * Context passed to protocol handlers during write. Mirrors the subset of
- * {@link ResolveContext} a write needs.
+ * ResolveContext a write needs.
  */
 export interface WriteContext {
 	cwd?: string | undefined;
@@ -84,11 +130,20 @@ export interface WriteContext {
 	signal?: AbortSignal | undefined;
 }
 
+// ── Protocol Handler Interface ────────────────────────────────────────────────
+
 /** Protocol handler for a specific internal URL scheme. */
 export interface ProtocolHandler {
+	/** The URL scheme (e.g., "memory", "skill"). Lowercase only. */
 	scheme: string;
-	/** Whether resources produced by this handler are editable via write. Every handler must declare a stance. */
+	/** Whether resources produced by this handler are editable via write. */
 	immutable: boolean;
+	/** Rich scheme declaration — tells tools how to consume this protocol. */
+	spec?: SchemeSpec | Record<string, unknown>;
+	/**
+	 * Resolve a URL to its resource content. Called by the router when a tool
+	 * reads an internal URL.
+	 */
 	resolve: (
 		url: InternalUrl,
 		context?: ResolveContext,
@@ -96,15 +151,23 @@ export interface ProtocolHandler {
 	/**
 	 * Optional write hook. When present, the write tool dispatches
 	 * `write(url, content)` to this handler instead of rejecting the scheme.
-	 * Handlers that omit this are read-only for write.
 	 */
 	write?: (
 		url: InternalUrl,
 		content: string,
 		context?: WriteContext,
 	) => Promise<string | void>;
+	/**
+	 * Optional autocomplete for URL completion in the TUI.
+	 */
 	complete?: (
 		query: string,
 		context?: ResolveContext,
 	) => Promise<UrlCompletion[]>;
+	/**
+	 * Optional prompt document describing valid URL forms for this scheme.
+	 * The router includes this in the system prompt when addressable resources exist.
+	 * Return undefined when no resources are available (scheme is a no-op).
+	 */
+	promptDoc?: (host: SchemeHost) => string | undefined;
 }

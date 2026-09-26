@@ -1,0 +1,863 @@
+/** Messages, tools, hooks, and execution events shared by the core runtime. */
+
+import type { RunOutcomeStatus } from "./execution-policy.ts";
+
+// ── Message types ─────────────────────────────────────────────────────────
+
+type MessageRole = "system" | "user" | "assistant" | "tool";
+
+export interface Message {
+	role: MessageRole;
+	content: string | null;
+	tool_call_id?: string | undefined;
+	tool_calls?: ToolCall[] | undefined;
+	details?: Record<string, unknown> | undefined;
+	name?: string | undefined;
+	timestamp?: number | undefined;
+	/** Images to send alongside `content` (e.g. snapcompact frames). Only the
+	 * wire-serialization boundary (convertToChatFormat) interprets this. */
+	images?: Array<{ data: string; mimeType: string }> | undefined;
+}
+
+export interface MutationReceipt {
+	kind: "mutation";
+	applied: boolean;
+	changed: boolean;
+	paths: string[];
+	filesAffected: number;
+	revisions: Array<{
+		path: string;
+		beforeHash: string;
+		afterHash: string;
+	}>;
+	error?: string;
+}
+
+/** Loose message type compatible with both Message and AgentMessage. Used by compaction. */
+export type CompactableMessage = {
+	role: string;
+	content?: unknown[] | string | null;
+	usage?: Record<string, number>;
+	/** UUID for tree-based entry tracking. */
+	entryId?: string;
+	/** Snapcompact frame archive data, persisted for re-rendering on next compaction. */
+	snapcompact?: Record<string, unknown>;
+};
+
+// ── AgentMessage Abstraction ─────────────────────────────────────────────
+// Union of standard LLM messages + custom app messages (notifications,
+// status updates, UI-only artifacts). Apps extend via declaration merging.
+
+// ── Custom message types ──────────────────────────────────────────────────
+
+/** Key under `CompactionSummaryMessage.snapcompact` holding the frame archive.
+ * Also re-exported from @logician/log-snapcompact for external consumers. */
+export const SNAPCOMPACT_PRESERVE_KEY = "snapcompact";
+
+/** Compaction summary text — emitted after context compaction. Field is named
+ * `content` (not `summary`) to match the shape the compaction engine actually
+ * constructs (`CompactableMessage.content`) — every real construction site
+ * writes `content`, so a `summary` field here silently read as `undefined`. */
+export interface CompactionSummaryMessage {
+	role: "compactionSummary";
+	content: string;
+	tokensBefore: number;
+	timestamp: number;
+	/** Files read in the compacted history. */
+	readFiles?: string[];
+	/** Files modified in the compacted history. */
+	modifiedFiles?: string[];
+	/** Snapcompact frame archive data, persisted for re-rendering on next compaction. */
+	snapcompact?: Record<string, unknown>;
+}
+
+/** Branch summary text — emitted after branch recovery. */
+export interface BranchSummaryMessage {
+	role: "branchSummary";
+	summary: string;
+	fromId: string;
+	timestamp: number;
+}
+
+/** Bash execution log — emitted after tool execution. */
+export interface BashExecutionMessage {
+	role: "bashExecution";
+	command: string;
+	output: string;
+	exitCode: number | undefined;
+	cancelled: boolean;
+	truncated: boolean;
+	fullOutputPath?: string;
+	timestamp: number;
+	excludeFromContext?: boolean;
+}
+
+/** Arbitrary custom message — emitted by tools and hooks. */
+export interface CustomMessage {
+	role: "custom";
+	customType: string;
+	content: string;
+	display: boolean;
+	details?: unknown;
+	timestamp: number;
+}
+
+/** Custom agent message types — extend via declaration merging. */
+interface CustomAgentMessages {
+	compactionSummary?: CompactionSummaryMessage;
+	branchSummary?: BranchSummaryMessage;
+	bashExecution?: BashExecutionMessage;
+	custom?: CustomMessage;
+}
+
+/** Helper: map custom keys to message shapes. */
+type CustomAgentMessageMap = {
+	[K in keyof CustomAgentMessages]-?: NonNullable<CustomAgentMessages[K]> & {
+		role: K extends string ? K : never;
+	};
+};
+
+/** Union of standard Message + custom app messages. */
+export type AgentMessage =
+	| Message
+	| CustomAgentMessageMap[keyof CustomAgentMessageMap & string];
+
+// ── Type guards for AgentMessage narrowing ────────────────────────────────
+
+/** Narrow an AgentMessage to a standard LLM message (system/user/assistant/tool). */
+export function isLlmMessage(msg: AgentMessage): msg is Message {
+	return (
+		msg.role === "system" ||
+		msg.role === "user" ||
+		msg.role === "assistant" ||
+		msg.role === "tool"
+	);
+}
+
+export function isCompactionSummary(
+	msg: AgentMessage,
+): msg is CompactionSummaryMessage {
+	return msg.role === "compactionSummary";
+}
+
+export function isBranchSummary(
+	msg: AgentMessage,
+): msg is BranchSummaryMessage {
+	return msg.role === "branchSummary";
+}
+
+export function isBashExecution(
+	msg: AgentMessage,
+): msg is BashExecutionMessage {
+	return msg.role === "bashExecution";
+}
+
+export function isCustomMessage(msg: AgentMessage): msg is CustomMessage {
+	return msg.role === "custom";
+}
+
+/** Why the model (or loop) ended its turn. */
+export type StopReason =
+	| "stop"
+	| "length"
+	| "tool_calls"
+	| "error"
+	| "aborted"
+	| "loop_detected";
+
+// ── Tool types ────────────────────────────────────────────────────────────
+
+export interface ToolCall {
+	id: string;
+	name: string;
+	arguments: string;
+}
+
+/** Structured tool result. */
+export interface ToolResult {
+	content: string;
+	details?: Record<string, unknown> | undefined;
+	isError?: boolean | undefined;
+	terminate?: boolean | undefined;
+}
+
+type ToolExecutionMode = "sequential" | "parallel";
+
+export interface Tool {
+	name: string;
+	/** Structured provenance for tools contributed by an external runtime. */
+	origin?: {
+		kind: "mcp";
+		server: string;
+		tool: string;
+	};
+	/** Human-readable label shown in UI/tool lists. */
+	label?: string;
+	description: string;
+	/** One-line description for the "Available tools" section in the system prompt. */
+	promptSnippet?: string;
+	/** Guideline bullets for the system prompt Guidelines section. */
+	promptGuidelines?: string[];
+	parameters: Record<string, unknown>;
+	prepareArguments?: (args: unknown) => Record<string, unknown>;
+	/** Resolve a transport call to a registered tool before hooks and permissions. */
+	resolveCall?: (
+		args: Record<string, unknown>,
+	) => { name: string; arguments: Record<string, unknown> } | undefined;
+	executionMode?: ToolExecutionMode;
+	/** Opt-in result caching. Only pure, side-effect-free tools should set this. */
+	cacheable?: boolean;
+	/** Execution timeout in ms. Overrides the registry default; 0 disables. */
+	timeoutMs?: number;
+	/**
+	 * Per-call timeout in ms derived from the call's arguments (e.g. bash's
+	 * timeout parameter). Takes precedence over timeoutMs; return undefined to
+	 * fall through.
+	 */
+	resolveTimeoutMs?: (args: Record<string, unknown>) => number | undefined;
+	hookAliases?: string[];
+	readOnly?: boolean;
+	execute: (
+		args: Record<string, unknown>,
+		ctx: ToolContext,
+	) => Promise<string | ToolResult>;
+}
+
+export interface AskUserContext {
+	questions: Array<{
+		id: string;
+		header?: string;
+		question: string;
+		/** Allow selecting more than one choice. Answer is returned as an array. */
+		multi?: boolean;
+		/** Value of the choice to pre-select and mark as recommended. No auto-timeout — purely a hint/default. */
+		recommended?: string;
+		choices: Array<{
+			value: string;
+			label: string;
+			description?: string;
+			/** Selecting this choice opens free-text entry instead of submitting `value` directly. */
+			isFreeText?: boolean;
+		}>;
+	}>;
+}
+
+export interface ToolContext {
+	cwd?: string | undefined;
+	allowedPaths?: string[] | undefined;
+	allowAllPaths?: boolean | undefined;
+	maxOutputChars?: number | undefined;
+	signal?: AbortSignal | undefined;
+	onUpdate?: ((partialResult: string) => void) | undefined;
+	onQuestionRequest?: ((ctx: AskUserContext) => Promise<string>) | undefined;
+	/** Loaded skills for skill:// URL resolution. */
+	skills?: Array<{ name: string; content: string; path: string }> | undefined;
+	memory?: {
+		listObservations: (
+			sessionId: string,
+			limit: number,
+		) => Promise<Array<{ id: string; content: string }>>;
+		listMemories: (
+			query?: Record<string, unknown>,
+		) => Promise<Array<{ id: string; content: string }>>;
+	};
+}
+
+// ── Event types ───────────────────────────────────────────────────────────
+
+import type { AgentConfig, AgentHarnessStreamOptions } from "./config.ts";
+import type { HarnessIntervention } from "./intervention.ts";
+
+/**
+ * Envelope metadata stamped onto every event at the emit boundary: a
+ * monotonic per-loop sequence number and a wall-clock timestamp.
+ */
+interface AgentEventEnvelope {
+	seq?: number;
+	ts?: number;
+}
+
+type AgentEventBody =
+	| { type: "agent_start" }
+	| ({ type: "harness_intervention" } & HarnessIntervention)
+	| {
+			type: "policy_evaluation";
+			policyId: string;
+			kind: "deterministic" | "prompt" | "agent";
+			status: "started" | "completed" | "failed";
+			durationMs?: number | undefined;
+			decision?: "continue" | "finish" | "abstain" | undefined;
+			error?: string | undefined;
+	  }
+	| {
+			type: "agent_end";
+			messages?: Message[] | undefined;
+			status?: RunOutcomeStatus | undefined;
+			summary?: string | undefined;
+			stepCount?: number | undefined;
+	  }
+	| { type: "agent_settled"; nextTurnCount?: number }
+	| {
+			type: "queue_update";
+			steering: readonly string[];
+			followUp: readonly string[];
+			nextTurn: readonly string[];
+	  }
+	| { type: "turn_start"; turnId: string }
+	| {
+			type: "inference_mode_selected";
+			configuredMode: "auto";
+			effectiveMode: Exclude<AgentConfig["inferenceMode"], "auto">;
+			reason: string;
+	  }
+	| {
+			type: "turn_end";
+			turnId: string;
+			stopReason?: StopReason | undefined;
+			message?: Message | undefined;
+			toolResults?: Message[] | undefined;
+	  }
+	| { type: "message_start"; turnId: string; role: MessageRole }
+	| { type: "text_start"; turnId: string }
+	| { type: "text_delta"; turnId: string; delta: string }
+	| { type: "text_end"; turnId: string }
+	| { type: "message_update"; turnId: string; message: Message }
+	| { type: "message_end"; turnId: string; message?: Message }
+	| {
+			type: "context_update";
+			tokens: number;
+			maxTokens?: number | undefined;
+			compacted?: boolean | undefined;
+			/** null means the provider supplied no cache telemetry. */
+			cachedTokens?: number | null | undefined;
+			/** Tokens sent to the provider (prompt/input); null means unavailable. */
+			promptTokens?: number | null | undefined;
+			/** Tokens generated by the provider (completion/output); null means unavailable. */
+			completionTokens?: number | null | undefined;
+			/** Client-side prefix check: true when this request's payload prefix
+			 * fully matched the previous request's (prompt-cache/KV-prefix warm). */
+			prefixStable?: boolean | undefined;
+			/** First message index that changed vs the previous request; the
+			 * previous length on a pure append; 0 when the payload was rewritten. */
+			prefixDivergedAt?: number | undefined;
+			/** True when the payload shrank (compaction) or the tool spec changed. */
+			prefixRewritten?: boolean | undefined;
+	  }
+	| {
+			type: "compaction";
+			reason: "manual" | "context_full" | "auto" | "overflow" | "threshold";
+			tokensBefore?: number | undefined;
+			tokensAfter?: number | undefined;
+	  }
+	| { type: "thinking_delta"; turnId?: string; delta: string }
+	// The backend's coherent mid-stream reasoning accumulation — a snapshot,
+	// not a delta, fired alongside message_update. Reasoning is never part of
+	// the persisted Message (providers don't echo it back in history), so it
+	// travels as its own event instead of a Message field.
+	| { type: "message_reasoning_update"; turnId: string; reasoning: string }
+	| {
+			type: "tool_call_start";
+			toolName: string;
+			toolCallId: string;
+			args: string;
+	  }
+	| {
+			type: "tool_call_delta";
+			toolCallId: string;
+			delta: string;
+	  }
+	| {
+			type: "tool_call_id_update";
+			previousToolCallId: string;
+			toolCallId: string;
+	  }
+	| {
+			type: "tool_call_end";
+			toolName: string;
+			toolCallId: string;
+			result: string;
+			isError?: boolean | undefined;
+			details?: Record<string, unknown> | undefined;
+	  }
+	| {
+			type: "tool_execution_start";
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+	  }
+	| {
+			type: "tool_execution_update";
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			partialResult: string;
+	  }
+	| {
+			type: "tool_execution_end";
+			toolCallId: string;
+			toolName: string;
+			result: string;
+			isError: boolean;
+	  }
+	| {
+			type: "repair_nudge";
+			turnId?: string | undefined;
+			repairStage: string;
+			toolName?: string | undefined;
+			message: string;
+	  }
+	| { type: "phase"; phase: "thinking" | "tool" | "idle" }
+	| { type: "model_select"; model: string; index: number }
+	| { type: "max_iterations"; iterations: number; limit: number }
+	| {
+			type: "loop_detected";
+			message: string;
+			attempt?: number | undefined;
+	  }
+	| {
+			type: "subagent_start";
+			agentId: string;
+			agent: string;
+			task: string;
+			/** Position within a spawn_agents batch, if run as part of one. */
+			taskIndex?: number | undefined;
+	  }
+	| {
+			type: "subagent_event";
+			agentId: string;
+			event: AgentEvent;
+			/** Position within a spawn_agents batch, if run as part of one. */
+			taskIndex?: number | undefined;
+	  }
+	| {
+			type: "subagent_end";
+			agentId: string;
+			agent: string;
+			result: string;
+			isError?: boolean | undefined;
+			turns?: number | undefined;
+			/** Position within a spawn_agents batch, if run as part of one. */
+			taskIndex?: number | undefined;
+	  }
+	| {
+			type: "tool_permission_request";
+			toolName: string;
+			toolCallId: string;
+			args: string;
+	  }
+	| {
+			type: "tool_permission_decision";
+			toolName: string;
+			toolCallId: string;
+			decision: "allow" | "deny" | "always";
+			source: "rule" | "mode" | "user" | "hook" | "fail_closed";
+	  }
+	| { type: "budget_exhausted"; usedTokens: number; limitTokens: number }
+	| { type: "error"; message: string; error?: unknown }
+	| {
+			type: "model_cycle";
+			model: string;
+			fromModel: string;
+			thinkingLevel?: string | undefined;
+	  }
+	| { type: "thinking_level_changed"; level: string }
+	| { type: "thinking_level_clamped"; level: string; reason: string }
+	| { type: "tools_update"; toolNames: string[] }
+	| {
+			type: "abort";
+			clearedSteering: readonly string[];
+			clearedFollowUp: readonly string[];
+			clearedNextTurn: readonly string[];
+	  }
+	| {
+			type: "thinking_loop_detected";
+			message: string;
+			strategy:
+				| "thinking_only"
+				| "escalation"
+				| "meta_reasoning"
+				| "budget_exhausted";
+			iteration: number;
+	  }
+	| {
+			type: "guard_triggered";
+			guard:
+				| "duplicate"
+				| "failure"
+				| "continuation_nudge"
+				| "loop_detected"
+				| "budget_stop"
+				| "follow_up"
+				| "policy_continue"
+				| "continuation_exhausted";
+			message: string;
+			toolName?: string | undefined;
+			iteration: number;
+	  }
+	| {
+			type: "thinking_loop_stats";
+			consecutiveThinkingOnly: number;
+			totalThinkingTurns: number;
+			totalThinkingTokens: number;
+			metaReasoningHits: number;
+	  }
+	| {
+			type: "acceptance_start";
+			level: string;
+			criteriaCount: number;
+	  }
+	| {
+			type: "acceptance_check";
+			criterionId: string;
+			status: "satisfied" | "failed" | "partial";
+			severity: string;
+	  }
+	| {
+			type: "acceptance_verify";
+			command: string;
+			result: "passed" | "failed" | "skipped";
+			summary?: string | undefined;
+	  }
+	| {
+			type: "acceptance_complete";
+			status: "passed" | "failed" | "timeout";
+			report?: Record<string, unknown> | undefined;
+	  }
+	// Session tree entries
+	| {
+			type: "model_change";
+			provider: string;
+			modelId: string;
+	  }
+	| {
+			type: "active_tools_change";
+			activeToolNames: string[];
+	  }
+	// Retry / error observability
+	| {
+			type: "agent_retry_start";
+			attempt: number;
+			maxRetries: number;
+			delayMs?: number | undefined;
+			error: string;
+			reason?: "compaction" | "error" | "overflow" | "rate_limit" | undefined;
+	  }
+	| {
+			type: "agent_retry_end";
+			attempt: number;
+			success: boolean;
+			reason?: "compaction" | "error" | "overflow" | "rate_limit" | undefined;
+	  }
+	| {
+			type: "agent_error";
+			message: string;
+			phase: "model" | "tool" | "compaction" | "network" | "other";
+			recoverable: boolean;
+	  }
+	// Session lifecycle
+	| {
+			type: "session_delete";
+			sessionFile: string;
+			sessionId: string;
+	  };
+
+export type AgentEvent = AgentEventBody & AgentEventEnvelope;
+export type EventHandler = (event: AgentEvent) => void;
+export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
+
+// ── Hook context/result types ─────────────────────────────────────────────
+
+export interface BeforeToolCallContext {
+	toolCall: ToolCall;
+	args: Record<string, unknown>;
+	iteration: number;
+}
+
+export interface BeforeToolCallResult {
+	content?: string | undefined;
+	isError?: boolean | undefined;
+	args?: Record<string, unknown> | undefined;
+}
+
+export interface AfterToolCallContext {
+	toolCall: ToolCall;
+	args: Record<string, unknown>;
+	result: string;
+	isError: boolean;
+	iteration: number;
+}
+
+export interface AfterToolCallResult {
+	content?: string | undefined;
+	isError?: boolean | undefined;
+	terminate?: boolean | undefined;
+}
+
+export interface PrepareNextTurnContext {
+	messages: Message[];
+	iteration: number;
+	hadToolCalls: boolean;
+}
+
+export interface PrepareNextTurnResult {
+	messages: Message[];
+}
+
+export interface ShouldStopAfterTurnContext {
+	messages: Message[];
+	iteration: number;
+	hadToolCalls: boolean;
+}
+
+export interface GetSteeringMessagesContext {
+	messages: Message[];
+	iteration: number;
+}
+export interface GetToolChoiceContext {
+	messages: Message[];
+	iteration: number;
+	availableTools: string[];
+}
+
+/**
+ * Tool choice directive for one turn: either a hard provider tool_choice or
+ * a soft requirement that injects reminders and escalates after failures.
+ */
+export type ToolChoiceDirective =
+	| { hard: true; toolChoice: string }
+	| SoftToolRequirement;
+
+export interface TransformContext {
+	messages: AgentMessage[];
+	iteration: number;
+	signal?: AbortSignal | undefined;
+}
+
+export interface BeforeProviderRequestContext {
+	model: string;
+	sessionId: string;
+	iteration: number;
+	streamOptions: AgentHarnessStreamOptions;
+}
+
+export interface BeforeProviderRequestResult {
+	/** Header patch. undefined values delete keys; explicit headers: undefined clears all. */
+	headers?: Record<string, string | undefined> | undefined;
+	/** Timeout override in milliseconds. */
+	timeoutMs?: number | undefined;
+	/** Max retry attempts override. */
+	maxRetries?: number | undefined;
+	/** Cache retention hint (e.g., "transient", "persistent"). */
+	cacheRetention?: string | undefined;
+	/** Additional request headers merged with auth and lifecycle headers. */
+	metadata?: Record<string, unknown> | undefined;
+	/** Provider metadata forwarded with requests. */
+	transport?: string | undefined;
+}
+
+export interface BeforeProviderPayloadContext {
+	model: string;
+	payload: Record<string, unknown>;
+	hookSessionId?: string;
+}
+
+export interface BeforeProviderPayloadResult {
+	payload: Record<string, unknown>;
+}
+
+export interface AfterProviderResponseContext {
+	model: string;
+	content: string;
+	toolCallCount: number;
+	stopReason: StopReason;
+	usageTokens?: number | undefined;
+	iteration: number;
+}
+
+export interface TransformContextResult {
+	messages: AgentMessage[];
+}
+
+export interface GetFollowUpMessagesContext {
+	messages: Message[];
+	iteration: number;
+	assistantText: string;
+	stopReason?: StopReason;
+}
+
+export interface BeforeCompactContext {
+	/** Messages that will be summarized. */
+	messages: Message[];
+	/** Estimated token count before compaction. */
+	tokensBefore: number;
+	/** "manual" = explicit compact() call; "auto" = threshold-triggered. */
+	reason: "manual" | "auto";
+}
+
+export interface BeforeCompactResult {
+	/** Return true to skip compaction entirely. */
+	cancel?: boolean;
+	/** Provide a pre-built summary to use instead of generating one. */
+	summary?: string;
+}
+
+export interface BeforeAgentStartContext {
+	prompt: string;
+	systemPrompt: string;
+	messages: AgentMessage[];
+}
+
+export interface BeforeAgentStartResult {
+	messages?: AgentMessage[];
+	systemPrompt?: string;
+}
+
+export interface AgentHooks {
+	beforeAgentStart?:
+		| ((
+				ctx: BeforeAgentStartContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<BeforeAgentStartResult | undefined>
+				| BeforeAgentStartResult
+				| undefined)
+		| undefined;
+	beforeToolCall?:
+		| ((
+				ctx: BeforeToolCallContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<BeforeToolCallResult | undefined>
+				| BeforeToolCallResult
+				| undefined)
+		| undefined;
+	afterToolCall?:
+		| ((
+				ctx: AfterToolCallContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<AfterToolCallResult | undefined>
+				| AfterToolCallResult
+				| undefined)
+		| undefined;
+	prepareNextTurn?:
+		| ((
+				ctx: PrepareNextTurnContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<PrepareNextTurnResult | undefined>
+				| PrepareNextTurnResult
+				| undefined)
+		| undefined;
+	transformContext?:
+		| ((
+				ctx: TransformContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<TransformContextResult | undefined>
+				| TransformContextResult
+				| undefined)
+		| undefined;
+	beforeProviderRequest?:
+		| ((
+				ctx: BeforeProviderRequestContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<BeforeProviderRequestResult | undefined>
+				| BeforeProviderRequestResult
+				| undefined)
+		| undefined;
+	beforeProviderPayload?:
+		| ((
+				ctx: BeforeProviderPayloadContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<BeforeProviderPayloadResult | undefined>
+				| BeforeProviderPayloadResult
+				| undefined)
+		| undefined;
+	afterProviderResponse?:
+		| ((
+				ctx: AfterProviderResponseContext,
+				signal?: AbortSignal,
+		  ) => Promise<void> | void)
+		| undefined;
+	shouldStopAfterTurn?:
+		| ((
+				ctx: ShouldStopAfterTurnContext,
+				signal?: AbortSignal,
+		  ) => Promise<boolean | undefined> | boolean | undefined)
+		| undefined;
+	getSteeringMessages?:
+		| ((
+				ctx: GetSteeringMessagesContext,
+				signal?: AbortSignal,
+		  ) => Promise<Message[] | undefined> | Message[] | undefined)
+		| undefined;
+	getToolChoice?:
+		| ((
+				ctx: GetToolChoiceContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<ToolChoiceDirective | undefined>
+				| ToolChoiceDirective
+				| undefined)
+		| undefined;
+	getFollowUpMessages?:
+		| ((
+				ctx: GetFollowUpMessagesContext,
+				signal?: AbortSignal,
+		  ) => Promise<Message[] | undefined> | Message[] | undefined)
+		| undefined;
+	beforeCompact?:
+		| ((
+				ctx: BeforeCompactContext,
+				signal?: AbortSignal,
+		  ) =>
+				| Promise<BeforeCompactResult | undefined>
+				| BeforeCompactResult
+				| undefined)
+		| undefined;
+}
+// ── Soft Tool Requirement ────────────────────────────────────────────────────
+// Remind-then-escalate pattern: inject reminder messages when a specific tool
+// should be called before the agent yields or calls other tools. Avoids the
+// message-cache invalidation cost of forcing tool_choice up front.
+
+/**
+ * A soft tool requirement: the harness wants `toolName` called before the loop
+ * runs other tools or yields, but WITHOUT forcing tool_choice (which invalidates
+ * the provider message cache). The loop injects `reminder` once when a new `id`
+ * becomes active and escalates to a one-turn forced choice only if the model
+ * fails to call `toolName`. Auto-clears when the host stops returning it.
+ */
+export interface SoftToolRequirement {
+	/** Discriminates a soft requirement from a hard ToolChoice. */
+	soft: true;
+	/**
+	 * Stable id of the current requirement. The loop injects `reminder` when
+	 * this id first becomes active and again whenever it changes, but never
+	 * re-injects for an unchanged id across turns.
+	 */
+	id: string;
+	/** Tool that must be called before the loop runs other tools or yields. */
+	toolName: string;
+	/**
+	 * Per-call compliance check: a turn satisfies the requirement only when
+	 * every tool call passes. Defaults to `name === toolName`.
+	 */
+	satisfies?(toolCall: {
+		name: string;
+		arguments?: Record<string, unknown>;
+	}): boolean;
+	/** Host-owned reminder messages, injected once per id activation. */
+	reminder: Message[];
+}
+
+/** Mutable soft-requirement lifecycle retained across tool-call batches. */
+export interface SoftToolRequirementState {
+	/** Current active requirement (or undefined when none is active). */
+	requirement: SoftToolRequirement | undefined;
+	/** Number of consecutive escalations for the current requirement. */
+	escalations: number;
+}

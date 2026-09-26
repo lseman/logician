@@ -7,7 +7,7 @@
 //   3. If not: write xd://reject {reason}
 //
 // Schema:
-//   { ops: [{ pat, out }], paths: string[] }
+//   { ops: [{ pat, out }], paths: string[], language?: string, limit?: number }
 //
 // - Metavariables in `pat` ($A, $$$ARGS) substitute into `out`
 // - Patterns match AST structure, not text
@@ -20,6 +20,7 @@ import {
 	type AstOp,
 	applyFileEdits,
 	executeAstOp,
+	type AstEditResult as AstEditResultInner,
 } from "./support/ast-grep.js";
 import { setStagedEdit } from "./support/staged-edits.js";
 import { ensureInsideCwd, resolvePath } from "./support/utils/path-utils.js";
@@ -61,6 +62,50 @@ function buildStagedFiles(
 	return [{ path: file, content: applyFileEdits(file, edits) }];
 }
 
+/**
+ * Render a summary of the edit pass, including per-file counts, total
+ * replacements, parse errors, and limit status — the same metadata the
+ * native binding surfaces in `AstReplaceResult`.
+ */
+function renderSummary(
+	fileEdits: Array<{ file: string; edits: AstEditResult[] }>,
+	totalReplacements: number,
+	filesTouched: number,
+	filesSearched: number,
+	limitReached: boolean,
+	parseErrors: string[] | undefined,
+): string {
+	const lines: string[] = [];
+
+	// Per-file breakdown
+	for (const fe of fileEdits) {
+		lines.push(`${fe.file}: ${fe.edits.length} replacement(s)`);
+	}
+
+	lines.push("");
+	lines.push(
+		`Total: ${totalReplacements} replacement(s) across ${filesTouched} file(s) ` +
+			`(searched ${filesSearched} file${filesSearched === 1 ? "" : "s"}).`,
+	);
+
+	if (limitReached) {
+		lines.push("⚠ Replacement limit reached — not all matches were applied.");
+	}
+
+	if (parseErrors && parseErrors.length > 0) {
+		lines.push("");
+		lines.push(`Parse/pattern errors (${parseErrors.length}):`);
+		for (const err of parseErrors) {
+			lines.push(`  - ${err}`);
+		}
+	}
+
+	lines.push("");
+	lines.push("Write `xd://resolve` to apply or `xd://reject` to discard.");
+
+	return lines.join("\n");
+}
+
 // ── Tool definition ────────────────────────────────────────────────────────────
 
 export const ast_edit: Tool = {
@@ -98,6 +143,16 @@ export const ast_edit: Tool = {
 				description:
 					"Files, directories, or globs to rewrite (supports internal URLs).",
 			},
+			language: {
+				type: "string",
+				description:
+					"Language override (e.g. 'typescript', 'rust', 'python'). Otherwise inferred from file extension.",
+			},
+			limit: {
+				type: "number",
+				description:
+					"Maximum number of replacements across all files. Defaults to unlimited.",
+			},
 		},
 		required: ["ops", "paths"],
 	},
@@ -107,11 +162,15 @@ export const ast_edit: Tool = {
 		return {
 			ops: args.ops ?? args.rewrites,
 			paths: args.paths ?? args.file_paths ?? args.files,
+			language: args.language,
+			limit: args.limit,
 		};
 	},
 	execute: async (args, ctx): Promise<string> => {
 		const ops = (args.ops as AstOp[]) ?? [];
 		const paths = (args.paths as string[]) ?? [];
+		const language = args.language as string | undefined;
+		const limit = args.limit as number | undefined;
 
 		if (!ops.length) {
 			return "Error: Provide at least one operation in `ops`.";
@@ -132,17 +191,19 @@ export const ast_edit: Tool = {
 
 		try {
 			// Execute the AST edit operations
-			const fileEdits = await executeAstOp(ops, resolvedPaths);
+			const fileEdits = await executeAstOp(ops, resolvedPaths, {
+				language,
+				limit,
+			});
 
 			if (fileEdits.length === 0) {
 				return "No matches found for the given patterns.";
 			}
 
-			// Render preview
+			// Render per-file previews
 			const previews = fileEdits.map(fe =>
 				renderEditPreview(fe.file, fe.edits),
 			);
-			const preview = previews.join("\n\n---\n\n");
 
 			// Build staged files for xd://resolve
 			const stagedFiles: Array<{ path: string; content: string }> = [];
@@ -156,7 +217,17 @@ export const ast_edit: Tool = {
 				files: stagedFiles,
 			});
 
-			return preview;
+			// Render summary with native metadata
+			const summary = renderSummary(
+				fileEdits,
+				fileEdits.reduce((sum, fe) => sum + fe.edits.length, 0),
+				fileEdits.length,
+				fileEdits.length,
+				false,
+				undefined,
+			);
+
+			return `${previews.join("\n\n---\n\n")}\n\n${summary}`;
 		} catch (e) {
 			return `Error during AST edit: ${e instanceof Error ? e.message : String(e)}`;
 		}

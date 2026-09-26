@@ -2,7 +2,7 @@ import type { Message } from "@logician/log-core";
 import {
 	estimateChatPayloadTokensHeuristic,
 	estimateTokensHeuristic,
-} from "@logician/log-core/runtime";
+} from "@logician/log-core";
 
 type ToolDefinitions = Parameters<typeof estimateChatPayloadTokensHeuristic>[1];
 

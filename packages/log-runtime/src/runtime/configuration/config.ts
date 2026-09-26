@@ -70,6 +70,7 @@ const SUB_OBJECTS = [
 	"tools",
 	"webSearch",
 	"permissions",
+	"ttsr",
 ] as const;
 
 /**
@@ -197,6 +198,16 @@ const SUB_OBJECT_CUSTOMS: Readonly<Record<string, SubObjectCustom>> = {
 				out.config = value.config;
 			else warn(warnings, '"legroom.config" must be an object.');
 		}
+	},
+	ttsr: (value, out, warnings) => {
+		if (value.disabledRules !== undefined)
+			copyStringArray(
+				"ttsr.disabledRules",
+				"disabledRules",
+				value.disabledRules,
+				out,
+				warnings,
+			);
 	},
 	memoriam: (value, out, warnings) => {
 		if (value.args !== undefined)
@@ -640,6 +651,16 @@ export interface LogicianTuiConfig {
 				languageId: string;
 			}
 		>;
+	};
+	// Time-traveling stream rules (mid-stream rule enforcement).
+	ttsr?: {
+		enabled?: boolean;
+		builtinRules?: boolean;
+		judge?: boolean;
+		interruptMode?: "always" | "prose-only" | "tool-only" | "never";
+		repeatMode?: "once" | "gap";
+		repeatGap?: number;
+		disabledRules?: string[];
 	};
 	// Compaction settings.
 	compaction?: {

@@ -10,7 +10,7 @@ import type {
 	CustomSessionEntry,
 	SessionEntry,
 	SessionStore,
-} from "@logician/log-core/runtime";
+} from "@logician/log-core";
 import type { Turn } from "./transcript.ts";
 
 const TURN_CUSTOM_TYPE = "tui_turn";

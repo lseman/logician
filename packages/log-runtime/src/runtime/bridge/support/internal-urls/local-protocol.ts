@@ -18,6 +18,7 @@ import type {
 	InternalUrl,
 	ProtocolHandler,
 	ResolveContext,
+	SchemeHost,
 	WriteContext,
 } from "./types";
 
@@ -76,6 +77,18 @@ function parseRange(
 export class LocalProtocolHandler implements ProtocolHandler {
 	readonly scheme = "local";
 	readonly immutable = false;
+	readonly spec = { backing: "file", selectors: "lines" as const };
+
+	promptDoc(_host: SchemeHost): string | undefined {
+		return [
+			"**local://** - Access session-local artifacts (JSONL journals, session metadata).",
+			"URL forms:",
+			"- `local://<path>` - reads a file under the session artifacts directory",
+			"- `local:///0` - reads artifact by numeric ID",
+			"- `local:///0:10-30` - artifact with line-range selector",
+			"- `local:///0:raw` - artifact verbatim",
+		].join("\n");
+	}
 
 	/** Resolve `<cwd>/.logician/artifacts` plus the target path for a URL, enforcing the sandbox both hops. */
 	#resolveTargetPath(

@@ -6,7 +6,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
-import { ExtensionRunner, loadExtensions } from "@logician/log-core/runtime";
+import { ExtensionRunner, loadExtensions } from "@logician/log-core";
 import type { Skill } from "../../capabilities/skills/loader.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────

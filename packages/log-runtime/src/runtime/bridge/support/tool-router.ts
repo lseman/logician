@@ -52,6 +52,7 @@ import { resolveWebSearchConfig } from "../environment.ts";
 import { ArtifactRegistry } from "./internal-urls/artifact-manager.ts";
 import { createInternalUrlRouter } from "./internal-urls/default-router.ts";
 import type {
+	ProtocolHandler,
 	ResolveContext,
 	UrlCompletion,
 } from "./internal-urls/types.ts";
@@ -247,6 +248,11 @@ export class ToolRouter {
 
 	getDefaultTools(): Tool[] {
 		return filterCoreTools(this.defaultTools);
+	}
+
+	/** Register a session-owned internal URL handler (e.g. cfg://). */
+	registerResourceHandler(handler: ProtocolHandler): void {
+		this.resourceRouter.register(handler);
 	}
 
 	// ── Internal URL completion ─────────────────────────────────────────

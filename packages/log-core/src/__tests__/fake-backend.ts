@@ -2,12 +2,12 @@
 // A responder gets the generate options (for callbacks/signal) and returns an
 // LLMResponse — or a promise that settles however the test scripts it.
 
+import type { RemoteCompactionResult } from "../compaction/engine.ts";
 import type {
 	GenerateOptions,
 	LLMBackend,
 	LLMResponse,
-} from "../capabilities/provider/backend.ts";
-import type { RemoteCompactionResult } from "../runtime/compaction/engine.ts";
+} from "../provider/backend.ts";
 
 export type Responder = (
 	messages: Record<string, unknown>[],

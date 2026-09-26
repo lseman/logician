@@ -3,7 +3,7 @@
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { resolve } from "node:path";
-import { CancellationScope } from "@logician/log-core/runtime";
+import { CancellationScope } from "@logician/log-core";
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 

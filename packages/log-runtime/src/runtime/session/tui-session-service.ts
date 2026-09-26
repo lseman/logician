@@ -4,7 +4,7 @@
 // One Session per conversation, cwd-scoped listing, Turn[] persisted as
 // opaque entries via turn-entries.ts.
 
-import { SessionRegistry, type SessionStore } from "@logician/log-core/runtime";
+import { SessionRegistry, type SessionStore } from "@logician/log-core";
 import type { Turn } from "../transcript/transcript.ts";
 import {
 	loadTurns as loadTurnsFromSession,

@@ -8,6 +8,7 @@ import type {
 	InternalUrl,
 	ProtocolHandler,
 	ResolveContext,
+	SchemeHost,
 } from "./types";
 
 /** Edit distance for short strings (skill names). */
@@ -50,6 +51,19 @@ function closestSkillName(name: string, available: string[]): string | null {
 export class SkillProtocolHandler implements ProtocolHandler {
 	readonly scheme = "skill";
 	readonly immutable = true;
+	readonly spec = { backing: "virtual", selectors: "lines" as const };
+	/** Set externally by the router factory. */
+	skills: Array<{ name: string; content: string; path: string }> = [];
+
+	promptDoc(_host: SchemeHost): string | undefined {
+		if (this.skills.length === 0) return undefined;
+		const names = this.skills.map(s => s.name).join(", ");
+		return [
+			"**skill://** - Access agent skills.",
+			"URL form: `skill://<name>` - Reads the skill's SKILL.md content.",
+			`Available skills: ${names}`,
+		].join("\n");
+	}
 
 	async resolve(
 		url: InternalUrl,

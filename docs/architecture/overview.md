@@ -45,19 +45,25 @@ The foundation layer. Handles:
 - Hook system
 - Tool registry and execution
 
-Inside the package, source is organized by role rather than one flat `core/`:
+Inside the package, source is one flat folder per feature module, each
+assigned a layer. A module imports (at runtime) only from its own layer or
+below; `src/__tests__/architecture-boundaries.test.ts` enforces this, and
+every new top-level folder must declare its layer there.
 
 ```text
-capabilities/  session, provider, tools — the durable/model-facing seams
-control/       guards, policy, configuration — enforcement over the loop
-runtime/       harness, execution, hooks, compaction, loop, state — the engine itself
-system/        types (vocabulary) and cross-cutting context/evaluation concerns
+0  types/ lifecycle/ events/         vocabulary, cancellation, event journal + runtime state
+1  tools/ config/ evaluation/        tool registry/permissions, settings + model caps, trajectories
+2  provider/                         LLM backend, adapters, message helpers, tokenizer
+3  session/ guards/ ttsr/ policy/    journal + checkpoints, loop/output guards, stream rules,
+   context/                          run policy and budgets, adaptive context
+4  compaction/                       context-window compaction
+5  loop/ hooks/ extensions/          the agent loop + tool batches, hook bus, extension runner
+6  harness/                          AgentSession: the stateful owner of a running agent
 ```
 
-`system/types/` holds pure vocabulary (`TaskLedger`, `RunBudgetLimits`,
-`AcceptanceConfig`, and similar) with no behavior, so `control/`'s
-enforcement classes and `capabilities/`/`runtime/` code can share one
-definition without a circular dependency. Product composition — wiring
+`types/` holds pure vocabulary (`TaskLedger`, `RunBudgetLimits`,
+`AcceptanceConfig`, and similar) with no behavior, so every layer can share
+one definition without a circular dependency. Product composition — wiring
 log-core into a running agent — lives in `log-runtime`, not inside log-core
 itself. The harness uses immutable configuration revisions, an append-only
 thread ledger, a run-scoped policy controller, and an adaptive context

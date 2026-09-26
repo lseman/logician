@@ -96,7 +96,7 @@ type RuntimeEventType =
 ```
 
 Each variant has its own payload shape (see
-`packages/log-core/src/system/types/types-events.ts` for the full interfaces).
+`packages/log-core/src/types/events.ts` for the full interfaces).
 Most core events pass through `mapAgentEvent()`; bridge-owned features also
 emit UI-facing events such as `todos`, `steered`, `notice`, and
 `memory_update`. The [headless JSONL stream](/tutorials/headless) is a separate,

@@ -33,6 +33,28 @@ export interface AstOp {
 	out: string;
 }
 
+/** Options for AST edit operations. */
+export interface AstEditOptions {
+	/** Language override (e.g. 'typescript', 'rust'). Inferred from extension when omitted. */
+	language?: string;
+	/** Maximum number of replacements across all files. */
+	limit?: number;
+}
+
+/** Result of running an AST edit operation, with full native metadata. */
+export interface AstEditResult {
+	/** The file being edited. */
+	file: string;
+	/** The replacement text. */
+	replacement: string;
+	/** Byte offset of the original text. */
+	originalStart: number;
+	/** Byte offset after the original text. */
+	originalEnd: number;
+	/** The original text. */
+	original: string;
+}
+
 /** Result of running an AST edit operation. */
 export interface AstEditResult {
 	/** The file being edited. */
@@ -114,24 +136,47 @@ function applyByteEdits(filePath: string, edits: AstEditResult[]): string {
 
 /**
  * Execute an AST edit operation across the given paths.
- * Returns the file edits that would result from applying the operation.
+ * Returns the file edits that would result from applying the operation,
+ * plus full native metadata (parse errors, limit status, file counts).
  */
 export async function executeAstOp(
 	ops: AstOp[],
 	paths: string[],
-): Promise<Array<{ file: string; edits: AstEditResult[] }>> {
+	options: AstEditOptions = {},
+): Promise<{
+	fileEdits: Array<{ file: string; edits: AstEditResult[] }>;
+	totalReplacements: number;
+	filesTouched: number;
+	filesSearched: number;
+	limitReached: boolean;
+	parseErrors: string[] | undefined;
+}> {
 	const native = await loadNative();
 	const rewrites = Object.fromEntries(ops.map(op => [op.pat, op.out]));
+	const { language, limit } = options;
 
 	const fileMap = new Map<string, AstEditResult[]>();
+	let totalReplacements = 0;
+	let filesTouched = 0;
+	let filesSearched = 0;
+	let limitReached = false;
+	const allParseErrors: string[] = [];
+
 	for (const scanPath of paths) {
-		const lang = detectLanguage(scanPath);
 		const result = await native.astEdit({
 			rewrites,
-			...(lang !== undefined ? { lang } : {}),
+			...(language !== undefined ? { lang: language } : {}),
 			path: scanPath,
 			dryRun: true,
+			...(limit !== undefined ? { maxReplacements: limit } : {}),
 		});
+
+		filesSearched += result.filesSearched;
+		filesTouched += result.filesTouched;
+		totalReplacements += result.totalReplacements;
+		if (result.limitReached) limitReached = true;
+		if (result.parseErrors) allParseErrors.push(...result.parseErrors);
+
 		for (const change of result.changes) {
 			const file = resolveDisplayPath(scanPath, change.path);
 			const edits = fileMap.get(file) ?? [];
@@ -146,10 +191,17 @@ export async function executeAstOp(
 		}
 	}
 
-	return Array.from(fileMap.entries()).map(([file, edits]) => ({
-		file,
-		edits,
-	}));
+	return {
+		fileEdits: Array.from(fileMap.entries()).map(([file, edits]) => ({
+			file,
+			edits,
+		})),
+		totalReplacements,
+		filesTouched,
+		filesSearched,
+		limitReached,
+		parseErrors: allParseErrors.length > 0 ? allParseErrors : undefined,
+	};
 }
 
 /**

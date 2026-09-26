@@ -1,53 +1,5 @@
 /** Public contracts required to embed and extend the agent loop. */
 
-export type {
-	BackendErrorCategory,
-	GenerateOptions,
-	LLMBackend,
-	LLMResponse,
-} from "./capabilities/provider/backend.ts";
-export {
-	BackendError,
-	classifyHttpError,
-	classifyNetworkError,
-	createLLMBackend,
-	normalizeProviderMessages,
-	OpenAIBackend,
-	parseProviderUsage,
-} from "./capabilities/provider/backend.ts";
-export {
-	OpenAIChatCompletionsAdapter,
-	type ProviderAdapter,
-	type ProviderRequestContext,
-} from "./capabilities/provider/provider-adapter.ts";
-export {
-	parseTextToolCalls,
-	stripTextToolCalls,
-} from "./capabilities/provider/text-tool-calls.ts";
-export {
-	type BashDebugEntry,
-	clearBashDebugger,
-	getBashDebuggerReport,
-	isBashDebuggerEnabled,
-	setBashDebugger,
-} from "./capabilities/tools/bash-debugger.ts";
-export type { AcceptanceLedger } from "./control/guards/acceptance-contract.ts";
-export {
-	MAX_ESCALATIONS,
-	SoftToolRequirementExceededError,
-	SoftToolRequirementManager,
-} from "./control/guards/soft-tool-requirement.ts";
-export {
-	TextLoopDetector,
-	type TextLoopDetectorOptions,
-} from "./control/guards/text-loop-detector.ts";
-export type {
-	NamedAgentStopPolicy,
-	StopPolicy,
-	StopPolicyEvaluation,
-	StopPolicyKind,
-} from "./control/policy/execution-policy.ts";
-export { createVerifiedStopPolicy } from "./control/policy/verified-stop-policy.ts";
 // ── Context compaction ──────────────────────────────────────────────────────
 export {
 	type CompactionMode,
@@ -58,21 +10,8 @@ export {
 	microCompactCompactableMessages,
 	pruneHistoricalToolOutputs,
 	shakeCompaction,
-} from "./runtime/compaction/engine.ts";
-export {
-	EventJournal,
-	type EventJournalEntry,
-	type EventJournalOptions,
-	type EventJournalQuery,
-	type EventJournalSubscriptionOptions,
-	type JournalEvent,
-} from "./runtime/events/event-journal.ts";
-export {
-	type RunAgentLoopConfig,
-	type RunAgentLoopContext,
-	runAgentLoop,
-	STEERING_INTERRUPT_SUMMARY,
-} from "./runtime/harness/agent-harness.ts";
+} from "./compaction/engine.ts";
+export { resolveAgentSettings } from "./config/agent-settings.ts";
 export {
 	AdaptiveContextController,
 	type AdaptiveContextControllerOptions,
@@ -80,26 +19,123 @@ export {
 	type AdaptiveContextPlan,
 	type AdaptiveContextRequest,
 	type ContextOutcome,
-} from "./system/context/adaptive-context-controller.ts";
+} from "./context/adaptive-context-controller.ts";
+export {
+	EventJournal,
+	type EventJournalEntry,
+	type EventJournalOptions,
+	type EventJournalQuery,
+	type EventJournalSubscriptionOptions,
+	type JournalEvent,
+} from "./events/event-journal.ts";
+export type { HarnessPhase } from "./events/runtime-state.ts";
+export { loadExtensions } from "./extensions/loader.ts";
+export { ExtensionRunner } from "./extensions/runner.ts";
+// Public contracts for native Logician extensions.
+export type {
+	ExtensionAPI,
+	ExtensionContext,
+	ExtensionEvent,
+	ExtensionEventContext,
+	ExtensionEventHandler,
+	ExtensionEventType,
+	RegisteredCommand,
+	RegisteredTool,
+} from "./extensions/types.ts";
+export type { AcceptanceLedger } from "./guards/acceptance-contract.ts";
+export {
+	MAX_ESCALATIONS,
+	SoftToolRequirementExceededError,
+	SoftToolRequirementManager,
+} from "./guards/soft-tool-requirement.ts";
+export {
+	TextLoopDetector,
+	type TextLoopDetectorOptions,
+} from "./guards/text-loop-detector.ts";
+export type { AbortResult } from "./harness/types.ts";
 export {
 	type CancellationCleanup,
 	CancellationError,
 	type CancellationKind,
 	CancellationScope,
 	type CancellationScopeOptions,
-} from "./system/lifecycle/cancellation-scope.ts";
-export { TtsrManager } from "./system/ttsr/ttsr-manager.ts";
-export type { AcceptanceConfig } from "./system/types/acceptance.ts";
-// TTSR (Time-Traveling Stream Rules) types
+} from "./lifecycle/cancellation-scope.ts";
+export {
+	type RunAgentLoopConfig,
+	type RunAgentLoopContext,
+	runAgentLoop,
+	STEERING_INTERRUPT_SUMMARY,
+} from "./loop/agent-harness.ts";
 export type {
-	TtsrBridgeSettings,
-	TtsrInjectionEntry,
-	TtsrMatchContext,
-	TtsrMatchSource,
-	TtsrRule,
-	TtsrScope,
-	TtsrSettings,
-} from "./system/types/ttsr-types.ts";
+	NamedAgentStopPolicy,
+	StopPolicy,
+	StopPolicyEvaluation,
+	StopPolicyKind,
+} from "./policy/execution-policy.ts";
+export { createVerifiedStopPolicy } from "./policy/verified-stop-policy.ts";
+export type {
+	BackendErrorCategory,
+	GenerateOptions,
+	LLMBackend,
+	LLMResponse,
+} from "./provider/backend.ts";
+export {
+	BackendError,
+	classifyHttpError,
+	classifyNetworkError,
+	createLLMBackend,
+	normalizeProviderMessages,
+	OpenAIBackend,
+	parseProviderUsage,
+} from "./provider/backend.ts";
+// ── Host embedding surface (formerly @logician/log-core/runtime) ──────────────
+export {
+	createAssistantMessage,
+	createToolResultMessage,
+	createUserMessage,
+	estimateChatPayloadTokens,
+	estimateChatPayloadTokensHeuristic,
+	estimateTokens,
+	estimateTokensHeuristic,
+} from "./provider/messages.ts";
+export {
+	OpenAIChatCompletionsAdapter,
+	type ProviderAdapter,
+	type ProviderRequestContext,
+} from "./provider/provider-adapter.ts";
+export {
+	parseTextToolCalls,
+	stripTextToolCalls,
+} from "./provider/text-tool-calls.ts";
+export {
+	type CustomSessionEntry,
+	type SessionEntry,
+	SessionRegistry,
+	SessionStore,
+} from "./session/session-store.ts";
+export {
+	type BashDebugEntry,
+	clearBashDebugger,
+	getBashDebuggerReport,
+	isBashDebuggerEnabled,
+	setBashDebugger,
+} from "./tools/bash-debugger.ts";
+export { ToolRegistry } from "./tools/registry.ts";
+export {
+	BUILTIN_RULES,
+	getBuiltInRuleByName,
+	isBuiltInRule,
+} from "./ttsr/built-in-rules.ts";
+export {
+	buildJudgeRequest,
+	JUDGED_CONTENT_MAX_CHARS,
+	judgeRules,
+	parseJudgeVerdicts,
+	type TtsrJudge,
+} from "./ttsr/judge.ts";
+export { RuleLoader } from "./ttsr/rule-loader.ts";
+export { TtsrManager } from "./ttsr/ttsr-manager.ts";
+export type { AcceptanceConfig } from "./types/acceptance.ts";
 export {
 	type AgentConfig,
 	type AgentModelConfig,
@@ -119,7 +155,7 @@ export {
 	type TruncationConfig,
 	VALID_TOOL_EXECUTION,
 	type WebSearchConfig,
-} from "./system/types/types-config.ts";
+} from "./types/config.ts";
 export type {
 	AgentEvent,
 	AgentHooks,
@@ -135,4 +171,16 @@ export type {
 	ToolChoiceDirective,
 	ToolContext,
 	ToolResult,
-} from "./system/types/types-messages.ts";
+} from "./types/messages.ts";
+// TTSR (Time-Traveling Stream Rules) types
+export type {
+	JudgedCandidate,
+	TtsrBridgeSettings,
+	TtsrInjectionEntry,
+	TtsrMatchContext,
+	TtsrMatchSource,
+	TtsrOutput,
+	TtsrRule,
+	TtsrScope,
+	TtsrSettings,
+} from "./types/ttsr.ts";
