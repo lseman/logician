@@ -5,9 +5,9 @@ import {
 	readFile as readFileAsync,
 } from "node:fs/promises";
 import path from "node:path";
-import { parseFrontmatter } from "@logician/log-core/frontmatter";
 import { ExtensionRunner, loadExtensions } from "@logician/log-core";
-import type { Skill } from "../../capabilities/skills/loader.ts";
+import { parseFrontmatter } from "@logician/log-core/frontmatter";
+import type { Skill } from "../skills/loader.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────
 

@@ -130,3 +130,99 @@ describe("workspace package architecture", () => {
 		expect(forbidden).toEqual([]);
 	});
 });
+
+/**
+ * Source modules: top-level folders, with each capability and adapter its own
+ * module. A new top-level folder has to be added here deliberately.
+ */
+const TOP_LEVEL_MODULES = [
+	"adapters",
+	"agent",
+	"capabilities",
+	"config",
+	"context",
+	"diagnostics",
+	"events",
+	"resources",
+	"session",
+	"shared",
+	"tools",
+	"transcript",
+	"trust",
+];
+
+function moduleOf(relative: string): string | undefined {
+	const parts = relative.split(path.sep);
+	if (parts.length === 1) return undefined; // public entry-point files
+	if (
+		(parts[0] === "capabilities" || parts[0] === "adapters") &&
+		parts.length > 2
+	) {
+		return `${parts[0]}/${parts[1]}`;
+	}
+	return parts[0];
+}
+
+describe("runtime source layout", () => {
+	const sourceRoot = path.resolve(import.meta.dir, "..");
+
+	test("source contains only the known top-level modules", async () => {
+		const directories = (await readdir(sourceRoot, { withFileTypes: true }))
+			.filter(entry => entry.isDirectory() && entry.name !== "__tests__")
+			.map(entry => entry.name)
+			.sort();
+		expect(directories).toEqual(TOP_LEVEL_MODULES);
+	});
+
+	test("module dependency graph is acyclic (runtime imports)", async () => {
+		const transpiler = new Bun.Transpiler({ loader: "ts" });
+		const graph = new Map<string, Set<string>>();
+		for (const file of await sourceFiles(sourceRoot)) {
+			if (file.includes(`${path.sep}__tests__${path.sep}`)) continue;
+			const from = moduleOf(path.relative(sourceRoot, file));
+			if (!from) continue;
+			for (const { path: specifier } of transpiler.scan(
+				await readFile(file, "utf8"),
+			).imports) {
+				if (!specifier.startsWith(".")) continue;
+				const to = moduleOf(
+					path.relative(
+						sourceRoot,
+						path.resolve(path.dirname(file), specifier),
+					),
+				);
+				if (!to || to === from) continue;
+				const edges = graph.get(from) ?? new Set<string>();
+				edges.add(to);
+				graph.set(from, edges);
+			}
+		}
+		const cycles = new Set<string>();
+		const visit = (name: string, stack: string[]): void => {
+			const start = stack.indexOf(name);
+			if (start >= 0) {
+				cycles.add([...stack.slice(start), name].join(" -> "));
+				return;
+			}
+			for (const next of graph.get(name) ?? []) visit(next, [...stack, name]);
+		};
+		for (const name of graph.keys()) visit(name, []);
+		expect([...cycles].sort()).toEqual([]);
+	});
+
+	test("every public export resolves to a source file", async () => {
+		const packageRoot = path.resolve(sourceRoot, "..");
+		const manifest = JSON.parse(
+			await readFile(path.join(packageRoot, "package.json"), "utf8"),
+		) as { exports?: Record<string, string> };
+		const missing: string[] = [];
+		for (const [name, target] of Object.entries(manifest.exports ?? {})) {
+			try {
+				await readFile(path.resolve(packageRoot, target));
+			} catch {
+				missing.push(`${name} -> ${target}`);
+			}
+		}
+		expect(missing).toEqual([]);
+	});
+});

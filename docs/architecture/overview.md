@@ -89,19 +89,40 @@ than depending on runtime internals.
 ### log-runtime
 
 Composes log-core into a running agent and hosts every optional product
-capability, organized as one folder per capability under `capabilities/`:
+capability. Source is one folder per module; the module import graph is kept
+acyclic by `src/__tests__/architecture.test.ts`, which also pins the set of
+top-level folders:
+
+```text
+agent/         AgentRuntime facade (agent-runtime.ts), session runner, TTSR coordinator,
+               application services (application/) and runtime support (support/)
+capabilities/  one folder per optional capability (see below)
+tools/         the built-in tool set; builtin-blocks.ts assembles tools from capabilities
+resources/     internal-URL router and protocols (cfg://, rule://, skill://, memory://, ssh://, …)
+config/        settings schema registry, config loading/validation, env overrides, provenance
+context/       system prompt, @file mentions, context inspection and learning store
+events/        runtime event bus and agent-event mapping
+transcript/    transcript model and selectors for clients
+session/       TUI-facing session service
+trust/         project trust store and checks
+diagnostics/   doctor and native-addon diagnostics
+adapters/      Claude Code plugin compatibility
+shared/        package-wide utilities (paths, JSON, shell, truncation, diffs, native addon)
+```
+
+Capabilities under `capabilities/`:
 - `reasoning/` — ToT, SSR, Reflexion, Best-of-N, Self-Consistency, Auto-CoT,
   In-Context CoT, GoT, plus a shared base and registry
 - `delegation/` — subagent spawning and definitions
 - `tasks/` — todo/task tracking
 - `ask/` — structured mid-turn prompts back to the user
 - `rag/` — retrieval-backed tools (backed by `@logician/log-rag`)
-- `tools/` — the built-in tool registry, including `builtin-blocks.ts`,
-  which assembles tools from the capabilities above
-- `memory/`, `lsp/`, `mcp/`, `skills/`, `interactions/`, `extensions/`,
-  `repository-map/`, `prompts/`, `commands/` — the remaining capability seams
+- `eoh/` — the `/eoh` controller for `@logician/log-eoh`
+- `memoriam/`, `legroom/`, `lsp/`, `mcp/`, `skills/`, `interactions/`,
+  `extensions/`, `repository-map/`, `prompts/`, `commands/`, `hub/`, `eval/`,
+  `browser/`, `sdk/` — the remaining capability seams
 
-`runtime/` is the orchestration layer on top. `AgentRuntime` remains the stable
+`agent/` is the orchestration layer on top. `AgentRuntime` remains the stable
 client-facing facade, while application modules behind it own distinct state
 transitions:
 

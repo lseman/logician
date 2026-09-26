@@ -1,11 +1,10 @@
-export { stripTextToolCalls } from "@logician/log-core";
+export { stripTextToolCalls, ToolRegistry } from "@logician/log-core";
 export { parseFrontmatter } from "@logician/log-core/frontmatter";
 export {
 	type PermissionMode,
 	PermissionPolicy,
 	type PermissionRules,
 } from "@logician/log-core/permissions";
-export { ToolRegistry } from "@logician/log-core";
 export {
 	configurePluginRuntimeEnv,
 	runHookEvent,
@@ -15,49 +14,28 @@ export {
 } from "./adapters/claude-code/plugin-runtime.ts";
 export { ask } from "./capabilities/ask/index.ts";
 export { createReadSkillTool } from "./capabilities/skills/read-skill-tool.ts";
-export { createAutoresearchTools } from "./capabilities/tools/autoresearch.ts";
-export { type BashDetails, bash } from "./capabilities/tools/bash.ts";
-export {
-	createDefaultTools,
-	DEFAULT_SEARXNG_URL,
-	type DefaultToolsOptions,
-} from "./capabilities/tools/default-tools.ts";
-export { type Edit, edit } from "./capabilities/tools/edit-file.ts";
-export { file_diff } from "./capabilities/tools/file-diff.ts";
-export { git } from "./capabilities/tools/git.ts";
-export { glob } from "./capabilities/tools/glob.ts";
-export { graphician } from "./capabilities/tools/graphician.ts";
-export { read } from "./capabilities/tools/read-file.ts";
-export {
-	getDefaultSandboxProfile,
-	type SandboxDetails,
-	type SandboxProfile,
-	sandbox,
-	setDefaultSandboxProfile,
-} from "./capabilities/tools/sandbox.ts";
-export { grep, type SearchDetails } from "./capabilities/tools/search.ts";
 export {
 	parseJsonWithComments,
 	parseJsonWithCommentsSafe,
 	stripJsonComments,
-} from "./capabilities/tools/support/utils/json-utils.ts";
+} from "./shared/json-utils.ts";
 export {
 	ensureInsideCwd,
 	readUtf8IfExists,
 	resolvePath,
 	resolveReadPath,
-} from "./capabilities/tools/support/utils/path-utils.ts";
+} from "./shared/path-utils.ts";
 export {
 	activateProjectVirtualEnv,
 	getProjectVirtualEnv,
 	getShellEnv,
 	getVirtualEnvPythonVersion,
-} from "./capabilities/tools/support/utils/shell.ts";
+} from "./shared/shell.ts";
 export {
 	type HighlightResult,
 	highlight,
 	highlightAuto,
-} from "./capabilities/tools/support/utils/syntax-highlighter.ts";
+} from "./shared/syntax-highlighter.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -72,7 +50,28 @@ export {
 	truncateHead,
 	truncateLine,
 	truncateTail,
-} from "./capabilities/tools/support/utils/truncate.ts";
-export { web_fetch } from "./capabilities/tools/web-fetch.ts";
-export { createWebSearchTool } from "./capabilities/tools/web-search.ts";
-export { write } from "./capabilities/tools/write-file.ts";
+} from "./shared/truncate.ts";
+export { createAutoresearchTools } from "./tools/autoresearch.ts";
+export { type BashDetails, bash } from "./tools/bash.ts";
+export {
+	createDefaultTools,
+	DEFAULT_SEARXNG_URL,
+	type DefaultToolsOptions,
+} from "./tools/default-tools.ts";
+export { type Edit, edit } from "./tools/edit-file.ts";
+export { file_diff } from "./tools/file-diff.ts";
+export { git } from "./tools/git.ts";
+export { glob } from "./tools/glob.ts";
+export { graphician } from "./tools/graphician.ts";
+export { read } from "./tools/read-file.ts";
+export {
+	getDefaultSandboxProfile,
+	type SandboxDetails,
+	type SandboxProfile,
+	sandbox,
+	setDefaultSandboxProfile,
+} from "./tools/sandbox.ts";
+export { grep, type SearchDetails } from "./tools/search.ts";
+export { web_fetch } from "./tools/web-fetch.ts";
+export { createWebSearchTool } from "./tools/web-search.ts";
+export { write } from "./tools/write-file.ts";

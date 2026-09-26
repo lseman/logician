@@ -1,3 +1,3 @@
 /** Runtime composition for Logician applications. */
 
-export * from "./runtime/index.ts";
+export * from "./agent/index.ts";

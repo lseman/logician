@@ -21,7 +21,7 @@ import {
 	type ToolResult,
 } from "@logician/log-core";
 import { parseFrontmatter } from "@logician/log-core/frontmatter";
-import { AgentOutputRegistry } from "../../runtime/bridge/support/internal-urls/agent-registry.js";
+import { AgentOutputRegistry } from "../../resources/agent-registry.js";
 import { createHubTool } from "../hub/hub-tool.ts";
 import { defaultHub } from "../hub/process-manager.ts";
 import { createHubMessageBus, type HubMessageBus } from "./hub.ts";

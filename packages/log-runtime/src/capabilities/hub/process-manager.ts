@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { createInterface } from "node:readline";
-import { untrackDetachedChildPid } from "../tools/support/utils/shell.ts";
+import { untrackDetachedChildPid } from "../../shared/shell.ts";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 

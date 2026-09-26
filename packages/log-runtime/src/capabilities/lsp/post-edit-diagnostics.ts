@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentHooks } from "@logician/log-core";
-import type { MutationSession } from "../tools/mutation/session.js";
-import { ensureInsideCwd } from "../tools/support/utils/path-utils.ts";
+import { ensureInsideCwd } from "../../shared/path-utils.ts";
+import type { MutationSession } from "../../tools/mutation/session.js";
 import type { LspClientPool } from "./lsp-client-pool.ts";
 
 const MAX_SOURCE_BYTES = 1_000_000;

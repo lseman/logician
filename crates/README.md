@@ -16,7 +16,7 @@ A few extras came along because the requested crates depend on them:
   above. It is a pure-Rust library (no napi dependency); `pi-natives`
   exposes it through logician-written bindings in `pi-natives/src/minimize.rs`
   (not vendored), and the JS wrapper lives at
-  `packages/log-runtime/src/capabilities/tools/support/utils/minimize.ts`.
+  `packages/log-runtime/src/shared/minimize.ts`.
   The bash tool runs it over chatty command output before settlement
   (`LOGICIAN_MINIMIZER=0` disables it). Its full test suite runs in CI via
   `cargo test --locked --workspace`.

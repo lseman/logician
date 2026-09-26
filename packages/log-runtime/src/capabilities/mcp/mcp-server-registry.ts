@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Tool } from "@logician/log-core";
 import { runPluginBackend } from "../../adapters/claude-code/plugin-runtime.ts";
+import { updateConfigFile } from "../../config/config-store.ts";
+import { parseJsonWithComments } from "../../shared/json-utils.ts";
 import {
 	allocateMcpToolName,
 	createMcpClient,
@@ -13,9 +15,7 @@ import {
 	type McpResourceListResult,
 	type McpResourceReadResult,
 	type McpServerConfig,
-} from "../../capabilities/mcp/client.ts";
-import { updateConfigFile } from "../../runtime/configuration/config-store.ts";
-import { parseJsonWithComments } from "../tools/support/utils/json-utils.ts";
+} from "./client.ts";
 
 export interface McpLoadResult {
 	tools: Tool[];

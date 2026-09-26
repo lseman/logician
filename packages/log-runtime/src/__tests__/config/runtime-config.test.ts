@@ -1,0 +1,290 @@
+import { test } from "bun:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { resolveRuntimeConfig } from "../../config/runtime-config.ts";
+
+function configuredWorkspace(): string {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-config-"));
+	writeFileSync(
+		path.join(cwd, ".logician.json"),
+		JSON.stringify({
+			baseUrl: "http://config.test:8000",
+			model: "config-model",
+			executionProfile: "minimal",
+			thinkingLevel: "high",
+			inferenceMode: "none",
+			compaction: { enabled: true },
+			maxParallelAgents: 4,
+			lsp: { enabled: false, timeoutMs: 3210 },
+			permissionMode: "ask",
+			toolExecution: "sequential",
+			hooks: true,
+			rtkProxyEnabled: true,
+			graphicianEnabled: false,
+			fffgrepEnabled: false,
+			autoRetryEnabled: false,
+			maxRetries: 2,
+			retryBaseDelayMs: 25,
+			turnTimeoutMs: 5000,
+			cacheSize: 64,
+			cacheTtlMs: 2000,
+			reasoner: "reflexion",
+			reasonerConfig: { maxTrials: 2 },
+			legroom: {
+				mode: "sdk",
+				python: "/opt/legroom/bin/python",
+				failOpen: false,
+				timeoutMs: 12000,
+				config: { protect_recent: 2 },
+			},
+			memoriam: {
+				mode: "sdk",
+				python: "/opt/memoriam/bin/python",
+				failOpen: false,
+				timeoutMs: 15000,
+				config: { db_path: "~/.logician/memories.db" },
+			},
+		}),
+		"utf8",
+	);
+	return cwd;
+}
+
+void test("runtime resolver applies shared environment precedence", () => {
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_LLM_URL: "http://env.test:9000",
+		LOGICIAN_MODEL: "env-model",
+		LOGICIAN_HOOKS: "0",
+	});
+
+	assert.equal(resolved.bridge.baseUrl, "http://env.test:9000");
+	assert.equal(resolved.bridge.model, "env-model");
+	assert.equal(resolved.bridge.executionProfile, "minimal");
+	assert.equal(resolved.bridge.thinkingLevel, "high");
+	assert.equal(resolved.bridge.inferenceMode, "none");
+	assert.equal(resolved.bridge.proactiveCompactionEnabled, true);
+	assert.deepEqual(resolved.bridge.compaction, { enabled: true });
+	assert.equal(resolved.bridge.maxParallelAgents, 4);
+	assert.deepEqual(resolved.bridge.lsp, { enabled: false, timeoutMs: 3210 });
+	assert.equal(resolved.bridge.configPath, resolved.configPath);
+	assert.equal(resolved.bridge.runtimeHooksEnabled, false);
+	assert.equal(resolved.bridge.toolExecution, "sequential");
+	assert.equal(resolved.bridge.permissions?.mode, "ask");
+	assert.equal(resolved.bridge.rtkProxyEnabled, true);
+	assert.equal(resolved.bridge.graphicianEnabled, false);
+	assert.equal(resolved.bridge.fffgrepEnabled, false);
+	assert.equal(resolved.bridge.autoRetryEnabled, false);
+	assert.equal(resolved.bridge.maxRetries, 2);
+	assert.equal(resolved.bridge.retryBaseDelayMs, 25);
+	assert.equal(resolved.bridge.turnTimeoutMs, 5000);
+	assert.equal(resolved.bridge.cacheSize, 64);
+	assert.equal(resolved.bridge.cacheTtlMs, 2000);
+	assert.equal(resolved.bridge.reasoner, "reflexion");
+	assert.deepEqual(resolved.bridge.reasonerConfig, { maxTrials: 2 });
+	assert.deepEqual(resolved.bridge.legroom, {
+		mode: "sdk",
+		python: "/opt/legroom/bin/python",
+		failOpen: false,
+		timeoutMs: 12000,
+		config: { protect_recent: 2 },
+	});
+	assert.deepEqual(resolved.bridge.memoriam, {
+		mode: "sdk",
+		python: "/opt/memoriam/bin/python",
+		failOpen: false,
+		timeoutMs: 15000,
+		config: { db_path: "~/.logician/memories.db" },
+	});
+});
+
+void test("runtime resolver applies environment overrides for config-only keys", () => {
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_THEME: "gruvbox",
+		LOGICIAN_SYSTEM_PROMPT: "env system prompt",
+		LOGICIAN_POST_EDIT_DIAGNOSTICS: "0",
+	});
+
+	assert.equal(resolved.source.theme, "gruvbox");
+	assert.equal(resolved.source.systemPrompt, "env system prompt");
+	assert.equal(resolved.bridge.systemPrompt, "env system prompt");
+	assert.equal(resolved.bridge.postEditDiagnostics, false);
+	assert.equal(resolved.warnings.length, 0);
+});
+
+void test("runtime resolver lets environment win over configured values", () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-config-"));
+	writeFileSync(
+		path.join(cwd, ".logician.json"),
+		JSON.stringify({
+			theme: "dark",
+			systemPrompt: "from config",
+			postEditDiagnostics: true,
+			contextWindowTokens: 100_000,
+		}),
+		"utf8",
+	);
+
+	const resolved = resolveRuntimeConfig(cwd, {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_THEME: "solarized",
+		LOGICIAN_SYSTEM_PROMPT: "from env",
+		LOGICIAN_POST_EDIT_DIAGNOSTICS: "0",
+		LOGICIAN_CONTEXT_WINDOW: "200000",
+	});
+
+	assert.equal(resolved.source.theme, "solarized");
+	assert.equal(resolved.bridge.systemPrompt, "from env");
+	assert.equal(resolved.bridge.postEditDiagnostics, false);
+	assert.equal(resolved.bridge.contextWindowTokens, 200_000);
+	assert.equal(resolved.warnings.length, 0);
+});
+
+void test("runtime resolver rejects uncoercible environment values with warnings", () => {
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_CONTEXT_WINDOW: "not-a-number",
+		LOGICIAN_HOOKS: "banana",
+	});
+
+	// Config value stands for both keys.
+	assert.equal(resolved.bridge.runtimeHooksEnabled, true);
+	assert.equal(resolved.warnings.length, 2);
+	assert.ok(resolved.warnings.some(w => w.includes("contextWindowTokens")));
+	assert.ok(resolved.warnings.some(w => w.includes("hooks")));
+});
+
+void test("reasoners are disabled by default", () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-defaults-"));
+	const resolved = resolveRuntimeConfig(cwd, {});
+	assert.equal(resolved.bridge.reasoner, "none");
+});
+
+void test("untrusted runtime resolution ignores project configuration", () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-runtime-home-"));
+	const settingsDir = path.join(home, ".logician");
+	mkdirSync(settingsDir, { recursive: true });
+	writeFileSync(
+		path.join(settingsDir, "settings.json"),
+		JSON.stringify({
+			baseUrl: "http://global.test:7000",
+			model: "global-model",
+			permissionMode: "acceptEdits",
+			compaction: { reserveTokens: 8_000, keepRecentTokens: 12_000 },
+			lsp: { enabled: true, timeoutMs: 5_000 },
+		}),
+		"utf8",
+	);
+	const resolved = resolveRuntimeConfig(
+		configuredWorkspace(),
+		{ HOME: home },
+		{ loadProjectConfig: false },
+	);
+	assert.equal(resolved.source.model, "global-model");
+	assert.equal(resolved.bridge.model, "global-model");
+	assert.equal(resolved.bridge.baseUrl, "http://global.test:7000");
+	assert.equal(resolved.bridge.permissions?.mode, "acceptEdits");
+	assert.equal(resolved.bridge.projectTrusted, false);
+	assert.ok(!resolved.provenance.some(e => e.layer === "project"));
+});
+
+void test("trusted runtime resolution overlays project config on global settings", () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-runtime-home-"));
+	const settingsDir = path.join(home, ".logician");
+	const workspace = path.join(home, "workspace");
+	mkdirSync(settingsDir, { recursive: true });
+	mkdirSync(workspace, { recursive: true });
+	writeFileSync(
+		path.join(settingsDir, "settings.json"),
+		JSON.stringify({
+			baseUrl: "http://global.test:7000",
+			model: "global-model",
+			permissionMode: "acceptEdits",
+			compaction: { reserveTokens: 8_000, keepRecentTokens: 12_000 },
+			lsp: { enabled: true, timeoutMs: 5_000 },
+		}),
+		"utf8",
+	);
+	writeFileSync(
+		path.join(workspace, ".logician.json"),
+		JSON.stringify({
+			compaction: { enabled: true },
+			lsp: { timeoutMs: 1_000 },
+			mcpServers: {
+				project: { command: "project-mcp" },
+			},
+		}),
+		"utf8",
+	);
+
+	const resolved = resolveRuntimeConfig(
+		workspace,
+		{ HOME: home },
+		{ loadProjectConfig: true },
+	);
+
+	assert.equal(resolved.configPath, path.join(workspace, ".logician.json"));
+	assert.equal(resolved.bridge.model, "global-model");
+	assert.equal(resolved.bridge.baseUrl, "http://global.test:7000");
+	assert.equal(resolved.bridge.permissions?.mode, "acceptEdits");
+	assert.deepEqual(resolved.source.mcpServers, {
+		project: { command: "project-mcp" },
+	});
+	assert.equal(resolved.bridge.projectTrusted, true);
+	assert.deepEqual(resolved.bridge.compaction, {
+		reserveTokens: 8_000,
+		keepRecentTokens: 12_000,
+		enabled: true,
+	});
+	assert.deepEqual(resolved.bridge.lsp, {
+		enabled: true,
+		timeoutMs: 1_000,
+	});
+	const byKey = new Map(resolved.provenance.map(e => [e.key, e]));
+	assert.deepEqual(byKey.get("model"), {
+		key: "model",
+		value: "global-model",
+		layer: "global",
+	});
+	assert.deepEqual(byKey.get("compaction.enabled"), {
+		key: "compaction.enabled",
+		value: true,
+		layer: "project",
+	});
+	assert.deepEqual(byKey.get("compaction.reserveTokens"), {
+		key: "compaction.reserveTokens",
+		value: 8_000,
+		layer: "global",
+	});
+	assert.deepEqual(byKey.get("lsp.timeoutMs"), {
+		key: "lsp.timeoutMs",
+		value: 1_000,
+		layer: "project",
+	});
+	assert.equal(byKey.get("mcpServers")?.layer, "project");
+});
+
+void test("runtime provenance attributes env overrides to the env layer", () => {
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
+		LOGICIAN_MODEL: "env-model",
+		LOGICIAN_HOOKS: "0",
+	});
+	const byKey = new Map(resolved.provenance.map(e => [e.key, e]));
+	assert.deepEqual(byKey.get("model"), {
+		key: "model",
+		value: "env-model",
+		layer: "env",
+	});
+	assert.deepEqual(byKey.get("hooks"), {
+		key: "hooks",
+		value: false,
+		layer: "env",
+	});
+	// Keys only the project file set stay attributed to project.
+	assert.equal(byKey.get("reasoner")?.layer, "project");
+	assert.equal(byKey.get("maxRetries")?.layer, "project");
+});

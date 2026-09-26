@@ -1,0 +1,1516 @@
+/** Coordinates one interactive agent session and its runtime integrations. */
+
+import type {
+	AbortResult,
+	AgentConfig,
+	Message,
+	QueueMode,
+	SessionStore,
+	Tool,
+} from "@logician/log-core";
+import {
+	estimateChatPayloadTokensHeuristic,
+	OpenAIBackend,
+	RuleLoader,
+	type ToolRegistry,
+	TtsrManager,
+} from "@logician/log-core";
+import type { RuntimeEvent } from "@logician/log-core/events";
+import type { PermissionMode } from "@logician/log-core/permissions";
+import type { AgentSession } from "@logician/log-core/session";
+import {
+	configurePluginRuntimeEnv,
+	type PluginCommandResult,
+} from "../adapters/claude-code/plugin-runtime.ts";
+import { createKernelManager } from "../capabilities/eval/kernel-manager.ts";
+import type { ExtensionRegistry } from "../capabilities/extensions/extensions.ts";
+import type { InteractionGateway } from "../capabilities/interactions/interaction-gateway.ts";
+import { LegroomGateway } from "../capabilities/legroom/legroom-gateway.ts";
+import type { LspClientPool } from "../capabilities/lsp/lsp-client-pool.ts";
+import { createPostEditDiagnosticHooks } from "../capabilities/lsp/post-edit-diagnostics.ts";
+import type {
+	McpSnapshotResult,
+	McpToggleResult,
+} from "../capabilities/mcp/mcp-server-registry.ts";
+import { MemoriamGateway } from "../capabilities/memoriam/memoriam-gateway.ts";
+import type { Prompt } from "../capabilities/prompts/loader.ts";
+import type { RepositoryMap } from "../capabilities/repository-map/repository-map.ts";
+import type { Skill } from "../capabilities/skills/loader.ts";
+import type { TaskPhase } from "../capabilities/tasks/todo.ts";
+import { getTasks, onTodosChanged } from "../capabilities/tasks/todo.ts";
+import { saveConfigPath } from "../config/config-store.ts";
+import { resolveRuntimeConfig } from "../config/runtime-config.ts";
+import {
+	contextSources,
+	inspectContext,
+} from "../context/context-inspector.ts";
+import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
+import { RuntimeEventBus } from "../events/runtime-event-bus.ts";
+import {
+	type CfgApproval,
+	CfgProtocolHandler,
+} from "../resources/cfg-protocol.ts";
+import { getRuleStore, setRuleStore } from "../resources/rule-protocol.ts";
+import { killAllTrackedChildren } from "../shared/shell.ts";
+import type { SandboxProfile } from "../tools/sandbox.ts";
+import { createAgentConfig } from "./application/agent-config-factory.ts";
+import { AgentCoordinator } from "./application/agent-coordinator.ts";
+import { CommandDispatcher } from "./application/command-dispatcher.ts";
+import { ConversationIdentity } from "./application/conversation-identity.ts";
+import { ConversationSession } from "./application/conversation-session.ts";
+import { PluginLifecycle } from "./application/plugin-lifecycle.ts";
+import { executeProcessCommand } from "./application/process-command.ts";
+import { RuntimeActivity } from "./application/runtime-activity.ts";
+import { RuntimeConfiguration } from "./application/runtime-configuration.ts";
+import { RuntimeLifecycle } from "./application/runtime-lifecycle.ts";
+import {
+	projectInitializationStatus,
+	projectRuntimeStatus,
+	runtimeToolNames,
+} from "./application/runtime-status.ts";
+import { TurnOrchestrator } from "./application/turn-orchestrator.ts";
+import {
+	createRuntimeContext,
+	type RuntimeContext,
+} from "./capability-context.ts";
+import {
+	buildPluginRuntimeEnv,
+	resolveWebSearchConfig,
+} from "./environment.ts";
+import { SessionRunner } from "./session-runner.ts";
+import { ModelSelector } from "./support/model-selector.ts";
+import { buildToolRegistry } from "./support/runtime-context.ts";
+import { ToolRouter } from "./support/tool-router.ts";
+import { TodoTracker } from "./todo-tracker.ts";
+import { TtsrCoordinator } from "./ttsr-coordinator.ts";
+
+export { findJbPrompt } from "./project-prompt.ts";
+
+export type {
+	AgentBridgeOptions,
+	ErrorCallback,
+	ProtocolCallback,
+	RuntimeSettingsPatch,
+} from "./types.ts";
+
+import type { AgentBridgeOptions, RuntimeSettingsPatch } from "./types.ts";
+
+// ── AgentRuntime ─────────────────────────────────────────────────────────────
+
+export class AgentRuntime {
+	private config: AgentConfig;
+	private backend: OpenAIBackend;
+	private readonly sessions: ConversationSession;
+	private readonly commands: CommandDispatcher;
+	private get session(): AgentSession | null {
+		return this.sessions?.current ?? null;
+	}
+	readonly events: RuntimeEventBus;
+	readonly models: ModelSelector;
+	private readonly turns: TurnOrchestrator;
+	private readonly lifecycle: RuntimeLifecycle;
+
+	private cwd: string;
+	private readonly toolRouter: ToolRouter;
+	private readonly kernelManager = createKernelManager();
+	private baseSystemPrompt = "";
+	private get _defaultTools(): Tool[] {
+		return this.toolRouter.getDefaultTools();
+	}
+	private get _loadedSkills(): Skill[] {
+		return this.toolRouter.getLoadedSkills();
+	}
+	private get _loadedPrompts(): Prompt[] {
+		return this.toolRouter.getLoadedPrompts();
+	}
+	private get _enabledPluginRoots(): Array<{
+		name: string;
+		installPath: string;
+	}> {
+		return this.toolRouter.getEnabledPluginRoots();
+	}
+
+	async loadMcpToolsOnce(): Promise<void> {
+		await this.toolRouter.loadMcpToolsOnce();
+		this.plugins.refreshContext();
+	}
+
+	async injectSkillsFromPlugins(): Promise<void> {
+		await this.toolRouter.injectSkillsFromPlugins();
+		this.plugins.refreshContext();
+	}
+
+	async injectPrompts(): Promise<void> {
+		await this.toolRouter.injectPrompts();
+	}
+
+	private readonly runtimeCtx: RuntimeContext;
+	private get extensions(): ExtensionRegistry {
+		return this.runtimeCtx.extensions;
+	}
+
+	private readonly identity: ConversationIdentity;
+	private get sessionId(): string {
+		return this.identity.id;
+	}
+	private get transcriptPath(): string {
+		return this.identity.transcript;
+	}
+	private readonly plugins: PluginLifecycle;
+	private readonly activity: RuntimeActivity;
+	private configPath: string | null;
+	private readonly runtimeConfiguration: RuntimeConfiguration;
+	private get lsp(): LspClientPool {
+		return this.runtimeCtx.lsp;
+	}
+	private readonly projectTrusted: boolean;
+	private get interactions(): InteractionGateway {
+		return this.runtimeCtx.interactions;
+	}
+	private agentCoordinator: AgentCoordinator | null = null;
+	private readonly sessionRunner: SessionRunner;
+	private readonly ttsrCoordinator: TtsrCoordinator;
+	private get legroomEnabled(): boolean {
+		return this.legroom.isEnabled();
+	}
+	private readonly legroom: LegroomGateway;
+
+	private readonly todoTracker: TodoTracker;
+
+	#ttsrSettings: NonNullable<AgentBridgeOptions["ttsr"]> = {};
+
+	#ttsrSubscribed = false;
+
+	private buildTtsrCoordinator(): TtsrCoordinator {
+		const settings = {
+			enabled: true,
+			contextMode: "discard" as const,
+			interruptMode: "always" as const,
+			repeatMode: "once" as const,
+			repeatGap: 10,
+			builtinRules: true,
+			disabledRules: [] as string[],
+			judge: true,
+			...this.#ttsrSettings,
+		};
+		const manager = new TtsrManager(settings);
+
+		// Wire rule:// protocol to TTSR rules
+		if (!getRuleStore()) setRuleStore({ rules: new Map() });
+
+		const coordinator = new TtsrCoordinator({
+			manager,
+			// Replace the in-flight provider call with the rule as the next
+			// turn; the runner auto-continues with it. Outside a turn there is
+			// no stream to replace, so fall back to a follow-up.
+			interrupt: text => {
+				try {
+					this.sessions.queues.steerNow(text);
+				} catch {
+					this.sessions.queues.followUp(text);
+				}
+			},
+			followUp: message => this.sessions.queues.followUp(message),
+			emit: event => this.emit(event),
+			judge: async ({ system, user, signal }) => {
+				const response = await this.backend.generate(
+					[
+						{ role: "system", content: system },
+						{ role: "user", content: user },
+					],
+					{ temperature: 0, maxTokens: 1024, thinkingLevel: "off", signal },
+				);
+				return response.content ?? "";
+			},
+			onJudgeError: error =>
+				this.events.reportError(
+					error instanceof Error ? error : new Error(String(error)),
+					{ component: "ttsr", operation: "judge", recoverable: true },
+				),
+		});
+
+		this.#syncRulesToProtocol(coordinator);
+
+		// Project/user rule files (.logician/rules, .cursor/rules, …) carry
+		// project-authored content, so they load only in trusted projects.
+		if (this.projectTrusted) {
+			void new RuleLoader(manager, settings)
+				.loadAll(undefined, this.cwd)
+				.then(() => this.#syncRulesToProtocol(coordinator))
+				.catch(error =>
+					this.events.reportError(
+						error instanceof Error ? error : new Error(String(error)),
+						{
+							component: "ttsr",
+							operation: "discover-rules",
+							recoverable: true,
+						},
+					),
+				);
+		}
+
+		return coordinator;
+	}
+
+	/** Wrap tool/response hooks with TTSR checks, chaining the inner hooks. */
+	private buildTtsrHooks(inner: AgentConfig["hooks"]): AgentConfig["hooks"] {
+		return {
+			...inner,
+			beforeToolCall: async (ctx, signal) => {
+				const blocked = await this.ttsrCoordinator.beforeToolCall(
+					ctx.toolCall,
+					ctx.args,
+				);
+				if (blocked !== undefined) return { content: blocked, isError: true };
+				return inner?.beforeToolCall?.(ctx, signal);
+			},
+			afterToolCall: async (ctx, signal) => {
+				const result = await inner?.afterToolCall?.(ctx, signal);
+				const reminder = this.ttsrCoordinator.buildToolReminder(
+					ctx.toolCall.id,
+				);
+				if (!reminder) return result;
+				return {
+					...result,
+					content: `${reminder}\n\n${result?.content ?? ctx.result}`,
+				};
+			},
+			afterProviderResponse: (ctx, signal) => {
+				this.ttsrCoordinator.onAssistantResponse(ctx.content);
+				return inner?.afterProviderResponse?.(ctx, signal);
+			},
+		};
+	}
+
+	/**
+	 * cfg:// for the interactive main session: reads resolve the config fresh
+	 * from disk + env, live writes go through updateSettings, saves go to the
+	 * global config, and every write is approved through the question UI.
+	 */
+	private createCfgHandler(): CfgProtocolHandler {
+		return new CfgProtocolHandler({
+			resolve: () => {
+				const resolved = resolveRuntimeConfig(this.cwd, process.env, {
+					loadProjectConfig: this.projectTrusted,
+				});
+				return {
+					config: resolved.source as unknown as Record<string, unknown>,
+					provenance: resolved.provenance,
+				};
+			},
+			applyLive: patch => this.updateSettings(patch),
+			save: (path, value) => saveConfigPath(path, value),
+			approve: async request => {
+				const change = `${request.path}: ${request.previous} → ${request.value}`;
+				const answer = await this.interactions.requestQuestion({
+					questions: [
+						{
+							id: "cfg",
+							header: request.save ? "Save setting" : "Change setting",
+							question: [
+								`The agent wants to ${request.save ? "save to your global config" : "change for this session"}:`,
+								change,
+								...(request.shadowedBy
+									? [
+											`Note: the ${request.shadowedBy} overrides the saved value in this project.`,
+										]
+									: []),
+							].join("\n"),
+							recommended: "deny",
+							choices: [
+								{ value: "once", label: "Allow" },
+								{
+									value: "session",
+									label: "Allow for this session",
+									description: request.save
+										? "Also allow later setting changes and saves without asking"
+										: "Also allow later session-only setting changes without asking",
+								},
+								{ value: "deny", label: "Deny" },
+							],
+						},
+					],
+				});
+				return answer === "once" || answer === "session"
+					? (answer as CfgApproval)
+					: "deny";
+			},
+		});
+	}
+
+	#syncRulesToProtocol(coordinator: TtsrCoordinator): void {
+		const store = getRuleStore();
+		if (!store) return;
+
+		store.rules.clear();
+		for (const rule of coordinator.getRules()) {
+			store.rules.set(rule.name, {
+				name: rule.name,
+				content: rule.content,
+				path: rule.path,
+				description: rule.description,
+			});
+		}
+	}
+
+	private readonly memoriam: MemoriamGateway;
+	private get memoriamEnabled(): boolean {
+		return this.memoriam.isEnabled();
+	}
+
+	private get repositoryMap(): RepositoryMap | undefined {
+		return this.runtimeCtx.repositoryMap;
+	}
+	// Track previous phases to detect completion transitions for TUI animations.
+	#lastPhases: TaskPhase[] = [];
+	private readonly unsubscribeTodos: () => void;
+	readonly compactionSettings?: AgentBridgeOptions["compaction"];
+
+	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
+
+	/** EoH command: /eoh <file.py> [generations] | stop | status | best | reset */
+	eohCommand(raw: string): string {
+		return this.agentCoordinator?.eohCommand(raw) ?? "";
+	}
+
+	constructor(
+		opts: AgentBridgeOptions = {
+			baseUrl: "http://localhost:8080",
+			model: "",
+		},
+	) {
+		this.events = new RuntimeEventBus({
+			historyCapacity: opts.eventStream?.historyCapacity,
+		});
+		this.#ttsrSettings = { enabled: true, ...opts.ttsr };
+		this.compactionSettings = opts.compaction;
+		this.cwd = opts.cwd || process.cwd();
+		this.identity = new ConversationIdentity(
+			`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+			{
+				cwd: this.cwd,
+				config: () => this.config,
+				sessions: () => this.sessions,
+				events: () => this.events,
+			},
+		);
+		this.projectTrusted = opts.projectTrusted === true;
+		this.configPath = opts.configPath ?? null;
+		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
+		const postEditDiagnosticsEnabled = opts.postEditDiagnostics !== false;
+		this.legroom = new LegroomGateway(opts.legroom ?? {});
+		this.memoriam = new MemoriamGateway(opts.memoriam ?? {});
+
+		this.runtimeCtx = createRuntimeContext({
+			opts,
+			cwd: this.cwd,
+			sessionId: this.sessionId,
+			projectTrusted: this.projectTrusted,
+			emit: event => this.emit(event),
+		});
+		// Extension loading is a real side effect (reads disk, may run init
+		// hooks) — kept as an explicit statement rather than folded into
+		// register(), which the context treats as pure construction.
+		void this.extensions.initialize();
+
+		const defaultWebSearch = resolveWebSearchConfig();
+		const webSearch = {
+			baseUrl: opts.webSearch?.baseUrl || defaultWebSearch.baseUrl,
+			maxResults: opts.webSearch?.maxResults ?? defaultWebSearch.maxResults,
+		};
+		const extraTools = opts.extraTools?.length
+			? [...opts.extraTools]
+			: undefined;
+		this.toolRouter = new ToolRouter({
+			cwd: this.cwd,
+			sessionId: this.sessionId,
+			projectTrusted: this.projectTrusted,
+			tools: opts.tools,
+			extraTools,
+			webSearch,
+			graphicianEnabled: opts.graphicianEnabled,
+			fffgrepEnabled: opts.fffgrepEnabled,
+			autoStartMcp: false,
+			kernelManager: this.kernelManager,
+			emit: event => this.emit(event),
+			xdevEnabled: opts.xdevEnabled,
+			todoEnabled: opts.todoEnabled,
+			memoriam: this.memoriam,
+			onToolAdded: _tool => {
+				if (!this.config) return;
+				this.config.tools = this.toolRouter.getDefaultTools();
+				this.session?.configure({ tools: this.config.tools });
+			},
+			onContextChanged: () => {
+				if (this.baseSystemPrompt) this.plugins?.refreshContext();
+			},
+		});
+		if (opts.interactive !== false) {
+			this.toolRouter.registerResourceHandler(this.createCfgHandler());
+		}
+		this.baseSystemPrompt = buildDefaultSystemPrompt(
+			this.cwd,
+			this._defaultTools,
+			{ loadProjectContext: this.projectTrusted },
+		);
+		this.backend = new OpenAIBackend({
+			baseUrl: opts.baseUrl,
+			model: opts.model,
+			chatTemplate: opts.chatTemplate,
+			thinkingFormat: opts.thinkingFormat,
+		});
+		if (opts.thinkingLevel) {
+			this.backend.setDefaultThinkingLevel(opts.thinkingLevel);
+		}
+
+		this.config = createAgentConfig({
+			bridge: opts,
+			cwd: this.cwd,
+			sessionId: this.sessionId,
+			transcriptPath: this.transcriptPath,
+			systemPrompt: this.baseSystemPrompt,
+			tools: this._defaultTools,
+			webSearch,
+			permissions: this.interactions.permissions,
+			hooks: this.buildTtsrHooks(
+				this.buildTodoHooks(
+					this.buildMemoriamHooks(
+						this.buildLegroomHooks(
+							createPostEditDiagnosticHooks(
+								this.cwd,
+								() => this.runtimeConfiguration.postEditDiagnostics,
+								opts.lsp?.enabled === false ? undefined : this.lsp,
+								{
+									allowedPaths: opts.allowedPaths,
+									allowAllPaths: opts.allowAllPaths,
+								},
+							),
+						),
+					),
+				),
+			),
+			onPermissionRequest: ctx => this.interactions.requestPermission(ctx),
+			onTurnEnd: turnId => this.emit({ type: "turn_end", turnId }),
+			onQuestionRequest: ctx => this.interactions.requestQuestion(ctx),
+			onEvent: event => this.activity.handle(event),
+		});
+		this.activity = new RuntimeActivity({
+			emit: event => this.emit(event),
+			runPhase: () => this.session?.phase,
+		});
+		this.sessions = new ConversationSession(
+			{
+				config: () => this.config,
+				backend: this.backend,
+				extensions: () => this.extensions,
+				emit: event => this.emit(event),
+				contextChanged: () => this.publishContextUsage(),
+				contextCompacted: tokens => {
+					this.activity.setContext(tokens);
+				},
+				compaction: this.compactionSettings,
+			},
+			this.sessionId,
+		);
+		this.ttsrCoordinator = this.buildTtsrCoordinator();
+		if (!this.#ttsrSubscribed) {
+			this.events.subscribe(notification => {
+				const event = notification.event;
+				// Reset buffer on turn start
+				if (event.type === "turn_start") {
+					this.ttsrCoordinator.reset();
+				}
+				// Increment message count at turn end
+				if (event.type === "turn_end") {
+					this.ttsrCoordinator.incrementMessageCount();
+				}
+				// Process all other events for TTSR matching
+				this.ttsrCoordinator.processEvent(event);
+			});
+			this.#ttsrSubscribed = true;
+		}
+		// ── TodoTracker (phased todo enforcement) ──────────────────────────
+		this.todoTracker = new TodoTracker({
+			getActiveToolNames: () => this.config?.tools?.map(t => t.name) ?? [],
+			getMutatingToolNames: () =>
+				this.config?.tools
+					?.filter(t =>
+						["bash", "edit", "write", "ast_edit"].includes(t.name ?? ""),
+					)
+					.map(t => t.name ?? "") ?? [],
+			getCurrentPromptText: () => {
+				const msgs = this.session?.messages ?? [];
+				const userMsg = [...msgs].reverse().find(m => m.role === "user");
+				return typeof userMsg?.content === "string"
+					? userMsg.content
+					: undefined;
+			},
+			isFirstTurn: () => {
+				const msgs = this.session?.messages ?? [];
+				return (
+					msgs.filter(m => m.role === "user" || m.role === "assistant")
+						.length <= 1
+				);
+			},
+			isPlanMode: () => false,
+			modelSupportsToolChoice: () => true,
+			steer: text => this.sessions.queues.steer(text),
+		});
+		this.commands = new CommandDispatcher({
+			session: () => this.session,
+			skills: () => this._loadedSkills,
+			prompts: () => this._loadedPrompts,
+			sendMessage: message => this.sendMessage(message),
+			reload: () => this.reload(),
+			emit: event => this.emit(event),
+			reportError: error => this.events.notifyError(error),
+		});
+		this.models = new ModelSelector(
+			() => this.config,
+			() => this.session,
+		);
+		this.unsubscribeTodos = onTodosChanged(() => {
+			// Detect completion transitions: tasks that were completed since last emit.
+			const completedTasks = new Map<string, string>(); // "phase\x00content" -> true
+			for (const last of this.#lastPhases) {
+				for (const t of last.tasks) {
+					if (t.status === "completed")
+						completedTasks.set(`${last.name}\x00${t.content}`, t.content);
+				}
+			}
+			const transitions: Array<{ phase: string; content: string }> = [];
+			const currentPhases = getTasks();
+			for (const phase of currentPhases) {
+				for (const t of phase.tasks) {
+					const key = `${phase.name}\x00${t.content}`;
+					const prevContent = completedTasks.get(key);
+					if (prevContent && prevContent !== t.content) continue; // already tracked
+					if (t.status === "completed" && !completedTasks.has(key)) {
+						transitions.push({ phase: phase.name, content: t.content });
+					}
+					completedTasks.set(key, t.content);
+				}
+			}
+			this.#lastPhases = currentPhases;
+			this.emit({
+				type: "todos",
+				phases: currentPhases,
+				completedTasks: transitions,
+			});
+		});
+
+		// Create agent coordinator for reasoner, EoH, and subagents
+		this.agentCoordinator = new AgentCoordinator(
+			{
+				emit: event => this.emit(event),
+				getBackend: () => this.backend,
+				getConfig: () => this.config,
+				getBaseUrl: () => this.config.baseUrl,
+				getCurrentModel: () => this.models.current(),
+				cwd: this.cwd,
+				projectTrusted: this.projectTrusted,
+				maxParallelAgents: opts.maxParallelAgents,
+				getEnabledPluginRoots: () => this._enabledPluginRoots,
+				getDefaultTools: () => this._defaultTools,
+				ensureSession: () => this.ensureSession(),
+				reportError: error =>
+					this.events.reportError(error, {
+						component: "agent-coordinator",
+						operation: "capability-run",
+						recoverable: true,
+					}),
+			},
+			opts.reasoner,
+			opts.reasonerConfig,
+		);
+		this.runtimeConfiguration = new RuntimeConfiguration({
+			config: this.config,
+			backend: this.backend,
+			session: () => this.session,
+			sessionId: () => this.sessionId,
+			tools: this.toolRouter,
+			interactions: this.interactions,
+			legroom: this.legroom,
+			memoriam: this.memoriam,
+			defaultTools: () => this._defaultTools,
+			setReasoner: id => this.agentCoordinator?.setReasonerId(id),
+			emit: event => this.emit(event),
+			postEditDiagnostics: postEditDiagnosticsEnabled,
+		});
+		this.plugins = new PluginLifecycle({
+			config: () => this.config,
+			baseSystemPrompt: () => this.baseSystemPrompt,
+			sessionId: () => this.sessionId,
+			tools: this.toolRouter,
+			injectSubagents: async () => {
+				await this.agentCoordinator?.injectSubagents();
+			},
+		});
+
+		this.sessionRunner = new SessionRunner({
+			callbacks: {
+				emit: event => this.emit(event),
+				reportError: (error, context) =>
+					this.events.reportError(error, context),
+				getSession: () => this.session,
+				ensureSession: () => this.ensureSession(),
+				getSessionId: () => this.sessionId,
+				getSystemPrompt: () => this.config.systemPrompt,
+				getSkills: () => this._loadedSkills,
+				renderRepositoryContext: message => this.repositoryMap?.render(message),
+				publishUsage: () => this.publishContextUsage(),
+			},
+			events: this.events,
+			backend: this.backend,
+			getAgentCoordinator: () => this.agentCoordinator,
+			getRepositoryMap: () => this.repositoryMap,
+		});
+		this.turns = new TurnOrchestrator({
+			extensionsReady: () => this.extensions.getLoadPromise(),
+			hasSession: () => this.session !== null,
+			steer: message => this.sessions.queues.steer(message),
+			emit: event => this.emit(event),
+			ensureStartup: () => this.plugins.ensureStarted(),
+			isMcpLoaded: () => this.toolRouter.isMcpLoaded(),
+			loadMcp: () => this.toolRouter.loadMcpToolsOnce(),
+			reportMcpError: error =>
+				this.events.reportError(error, {
+					component: "mcp",
+					operation: "background-discovery",
+					recoverable: true,
+				}),
+			runTurn: message => this.sessionRunner.submit(message),
+		});
+		this.lifecycle = new RuntimeLifecycle({
+			cancel: () => this.cancel(),
+			resetTurns: () => {
+				this.ttsrCoordinator.newSession();
+				this.turns.reset();
+			},
+			dropSession: () => this.sessions.drop(),
+			clearSession: () => this.sessions.clearAndDrop(),
+			resetIdentity: () => this.identity.reset(),
+			endPluginSession: reason => this.plugins.endSession(reason),
+			resetPlugin: options => this.plugins.reset(options),
+			refreshPluginContext: () => this.plugins.refreshContext(),
+			resetInjectedContext: () => this.toolRouter.resetInjectedContext(),
+			resetDiscoveredResources: () => this.toolRouter.resetSkillsAndPrompts(),
+			injectSkills: () => this.injectSkillsFromPlugins(),
+			injectPrompts: () => this.injectPrompts(),
+			reloadExtensions: () => this.extensions.reload(),
+			reportExtensionError: error =>
+				this.events.reportError(error, {
+					component: "extensions",
+					operation: "reload",
+					recoverable: true,
+				}),
+			extensionsReady: () => this.extensions.getLoadPromise(),
+			ensurePluginsStarted: () => this.plugins.ensureStarted(),
+			ensureSession: () => {
+				this.ensureSession();
+			},
+			loadMcp: () => this.loadMcpToolsOnce(),
+			reportMcpError: error =>
+				this.events.reportError(error, {
+					component: "mcp",
+					operation: "reload-tools",
+					recoverable: true,
+				}),
+			closeResources: async () => {
+				this.lsp.close();
+				this.legroom.close();
+				this.memoriam.close();
+				killAllTrackedChildren();
+				await this.toolRouter.closeMcp();
+				this.kernelManager.stop();
+			},
+			resetActivity: () => this.activity.resetContext(),
+			publishUsage: () => this.publishContextUsage(),
+			emitTurnEnd: turnId => {
+				this.ttsrCoordinator.incrementMessageCount();
+				this.emit({ type: "turn_end", turnId });
+			},
+		});
+	}
+
+	private buildLegroomHooks(
+		existingHooks: AgentConfig["hooks"],
+	): AgentConfig["hooks"] {
+		return this.legroom.createHooks(existingHooks);
+	}
+
+	/** Build Memoriam hooks by delegating to the MemoriamGateway. */
+	private buildMemoriamHooks(
+		existingHooks: AgentConfig["hooks"],
+	): AgentConfig["hooks"] {
+		return this.memoriam.createHooks(existingHooks);
+	}
+
+	/** Build TodoTracker hooks for phased todo enforcement. */
+	private buildTodoHooks(
+		existingHooks: AgentConfig["hooks"],
+	): AgentConfig["hooks"] {
+		const tracker = this.todoTracker;
+
+		return {
+			...existingHooks,
+			beforeAgentStart: (_ctx, _signal) => {
+				const prelude = tracker.createEagerTodoPrelude();
+				const messages: Message[] = [];
+				if (prelude) {
+					messages.push(prelude);
+				}
+				const nudge = tracker.createMidRunNudge();
+				if (nudge) {
+					messages.push(nudge);
+				}
+				if (messages.length === 0) return undefined;
+				return { messages };
+			},
+			afterToolCall: ({ toolCall, result, isError }) => {
+				const name = toolCall.name ?? "";
+				if (name === "todo") {
+					tracker.onTodoToolResult();
+					try {
+						const parsed = JSON.parse(result);
+						if (parsed.value && typeof parsed.value === "object") {
+							const obj = parsed.value as Record<string, unknown>;
+							if (Array.isArray(obj.phases)) {
+								const phases = obj.phases as Array<{
+									name: string;
+									tasks: Array<{
+										content: string;
+										status: string;
+										blocker?: string;
+									}>;
+								}>;
+								// Cast status to the expected union.
+								const typedPhases: Array<{
+									name: string;
+									tasks: Array<{
+										content: string;
+										status:
+											| "pending"
+											| "in_progress"
+											| "completed"
+											| "abandoned";
+										blocker?: string;
+									}>;
+								}> = phases.map(p => ({
+									...p,
+									tasks: p.tasks.map(t => ({
+										...t,
+										status: t.status as
+											| "pending"
+											| "in_progress"
+											| "completed"
+											| "abandoned",
+									})),
+								}));
+								const completedTasks = obj.completedTasks as
+									| Array<{
+											phase: string;
+											content: string;
+									  }>
+									| undefined;
+								const completed = tracker.setPhases(
+									typedPhases,
+									completedTasks,
+								);
+								if (completed && completed.length > 0) {
+									this.emit({
+										type: "todos",
+										phases: typedPhases,
+										completedTasks: completed,
+									});
+								}
+							}
+						}
+					} catch {
+						// Non-JSON result; ignore.
+					}
+				} else if (!isError) {
+					tracker.onMutatingToolResult();
+				}
+				return undefined;
+			},
+			getToolChoice: () => tracker.createEagerTodoRequirement(),
+			shouldStopAfterTurn: (_ctx, _signal) => {
+				const completed = tracker.checkCompletion();
+				if (!completed) return undefined;
+				return true;
+			},
+		};
+	}
+
+	// ── Event registration ─────────────────────────────────────────────────
+
+	private emit(event: RuntimeEvent): void {
+		this.events.emit(event);
+	}
+
+	// ── High-level commands ──────────────────────────────────────────────
+
+	async sendMessage(message: string): Promise<void> {
+		return this.turns.submit(message);
+	}
+
+	// Lazily build the singleton harness and wire its UI callbacks.
+	private ensureSession(): AgentSession {
+		return this.sessions.ensure();
+	}
+
+	/**
+	 * Replace the harness conversation with restored session history (resume /
+	 * session switch), so the model continues with the restored context instead
+	 * of starting cold. Pass [] to clear (new session). No-op while a turn is
+	 * running (the harness rejects structural ops mid-turn).
+	 */
+	restoreHistory(messages: Message[]): boolean {
+		return this.sessions.restoreHistory(messages);
+	}
+
+	// ── Queue operations (delegated to AgentSession) ─────────────────
+
+	steer(message: string): void {
+		this.sessions.queues.steer(message);
+	}
+
+	/** Queue steering for after the current turn (never interrupts). */
+	steerQueue(message: string): void {
+		this.sessions.queues.steerQueue(message);
+	}
+
+	/** Immediately interrupt and apply steering (always forces abort). */
+	steerNow(message: string): void {
+		this.sessions.queues.steerNow(message);
+	}
+
+	followUp(message: string): void {
+		this.sessions.queues.followUp(message);
+	}
+
+	nextTurn(message: string): void {
+		this.sessions.queues.nextTurn(message);
+	}
+
+	setSteeringMode(mode: QueueMode): void {
+		this.sessions.queues.setSteeringMode(mode);
+	}
+
+	getSteeringInterrupt(): boolean {
+		return this.config.steeringInterrupt === true;
+	}
+
+	/** Return config snapshot for external LLM calls (goal evaluator, etc.). */
+	getConfig(): {
+		baseUrl: string;
+		model: string;
+		rtkProxyEnabled?: boolean;
+		graphicianEnabled?: boolean;
+		fffgrepEnabled?: boolean;
+		legroomEnabled?: boolean;
+		memoriamEnabled?: boolean;
+	} {
+		return {
+			baseUrl: this.config.baseUrl,
+			model: this.config.model,
+			rtkProxyEnabled: this.config.rtkProxyEnabled,
+			graphicianEnabled: this.config.graphicianEnabled,
+			fffgrepEnabled: this.config.fffgrepEnabled,
+			legroomEnabled: this.legroomEnabled,
+			memoriamEnabled: this.memoriamEnabled,
+		};
+	}
+
+	setFollowUpMode(mode: QueueMode): void {
+		this.sessions.queues.setFollowUpMode(mode);
+	}
+
+	getSteeringMessages(): string[] {
+		return this.sessions.queues.snapshot().steering;
+	}
+
+	flushSteeringNow(): number {
+		return this.sessions.queues.flushSteeringNow();
+	}
+
+	getFollowUpMessages(): string[] {
+		return this.sessions.queues.snapshot().followUp;
+	}
+
+	getNextTurnMessages(): string[] {
+		return this.sessions.queues.snapshot().nextTurn;
+	}
+
+	clearQueue(): {
+		steering: string[];
+		followUp: string[];
+		nextTurn: string[];
+	} {
+		return this.sessions.queues.clear();
+	}
+
+	dropQueuedMessage(displayIndex: number): string | undefined {
+		return this.sessions.queues.drop(displayIndex);
+	}
+
+	/** Abort: clear steering/follow-up queues (preserves nextTurn). */
+	async abort(): Promise<AbortResult | null> {
+		// Drop TTSR state tied to the aborted step (per-tool reminders).
+		this.ttsrCoordinator.incrementRetryToken();
+		// harness.abort() clears steering/follow-up and emits onQueueChange.
+		return this.sessions.abort();
+	}
+
+	/** Execute a slash command (sends as chat message to the agent). */
+	sendSlash(raw: string): void {
+		this.commands.dispatchSlash(raw);
+	}
+
+	// ── Reload ────────────────────────────────────────────────────────────
+
+	/** Reload: restart the session (like Pi's /reload). */
+	private async reload(): Promise<void> {
+		await this.lifecycle.reload();
+	}
+
+	// ── Skill invocation ───────────────────────────────────────────────
+
+	/** Skills discovered at startup (for /<skill-name> completion). */
+	getSkills(): Skill[] {
+		return this._loadedSkills;
+	}
+
+	/**
+	 * Invoke a skill by name as a user prompt: sends the skill's full body
+	 * (plus any arguments) to the agent. Returns false for unknown names so the
+	 * caller can fall back to normal slash handling.
+	 */
+	invokeSkill(name: string, args: string): boolean {
+		return this.commands.invokeSkill(name, args);
+	}
+
+	/** Prompts discovered at startup (for /<prompt-name> completion). */
+	getPrompts(): Prompt[] {
+		return this._loadedPrompts;
+	}
+
+	/**
+	 * Invoke a prompt by name as a user message: sends the prompt's body
+	 * (with $ARGUMENTS substituted, or arguments appended) directly — no XML
+	 * wrapping, unlike invokeSkill, since a prompt is meant to read exactly as
+	 * if the user had typed it. Returns false for unknown names so the caller
+	 * can fall back to normal slash handling.
+	 */
+	invokePrompt(name: string, args: string): boolean {
+		return this.commands.invokePrompt(name, args);
+	}
+
+	// ── Permissions & interactive questions (inlined from InteractionCoordinator) ─
+
+	/** Answer a pending permission_request. Returns false for unknown ids. */
+	respondToPermission(
+		toolCallId: string,
+		decision: "allow" | "deny" | "always",
+	): boolean {
+		return this.interactions.respondToPermission(toolCallId, decision);
+	}
+
+	/**
+	 * Answer a pending question by id. The answer is forwarded to the agent's
+	 * resolver. Returns false if the question id is unknown.
+	 */
+	respondToQuestion(questionId: string, answer: string): boolean {
+		return this.interactions.respondToQuestion(questionId, answer);
+	}
+
+	/** Deny every pending permission request (abort / shutdown). */
+	private denyPendingPermissions(): void {
+		this.interactions.denyPending();
+	}
+
+	setPermissionMode(mode: PermissionMode): void {
+		this.interactions.setMode(mode);
+	}
+
+	getPermissionMode(): PermissionMode {
+		return this.interactions.mode;
+	}
+
+	// ── Sandbox mode (see tool-router.ts) ───────────────────────────────
+
+	getSandboxMode(): SandboxProfile {
+		return this.toolRouter.getSandboxMode();
+	}
+
+	setSandboxMode(mode: SandboxProfile): void {
+		this.toolRouter.setSandboxMode(mode);
+	}
+
+	cycleSandboxMode(): SandboxProfile {
+		return this.toolRouter.cycleSandboxMode();
+	}
+
+	// ── Model cycling ──────────────────────────────────────────────────
+
+	async getState(): Promise<Record<string, unknown>> {
+		// Status is a snapshot, not a synchronization barrier for external MCP
+		// transports. The manager UI provides explicit awaited refresh operations.
+		if (!this.toolRouter.isMcpLoaded() && !this.toolRouter.isMcpLoading()) {
+			void this.toolRouter.loadMcpToolsOnce().catch(error =>
+				this.events.reportError(error, {
+					component: "mcp",
+					operation: "load-tools",
+					recoverable: true,
+				}),
+			);
+		}
+		const context = this.activity.setContext(this.measureContextTokens());
+		return projectRuntimeStatus({
+			config: this.config,
+			toolNames: runtimeToolNames(this.session?.tools, this._defaultTools),
+			mcpServerCount: this.toolRouter.getMcpServerCount(),
+			mcpToolCount: this.toolRouter.getMcpToolCount(),
+			mcpErrors: this.toolRouter.getMcpErrors(),
+			contextTokens: context.tokens,
+			contextMaxTokens: context.maxTokens,
+			runtimeState: this.session?.runtimeState,
+			configPath: this.configPath,
+			reasoner: this.getReasonerStatus(),
+		});
+	}
+
+	async getPluginSnapshot(): Promise<PluginCommandResult> {
+		return this.plugins.snapshot();
+	}
+
+	async getMcpSnapshot(): Promise<McpSnapshotResult> {
+		return this.toolRouter.getMcpSnapshot();
+	}
+
+	async setMcpServerEnabled(
+		serverName: string,
+		enabled: boolean,
+	): Promise<McpToggleResult> {
+		return this.toolRouter.setMcpServerEnabled(serverName, enabled);
+	}
+
+	async setPluginEnabled(
+		pluginId: string,
+		enabled: boolean,
+	): Promise<PluginCommandResult> {
+		return this.plugins.setEnabled(pluginId, enabled);
+	}
+
+	async runPluginCommand(input: string): Promise<string> {
+		return this.plugins.runCommand(input);
+	}
+
+	getReasonerStatus(): string {
+		return this.agentCoordinator?.getReasonerStatus() ?? "none";
+	}
+
+	/** Directly invoke the spawn_agent tool without going through the LLM. */
+	spawnAgentDirectly(task: string, agent?: string): void {
+		this.agentCoordinator?.spawnAgentDirectly(task, agent);
+	}
+
+	/** Whether MCP discovery has started but not finished — lets the TUI show
+	 * a "loading" status while background discovery is in flight. */
+	isMcpLoading(): boolean {
+		return this.toolRouter.isMcpLoading();
+	}
+
+	updateSettings(patch: RuntimeSettingsPatch): void {
+		this.runtimeConfiguration.update(patch);
+	}
+
+	/** Return structured settings data for the overlay UI. */
+	getSettingsData(): {
+		model: string;
+		temperature: number;
+		maxTokens: number;
+		maxIterations: number;
+		thinkingLevel: string;
+		inferenceMode: string;
+		permissionMode: string;
+		executionProfile: string;
+		guardsEnabled: boolean;
+		proactiveCompactionEnabled: boolean;
+		postEditDiagnostics: boolean;
+		rtkProxyEnabled: boolean;
+		graphicianEnabled: boolean;
+		fffgrepEnabled: boolean;
+		legroomEnabled: boolean;
+		memoriamEnabled: boolean;
+		duplicateGuardEnabled: boolean;
+		failureGuardEnabled: boolean;
+		continuationEnabled: boolean;
+		autoRetryEnabled: boolean;
+		progressStopEnabled: boolean;
+		guardMode: "auto" | "on" | "off";
+	} {
+		return this.runtimeConfiguration.read();
+	}
+
+	get compression(): Pick<
+		LegroomGateway,
+		| "isEnabled"
+		| "compressWithStore"
+		| "storeRetrieve"
+		| "storeStats"
+		| "workerStats"
+		| "workerHistory"
+		| "calibrationStatus"
+		| "calibrationRecord"
+	> {
+		return this.legroom;
+	}
+
+	get memory(): Pick<
+		MemoriamGateway,
+		| "isEnabled"
+		| "observe"
+		| "getContext"
+		| "recall"
+		| "listMemories"
+		| "removeMemory"
+		| "consolidate"
+		| "listObservations"
+		| "searchObservations"
+		| "clearObservations"
+		| "listSessions"
+		| "clearSessions"
+		| "workerStats"
+	> {
+		return this.memoriam;
+	}
+
+	/** Use the user-facing conversation session as the hook and memory session. */
+	useConversationSession(
+		sessionId: string,
+		durableSession?: SessionStore,
+	): void {
+		this.identity.use(sessionId, durableSession);
+	}
+
+	/** Rename the Memoriam session metadata (best-effort). */
+	async renameConversationSession(
+		sessionId: string,
+		name: string,
+	): Promise<void> {
+		if (!this.memoriamEnabled) return;
+		try {
+			await this.memoriam.updateSession(sessionId, { name: name.trim() });
+		} catch {
+			// Fail open — memory metadata rename is not load-bearing.
+		}
+	}
+
+	reset(): void {
+		this.lifecycle.reset();
+	}
+
+	async cancel(): Promise<AbortResult | null> {
+		// A turn blocked on an approval must unblock to abort cleanly.
+		this.denyPendingPermissions();
+		try {
+			return await this.sessions.abort();
+		} catch (error) {
+			const normalized =
+				error instanceof Error ? error : new Error(String(error));
+			this.events.notifyError(normalized);
+			throw normalized;
+		}
+	}
+
+	/** Manual context compaction. Returns { tokensSaved, tokensBefore, tokensAfter } or null if nothing to compact. */
+	async compact(mode?: "shake" | "auto" | "llm" | "snapcompact"): Promise<{
+		tokensSaved: number;
+		tokensBefore: number;
+		tokensAfter: number;
+	} | null> {
+		const injected = this.ttsrCoordinator.persistInjected();
+
+		// Resolve compaction method from settings if no explicit mode given
+		let effectiveMode = mode;
+		if (!mode && this.compactionSettings) {
+			const { resolveCompactionMethod } = await import(
+				"@logician/log-eoh/compaction-methods"
+			);
+			const resolved = resolveCompactionMethod(this.compactionSettings, {
+				serverCompactionAvailable: false,
+				snapcompactAvailable: mode === "snapcompact",
+				llmAvailable: true,
+			});
+			if (resolved) effectiveMode = resolved as any;
+		}
+
+		const result = await this.sessions.compact(effectiveMode);
+		if (result) {
+			this.ttsrCoordinator.restoreInjected(injected);
+		}
+		return result;
+	}
+
+	// ── Conversation branching ─────────────────────────────────────────────
+
+	/** Fork the conversation; returns the new branch id, or null if no harness. */
+	fork(): string | null {
+		return this.sessions.fork();
+	}
+
+	/**
+	 * Summarize the active branch and merge it back into the parent. Returns the
+	 * summary text, or null if nothing to summarize / no harness.
+	 */
+	async branchSummary(): Promise<string | null> {
+		return this.sessions.branchSummary();
+	}
+
+	/**
+	 * Rewind to the checkpoint taken before the last prompt: restores the
+	 * conversation AND the files that turn wrote via the write tools. Returns
+	 * what was restored, or null when there is nothing to rewind / a turn is
+	 * running.
+	 */
+	rewind(): { messages: number; filesRestored: number } | null {
+		return this.sessions.rewind();
+	}
+
+	/** Discard the active branch without merging. Returns true if one was discarded. */
+	discardBranch(): boolean {
+		return this.sessions.discardBranch();
+	}
+
+	// ── State management ─────────────────────────────────────────────────
+
+	async init(): Promise<Record<string, unknown>> {
+		await this.lifecycle.initialize();
+		const toolNames = runtimeToolNames(this.session?.tools, this._defaultTools);
+		const status = this.toolRouter.getStatus();
+		const pluginStatus = this.plugins.status();
+		const context = this.activity.context();
+		const info = projectInitializationStatus({
+			config: this.config,
+			toolNames,
+			mcpServerCount: status.mcpServerCount,
+			mcpToolCount: status.mcpToolCount,
+			mcpErrors: status.mcpErrors,
+			contextTokens: context.tokens,
+			contextMaxTokens: context.maxTokens || this.config.contextWindowTokens,
+			runtimeState: this.session?.runtimeState,
+			configPath: this.configPath,
+			reasoner: this.getReasonerStatus(),
+			mcpLoaded: status.mcpLoaded,
+			mcpLoading: status.mcpLoading,
+			enabledPluginRoots: status.enabledPluginRoots,
+			loadedSkills: status.loadedSkills,
+			skillsInjected: status.skillsInjected,
+			skillsVisible: status.skillsVisible,
+			pluginCount: pluginStatus.pluginCount,
+			hookResult: pluginStatus.hookResult,
+		});
+		// Explicitly signal ready so the TUI status bar doesn't get stuck in
+		// streaming after init.
+		this.emit({ type: "phase", state: "ready" });
+		return info;
+	}
+
+	getExtensionCommands(): Array<{
+		name: string;
+		description: string;
+		usage?: string;
+		acceptsArgs?: boolean;
+	}> {
+		return this.extensions.getCommands();
+	}
+
+	invokeExtensionCommand(
+		name: string,
+		args: string,
+	): Promise<string | undefined> {
+		return this.extensions.executeCommand(name, args);
+	}
+
+	async stop(): Promise<void> {
+		try {
+			await this.lifecycle.stop();
+		} finally {
+			this.unsubscribeTodos();
+		}
+	}
+
+	isActive(): boolean {
+		return this.turns.isActive();
+	}
+
+	getMessages(): Message[] {
+		return this.session?.messages || [];
+	}
+
+	/** Return full context as formatted text for /context command.
+	 *
+	 * Memoriam memory context is injected into the provider payload by the
+	 * beforeProviderPayload hook rather than composed here, so it does not
+	 * appear in this synchronous inspection view.
+	 */
+	getContext(): string {
+		const msgs = this.getMessages();
+		const inspection = inspectContext({
+			messages: msgs,
+			systemPrompt: this.config.systemPrompt || "",
+			memoryContext: "",
+			toolDefinitions: this.getTools().toToolDefinitions(),
+		});
+		this.activity.setContext(inspection.tokens);
+		return inspection.text;
+	}
+
+	getContextSourceMap(memoryContext: string = ""): Array<{
+		name: string;
+		tokens: number;
+		detail: string;
+	}> {
+		return contextSources({
+			messages: this.getMessages(),
+			systemPrompt: this.config.systemPrompt || "",
+			memoryContext,
+			toolDefinitions: this.getTools().toToolDefinitions(),
+		});
+	}
+
+	/** Canonical size used by /context, /status, and the status bar. */
+	private measureContextTokens(): number {
+		const messages = this.getMessages();
+		const toolDefinitions = this.getTools().toToolDefinitions();
+		return estimateChatPayloadTokensHeuristic(messages, toolDefinitions);
+	}
+
+	private publishContextUsage(): void {
+		const current = this.activity.context();
+		const context = this.activity.setContext(
+			this.measureContextTokens(),
+			current.maxTokens || this.config.contextWindowTokens,
+		);
+		this.emit({
+			type: "context_update",
+			tokens: context.tokens,
+			maxTokens: context.maxTokens,
+			compacted: false,
+		});
+	}
+
+	getTools(): ToolRegistry {
+		const live = this.session?.tools;
+		if (live) return live;
+		return buildToolRegistry(this.toolRouter, {
+			cwd: this.config.cwd,
+			allowedPaths: this.config.allowedPaths,
+			allowAllPaths: this.config.allowAllPaths,
+			cacheSize: this.config.cacheSize,
+			cacheTtlMs: this.config.cacheTtlMs,
+			maxResultChars: this.config.truncation?.toolResultMaxChars,
+			skills: this.toolRouter.getLoadedSkills().map(skill => ({
+				name: skill.name,
+				content: skill.content,
+				path: skill.filePath,
+			})),
+			memory: this.memoryToolContext(),
+		});
+	}
+
+	/**
+	 * Memory tool context shared by the tool registry and URL completion:
+	 * the memoriam worker's observation/memory listings, normalized to the
+	 * plain { id, content } shape the internal-URL handlers consume.
+	 */
+	private memoryToolContext():
+		| {
+				listObservations: (
+					sessionId: string,
+					limit: number,
+				) => Promise<Array<{ id: string; content: string }>>;
+				listMemories: (
+					query?: Record<string, unknown>,
+				) => Promise<Array<{ id: string; content: string }>>;
+		  }
+		| undefined {
+		if (!this.memoriamEnabled) return undefined;
+		return {
+			listObservations: (sessionId: string, limit: number) =>
+				this.memory
+					.listObservations(sessionId, limit)
+					.then((results: unknown[]) =>
+						results.map(r => ({
+							id: String((r as Record<string, unknown>).id ?? ""),
+							content: String((r as Record<string, unknown>).content ?? ""),
+						})),
+					),
+			listMemories: (query?: Record<string, unknown>) =>
+				this.memory.listMemories(query).then((results: unknown[]) =>
+					results.map(r => ({
+						id: String((r as Record<string, unknown>).id ?? ""),
+						content: String((r as Record<string, unknown>).content ?? ""),
+					})),
+				),
+		};
+	}
+
+	/** Internal-URL schemes whose handlers support host/path completion in the input bar. */
+	urlCompletionSchemes(): string[] {
+		return this.toolRouter.internalUrlCompletionSchemes();
+	}
+
+	/**
+	 * Candidates for a `scheme://<query>` token typed in the input bar, using
+	 * the same skills/memory context the tools resolve URLs with. Returns
+	 * null when the scheme has no completions.
+	 */
+	async completeInternalUrl(
+		scheme: string,
+		query: string,
+	): Promise<Array<{ value: string; description?: string }> | null> {
+		return this.toolRouter.completeInternalUrl(scheme, query, {
+			cwd: this.config.cwd,
+			skills: this.toolRouter.getLoadedSkills().map(skill => ({
+				name: skill.name,
+				content: skill.content,
+				path: skill.filePath,
+			})),
+			memory: this.memoryToolContext(),
+		});
+	}
+
+	/**
+	 * Execute a bash command directly (for user_bash / !command in the input bar).
+	 * Returns the command output and exit code.
+	 */
+	async executeBashCommand(command: string): Promise<{
+		output: string;
+		exitCode: number;
+	}> {
+		return executeProcessCommand(this.cwd, command);
+	}
+
+	/**
+	 * Execute Python code directly (for $code in the input bar).
+	 * Returns the execution output.
+	 */
+	async executePythonCommand(code: string): Promise<{
+		output: string;
+		error?: string;
+	}> {
+		const result = await this.kernelManager.eval({ language: "python", code });
+		return {
+			output: result.output,
+			error: result.error,
+		};
+	}
+}
+
+export {
+	getProjectRulesDirs,
+	getSkillsDirs,
+} from "./support/resource-directories.ts";

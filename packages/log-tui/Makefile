@@ -15,8 +15,8 @@ binary:
 	@mkdir -p dist
 	@rm -f $(TMP_BIN)
 	@cd $(CURDIR)/../.. && node packages/log-tui/scripts/embed-md.mjs \
-		packages/log-runtime/src/runtime/context/system-prompt.md \
-		packages/log-runtime/src/runtime/context/system-prompt-embed.ts \
+		packages/log-runtime/src/context/system-prompt.md \
+		packages/log-runtime/src/context/system-prompt-embed.ts \
 		SYSTEM_PROMPT_TEMPLATE
 	$(BUN) build --target=bun --compile --define 'LOGICIAN_BUILD_REVISION="$(shell git rev-parse HEAD)"' $(ENTRY) --outfile $(TMP_BIN)
 	@mkdir -p dist/themes
