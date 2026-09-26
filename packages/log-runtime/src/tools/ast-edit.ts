@@ -191,7 +191,7 @@ export const ast_edit: Tool = {
 
 		try {
 			// Execute the AST edit operations
-			const fileEdits = await executeAstOp(ops, resolvedPaths, {
+			const { fileEdits } = await executeAstOp(ops, resolvedPaths, {
 				language,
 				limit,
 			});
