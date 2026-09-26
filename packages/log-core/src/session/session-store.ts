@@ -108,6 +108,8 @@ interface CompactionSessionEntry {
 	summary: string;
 	firstKeptEntryId?: string | undefined;
 	tokensBefore: number;
+	/** Snapcompact preserve data (frame archive), restored on resume. */
+	snapcompact?: Record<string, unknown> | undefined;
 }
 
 interface BranchSummarySessionEntry {
@@ -459,6 +461,7 @@ export class SessionStore {
 		summary: string,
 		tokensBefore: number,
 		firstKeptEntryId?: string,
+		snapcompact?: Record<string, unknown>,
 	): void {
 		this.appendEntry({
 			type: "compaction",
@@ -467,6 +470,7 @@ export class SessionStore {
 			summary,
 			firstKeptEntryId,
 			tokensBefore,
+			...(snapcompact ? { snapcompact } : {}),
 		});
 	}
 
@@ -626,7 +630,18 @@ export class SessionStore {
 			}
 		}
 
-		if (lastCompaction) {
+		if (lastCompaction?.snapcompact) {
+			// A snapcompact archive restores as a compaction summary so the
+			// provider conversion re-attaches its frames and archived text.
+			context.messages.push({
+				role: "compactionSummary",
+				content: lastCompaction.summary,
+				snapcompact: lastCompaction.snapcompact,
+				timestamp: lastCompaction.timestamp,
+				entryId: lastCompaction.id,
+				parentId: lastCompaction.parentId,
+			} as unknown as SessionMessage);
+		} else if (lastCompaction) {
 			context.messages.push({
 				role: "system",
 				content: `<compaction_summary>${lastCompaction.summary}</compaction_summary>`,

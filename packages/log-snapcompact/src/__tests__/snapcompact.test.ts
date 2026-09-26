@@ -10,8 +10,9 @@ import {
 	PRESERVE_KEY,
 	serializeMessages,
 	stripDimMarkers,
+	toBlockShape,
 	truncateForSummary,
-} from "../../../src/snapcompact.ts";
+} from "../snapcompact.ts";
 
 describe("snapcompact", () => {
 	describe("serializeMessages", () => {
@@ -371,5 +372,77 @@ describe("snapcompact", () => {
 				}
 			}
 		});
+	});
+});
+
+describe("OpenAI-shaped messages (the shape Logician's loop keeps)", () => {
+	const openai = [
+		{ role: "user", content: "Fix the parser" },
+		{
+			role: "assistant",
+			content: "Reading the file.",
+			tool_calls: [
+				{
+					id: "c1",
+					name: "read",
+					arguments: JSON.stringify({ path: "src/parse.ts" }),
+				},
+			],
+		},
+		{ role: "tool", tool_call_id: "c1", content: "export function parse() {}" },
+		{ role: "assistant", content: "The parser needs a guard." },
+	] as unknown as CompactableMessage[];
+
+	it("normalizes to block shape", () => {
+		const [, call, result] = openai.map(toBlockShape);
+		expect(call?.content).toEqual([
+			{ type: "text", text: "Reading the file." },
+			{
+				type: "toolCall",
+				id: "c1",
+				name: "read",
+				arguments: { path: "src/parse.ts" },
+			},
+		]);
+		expect(result?.role).toBe("toolResult");
+		expect(result?.toolCallId).toBe("c1");
+	});
+
+	it("archives assistant text, tool calls and results", async () => {
+		const result = await compact(openai, { render: false });
+		const archive = result.preserveData?.[PRESERVE_KEY] as Archive;
+		const text = `${archive.textHead ?? ""}${archive.text ?? ""}`;
+		expect(text).toContain("Reading the file.");
+		expect(text).toContain("read(");
+		expect(text).toContain("export function parse()");
+		expect(text).toContain("The parser needs a guard.");
+		expect(result.summary).toContain("Files: src/parse.ts");
+	});
+});
+
+describe("repeated compaction", () => {
+	it("folds the previous archive forward once, oldest content included", async () => {
+		const first = await compact(
+			[
+				{ role: "user", content: "ORIGINAL TASK alpha" },
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "first answer beta" }],
+				},
+			] as CompactableMessage[],
+			{ render: false },
+		);
+		const previousArchive = first.preserveData?.[PRESERVE_KEY] as Archive;
+		expect(previousArchive.text).toContain("ORIGINAL TASK alpha");
+
+		const second = await compact(
+			[{ role: "user", content: "follow-up gamma" }] as CompactableMessage[],
+			{ render: false, previousArchive },
+		);
+		const archive = second.preserveData?.[PRESERVE_KEY] as Archive | undefined;
+		const text = archive?.text ?? "";
+		expect(text).toContain("ORIGINAL TASK alpha");
+		expect(text).toContain("follow-up gamma");
+		expect(text.split("first answer beta").length - 1).toBe(1);
 	});
 });

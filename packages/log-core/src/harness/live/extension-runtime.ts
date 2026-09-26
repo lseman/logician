@@ -5,6 +5,7 @@
 // caller-supplied hooks (in that override order). Mirrors queue-ops.ts's
 // Deps pattern — the harness owns the mutable fields and supplies them here.
 
+import type { CompactionSettings } from "../../compaction/engine.ts";
 import { resolveModelContextWindow } from "../../config/models.ts";
 import type { ExtensionRunner } from "../../extensions/runner.ts";
 import type { RegisteredTool } from "../../extensions/types.ts";
@@ -34,6 +35,8 @@ export interface ExtensionRuntimeDeps {
 	emit: (event: AgentEvent) => void;
 	/** Steering/follow-up messages drained from the harness's own queues. */
 	drainHooks: () => AgentHooks;
+	/** The session's current compaction settings (mode, frame options). */
+	getCompactionSettings?: (() => Partial<CompactionSettings>) | undefined;
 }
 
 function wrapExtensionTool(
@@ -164,6 +167,7 @@ export function withExtensionRuntime(
 				config.model,
 				config.contextWindowTokens,
 			),
+		compactionSettings: deps.getCompactionSettings,
 		toolDefs: () => tools as unknown as Record<string, unknown>[],
 		loopDetector: deps.loopDetector,
 		emitEvent: (event: { type: string; [key: string]: unknown }) => {

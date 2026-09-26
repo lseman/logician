@@ -1,3 +1,12 @@
+// ── Native snapcompact renderer ────────────────────────────────────────────────
+// The frame renderer lives in the Rust `snapcompact` crate (crates/snapcompact),
+// linked into the shared @logician/log-natives addon. That crate registers its
+// N-API functions itself at load time, so napi's codegen never sees them and
+// the generated log-natives typings don't declare them. Their contract is
+// declared here instead, next to the only code that uses it.
+
+import * as natives from "@logician/log-natives";
+
 /**
  * Render one snapcompact frame on a libuv worker: print pre-normalized text
  * onto a `size`-wide bitmap and encode it as PNG.
@@ -18,10 +27,10 @@
  * (Latin-1) JS string straight from native code — no `Uint8Array` hop or
  * JS-side re-encode.
  */
-export declare function renderSnapcompactPng(
+export type RenderSnapcompactPng = (
 	text: string,
 	options: SnapcompactRenderOptions,
-): Promise<string>;
+) => Promise<string>;
 
 /** Shape options for one snapcompact frame. */
 export interface SnapcompactRenderOptions {
@@ -75,7 +84,19 @@ export interface SnapcompactRenderOptions {
  * the selected native font has a glyph for it; renderer control codes are
  * considered renderable because they are interpreted outside font lookup.
  */
-export declare function snapcompactSupportedChars(
-	font: string,
-	chars: string,
-): string;
+export type SnapcompactSupportedChars = (font: string, chars: string) => string;
+
+interface SnapcompactNative {
+	renderSnapcompactPng: RenderSnapcompactPng;
+	snapcompactSupportedChars: SnapcompactSupportedChars;
+}
+
+const native = natives as unknown as SnapcompactNative;
+
+export const renderSnapcompactPng: RenderSnapcompactPng = (text, options) =>
+	native.renderSnapcompactPng(text, options);
+
+export const snapcompactSupportedChars: SnapcompactSupportedChars = (
+	font,
+	chars,
+) => native.snapcompactSupportedChars(font, chars);

@@ -15,7 +15,9 @@ const exportsByCapability = {
 
 export async function inspectNative() {
 	try {
-		const native = await loadNative();
+		// Probe by name: some exports (snapcompact) self-register at load time
+		// and are absent from the generated typings.
+		const native = (await loadNative()) as unknown as Record<string, unknown>;
 		const capabilities = Object.fromEntries(
 			Object.entries(exportsByCapability).map(([name, symbol]) => [
 				name,

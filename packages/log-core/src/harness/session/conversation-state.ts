@@ -47,6 +47,11 @@ export class ConversationState {
 		this.ledger.replace(messages, "run-commit");
 	}
 
+	/** Changes whenever history does; `history` reads are fresh clones. */
+	get historyRevision(): number {
+		return this.ledger.revision;
+	}
+
 	get items() {
 		return this.ledger.items();
 	}

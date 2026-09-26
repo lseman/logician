@@ -378,6 +378,10 @@ export const SETTINGS_SCHEMA: Readonly<Record<string, SettingSpec>> = {
 	"lsp.enabled": { type: "boolean" },
 	"lsp.timeoutMs": { type: "number", min: 0, minExclusive: true },
 	"lsp.serverOverrides": { type: "object" },
+	"compaction.mode": {
+		type: "enum",
+		enum: ["auto", "llm", "snapcompact", "shake", "remote"],
+	},
 	"compaction.reserveTokens": {
 		type: "number",
 		min: 0,

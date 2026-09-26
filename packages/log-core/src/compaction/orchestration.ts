@@ -12,6 +12,7 @@ import type { ThinkingLevel } from "../types/config.ts";
 import type { CompactableMessage, Message } from "../types/messages.ts";
 import {
 	type CompactionSettings,
+	type CompactToFitResult,
 	compactToFit,
 	shakeCompaction,
 } from "./engine.ts";
@@ -47,111 +48,94 @@ export async function runCompaction(
 		thinkingLevel?: ThinkingLevel | undefined;
 		/** Provider-aware frame sizing, used only when mode is "snapcompact". */
 		frameOptions?: FrameConfig | undefined;
+		/** Recent-context budget the summarizing pass leaves verbatim. */
+		keepRecentTokens?: number | undefined;
 	},
 ): Promise<CompactionOutcome> {
 	const { mode = "auto" } = options;
 
-	// Shake pass: drop recoverable heavy content without LLM
+	// Shake: drop recoverable heavy content without an LLM. It is a cheap
+	// pre-pass, not a gate — a history with nothing heavy to drop (plain chat)
+	// must still reach the summarizing pass of the requested mode.
 	const shakeResult = shakeCompaction(history as CompactableMessage[], {});
+	const shaken: CompactionOutcome = shakeResult.changed
+		? {
+				changed: true,
+				messages: shakeResult.messages,
+				tokensBefore,
+				tokensAfter: shakeResult.tokensAfter,
+			}
+		: {
+				changed: false,
+				messages: history as CompactableMessage[],
+				tokensBefore,
+				tokensAfter: tokensBefore,
+			};
 
-	if (!shakeResult.changed) {
-		return {
-			changed: false,
-			messages: history,
-			tokensBefore,
-			tokensAfter: tokensBefore,
-		};
+	// Shake-only mode: use the shake result as-is.
+	if (mode === "shake") return shaken;
+
+	// Auto mode: if shake alone saved enough (8k+), stop there.
+	if (mode === "auto" && tokensBefore - shaken.tokensAfter >= 8000) {
+		return shaken;
 	}
 
-	// Shake-only mode: use the shake result as-is
-	if (mode === "shake") {
-		return {
-			changed: true,
-			messages: shakeResult.messages,
-			tokensBefore,
-			tokensAfter: shakeResult.tokensAfter,
-		};
-	}
-
-	// Auto mode: if shake brought us well under budget, use it; otherwise LLM
-	const shakeTokens = shakeResult.tokensAfter;
-	const shakeSaved = tokensBefore - shakeTokens;
-
-	// If shake saved enough tokens (8k+), use shake result
-	if (mode === "auto" && shakeSaved >= 8000) {
-		return {
-			changed: true,
-			messages: shakeResult.messages,
-			tokensBefore,
-			tokensAfter: shakeTokens,
-		};
-	}
-
-	// Remote mode: use provider's native compaction endpoint
+	const keep =
+		options.keepRecentTokens !== undefined
+			? { keepRecentTokens: options.keepRecentTokens }
+			: {};
+	let pass: CompactToFitResult;
 	if (mode === "remote") {
+		// Provider-native compaction endpoint.
 		const remoteSummarizer = async (older: CompactableMessage[]) => {
 			const result = await backend.remote(
 				older as unknown as Record<string, unknown>[],
-				{
-					maxTokens: options.maxTokens ?? 2048,
-				},
+				{ maxTokens: options.maxTokens ?? 2048 },
 			);
 			return result.summary;
 		};
-
-		const remoteResult = await compactToFit(shakeResult.messages, {
+		pass = await compactToFit(shaken.messages, {
 			triggerTokens: 0,
 			remoteSummarizer,
-			settings: { mode: "remote" },
+			settings: { mode: "remote", ...keep },
 		});
-
-		return {
-			changed: remoteResult.changed,
-			messages: remoteResult.messages,
-			tokensBefore,
-			tokensAfter: remoteResult.tokensAfter,
-		};
-	}
-
-	// Snapcompact mode: local, deterministic bitmap frame rendering — no LLM call.
-	if (mode === "snapcompact") {
-		const snapcompactResult = await compactToFit(shakeResult.messages, {
+	} else if (mode === "snapcompact") {
+		// Local, deterministic frame rendering — no LLM call.
+		pass = await compactToFit(shaken.messages, {
 			triggerTokens: 0,
 			settings: {
 				mode: "snapcompact",
+				...keep,
 				...(options.frameOptions ? { frameOptions: options.frameOptions } : {}),
 			},
 		});
-
-		return {
-			changed: snapcompactResult.changed,
-			messages: snapcompactResult.messages,
-			tokensBefore,
-			tokensAfter: snapcompactResult.tokensAfter,
+	} else {
+		// LLM (or auto that shake couldn't satisfy): summarize older turns.
+		const summarize = async (older: CompactableMessage[]) => {
+			if (options.presetSummary) return options.presetSummary;
+			return generateCompactionSummary(backend, older as Message[], [], {
+				temperature: options.temperature,
+				maxTokens: options.maxTokens,
+				thinkingLevel: options.thinkingLevel,
+			});
 		};
+		pass = await compactToFit(shaken.messages, {
+			triggerTokens: 0,
+			summarize,
+			settings: keep,
+		});
 	}
 
-	// LLM or auto-needs-LLM: summarize with LLM (on shake-processed history)
-	const summarize = async (older: CompactableMessage[]) => {
-		if (options.presetSummary) return options.presetSummary;
-		return generateCompactionSummary(backend, older as Message[], [], {
-			temperature: options.temperature,
-			maxTokens: options.maxTokens,
-			thinkingLevel: options.thinkingLevel,
-		});
-	};
-
-	const llmResult = await compactToFit(shakeResult.messages, {
-		triggerTokens: 0,
-		summarize,
-	});
-
-	return {
-		changed: llmResult.changed,
-		messages: llmResult.messages,
-		tokensBefore,
-		tokensAfter: llmResult.tokensAfter,
-	};
+	// The summarizing pass may find nothing to cut (everything fits in the
+	// kept tail); shake's savings still stand in that case.
+	return pass.changed
+		? {
+				changed: true,
+				messages: pass.messages,
+				tokensBefore,
+				tokensAfter: pass.tokensAfter,
+			}
+		: shaken;
 }
 
 /** Whether auto-compaction should fire given current settings + message history. */

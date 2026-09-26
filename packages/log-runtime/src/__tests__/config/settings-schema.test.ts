@@ -47,6 +47,7 @@ describe("settings schema registry", () => {
 		expect(getNestedKeys("tools")).toEqual(["xdev"]);
 		expect(getNestedKeys("compaction")).toEqual([
 			"enabled",
+			"mode",
 			"reserveTokens",
 			"keepRecentTokens",
 		]);

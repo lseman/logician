@@ -8,7 +8,9 @@
 import { execFile } from "node:child_process";
 import {
 	COMPACTION_TARGET_FRACTION,
+	type CompactionSettings,
 	compactToFit,
+	estimateCompactionTokens,
 } from "../../compaction/engine.ts";
 import { resetToRunCheckpoint } from "../../compaction/run-checkpoint.ts";
 import {
@@ -44,6 +46,8 @@ import { EMPTY_TASK_LEDGER } from "../../types/task-ledger.ts";
 const DEFAULT_COMPACTION_FRACTION = 0.8;
 // Don't run proactive compaction every turn — cooldown in turns.
 export const COMPACTION_COOLDOWN_TURNS = 3;
+/** Largest share of the window a compaction keeps verbatim as its recent tail. */
+export const KEEP_RECENT_WINDOW_SHARE = 0.3;
 const RTK_REWRITE_TIMEOUT_MS = 2_000;
 
 /**
@@ -80,6 +84,10 @@ export function rewriteCommandWithRtk(command: string): Promise<string> {
 export interface BuiltinHookDeps {
 	config: AgentConfig;
 	contextWindowTokens: () => number | undefined;
+	// Session compaction settings (mode, frame options). Proactive compaction
+	// honors a configured "snapcompact" mode — local and LLM-free, so safe
+	// mid-run; other modes fall back to the inline summary.
+	compactionSettings?: (() => Partial<CompactionSettings>) | undefined;
 	// Tool definitions for accurate payload token estimates.
 	toolDefs: () => Record<string, unknown>[];
 	// LoopDetector instance powering the duplicate/failure-loop tool-call guards.
@@ -270,12 +278,52 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			if (iteration - compactionCooldown.lastTurn < COMPACTION_COOLDOWN_TURNS) {
 				return undefined;
 			}
-			// Shared ladder: estimate → micro → full-if-still-over. Fires at
-			// `fraction` of the window, targets COMPACTION_TARGET_FRACTION.
+			// Decide on the exact BPE count of the real payload (the same count
+			// the session trigger and context_update use). The engine's own
+			// estimate is off by up to ±60% depending on content, so the trigger
+			// handed to compactToFit is scaled into its units — its micro pass
+			// then still stops as soon as the payload fits.
+			const trigger = max * fraction;
+			const tokensBefore = await estimateChatPayloadTokens(
+				messages,
+				deps.toolDefs(),
+				resolveTokenEncoding(config.model),
+			);
+			if (tokensBefore < trigger) {
+				// A check past the cooldown counts, compacting or not: it runs at
+				// most every COMPACTION_COOLDOWN_TURNS iterations.
+				compactionCooldown.lastTurn = iteration;
+				return undefined;
+			}
+			const engineTokens = estimateCompactionTokens(
+				messages as CompactableMessage[],
+			);
+			const scale = tokensBefore > 0 ? engineTokens / tokensBefore : 1;
+			// Shared ladder: micro → full-if-still-over. Fires at `fraction` of
+			// the window, targets COMPACTION_TARGET_FRACTION.
+			const session = deps.compactionSettings?.() ?? {};
+			// Keep a verbatim tail no bigger than a share of the window (a 20k
+			// default tail can exceed a small model's whole window, leaving
+			// nothing to cut), and give compactToFit the target so it tightens
+			// the tail until the result fits.
+			const keepRecentTokens = Math.min(
+				session.keepRecentTokens ?? Number.POSITIVE_INFINITY,
+				max * KEEP_RECENT_WINDOW_SHARE,
+			);
 			const result = await compactToFit(messages as CompactableMessage[], {
-				triggerTokens: max * fraction,
+				triggerTokens: trigger * scale,
+				targetTokens: max * COMPACTION_TARGET_FRACTION * scale,
 				settings: {
+					keepRecentTokens: Math.round(keepRecentTokens * scale),
 					contextWindow: Math.round(max * COMPACTION_TARGET_FRACTION * 1.5),
+					...(session.mode === "snapcompact"
+						? {
+								mode: "snapcompact" as const,
+								...(session.frameOptions
+									? { frameOptions: session.frameOptions }
+									: {}),
+							}
+						: {}),
 				},
 			});
 			compactionCooldown.lastTurn = iteration;
@@ -285,12 +333,12 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				deps.emitEvent?.({
 					type: "compaction",
 					reason: "threshold",
-					tokensBefore: await estimateChatPayloadTokens(
-						messages,
+					tokensBefore,
+					tokensAfter: await estimateChatPayloadTokens(
+						result.messages as Message[],
 						deps.toolDefs(),
 						resolveTokenEncoding(config.model),
 					),
-					tokensAfter: result.tokensAfter,
 				});
 				const tasks = taskLedger.snapshot();
 				const unfinished = tasks.some(

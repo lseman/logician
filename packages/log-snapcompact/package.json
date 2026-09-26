@@ -5,8 +5,7 @@
 	"type": "module",
 	"main": "src/snapcompact.ts",
 	"exports": {
-		".": "./src/snapcompact.ts",
-		"./types": "./src/types.ts"
+		".": "./src/snapcompact.ts"
 	},
 	"scripts": {
 		"test": "bun test $(find src -name '*.test.ts' -type f -print)",

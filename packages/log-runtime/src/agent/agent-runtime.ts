@@ -1233,21 +1233,9 @@ export class AgentRuntime {
 	} | null> {
 		const injected = this.ttsrCoordinator.persistInjected();
 
-		// Resolve compaction method from settings if no explicit mode given
-		let effectiveMode = mode;
-		if (!mode && this.compactionSettings) {
-			const { resolveCompactionMethod } = await import(
-				"@logician/log-eoh/compaction-methods"
-			);
-			const resolved = resolveCompactionMethod(this.compactionSettings, {
-				serverCompactionAvailable: false,
-				snapcompactAvailable: mode === "snapcompact",
-				llmAvailable: true,
-			});
-			if (resolved) effectiveMode = resolved as any;
-		}
-
-		const result = await this.sessions.compact(effectiveMode);
+		// Without an explicit mode the session compactor uses the configured
+		// `compaction.mode` (default "auto").
+		const result = await this.sessions.compact(mode);
 		if (result) {
 			this.ttsrCoordinator.restoreInjected(injected);
 		}

@@ -665,6 +665,12 @@ export interface LogicianTuiConfig {
 	// Compaction settings.
 	compaction?: {
 		enabled?: boolean;
+		/**
+		 * auto: shake, then LLM summary if still large (default) · llm · shake
+		 * (drop recoverable heavy content only) · snapcompact (local bitmap
+		 * frames, no LLM) · remote (provider-native endpoint).
+		 */
+		mode?: "auto" | "llm" | "snapcompact" | "shake" | "remote";
 		reserveTokens?: number;
 		keepRecentTokens?: number;
 	};

@@ -69,7 +69,7 @@ export interface CompactionSettings {
 	/** Whether to force compaction regardless of current token usage. */
 	force?: boolean | undefined;
 	/** Compaction strategy: "auto" (micro + LLM or inline summary), "snapcompact" (local bitmap frames), "remote" (provider-native server compaction), or "shake" (drop recoverable content). */
-	mode?: "auto" | "snapcompact" | "remote" | "shake";
+	mode?: "auto" | "llm" | "snapcompact" | "remote" | "shake";
 	/** Provider-aware frame sizing for snapcompact PNG rendering. */
 	frameOptions?: FrameConfig;
 	/** Remote (server-side) compaction configuration. */
@@ -228,6 +228,18 @@ interface ContextUsageEstimate {
 	lastUsageIndex: number | null;
 }
 
+/**
+ * The engine's own token estimate (provider usage + content heuristics), in
+ * the units compactToFit compares `triggerTokens` against. It can differ from
+ * the exact BPE count by ±60% depending on content, so callers that decide
+ * on BPE counts should scale their trigger into these units.
+ */
+export function estimateCompactionTokens(
+	messages: CompactableMessage[],
+): number {
+	return estimateContextTokens(messages).tokens;
+}
+
 /** Estimate context tokens using provider usage (when available) + estimation. */
 function estimateContextTokens(
 	messages: CompactableMessage[],
@@ -301,15 +313,20 @@ function findValidCutPoints(
 		const message = messages[i];
 		if (!message) continue;
 		const role = message.role;
+		// An assistant message is a valid split-turn cut: the kept tail starts
+		// with the assistant call and its results follow it, so a call is never
+		// separated from its results. Without it, a long agentic turn (one user
+		// message, many tool rounds) has no cut point and can't be compacted.
 		if (
 			role === "user" ||
+			role === "assistant" ||
 			role === "custom" ||
 			role === "branchSummary" ||
 			role === "compactionSummary"
 		) {
 			cutPoints.push(i);
 		}
-		// Never cut inside tool results — they belong to the assistant's turn
+		// Never cut at tool results — they belong to the preceding call.
 	}
 	return cutPoints;
 }
@@ -419,7 +436,12 @@ function findCutPoint(
 		if (role === "compactionSummary" || role === "branchSummary") {
 			break;
 		}
-		if (role === "user" || role === "assistant" || role === "toolResult") {
+		if (
+			role === "user" ||
+			role === "assistant" ||
+			role === "toolResult" ||
+			role === "tool"
+		) {
 			break;
 		}
 		cutIndex--;

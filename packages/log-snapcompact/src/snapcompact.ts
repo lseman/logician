@@ -7,13 +7,10 @@
 //
 // This replaces the LLM-based `generateCompactionSummary` path with a
 // zero-latency, zero-cost local compaction. Frame rasterization and PNG
-// encoding happen in native code (@logician/log-natives' renderSnapcompactPng,
-// ported from oh-my-pi's crates/pi-natives/src/snapcompact.rs).
+// encoding happen in native code (the Rust `snapcompact` crate, ported from
+// oh-my-pi's pi-natives renderer; see ./native.ts).
 
-import {
-	renderSnapcompactPng,
-	snapcompactSupportedChars,
-} from "@logician/log-natives";
+import { renderSnapcompactPng, snapcompactSupportedChars } from "./native.ts";
 
 /** Key under `CompactionSummaryMessage.snapcompact` holding the frame archive. */
 export const SNAPCOMPACT_PRESERVE_KEY = "snapcompact";
@@ -61,7 +58,8 @@ export interface Archive {
 	frames: Frame[];
 	totalChars: number;
 	truncatedChars: number;
-	/** Full kept archive source text for re-rendering on next compaction. */
+	/** Full kept archive source (head + imaged middle + tail), folded forward
+	 * by the next compaction. */
 	text?: string;
 	/** Oldest text region kept verbatim. */
 	textHead?: string;
@@ -131,6 +129,56 @@ const STOPWORDS = new Set(
 // ============================================================================
 // Message Serialization
 // ============================================================================
+
+/**
+ * Normalize an OpenAI-shaped chat message (the shape Logician's loop keeps:
+ * string `content`, assistant `tool_calls`, `tool` results with
+ * `tool_call_id`) into the block shape the serializer and digest read
+ * (content blocks, `toolCall` blocks, `toolResult` with `toolCallId`).
+ * Messages already in block shape pass through unchanged.
+ */
+export function toBlockShape(message: CompactableMessage): CompactableMessage {
+	const msg = message as CompactableMessage & {
+		tool_calls?: Array<{ id?: string; name?: string; arguments?: unknown }>;
+		tool_call_id?: string;
+	};
+	if (msg.role === "tool") {
+		const toolCallId = msg.toolCallId ?? msg.tool_call_id;
+		return {
+			...msg,
+			role: "toolResult",
+			...(toolCallId ? { toolCallId } : {}),
+			content:
+				typeof msg.content === "string"
+					? [{ type: "text", text: msg.content }]
+					: (msg.content ?? []),
+		};
+	}
+	if (msg.role === "assistant" && !Array.isArray(msg.content)) {
+		const blocks: unknown[] = [];
+		if (typeof msg.content === "string" && msg.content.trim()) {
+			blocks.push({ type: "text", text: msg.content });
+		}
+		for (const call of msg.tool_calls ?? []) {
+			let args: unknown = call.arguments;
+			if (typeof args === "string") {
+				try {
+					args = JSON.parse(args);
+				} catch {
+					// Keep the raw string when it isn't JSON.
+				}
+			}
+			blocks.push({
+				type: "toolCall",
+				id: call.id,
+				name: call.name,
+				arguments: args,
+			});
+		}
+		return { ...msg, content: blocks };
+	}
+	return msg;
+}
 
 /** Serialize conversation messages into a structured text format for
  *  frame rendering. Mirrors omp's `serializeConversation` contract. */
@@ -639,7 +687,9 @@ function planArchive(
 	return {
 		textHead,
 		textTail,
-		keptText: imagedMiddle + textTail,
+		// The full kept source (head + imaged middle + tail): what the next
+		// compaction folds forward and re-lays out.
+		keptText: archiveText,
 		framePages,
 		truncatedChars,
 	};
@@ -695,6 +745,10 @@ export async function compact(
 	);
 	const rows = options?.shape?.rows ?? DEFAULT_ROWS;
 
+	// The loop keeps OpenAI-shaped messages; the serializer and digest read
+	// block-shaped ones.
+	messages = messages.map(toBlockShape);
+
 	// Serialize messages.
 	const serialized = serializeMessages(messages, options?.serializeOptions);
 
@@ -704,14 +758,16 @@ export async function compact(
 	// Fold in previous archive text if one exists.
 	let archiveText = elided;
 	if (options?.previousArchive) {
+		// `text` is the full kept source; archives written before it was
+		// carried in full fall back to their verbatim edges.
+		const prev = options.previousArchive;
 		const prevText =
-			options.previousArchive.text ?? options.previousArchive.textHead ?? "";
-		const prevTail = options.previousArchive.textTail ?? "";
-		if (prevText || prevTail) {
-			archiveText =
-				prevText +
-				(prevTail ? NEWLINE_GLYPH + prevTail : "") +
-				(archiveText ? NEWLINE_GLYPH + archiveText : "");
+			prev.text ??
+			[prev.textHead, prev.textTail]
+				.filter((part): part is string => Boolean(part))
+				.join(NEWLINE_GLYPH);
+		if (prevText) {
+			archiveText = prevText + (archiveText ? NEWLINE_GLYPH + archiveText : "");
 		}
 	}
 

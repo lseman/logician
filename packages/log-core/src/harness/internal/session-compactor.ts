@@ -8,6 +8,7 @@ import {
 	shouldAutoCompact,
 } from "../../compaction/orchestration.ts";
 import type { ExtensionRunner } from "../../extensions/runner.ts";
+import { KEEP_RECENT_WINDOW_SHARE } from "../../hooks/builtin/builtin-hooks.ts";
 import type { LLMBackend } from "../../provider/backend.ts";
 import { resolveTokenEncoding } from "../../provider/messages.ts";
 import type { AgentConfig } from "../../types/config.ts";
@@ -21,7 +22,10 @@ export type CompactionReason = "auto" | "manual";
 export interface SessionCompactorDependencies {
 	backend: () => LLMBackend;
 	history: () => Message[];
-	commitHistory: (expected: Message[], replacement: Message[]) => boolean;
+	/** Current history revision (history reads are clones, not identities). */
+	historyRevision: () => number;
+	/** Replace history only if it is still at `expectedRevision`. */
+	commitHistory: (expectedRevision: number, replacement: Message[]) => boolean;
 	config: () => Readonly<AgentConfig>;
 	identity: () => { sessionId: string; cwd: string };
 	extensionRunner: () => ExtensionRunner | undefined;
@@ -33,8 +37,15 @@ export interface SessionCompactorDependencies {
 		summary: string,
 		tokensBefore: number,
 		firstKeptEntryId?: string,
+		snapcompact?: Record<string, unknown>,
 	) => void;
 	estimateTokens: () => Promise<number>;
+	/**
+	 * The active model's context window (per-model `contextWindow`, else the
+	 * config's `contextWindowTokens`). Used whenever the compaction settings
+	 * don't pin their own `contextWindow`.
+	 */
+	contextWindowTokens: () => number | undefined;
 	emit: (event: {
 		type: "compaction";
 		reason: CompactionReason;
@@ -43,11 +54,13 @@ export interface SessionCompactorDependencies {
 	}) => void;
 }
 
+/** Last-resort window when neither the settings nor the config name one. */
+const FALLBACK_CONTEXT_WINDOW = 128_000;
+
 const DEFAULT_SETTINGS: CompactionSettings = {
 	enabled: false,
 	reserveTokens: 16_384,
 	keepRecentTokens: 20_000,
-	contextWindow: 128_000,
 };
 
 /**
@@ -63,8 +76,17 @@ export class SessionCompactor {
 		return this.settings.enabled;
 	}
 
+	/** Current settings, for components that mirror the compaction mode. */
+	get currentSettings(): Readonly<CompactionSettings> {
+		return this.settings;
+	}
+
 	get contextWindow(): number {
-		return this.settings.contextWindow ?? 128_000;
+		return (
+			this.settings.contextWindow ??
+			this.dependencies.contextWindowTokens() ??
+			FALLBACK_CONTEXT_WINDOW
+		);
 	}
 
 	configure(settings: Partial<CompactionSettings>): void {
@@ -79,7 +101,7 @@ export class SessionCompactor {
 		messages: Message[] = this.dependencies.history(),
 	): Promise<boolean> {
 		return shouldAutoCompact(
-			this.settings,
+			{ ...this.settings, contextWindow: this.contextWindow },
 			messages,
 			resolveTokenEncoding(this.dependencies.backend().model),
 		);
@@ -89,9 +111,10 @@ export class SessionCompactor {
 		messages: Message[],
 		tokensBefore: Promise<number>,
 	): Promise<void> {
-		const summary = messages.find(
+		const summaryMessage = messages.find(
 			message => String(message.role) === "compactionSummary",
-		)?.content;
+		) as (Message & { snapcompact?: Record<string, unknown> }) | undefined;
+		const summary = summaryMessage?.content;
 		if (typeof summary !== "string" || !summary.trim()) return;
 		const firstKeptEntryId = messages
 			.map(message => message as Message & { entryId?: string })
@@ -103,6 +126,7 @@ export class SessionCompactor {
 			summary,
 			await tokensBefore,
 			firstKeptEntryId,
+			summaryMessage?.snapcompact,
 		);
 	}
 
@@ -111,7 +135,11 @@ export class SessionCompactor {
 		force: boolean,
 		mode?: CompactionMode,
 	): Promise<number> {
+		const revision = this.dependencies.historyRevision();
 		const messages = this.dependencies.history();
+		// Below threshold: nothing happens, so nothing is announced — no
+		// compaction events, no Pre/PostCompact hooks.
+		if (!force && !(await this.shouldCompact(messages))) return 0;
 		this.dependencies.emit({ type: "compaction", reason });
 		let postCompactEmitted = false;
 		const emitPostCompact = async (): Promise<void> => {
@@ -132,9 +160,6 @@ export class SessionCompactor {
 
 		try {
 			const before = await this.dependencies.estimateTokens();
-			if (!force && !(await this.shouldCompact(messages))) {
-				return await finishUnchanged(before);
-			}
 
 			const preResult = await this.dependencies.beforeCompact({
 				messages,
@@ -155,13 +180,10 @@ export class SessionCompactor {
 			});
 
 			const config = this.dependencies.config();
-			// A caller-supplied mode wins; otherwise fall back to the configured
-			// default mode — only the "snapcompact" case (CompactionSettings.mode
-			// also allows "remote"/"auto"/"shake", a pre-existing, differently
-			// shaped union not unified here).
-			const effectiveMode: CompactionMode | undefined =
-				mode ??
-				(this.settings.mode === "snapcompact" ? "snapcompact" : undefined);
+			// A caller-supplied mode wins; otherwise the configured mode
+			// (runCompaction defaults to "auto" when neither is set).
+			const effectiveMode: CompactionMode | "remote" | undefined =
+				mode ?? this.settings.mode;
 			// Auto-derive the vision-model provider hint from the live model
 			// unless explicitly configured — otherwise PROVIDER_COLS tuning is
 			// unreachable.
@@ -182,6 +204,12 @@ export class SessionCompactor {
 					temperature: config.temperature,
 					maxTokens: config.maxTokens,
 					mode: effectiveMode,
+					// A configured tail larger than a share of the window would
+					// leave nothing to cut on small-window models.
+					keepRecentTokens: Math.min(
+						this.settings.keepRecentTokens,
+						Math.floor(this.contextWindow * KEEP_RECENT_WINDOW_SHARE),
+					),
 					...(frameOptions ? { frameOptions } : {}),
 				},
 			);
@@ -189,7 +217,7 @@ export class SessionCompactor {
 			if (
 				!result.changed ||
 				result.tokensAfter >= before ||
-				!this.dependencies.commitHistory(messages, toMessages(result.messages))
+				!this.dependencies.commitHistory(revision, toMessages(result.messages))
 			) {
 				return await finishUnchanged(before);
 			}

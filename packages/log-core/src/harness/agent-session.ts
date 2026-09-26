@@ -280,8 +280,11 @@ export class AgentSession {
 		this.compactor = new SessionCompactor({
 			backend: () => this.backend,
 			history: () => this.session.conversation.history,
-			commitHistory: (expected, replacement) => {
-				if (this.session.conversation.history !== expected) return false;
+			historyRevision: () => this.session.conversation.historyRevision,
+			commitHistory: (expectedRevision, replacement) => {
+				// A turn or edit landed while compaction ran: drop the stale result.
+				if (this.session.conversation.historyRevision !== expectedRevision)
+					return false;
 				this.session.conversation.history = replacement;
 				return true;
 			},
@@ -293,13 +296,25 @@ export class AgentSession {
 			extensionRunner: () => this._extensionRunner,
 			beforeCompact: context => this.emitPreCompact(context),
 			afterCompact: () => this.emitPostCompact(),
-			persistCompaction: (summary, tokensBefore, firstKeptEntryId) =>
+			persistCompaction: (
+				summary,
+				tokensBefore,
+				firstKeptEntryId,
+				snapcompact,
+			) =>
 				this.session.store?.appendCompaction(
 					summary,
 					tokensBefore,
 					firstKeptEntryId,
+					snapcompact,
 				),
 			estimateTokens: () => this.estimatePayloadTokens(),
+			contextWindowTokens: () =>
+				resolveModelContextWindow(
+					this.config.models,
+					this.config.model,
+					this.config.contextWindowTokens,
+				),
 			emit: event => this.emitToSubscribers(event),
 		});
 	}
@@ -724,6 +739,7 @@ export class AgentSession {
 			interventions: this.interventions,
 			emit: event => this.emitToSubscribers(event),
 			drainHooks: () => this.drainHooks(),
+			getCompactionSettings: () => this.compactor.currentSettings,
 		};
 	}
 
@@ -1162,6 +1178,9 @@ export class AgentSession {
 	private async runAutoCompaction(reason: "auto" | "manual"): Promise<boolean> {
 		const messages = this.session.conversation.history;
 		if (!messages.length || !this.compactor.enabled) return false;
+		// Check the threshold before entering the compaction phase, so a
+		// prompt that doesn't need compaction never flips the phase.
+		if (!(await this.compactor.shouldCompact(messages))) return false;
 		return this.runInPhase("compaction", "autoCompact", () =>
 			this.compactor
 				.compact(reason, /* force */ false)

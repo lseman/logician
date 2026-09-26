@@ -123,8 +123,8 @@ export interface AgentBridgeOptions {
 		enabled?: boolean;
 		reserveTokens?: number;
 		keepRecentTokens?: number;
-		/** Compaction strategy default; only "snapcompact" is selectable here today. */
-		mode?: "snapcompact";
+		/** Compaction strategy (see LogicianTuiConfig.compaction.mode). */
+		mode?: "auto" | "llm" | "snapcompact" | "shake" | "remote";
 		/** Provider-aware frame sizing for snapcompact PNG rendering. */
 		frameOptions?: FrameConfig;
 	};

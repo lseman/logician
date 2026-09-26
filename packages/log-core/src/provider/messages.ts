@@ -32,8 +32,10 @@ const COMPACTION_SUMMARY_SUFFIX = `
 /** Appended after the summary only when snapcompact frames are attached. */
 const COMPACTION_FRAMES_NOTE = `
 
-The images attached to this message are the archived conversation history,
-rendered as monospace text on a bitmap (one frame per image), in order. Read
+The images attached to this message hold the middle of the
+archived conversation history (its oldest and newest parts are the plain text
+in <archived-history> above), rendered as monospace text on a bitmap (one frame
+per image), in order. Read
 them as literal text, not as photos or diagrams — this is a deliberate
 context-saving technique, not a rendering error. Do not re-run tool calls
 whose output appears in a frame; treat the frame content as already known.`;
@@ -67,15 +69,53 @@ function bashExecutionToText(msg: BashExecutionMessage): string {
 	return text;
 }
 
+interface SnapcompactArchiveView {
+	frames?: SnapcompactFrame[];
+	textHead?: string;
+	textTail?: string;
+}
+
+function snapcompactArchive(
+	snapcompact: Record<string, unknown> | undefined,
+): SnapcompactArchiveView | undefined {
+	return snapcompact?.[SNAPCOMPACT_PRESERVE_KEY] as
+		| SnapcompactArchiveView
+		| undefined;
+}
+
 /** Extract renderable snapcompact frames (non-empty `data`) from a
  * CompactionSummaryMessage's `snapcompact` preserve-data bag. */
 function extractSnapcompactFrames(
 	snapcompact: Record<string, unknown> | undefined,
 ): SnapcompactFrame[] {
-	const archive = snapcompact?.[SNAPCOMPACT_PRESERVE_KEY] as
-		| { frames?: SnapcompactFrame[] }
-		| undefined;
-	return (archive?.frames ?? []).filter(frame => frame.data.length > 0);
+	return (snapcompactArchive(snapcompact)?.frames ?? []).filter(
+		frame => frame.data.length > 0,
+	);
+}
+
+/**
+ * The archive's verbatim text regions in chronological order: the oldest
+ * text, then (when frames exist) a marker standing in for the imaged middle,
+ * then the newest text. The model must see these — they hold the start of
+ * the task and the context right before the cut; only the middle is imaged.
+ */
+function snapcompactArchiveText(
+	snapcompact: Record<string, unknown> | undefined,
+	hasFrames: boolean,
+): string {
+	const archive = snapcompactArchive(snapcompact);
+	const head = archive?.textHead ?? "";
+	const tail = archive?.textTail ?? "";
+	if (!head && !tail) return "";
+	const parts = ["\n\n<archived-history>", head];
+	if (hasFrames) {
+		parts.push(
+			"-------------- older middle history is in the attached image frames --------------",
+		);
+	}
+	if (tail) parts.push(tail);
+	parts.push("</archived-history>");
+	return parts.filter(Boolean).join("\n");
 }
 
 /** Convert AgentMessage[] to LLM-compatible Message[]. Handles custom message types. */
@@ -95,6 +135,7 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 					content:
 						COMPACTION_SUMMARY_PREFIX +
 						m.content +
+						snapcompactArchiveText(m.snapcompact, frames.length > 0) +
 						COMPACTION_SUMMARY_SUFFIX +
 						(frames.length ? COMPACTION_FRAMES_NOTE : ""),
 					timestamp: m.timestamp,

@@ -40,8 +40,14 @@ export class ThreadLedger {
 	private projection: Message[] = [];
 	private sequence = 0;
 
+	/** Reads return clones, so this is the value to compare for staleness. */
 	get messages(): Message[] {
 		return this.projection.map(cloneMessage);
+	}
+
+	/** Bumped on every append/replace; equal revisions mean identical history. */
+	get revision(): number {
+		return this.sequence;
 	}
 
 	items(): readonly ThreadItem[] {

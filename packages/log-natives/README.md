@@ -5,9 +5,13 @@ TypeScript-facing native addon wrapping the `pi-natives` Rust crate
 (ast-grep-powered structural search/rewrite), `pi-edit` (the streaming edit
 engine), filesystem search (`pi-walker`-backed glob, regex grep, fuzzy
 find), token counting, and bash output minimization (`pi-minimize`) from
-oh-my-pi's own `pi-natives` crate; the snapcompact frame renderer registers
-into the same module from its standalone crate. See `crates/README.md` for
-fork provenance.
+oh-my-pi's own `pi-natives` crate. See `crates/README.md` for fork
+provenance.
+
+The snapcompact frame renderer (`crates/snapcompact`) is linked into the same
+addon but registers its functions itself at load time, so napi's codegen
+doesn't emit typings for them. `@logician/log-snapcompact` declares and wraps
+them (`src/native.ts`); this package's generated typings don't include them.
 
 ## Build
 

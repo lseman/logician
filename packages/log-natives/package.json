@@ -7,8 +7,8 @@
 	"main": "./index.js",
 	"types": "./index.d.ts",
 	"scripts": {
-		"build": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform --release -- --locked && node append-snapcompact-types.mjs",
-		"build:debug": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform && node append-snapcompact-types.mjs",
+		"build": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform --release -- --locked",
+		"build:debug": "napi build --manifest-path ../../crates/pi-natives/Cargo.toml --package-json-path package.json --output-dir . --platform",
 		"typecheck": "tsc --noEmit"
 	},
 	"napi": {

@@ -21,6 +21,7 @@ function dependencies(
 	return {
 		backend: () => new FakeBackend([]),
 		history,
+		historyRevision: () => 0,
 		commitHistory: () => true,
 		config: () => ({}) as AgentConfig,
 		identity: () => ({ sessionId: "session", cwd: "/workspace" }),
@@ -29,6 +30,7 @@ function dependencies(
 		afterCompact: async () => {},
 		persistCompaction: () => {},
 		estimateTokens: async () => 50_000,
+		contextWindowTokens: () => undefined,
 		emit: () => {},
 		...overrides,
 	};
@@ -94,17 +96,21 @@ describe("SessionCompactor", () => {
 
 	test("does not overwrite history changed during compaction", async () => {
 		let current = largeHistory();
+		let revision = 1;
 		let persistenceCalls = 0;
 		const replacement: Message[] = [{ role: "user", content: "new history" }];
 		const compactor = new SessionCompactor(
 			dependencies(() => current, {
+				historyRevision: () => revision,
 				beforeCompact: async () => {
 					current = replacement;
+					revision++;
 					return { summary: "summary" };
 				},
-				commitHistory: (expected, compacted) => {
-					if (current !== expected) return false;
+				commitHistory: (expectedRevision, compacted) => {
+					if (revision !== expectedRevision) return false;
 					current = compacted;
+					revision++;
 					return true;
 				},
 				persistCompaction: () => {
